@@ -23,6 +23,7 @@ struct SyncTaskMigrationRegression {
         try dateEncodingStrategyIsNotChanged()
         try legacyNamedArtifactsAreDetectedAsAbsent()
         try corruptRouteCommitDegradesToNil()
+        try exportCountsDecodeAndDegradeSafely()
         print("Sync task migration regression tests passed")
     }
 
@@ -278,6 +279,49 @@ struct SyncTaskMigrationRegression {
         try require(task.target == "http://127.0.0.1:8787", "the task identity must survive")
     }
 
+    /// P2-3（2026-10-18 同步诊断）：本批通道计数随任务行落盘 —— 恢复轮要能读出它。
+    ///
+    /// 两条判据：
+    ///   1. 正常 payload 里的计数逐字段往返（`attempt_count` 之类不能错位）；
+    ///   2. **损坏/未知形态降级为 nil**，绝不拖垮整份任务（与 `routeCommit` 同一条纪律 ——
+    ///      `loadTask` 用 `try?`，一个解不开的键等于整个进度消失，症状是升级后重导整个窗口）。
+    private static func exportCountsDecodeAndDegradeSafely() throws {
+        let counts = ExportChannelCounts(
+            anchorRecords: 4_500,
+            windowRecords: 12,
+            backfillRecords: 640,
+            workoutWindowRecords: 88,
+            writtenTypes: 9,
+            replayingTypes: 3,
+            historySkippedTypes: 2,
+            workoutWindows: 2,
+            workoutWindowsCompleted: 1
+        )
+        let task = SyncTaskState(
+            target: "http://127.0.0.1:8787",
+            phase: SyncPhase.exported.rawValue,
+            payloadHash: "00",
+            workoutCount: 1,
+            lastExportCounts: counts
+        )
+        let data = try JSONEncoder().encode(task)
+        let restored = try JSONDecoder().decode(SyncTaskState.self, from: data)
+        try require(restored.lastExportCounts == counts,
+                    "the channel counts survive the task-row round trip field for field")
+        try require(restored.lastExportCounts?.logLine.contains("anchor=4500") == true,
+                    "the restored counts keep their log shape (diagnostics depend on it)")
+        // 损坏的计数不许把整份任务变成"没有任务"。
+        var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        object["lastExportCounts"] = ["anchorRecords": "not-a-number"]
+        let corrupted = try JSONDecoder().decode(
+            SyncTaskState.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        try require(corrupted.lastExportCounts == nil,
+                    "a corrupt channel-count payload degrades to nil, never fails the task decode")
+        try require(corrupted.workoutCount == 1 && corrupted.target == "http://127.0.0.1:8787",
+                    "the rest of the task survives a corrupt channel-count payload")
+    }
+
     private static func newFieldNames(_ task: SyncTaskState) -> [(String, Any?)] {
         [
             ("schemaVersion", task.schemaVersion),
@@ -290,7 +334,9 @@ struct SyncTaskMigrationRegression {
             ("uploadRequestedAt", task.uploadRequestedAt),
             ("uploadCompletedAt", task.uploadCompletedAt),
             ("lastLifecycleStopAt", task.lastLifecycleStopAt),
-            ("lastBackgroundRunAt", task.lastBackgroundRunAt)
+            ("lastBackgroundRunAt", task.lastBackgroundRunAt),
+            // P2-3（2026-10-18 同步诊断）：通道计数是纯观测，老 payload 缺键 ⇒ nil。
+            ("lastExportCounts", task.lastExportCounts)
         ]
     }
 

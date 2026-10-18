@@ -68,6 +68,31 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     var lateBackfillBefore: Date? = nil
     var lateBackfillWindowStart: Date? = nil
 
+    /// P1-1（2026-10-18 同步诊断）：本类型历史重放时使用的**服务端覆盖下界**。
+    ///
+    /// 背景：服务端 `GET /v1/sync/coverage` 会回答"每个记录类型已经覆盖到哪个时刻"。
+    /// 当本地游标丢失（修复/重装/游标损坏）时，客户端过去只能从 `nil` 把 52.7 万条历史
+    /// 全部重读并重传，生产实测 118 批、≈96% 重复（2026-10-18 诊断 P1-1）。
+    /// 有了覆盖点之后，历史段改为只读 `[knownUntil − 24h, now]`，把已入库的历史跳过。
+    ///
+    /// 语义：
+    /// - `nil` = 本类型的历史段没有覆盖下界（老服务端 / 覆盖探测失败 / 服务端没有这类数据）
+    ///   ⇒ 行为与旧版**完全一致**（从 nil 全量重放）。
+    /// - 非 nil = 历史段（`.historyFromScratch` / `.historyResume`）查询必须带
+    ///   `startDate >= floor` 的时间谓词；**重放被预算截断后，续读必须沿用同一个下界** ——
+    ///   换谓词会让已持久化的锚点失去意义（`HKAnchoredObjectQuery` 的锚点是"变更序"位置，
+    ///   按新谓词重读会从页首重来，变成每批都在同一段上空转）。
+    /// - 🔴 **一旦用过就"粘住"**（2026-10-18 Lead 复核修正）：历史段跑完
+    ///   （`historyReplayPhase` 归 nil）后**也不清空** —— 该类型之后**所有** anchor 查询
+    ///   （历史段与增量段）都必须带同一个 `startDate` 谓词。理由：`HKQueryAnchor` 与
+    ///   predicate 的绑定关系 Apple 没有承诺"可换谓词"，拿一个用日期谓词建立的锚点去跑
+    ///   `predicate: nil` 的增量查询是未定义行为（真机症状：漏数据或整段重读）。
+    ///   下界之前的数据/删除本来就按"覆盖探测跳过已入库历史"的取舍放弃（诊断报告 §7.4）。
+    ///   唯一清除路径 = 显式「修复增量游标」（`repairSyncCursor` 清掉该类型整条游标）。
+    ///
+    /// `var` + 默认值：老 payload 缺键 ⇒ nil ⇒ 下一次重放照旧全量（升级瞬间的安全方向）。
+    var historyCoverageFloor: Date? = nil
+
     /// 下一次 drain 是否要先做**全量重放**。
     ///
     /// 判据 = 上次重放被预算截断还没做完（`historyReplayPhase != nil`）。
@@ -183,14 +208,24 @@ nonisolated enum RecordReplayPlan {
     ///   - decodedAvailable: 游标存在且 anchor 能解码（首读/损坏 = false）。
     ///   - history: `needsHistoryRead` 的结论（"上轮重放未完成"）。
     ///   - resumingHistoryPhase: 上轮的中断记账停在 `history` 段。
+    ///   - coverageRestart: P1-1 —— 服务端覆盖探测要求把一段**旧的、没有覆盖下界的**
+    ///     历史续读换成"带下界从 nil 重新开始"。它只在上轮续读没有 `historyCoverageFloor`
+    ///     （即这段续读产生于本功能之前）时置 true；已经带上下界的续读必须继续
+    ///     `.historyResume`，否则每批都从页首重来、永远读不完。
     static func segments(
         decodedAvailable: Bool,
         history: Bool,
-        resumingHistoryPhase: Bool
+        resumingHistoryPhase: Bool,
+        coverageRestart: Bool = false
     ) -> [Segment] {
         // 上轮中断在历史段：只续读历史流（增量段已完成）——
         // 这是"两段各自续传"的关键一格；丢了它，第二批会从增量段重新排起（重复读）
         // 而历史段永远不会被续上（重放语义静默丢失）。
+        // P1-1：旧的无下界续读 ⇒ 丢弃旧锚、按覆盖下界从 nil 重来（删除事件的那一段
+        // 已经由"跳过已入库历史"的取舍承担，见 `SyncCoveragePolicy` 头注释）。
+        if history, resumingHistoryPhase, decodedAvailable, coverageRestart {
+            return [.historyFromScratch]
+        }
         if history, resumingHistoryPhase, decodedAvailable { return [.historyResume] }
         // 首读 / 游标损坏（没有可解码的起点）：只有历史段一段，且只能从头。
         if history, !decodedAvailable { return [.historyFromScratch] }
@@ -346,5 +381,121 @@ nonisolated enum LateDynamicsBackfill {
             "[RAI] 稳态同步缺口：本批写入了其它跑步动态但没有 \(type)"
                 + "（检查读取权限；若是预算/时序问题，下一次补读通道会再覆盖近 14 天）"
         }
+    }
+}
+
+/// P1-1（2026-10-18 同步诊断）：服务端覆盖探测的**纯逻辑**。
+///
+/// ## 缺陷形态
+///
+/// 本地记录游标一旦丢失（游标损坏后修复、重装、状态复位），重放是唯一能重建基线的方式，
+/// 客户端因此会从 `nil` 把全部历史重新读一遍并**重新上传**。2026-10-18 生产实测：自 10-14
+/// 起 43 批 / 192,500 条、新增仅 8,117 条（≈95.8% 重复），按基数推算还剩 ≈75 批 ——
+/// 而服务端 `health_records` 里这些数据一条都不缺。每批 4500 条预算因此被重复数据占满，
+/// 新训练只能挤 20% 窗口份额（P0-4 要治的另一半）。
+///
+/// ## 判据
+///
+/// 服务端新增 `GET /v1/sync/coverage`（handshake 能力位 `syncCoverageVersion >= 1`）回答
+/// 每个类型的 `knownUntil`（已覆盖到的样本时刻）与 `sampleCount`。客户端据此把历史段的
+/// 查询起点抬到 `knownUntil − 24h`：
+///
+/// - **24h 重叠**：覆盖点是"服务端已接收的样本里最大的 startDate"，而客户端的样本是流式
+///   到达的；24h 重叠覆盖"服务端刚收到但尚未发布/时钟偏差"的那一段，代价是少量重复
+///   （服务端按 UUID 幂等）。
+/// - **`sampleCount == 0` / `knownUntil` 缺失 / 解析失败** ⇒ **不设下界**（全量重放）。
+///   服务端没有这类数据时"跳过历史"会把它们**永久丢掉** —— 方向必须保守。
+/// - **`knownUntil` 太旧**（早于 `maximumUsefulLag`）⇒ 不设下界：跳过一段 90 天以前的历史
+///   本身没有收益，却要承担"该区间删除/更正事件不再上报"的代价。90 天与显式修复的有界
+///   下界（`HealthKitSync.repairFloorWindow`）同量级。
+/// - 🔴 **下界一旦落到游标上就"粘住"**：该类型之后所有 anchor 查询都带同一个谓词
+///   （见 `HealthKitRecordCursor.historyCoverageFloor`）—— 谓词与锚点必须同源，
+///   所以后续批次即使 coverage 给出更新的 knownUntil，也**不**替换已持久化的下界。
+/// - 覆盖探测请求本身**失败 / 老服务端** ⇒ 传 nil 覆盖表 ⇒ 回落全量重放（不得报错中断）。
+///
+/// ## 已知代价（诊断报告 §7.4 已点明，这里如实重复）
+///
+/// 被跳过的历史区间内的**删除事件**不会上报（`HKAnchoredObjectQuery` 从 `nil` 出发本来也
+/// 看不到删除；只有持久锚点才能看到）。这是"用一次覆盖探测换掉 75 批重复上传"的取舍。
+nonisolated enum SyncCoveragePolicy {
+    /// 历史查询起点与覆盖点之间的重叠。见类型说明。
+    static let overlap: TimeInterval = 24 * 60 * 60
+    /// 覆盖点超过这么久没有更新 ⇒ 认为"太旧、不值得跳过"（见类型说明）。
+    static let maximumUsefulLag: TimeInterval = 90 * 24 * 60 * 60
+
+    /// 服务端覆盖表的一行（由 `HealthKitSync` 从 `SyncCoverageResponse` 映射而来，
+    /// 刻意不引用 APIModels 类型：本文件被"只编译 HealthKitRecordCursor"的回归单元执行，
+    /// 引 APIModels 会让那个单元编译不过 —— 与 `RouteTodoScheduler` 零外部依赖同源）。
+    nonisolated struct TypeCoverage: Equatable, Sendable {
+        let type: String
+        /// 服务端该类型已覆盖到的样本时刻（`knownUntil`，ISO8601 解析后）。
+        let knownUntil: Date?
+        /// 服务端该类型的样本数。0 = 服务端没有这类数据 ⇒ 不跳历史。
+        let sampleCount: Int
+
+        init(type: String, knownUntil: Date?, sampleCount: Int) {
+            self.type = type
+            self.knownUntil = knownUntil
+            self.sampleCount = sampleCount
+        }
+    }
+
+    /// 要不要向服务端发覆盖探测请求。
+    ///
+    /// 判据：handshake 宣告了能力位（调用方负责）**且**存在需要重放的类型 ——
+    /// "游标缺失"或"上轮重放未完成"。稳态增量同步（所有类型游标都有效）不花这次请求。
+    static func needsCoverageQuery(
+        cursors: [String: HealthKitRecordCursor],
+        types: [String]
+    ) -> Bool {
+        types.contains { type in
+            guard let cursor = cursors[type] else { return true }
+            return cursor.needsHistoryRead()
+        }
+    }
+
+    /// ISO8601 时间串解析（服务端 `knownUntil` 形如 `2026-10-18T12:28:46.000Z` 或整秒）。
+    /// 两种格式都试；解析不了返回 nil（⇒ 不设下界，安全方向）。
+    static func parseTimestamp(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = fractional.date(from: raw) { return parsed }
+        return ISO8601DateFormatter().date(from: raw)
+    }
+
+    /// 历史段查询下界。`nil` = 保持旧行为（从 nil 全量重放）。
+    ///
+    /// - Parameters:
+    ///   - type: HealthKit 类型标识（如 `HKQuantityTypeIdentifierHeartRate`）。
+    ///   - coverage: 服务端覆盖表（类型 → 覆盖点）。空表 = 老服务端/探测失败。
+    ///   - now: 本批的判定基准（与导出共用一个时钟，便于回归用合成时钟）。
+    static func historyFloor(
+        type: String,
+        coverage: [String: TypeCoverage],
+        now: Date
+    ) -> Date? {
+        guard let entry = coverage[type], entry.sampleCount > 0, let knownUntil = entry.knownUntil else {
+            return nil
+        }
+        // 服务端时钟可能略快：覆盖点"在未来"时按 now 收敛，避免把下界推到 now 之后。
+        let anchor = min(knownUntil, now)
+        // 太旧 ⇒ 跳过没有收益，不值得承担删除事件丢失的代价。
+        guard now.timeIntervalSince(anchor) <= maximumUsefulLag else { return nil }
+        let floor = anchor.addingTimeInterval(-overlap)
+        guard floor <= now else { return nil }
+        return floor
+    }
+
+    /// 是否需要把一段**旧的无下界历史续读**换成带下界的新重放。
+    ///
+    /// 只有"上轮中断在历史段、且那一轮没有持久化覆盖下界"才重开；已经带下界的续读必须
+    /// 继续（否则每批从页首重来，永远读不完）。
+    static func shouldRestartHistory(
+        cursor: HealthKitRecordCursor?,
+        floor: Date?
+    ) -> Bool {
+        guard floor != nil, let cursor else { return false }
+        return cursor.historyReplayPhase == .history && cursor.historyCoverageFloor == nil
     }
 }

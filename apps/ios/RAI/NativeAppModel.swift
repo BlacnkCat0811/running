@@ -80,6 +80,12 @@ final class NativeAppModel {
     private(set) var workoutTotal = 0
     private(set) var selectedWorkout: WorkoutDetailResponse?
     private(set) var selectedSeries: WorkoutSeriesResponse?
+    /// 2026-10-18（事故复盘 P0-3）：当前打开训练的**补齐状态**
+    /// （`GET /v1/workouts/:id/freshness`：facts / analysis / series[].state / completeness）。
+    ///
+    /// 与 detail/series **并行**取，一起失效；**刻意不落缓存** —— 它描述的是"此刻还在补
+    /// 什么"，缓存它只会让一份过期的"已完整"冒充现状，而那正是这次事故里用户看到的假话。
+    private(set) var selectedFreshness: WorkoutFreshnessResponse?
     private(set) var isLoading = false
     private(set) var isRefreshing = false
     private(set) var isOffline = false
@@ -196,6 +202,13 @@ final class NativeAppModel {
     }
     private var workoutRequestID = UUID()
     private var detailRequestID = UUID()
+    /// 2026-10-18（事故复盘 P0-6）：打开会话的自动重取句柄（350ms 合并窗口）。
+    ///
+    /// 一次同步成功可能连着改两次 `dataUpdatedGeneration`（本批 + 回前台补刷），
+    /// 而每次重取是三条接口；句柄让同一波里的第二次调用复用第一次的结果，
+    /// 不把 burst 变成 N 倍读。
+    private var openWorkoutReloadTask: Task<Bool, Never>?
+    private var openWorkoutReloadID: UUID?
     private var lockRequestID = UUID()
     private var regeneratePlanRequestID = UUID()
     private var planSyncRequestID = UUID()
@@ -805,6 +818,8 @@ final class NativeAppModel {
         let baseURL = session.serverURL
         selectedWorkout = cache.read(WorkoutDetailResponse.self, scope: scope, key: "workout-detail-\(id)")?.value
         selectedSeries = cache.read(WorkoutSeriesResponse.self, scope: scope, key: "workout-series-\(id)")?.value
+        // freshness 不落缓存：它只回答"此刻还在补什么"，旧值比没有更糟。
+        selectedFreshness = nil
         workoutDetailError = nil
         isLoadingWorkout = true
         defer { if detailRequestID == requestID { isLoadingWorkout = false } }
@@ -816,23 +831,118 @@ final class NativeAppModel {
             workoutDetailError = "请先连接 RAI 服务。"
             return
         }
+        // 2026-10-18（事故复盘 P0-3）：详情、时序、补齐状态**并行**取。
+        // 串行时详情页要等两条读各一个 RTT；freshness 只是补状态，更不该排在任何一条之后
+        // （它决定"该不该继续自动重取"，晚到就等于重取判据晚到）。
+        async let detailRequest = api.workoutDetail(id: id, baseURL: baseURL, token: token)
+        async let seriesRequest = api.workoutSeries(id: id, baseURL: baseURL, token: token)
+        async let freshnessRequest = api.workoutFreshness(id: id, baseURL: baseURL, token: token)
+        let detail: WorkoutDetailResponse
         do {
-            let detail = try await api.workoutDetail(id: id, baseURL: baseURL, token: token)
-            guard isCurrent() else { return }
-            selectedWorkout = detail
-            recordCache(detail, key: "workout-detail-\(id)")
-            do {
-                let series = try await api.workoutSeries(id: id, baseURL: baseURL, token: token)
-                guard isCurrent() else { return }
-                selectedSeries = series
-                recordCache(series, key: "workout-series-\(id)")
-            } catch {
-                guard isCurrent() else { return }
-                workoutDetailError = "时序数据未能更新，可下拉重试。"
-            }
+            detail = try await detailRequest
         } catch {
             guard isCurrent() else { return }
             workoutDetailError = friendlyMessage(error)
+            return
+        }
+        guard isCurrent() else { return }
+        selectedWorkout = detail
+        recordCache(detail, key: "workout-detail-\(id)")
+        do {
+            let series = try await seriesRequest
+            guard isCurrent() else { return }
+            selectedSeries = series
+            recordCache(series, key: "workout-series-\(id)")
+        } catch {
+            guard isCurrent() else { return }
+            workoutDetailError = "时序数据未能更新，可下拉重试。"
+        }
+        // freshness 是**补状态**，不是详情页的前置条件：老服务端没有这个端点、或这一次
+        // 读失败，都只让它缺席（`nil` ⇒ 展示层按"没有证据"处理），绝不把整页报成失败。
+        guard let freshness = try? await freshnessRequest, isCurrent() else { return }
+        selectedFreshness = freshness
+    }
+
+    /// 2026-10-18（事故复盘 P0-6）：同步成功 / 回到前台后，重取**当前打开的那条训练**。
+    ///
+    /// 事故直接成因 D10：每批成功只触发 `refreshAll()`，而它**不碰**
+    /// `selectedWorkout` / `selectedSeries` —— 服务端 12:30:23Z 就收下了 stride 482 条，
+    /// 而 App 直到 12:31:55Z 才第一次读新详情：中间用户看到的是旧页面，只能下拉或退出重进。
+    ///
+    /// 三条边界（复盘 §6.1 P0-6 写死）：
+    ///   1. 只在**有打开会话**时重取；
+    ///   2. 只在**判定为 stale** 时重取（`WorkoutFreshnessPresentation.shouldReload`）：
+    ///      freshness 仍 partial / 分析未发布 / 最近 6 小时结束 / 时序为空；
+    ///      已完整的老训练不会被每一代次都重读三条接口；
+    ///   3. **仅前台 + 350ms 合并窗口**：后台窗口里发 UI 级读会跨过后台到期点被系统挂起
+    ///      （`NativeViews` 里 -1001 的同源说明），而同一波里的第二次调用复用第一次的 Task。
+    ///
+    /// - Parameters:
+    ///   - isForeground: 调用方按 `scenePhase` 判定 —— 后台不发起 UI 级读。
+    ///   - coalescing: 合并窗口（秒）。回归用 `.zero` 把窗口从时序里拿掉。
+    /// - Returns: 真的发起了重取时为 `true`。
+    @discardableResult
+    func reloadOpenWorkoutIfStale(isForeground: Bool, coalescing: TimeInterval = 0.35) async -> Bool {
+        guard isForeground, let detail = selectedWorkout else { return false }
+        guard WorkoutFreshnessPresentation.shouldReload(
+            endedAt: detail.workout.endedAt,
+            publishStatus: detail.workout.analysisPublishStatus,
+            freshness: selectedFreshness,
+            series: selectedSeries,
+            now: now()
+        ) else { return false }
+        if let inFlight = openWorkoutReloadTask { return await inFlight.value }
+        let id = detail.workout.id
+        let reloadID = UUID()
+        let window = UInt64(max(0, coalescing) * 1_000_000_000)
+        let task = Task { [weak self] () -> Bool in
+            if window > 0 {
+                // 合并窗口。`Task.sleep` 在调用方任务被取消（详情页消失 / 切走）时抛出，
+                // 直接放弃这次重取 —— 不留下"页面已经不在却还在发请求"的尾巴。
+                do { try await Task.sleep(nanoseconds: window) } catch { return false }
+            }
+            guard let self, !Task.isCancelled else { return false }
+            // 窗口里用户可能已经切到别的训练：那条训练有自己的 `.task`，这里不越权。
+            guard self.selectedWorkout?.workout.id == id else { return false }
+            await self.loadWorkout(id: id)
+            return true
+        }
+        openWorkoutReloadTask = task
+        openWorkoutReloadID = reloadID
+        let reloaded = await task.value
+        if openWorkoutReloadID == reloadID {
+            openWorkoutReloadTask = nil
+            openWorkoutReloadID = nil
+        }
+        return reloaded
+    }
+
+    /// 2026-10-18（事故复盘 P0-3）：详情页**可见期间**的有界前台轮询。
+    ///
+    /// 只在 `TechWorkoutDetailView` 的 `.task` 里调用：页面消失或 App 进入后台时该任务被
+    /// 取消，`Task.sleep` 抛出即停止 —— 这就是"不新增后台机制"的落地形态（没有定时器、
+    /// 没有 BGTask、没有 observer）。次数与间隔由 `WorkoutFreshnessPollPolicy` 钉住
+    /// （2/5/10/15 秒，最多 4 次，一波 ≈32 秒）。
+    ///
+    /// 与 `reloadOpenWorkoutIfStale` 的分工：那个由**同步代次**驱动（数据到服务端了），
+    /// 这个由**详情页还开着**驱动（用户正盯着"数据仍在补齐"的横幅）。两者都不轮询后台。
+    func pollOpenWorkoutFreshnessWhileVisible(id: String) async {
+        var attempts = 0
+        while WorkoutFreshnessPollPolicy.shouldContinue(
+            attempts: attempts,
+            isPartial: WorkoutFreshnessPresentation.isPartial(selectedFreshness),
+            openWorkoutID: selectedWorkout?.workout.id,
+            expectedID: id
+        ) {
+            let delay = WorkoutFreshnessPollPolicy.delaySeconds(afterAttempt: attempts + 1)
+            do {
+                try await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, selectedWorkout?.workout.id == id else { return }
+            attempts += 1
+            await loadWorkout(id: id)
         }
     }
 
@@ -1298,6 +1408,11 @@ final class NativeAppModel {
         workoutTotal = 0
         selectedWorkout = nil
         selectedSeries = nil
+        selectedFreshness = nil
+        // 2026-10-18（事故复盘 P0-6）：配置/scope 变了，在飞的自动重取属于旧配置。
+        openWorkoutReloadTask?.cancel()
+        openWorkoutReloadTask = nil
+        openWorkoutReloadID = nil
         predictionLoadState = .unavailable(message: "尚未加载预测")
         predictionLastCacheAt = nil
         lastCacheUpdate = nil

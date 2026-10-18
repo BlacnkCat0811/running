@@ -45,6 +45,15 @@ export interface ImportLaneTimings {
   laneMs: Partial<Record<ImportLaneAttempt, number>>;
   /** 线程内「收到任务 → 产出结果」的总耗时（= Σ laneMs + 车道间准备）。 */
   taskMs: number;
+  /**
+   * 直连接收器内部四段耗时（P2-3，2026-10-18 同步诊断）：
+   * `directSync.identity` / `directSync.parse` / `directSync.ledger` / `directSync.commit`。
+   *
+   * 只在 `direct-sync` 车道**真的提交**时出现；拒收/重放没有完整四段。
+   * 这些是开放观测键（主线程原样写进 `performance.computeStagesMs`），
+   * 不进 `ImportStage` 闭集 —— 那个枚举是公开契约的一部分。
+   */
+  directSyncStagesMs?: Record<string, number>;
 }
 
 /**

@@ -280,3 +280,52 @@ nonisolated enum RouteQueryPolicy {
         return .execute
     }
 }
+
+/// P1-3（2026-10-18 同步诊断）：这一轮的轨迹**要不要真的放进载荷**。
+///
+/// ## 缺陷形态
+///
+/// 跑完 24h 内路线状态是 `.active`（`shouldQuery` 恒真）—— 那是**查询**语义，正确。
+/// 但旧实现把"查询到了内容"直接等同于"要重新上传"：同一份 GPX（2026-10-18 实测 2527 点）
+/// **每批重发**；又因为 workout 页的写法是 `hasWorkoutChange || !routeFiles.isEmpty` 才输出，
+/// `routeFiles` 非空还会顺带把 workout XML 一起重发。历史重放期 ≈75 批 ⇒ ≈75 份重复 GPX。
+///
+/// ## 判据
+///
+/// 只有三个条件**同时**成立才跳过重发：
+/// 1. 本轮观测到的摘要非空，且**等于**状态里记下的 `deliveredHash`（服务端已确认收到这一版）；
+/// 2. `hasWorkoutChange == false`（workout 自身变了就必须重发 XML 与它引用的轨迹）；
+/// 3. 不是用户点名的显式重试（`routeRetryWorkoutIDs`，§4.2 步骤 6）。
+///
+/// 🔴 `deliveredHash` 只在批次**成功提交之后**写入（`SyncTaskStore.upsertRouteStates`）；
+/// 上传/导入失败的批次不会留下"已交付"的证据，下一轮照旧重发。这与 ADR-004 决策二
+/// "没读到 ≠ 没变化" 同源：**没确认 ≠ 已交付**。
+///
+/// 跳过重发**不改状态机的调度**：查询照旧、`RouteSyncStateMachine.decide` 照旧推进
+/// `lastCheckedAt`/稳定计数 —— 被跳过的只是"文件字节"，不是"查过了"。
+nonisolated enum RouteDeliveredContent {
+    /// 是否需要把本轮的 GPX 放进载荷。
+    ///
+    /// - Parameters:
+    ///   - observation: 本轮**完整**观测（读取失败/预算拒绝走的是别的分支，不会到这里）。
+    ///   - deliveredHash: 上一批成功交付时记下的摘要（`nil` = 没有交付证据 ⇒ 必须重发）。
+    ///   - workoutChanged: 这条 workout 是否出现在本批的变更流里（`hasWorkoutChange`）。
+    ///     刻意**不**叫 `hasWorkoutChange`：`check-background-capabilities.py` §14h 用它数
+    ///     "每一次状态机 consult 都带上锚变更旁路"，而本函数不是状态机 consult ——
+    ///     同名会把那条结构判据的计数打歪。
+    ///   - isExplicitRetry: 用户是否点名重试这一条（`routeRetryWorkoutIDs`）。
+    static func shouldIncludeGPX(
+        observation: RouteObservation,
+        deliveredHash: String?,
+        workoutChanged: Bool,
+        isExplicitRetry: Bool
+    ) -> Bool {
+        guard let hash = observation.routeHash, !hash.isEmpty else {
+            // 空轨迹/无摘要：没有可比较的内容。`entries` 本来也是空的，但方向仍然选"重发"，
+            // 绝不把"没有摘要"当成"内容相同"（那会让一条轨迹永远不被重新上传）。
+            return true
+        }
+        guard hash == deliveredHash else { return true }
+        return workoutChanged || isExplicitRetry
+    }
+}

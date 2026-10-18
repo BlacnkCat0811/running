@@ -1098,6 +1098,13 @@ export class ImportWorker {
   private recordLaneTimings(timing: ImportPerformanceTracker, timings: ImportLaneTimings): void {
     timing.record("dataOnlyApply", timings.laneMs["data-only"] ?? 0);
     timing.record("directSyncApply", timings.laneMs["direct-sync"] ?? 0);
+    // P2-3（2026-10-18 同步诊断）：直连接收器内部的四段耗时。它们进
+    // `computeStagesMs`（开放键，schema 是 additionalProperties: number），**不**进
+    // `stagesMs` 的闭集枚举 —— 后者是公开契约的一部分，不能为一个诊断数字扩它。
+    // `recordComputeStage` 会过滤非有限值；这里不做 `?? 0`：不存在的键不该被写成 0。
+    for (const [stage, milliseconds] of Object.entries(timings.directSyncStagesMs ?? {})) {
+      this.recordComputeStage(stage, milliseconds);
+    }
   }
 
   /** A Promise wrapper around synchronous SQL is not sufficient: own the

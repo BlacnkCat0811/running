@@ -13,6 +13,7 @@ import { CONTRACT_VERSION } from "@rai/contracts";
 import { SaxesParser, type SaxesTagPlain } from "saxes";
 
 import { RaiDatabase, SEED_CONTENT_HASH } from "./database.js";
+import { isCanonicalInstant } from "./dirty-range.js";
 import { evaluateRemovalGuard, ImportRemovalGuardError } from "./import-guard.js";
 import { prepareNative, type NativeOptions } from "./native-worker.js";
 import { NativeRecordWriter } from "./native-record-writer.js";
@@ -79,6 +80,56 @@ interface RecordDraft {
   metadata: MetadataMap;
 }
 
+/**
+ * P1-2（2026-10-18）：**未变记录轻路径**的判定（纯函数，单测入口）。
+ *
+ * ## 它回答什么
+ *
+ * "这条记录的内容摘要与库里已接受的完全相同、且没有任何墓碑 ⇒ 本批对它无事可做"。
+ * 是则解析器跳过 `observeImportEntity` 的 UPSERT、`saveHealthKitRecordFact`、提交前回读
+ * 断言与全部 JSON 序列化，只累计计数/清单。
+ *
+ * ## 为什么每一条前置条件都不能省
+ *
+ * - `preserveAbsentIncremental`：完整快照（非 preserve-absent）必须**逐行重写**，而且它的
+ *   删除判定读的就是代次（`finalizeImportGeneration`）——跳过代次更新会被误判成删除。
+ * - `!recordDelta`：直连 record-delta 车道自带事实/账本提交前断言与身份副作用（`deltaIdentities`、
+ *   profile 增量），轻路径把那些断言一并跳掉；那条车道也不吃这份固定底（它本来就是有界的）。
+ * - `hasSampleUuid`：`healthkit_record_facts` 以 `(type, uuid)` 为键；无 UUID 的记录没有可比摘要。
+ * - `hasIdentityMapping`：`healthkit_record_sources` 没有映射 = 身份还没建立（新样本/旧库），
+ *   跳过身份解析会把它留在"无映射"状态 ⇒ 必须走完整路径。
+ * - `existingContentHash !== null && !== SEED_CONTENT_HASH`：`SEED_CONTENT_HASH` 是"只知其身份、
+ *   不知其内容"的哨兵（v31 回填与冷启动种子），拿哨兵比内容永远不该相等，也不该被当成命中。
+ * - 两个墓碑都为假：被删来源/被删实体必须走完整路径 —— 计数（`tombstonedCount`）、
+ *   `carriedDeletedSources` 与"删除不因重传复活"的判定都在那里。
+ *
+ * 账本语义：完整路径在"未变"时同样**不写** `import_entity_changes`（`observeImportEntity` 只在
+ * `!exists || updated` 时写），也不写 `health_records`；轻路径与它的产出因此逐项相同
+ * （`inserted`/`updated`/`removed` 全为 0），差别只是省掉了写入与断言。
+ */
+export interface UnchangedRecordFastPathInput {
+  preserveAbsentIncremental: boolean;
+  recordDelta: boolean;
+  hasSampleUuid: boolean;
+  hasIdentityMapping: boolean;
+  existingContentHash: string | null;
+  contentHash: string;
+  sourceDeleted: boolean;
+  entityTombstoned: boolean;
+}
+
+export function isUnchangedRecordForIncrementalImport(input: UnchangedRecordFastPathInput): boolean {
+  return input.preserveAbsentIncremental
+    && !input.recordDelta
+    && input.hasSampleUuid
+    && input.hasIdentityMapping
+    && input.existingContentHash !== null
+    && input.existingContentHash !== SEED_CONTENT_HASH
+    && input.existingContentHash === input.contentHash
+    && !input.sourceDeleted
+    && !input.entityTombstoned;
+}
+
 interface RouteDraft {
   attributes: Record<string, string>;
   metadata: MetadataMap;
@@ -119,6 +170,12 @@ export interface AppleHealthParseResult {
   supersededRecordTimes?: string[];
   /** Entities the payload carried but that stayed deleted via a tombstone. */
   tombstonedCount?: number;
+  /**
+   * P1-2（2026-10-18）：未变记录的**轻路径**命中数（内容摘要与既有 fact 相同、无墓碑 ⇒
+   * 不写行/不写 facts/不 UPSERT 代次，只计数）。同一份载荷重复导入时它 = 记录总数。
+   * 计入 `recordCount`，**不计入** `insertedRecordCount`。
+   */
+  unchangedRecordCount?: number;
   dirtyWorkoutTimes?: string[];
 }
 
@@ -165,6 +222,15 @@ export interface AppleHealthParseOptions {
   deletedWorkoutIds?: readonly string[];
   deletedRecords?: readonly HealthKitRecordDeletion[];
   healthKitRecordIdentity?: boolean;
+  /**
+   * v46 / P2-2：本批记录写入 `health_records.available_at` 的值（**到达服务端的时刻**，
+   * ISO 规范时刻）。省略时取解析**开始时刻**（`new Date().toISOString()`）。
+   *
+   * 传它的两个实际用途：①测试确定性（同一份 XML 两次导入得到可断言的可得时间）；
+   * ②接收端若已知"这批到达"的权威时刻（上传完成时刻），可以写它而不是解析时的钟。
+   * 更新行会**刷新**该值；内容未变的重复到达走轻路径，不重写行，因此不污染首次可得时间。
+   */
+  availableAt?: string;
   /** Narrow live-DB transaction path. The parser owns BEGIN/COMMIT; callbacks
    * must only use this connection and cannot commit or flush independently. */
   recordDelta?: {
@@ -352,6 +418,14 @@ export async function parseAppleHealthXml(
     throw new RecordDeltaNotEligibleError("not a bounded preserve-absent v2 record-only batch");
   }
   const native = options.recordDelta ? null : await prepareNative("health", xmlPath, options.native ?? {});
+  // v46 / P2-2：本批的**到达服务端时刻**（`health_records.available_at`）。
+  // 显式 option 优先（测试确定性 / 接收端已知上传完成时刻），否则取解析开始时刻。
+  // 在**任何写入之前**校验：坏值不能落进 available_at —— 那列是"何时可得"的唯一证据，
+  // 写脏了就无法与事件时间区分（DATA_PIPELINE §3）。
+  const availableAt = options.availableAt ?? new Date().toISOString();
+  if (!isCanonicalInstant(availableAt)) {
+    throw new Error("availableAt must be a canonical ISO instant (e.g. 2026-10-18T12:34:56.000Z)");
+  }
   // 调用方持有模式下，本批边界是一个 SAVEPOINT（不产生提交点）。
   // 失败路径**只**撤这一段，调用方仍可继续做完别的事再决定提交或整体回滚。
   let callerSavepointOpen = false;
@@ -421,6 +495,8 @@ export async function parseAppleHealthXml(
   let issueCount = 0;
   let insertedRecordCount = 0;
   let insertedWorkoutCount = 0;
+  /** P1-2：未变记录轻路径命中数（见 `isUnchangedRecordForIncrementalImport`）。 */
+  let unchangedRecordCount = 0;
   // Entities the payload still carries but that a tombstone keeps deleted.
   let tombstonedCount = 0;
   const insertedWorkoutTimes: string[] = [];
@@ -549,6 +625,37 @@ export async function parseAppleHealthXml(
         if (options.healthKitRecordIdentity && (!uuid || !validSampleUUID(uuid))) {
           throw new Error("HealthKit v2 record is missing a valid sample UUID");
         }
+        // P1-2（2026-10-18）：**未变记录前置跳过**（热路径：直连车道 95%+ 的载荷是重复数据）。
+        //
+        // 位置刻意在身份解析**之前**：命中时连 `resolveHealthKitRecordId` 的
+        // sources/aliases 写入（INSERT OR IGNORE）也一并省掉 —— 那些映射在首次导入时
+        // 已经写好，内容没变就没有要补的东西。判据全在纯函数
+        // `isUnchangedRecordForIncrementalImport` 里（单测入口），这里只负责取事实。
+        //
+        // 账本语义不变：完整路径在"未变"时同样不写 `import_entity_changes`、不写
+        // `health_records`、不 `saveHealthKitRecordFact`；差别只是不 UPSERT 代次、
+        // 不跑提交前回读断言、不做 JSON 序列化。
+        const contentHash = stableId("record_content", [currentRecord.attributes, currentRecord.metadata]);
+        if (uuid && options.incremental?.preserveAbsent && !options.recordDelta) {
+          const existingFact = store.healthKitRecordFactLookup(record.type, uuid);
+          if (existingFact !== null && isUnchangedRecordForIncrementalImport({
+            preserveAbsentIncremental: true,
+            recordDelta: false,
+            hasSampleUuid: true,
+            hasIdentityMapping: existingFact.recordId !== null,
+            existingContentHash: existingFact.contentHash,
+            contentHash,
+            sourceDeleted: existingFact.sourceDeleted,
+            entityTombstoned: existingFact.entityTombstoned
+          })) {
+            unchangedRecordCount += 1;
+            updateInventory(recordInventory, record.type, record.startAt, record.unit,
+              classifySource(record.sourceName, record.device, record.metadata));
+            recordCount += 1;
+            currentRecord = null;
+            return;
+          }
+        }
         const sourceIdentifiers: string[] = [];
         const candidateId = record.id;
         const legacyId = uuid || hasRecordAliases
@@ -584,7 +691,7 @@ export async function parseAppleHealthXml(
           }
         }
         const category = classifySource(record.sourceName, record.device, record.metadata);
-        const contentHash = stableId("record_content", [currentRecord.attributes, currentRecord.metadata]);
+        // `contentHash` 已在上面算过（轻路径判定要用；同一对输入的确定性摘要，不重算）。
         if (options.recordDelta) {
           const existing = store.database.prepare("SELECT 1 FROM health_records WHERE id = ?").get(record.id);
           const known = store.database.prepare(`SELECT content_hash AS hash FROM import_entity_generations
@@ -617,7 +724,7 @@ export async function parseAppleHealthXml(
             }
           }
           if (shouldWrite) {
-            store.insertRecord(record, category, currentRecord.attributes);
+            store.insertRecord(record, category, currentRecord.attributes, { availableAt });
             if (options.recordDelta) {
               assertRecordDeltaFact(store, record, category, currentRecord.attributes);
               const change = store.database.prepare(`SELECT change_type,content_hash FROM import_entity_changes
@@ -840,6 +947,8 @@ export async function parseAppleHealthXml(
       removedRecordCount: finalized.removedRecords + removedHealthKitRecords + superseded.removed,
       removedWorkoutCount: finalized.removedWorkouts,
       tombstonedCount,
+      // P1-2：重复载荷的规模证据（轻路径命中数）。计入 recordCount，不计入 inserted。
+      unchangedRecordCount,
       // 旧值被取代掉的时刻（`start_at`）：调用方把它并进脏范围下界，删除所在窗口
       // 必须重算 —— 账本 `previous_*` 也写了同一区间，两条消费路径同源。
       supersededRecordCount: superseded.removed,

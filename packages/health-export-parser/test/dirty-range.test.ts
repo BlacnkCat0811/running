@@ -85,7 +85,7 @@ test("不可解析时刻 ⇒ full（fail-safe，方向是不可错复用）", ()
   assert.ok(range.reasons.includes("invalid_health_time") || range.reasons.includes("invalid_health_interval"));
 });
 
-test("vo2Max 变更 ⇒ full（与 CLI 的 planHealthChanges 同口径）", () => {
+test("P0-2：vo2Max 变更不再 full——样本在训练之前时取下界本身（fitness 域得到边界）", () => {
   const range = planIncrementalAnalysisDirtyRange({
     changes: [{
       entityKind: "record",
@@ -95,8 +95,62 @@ test("vo2Max 变更 ⇒ full（与 CLI 的 planHealthChanges 同口径）", () =
     }],
     workouts: WORKOUTS
   });
-  assert.equal(range.full, true);
+  // 🔴 旧实现这里 `full = true`（生产实测：1 条 VO2Max 样本 ⇒ 286 条历史训练全量重算 103 s）。
+  assert.equal(range.full, false);
+  assert.equal(range.dirtyFromAt, "2026-01-10T07:00:00.000Z");
+  assert.equal(range.domains.fitness, "2026-01-10T07:00:00.000Z");
+  assert.equal(range.domains.features, "2026-01-10T07:00:00.000Z",
+    "特征前缀复用要求 features 非空；VO2 不进特征，回退到样本时刻是保守方向");
+  assert.ok(range.reasons.includes("vo2_evidence_changed"), "原因码保留（诊断/回执要用）");
+  assert.ok(!range.reasons.includes("overlapping_workout_rewound"), "样本在训练之前 ⇒ 不需要回绕");
+});
+
+test("P0-2：vo2Max 样本落在训练内 ⇒ 边界回绕到相交训练起点（与其它记录变更同口径）", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [{
+      entityKind: "record",
+      changeType: "inserted",
+      newType: healthTypes.vo2Max, newStart: "2026-01-10T08:10:00.000Z", newEnd: "2026-01-10T08:10:00.000Z",
+      previousType: null, previousStart: null, previousEnd: null
+    }],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, false);
+  assert.equal(range.dirtyFromAt, "2026-01-10T08:00:00.000Z");
+  assert.equal(range.domains.fitness, "2026-01-10T08:00:00.000Z");
   assert.ok(range.reasons.includes("vo2_evidence_changed"));
+  assert.ok(range.reasons.includes("overlapping_workout_rewound"));
+});
+
+test("P0-2 安全兜底：vo2Max 区间不可解析仍 full（不可错复用）", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [{
+      entityKind: "record",
+      changeType: "updated",
+      newType: healthTypes.vo2Max, newStart: "not-a-time", newEnd: "2026-01-10T08:11:00.000Z",
+      previousType: null, previousStart: null, previousEnd: null
+    }],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, true);
+  assert.equal(range.dirtyFromAt, null);
+  assert.ok(range.reasons.includes("vo2_evidence_changed"));
+  assert.ok(range.reasons.includes("invalid_health_interval") || range.reasons.includes("invalid_health_time"));
+});
+
+test("P0-2 安全兜底：有变更但新旧两侧都没有区间 ⇒ health_boundary_unknown full", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [{
+      entityKind: "record",
+      changeType: "removed",
+      newType: null, newStart: null, newEnd: null,
+      previousType: null, previousStart: null, previousEnd: null
+    }],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, true);
+  assert.equal(range.dirtyFromAt, null);
+  assert.ok(range.reasons.includes("health_boundary_unknown"));
 });
 
 test("恢复边界只压低 readiness/fitness，不污染 features 之外的语义", () => {

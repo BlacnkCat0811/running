@@ -114,18 +114,30 @@ nonisolated enum SyncFollowUp {
     /// 投递甩在后面；没有上限的话"补跑"会退化成前台自旋 —— 而每一次自旋都是一轮 GB 级导出。
     /// 超出额度的那一代交给后台的 `BackgroundRunPolicy.resubmitDelay` 兜着（关掉 App 之后照跑）。
     ///
-    /// 口径：**新代次**（`hasUncoveredGeneration`）专用。待续页另有独立额度
-    /// （`maxForegroundContinuationRounds`）—— 两者是不同的事，合成一份会让
-    /// "12,000 条积压"的第二、三页拿不到额度（那是常见路径），也会让新代次的防自旋护栏
-    /// 被页循环吃掉。
+    /// 口径：**新代次**（`hasUncoveredGeneration`）专用。待续页另有独立预算
+    /// （`foregroundContinuationTimeBudget` + `ForegroundContinuationBudget`）—— 两者是
+    /// 不同的事，合成一份会让"12,000 条积压"的第二、三页拿不到预算（那是常见路径），
+    /// 也会让新代次的防自旋护栏被页循环吃掉。
     static let maxForegroundRounds = 1
 
-    /// 一轮收工后，**只因为"自己没读完"（待续页）**而允许的前台续跑轮数（S2.3）。
+    /// 一轮收工后，**只因为"自己没读完"（待续页）**而允许的前台续读**时间预算**（秒）。
     ///
-    /// 有界性的依据：每轮至少消费 1 整页（预算在页末尾检查，见 `HealthKitRecordCursor.drain`），
-    /// 时间上界 ≈ 本额度 × 单页导出成本；读不完的部分与既有路径同源交给后台兜底
-    /// （`needsAnotherRound` 会因待续标记继续为真）。
-    static let maxForegroundContinuationRounds = 3
+    /// 2026-10-18 事故复盘 P0-6：旧形态是"新代次 1 轮 + 待续页固定 3 轮"
+    /// （`maxForegroundContinuationRounds = 3`）。而当时的真实状态是 ≈75 批历史重放待读：
+    /// 一次点击只推进 4 批，剩下约 19 次全靠用户点 —— 跑后 6 批的间隔（+12 s / +44 s /
+    /// +55 s / +21 s / +13 s）就是这个形态的指纹。改成**有界时间预算**：一波最多
+    /// `foregroundContinuationTimeBudget` 秒，或直到没有待续页 / 上一轮没有任何一批成功提交。
+    ///
+    /// 🔴 有界性没有变，只是口径从"固定批数"改成"固定时间"：
+    ///   · 时间上界仍是硬的（60 s），且每轮都必须先过 `SyncFollowUp.handoff`；
+    ///   · 轮数还留一个兜底上界（`maxForegroundContinuationRounds`）—— 单页导出异常快时
+    ///     60 s 内也能刷出很多轮，而每一轮都是一次 GB 级导出；
+    ///   · 读不完的部分与既有路径同源交给后台兜底（`needsAnotherRound` 因待续标记继续为真）。
+    static let foregroundContinuationTimeBudget: TimeInterval = 60
+
+    /// 一波前台续读的轮数兜底上界。**不是**"每波固定几批"：主判据是上面的时间预算，
+    /// 这条只防"导出比预算还快"的极端形态把 60 s 花在几十次重导上。
+    static let maxForegroundContinuationRounds = 8
 
     enum Handoff: Equatable {
         /// 这一轮已经把盘上的代次都覆盖了 ⇒ 什么都不做。
@@ -140,22 +152,76 @@ nonisolated enum SyncFollowUp {
     ///   - hasUncoveredGeneration: 有新代次（通知 / scope 恢复请求）没被覆盖。
     ///   - hasPendingContinuation: 上一批还有**未读完的页**（`PendingWork.hasPendingContinuation`）。
     ///   - foregroundRoundsLeft: 新代次的前台补跑额度（从 `maxForegroundRounds` 起算）。
-    ///   - continuationRoundsLeft: 待续页的前台续跑额度（从 `maxForegroundContinuationRounds` 起算）。
+    ///   - continuationBudgetLeft: 这一波前台续读的预算还够不够
+    ///     （`ForegroundContinuationBudget.allows(now:)`；时间 + 轮数双上界）。
     ///
     /// 🔴 判定的优先级 = 新代次优先用**自己的**额度：两者同时挂起时先按新代次扣账，
-    /// 额度尽后若待续页仍悬着再落到续页额度 —— 每个分支都对应"这一轮到底为什么还要跑"，
+    /// 额度尽后若待续页仍悬着再落到续读预算 —— 每个分支都对应"这一轮到底为什么还要跑"，
     /// 调用方据此扣**对应**的计数器（见 `AppDelegate.handOffUncoveredGenerations`）。
     static func handoff(
         hasUncoveredGeneration: Bool,
         hasPendingContinuation: Bool,
         isForeground: Bool,
         foregroundRoundsLeft: Int,
-        continuationRoundsLeft: Int
+        continuationBudgetLeft: Bool
     ) -> Handoff {
         guard hasUncoveredGeneration || hasPendingContinuation else { return .nothing }
         guard isForeground else { return .scheduleBackground }
         if hasUncoveredGeneration { return foregroundRoundsLeft > 0 ? .runAgain : .scheduleBackground }
-        return continuationRoundsLeft > 0 ? .runAgain : .scheduleBackground
+        return continuationBudgetLeft ? .runAgain : .scheduleBackground
+    }
+
+    /// 这一波前台续读该不该收手（把剩下的交给后台）。
+    ///
+    /// 两个停因都要有：预算（时间/轮数）用尽是**预期**的停因；而"上一轮一批都没提交成功"
+    /// 是**异常**停因 —— 没有它，一次服务端 5xx 或断网会被时间预算放大成"在 60 s 内反复
+    /// 重放同一个失败请求"，而每一次重放都是一次 GB 级 HealthKit 导出。
+    ///
+    /// 判据是纯函数：`AppDelegate` 只负责用它 + 扣预算（`recordRound()`）。
+    static func shouldStopWave(
+        budget: ForegroundContinuationBudget,
+        now: Date,
+        madeProgress: Bool
+    ) -> Bool {
+        if !budget.allows(now: now) { return true }
+        return !madeProgress
+    }
+}
+
+/// 一波前台续读的预算：**时间有界**（主判据）+ **轮数有界**（兜底）。
+///
+/// 为什么不是"固定几批"：单批导出的成本随样本量从秒级到几十秒不等，"3 批"在轻量增量上
+/// 是 10 秒、在 GB 级重放上是 3 分钟；用时间表达"这一波最多占用用户 60 秒"，既保住
+/// 前台自旋护栏，也让 75 批重放不必靠 ≈19 次点击。
+///
+/// 起点是**这一波第一次续读**，而不是"用户点同步那一刻"：一次手动同步本身可能已经花掉
+/// 几十秒（导出 + 上传 + 等服务端），从点击起算会让预算在续读开始前就用完。
+nonisolated struct ForegroundContinuationBudget: Equatable {
+    /// 一波的时间上界（秒），与 `SyncFollowUp.foregroundContinuationTimeBudget` 同源。
+    static let timeBudget: TimeInterval = SyncFollowUp.foregroundContinuationTimeBudget
+
+    /// 一波的轮数上界，与 `SyncFollowUp.maxForegroundContinuationRounds` 同源。
+    static let maxRounds: Int = SyncFollowUp.maxForegroundContinuationRounds
+
+    /// 这一波的起点（第一次续读的时刻）。
+    let startedAt: Date
+
+    /// 这一波已经跑了几轮续读。
+    private(set) var rounds: Int
+
+    init(startedAt: Date, rounds: Int = 0) {
+        self.startedAt = startedAt
+        self.rounds = rounds
+    }
+
+    /// 现在还能不能再开一轮。时间与轮数任一用尽即停。
+    func allows(now: Date) -> Bool {
+        rounds < Self.maxRounds && now.timeIntervalSince(startedAt) < Self.timeBudget
+    }
+
+    /// 扣一轮。调用点必须与 `handoff` 的判定对齐（只有真的跑了才扣）。
+    mutating func recordRound() {
+        rounds += 1
     }
 }
 

@@ -28,8 +28,10 @@
 | --- | --- | --- |
 | 今日 | `GET /v1/mobile/today` | 读取恢复、建议、周进度和最近训练；显示 `latestDataDate` 与 `generatedAt` |
 | 训练列表 | `GET /v1/workouts?limit=&offset=&sessionType=` | 以 `id` 去重，按分页追加 |
-| 训练详情 | `GET /v1/workouts/{id}` | 读取缺失指标的 `null`，不以零替代 |
+| 训练详情 | `GET /v1/workouts/{id}` | 读取缺失指标的 `null`，不以零替代；`analysisPublishStatus=pending` 时按“分析中”展示 |
 | 时序 | `GET /v1/workouts/{id}/series` | 各指标使用自身 `unit` 和同一时间轴 |
+| 训练新鲜度 | `GET /v1/workouts/{id}/freshness` | 事实批次与分析到齐程度；`not_seen_yet` 不得当成“设备没有该能力” |
+| 同步覆盖 | `GET /v1/sync/coverage?types=` | 只用于避免重传服务端已有历史；不得清除本地游标 |
 | 统计 | `GET /v1/mobile/statistics` | 月度、总量和心率区间直接展示服务端结果 |
 | 趋势 | `GET /v1/mobile/trends` | 12 周、增幅、纪录和洞察直接展示服务端结果 |
 | 目标 | `GET /v1/mobile/goals` | 保存当前 revision 和逐日计划 |
@@ -102,6 +104,82 @@
 - `unplannedDays`：`[{ localDate, code, detail }]`，只覆盖**用户自选的跑步日**中本周没有排入训练的那些天。`code` 是事实码（`no_session_scheduled` / `pre_race_taper`），`detail` 是可观测计数，不含动机判断。
 
 同时修正 `weeklyCapacityKm` 的语义：它现在是**本周可花预算**（`min(容量, 本周量带上限)`），与生成侧和今天页量带上限同源。它此前的值是未按阶段裁剪的容量，与生成侧实际使用的数字不一致；**同名同型，取值口径变了**，如果客户端把它当作"上限"来做二次裁剪，请改用今天页的 `periodization.current.volumeBandKm.upper`。
+
+## 2026-10-18 增量契约：事实可见性、新鲜度与覆盖探测（同步诊断 P0-1/P0-3/P1-1）
+
+背景：一次训练的事实与它的分析发布**不是同一时刻**（生产实测相差 102.5 s）。此前读侧以“已发布分析”
+为唯一入口，这段窗口里列表看不到、详情 404，且响应里没有任何“仍在补齐”的字段。以下三个变化
+都是**兼容扩展**（只加字段 / 把 404 场景变 200 / 新增读端点），既有字段语义不变。
+
+### 事实已提交、分析未发布时的读契约
+
+`GET /v1/workouts` 的 `items[]` 与 `GET /v1/workouts/{id}` 现在**事实驱动**：
+
+- 事实（workout + training_session + records）存在 ⇒ 列表包含该行、详情返回 **200**；
+  只有**事实不存在**（或已软删）才 404（详情仍是 `{"message": "未找到该训练记录"}`）。
+- 每行新增可选字段 `analysisPublishStatus`：`"pending" | "published" | "failed"`。
+  `pending` 时派生字段是 `null`/占位，**不是**结论：
+  - `sessionType = "unclassified"`、`eligibilityStatus = "pending"`、`qualityScore = 0`、
+    `modelVersion = ""`、`assessmentStatus = null`、`currentAbility/confidence/trueAbilityDelta = null`、
+    `dimensions` 全为 `null`；
+  - 事实侧能回答的照常给出：`startedAt/endedAt/durationSeconds/distanceKm/averageHeartRateBpm`
+    （来自 workout/session/`workout_statistics`；没有证据时保持 `null`，不编造）；
+  - 详情 `facts.analysisState = "pending"`，且 `analysis` 块为 `null`（没有已发布 release）。
+- 客户端**不得**把 `qualityScore = 0` 或空维度显示成真实分数；应显示“分析中”。
+- 带特征过滤（`status`/`sessionType`/`confidence`/`participation`）时 pending 行会被排除，
+  这是契约允许的（它还没有 eligibility/sessionType）；**不带**过滤时必须包含 pending 行。
+
+### `GET /v1/workouts/{id}/freshness`
+
+```jsonc
+{
+  "workoutId": "training_session_…",
+  "facts":   { "committedAt": "2026-10-18T12:29:38.755Z",
+               "lastBatchAt": "2026-10-18T12:31:50.405Z", "batches": 6 },
+  "analysis":{ "status": "pending", "jobId": "recompute_job_…", "publishedAt": null },
+  "series":  [ { "metric": "heartRate", "samples": 512, "state": "present", "lastAvailableAt": null },
+               { "metric": "strideLength", "samples": 0, "state": "not_seen_yet", "lastAvailableAt": null } ],
+  "completeness": "partial"
+}
+```
+
+- `metric` 固定集合：`heartRate/speed/power/cadence/strideLength/verticalOscillation/groundContactTime/elevation`；
+  `samples` 与 `/series` 同口径（窗口内去重样本数；`elevation` 为可读路线点数）。
+- `state = not_seen_yet` 表示“目前没有样本，可能还在传输”，**不是**“设备不支持该指标”；
+  界面用“数据仍在传输”，不要用“暂无数据/设备不支持”。
+- `lastAvailableAt` 是 P2-2（`health_records.available_at`）落地后的每指标最近接收时刻；
+  旧库/未迁移时为 `null`（表示“不知道”，不是“从未到达”）。客户端按可选字段处理。
+- `completeness = complete` **仅当**分析已发布且 `lastBatchAt` 距当前 ≥ 24h；
+  其余为 `partial`。24h 是“数据已稳定”的下界证据，不是“永远不会再补齐”。
+- 鉴权与 `/v1/workouts/{id}` 相同；事实不存在 ⇒ 404。
+
+### `GET /v1/sync/coverage?types=a,b`
+
+```jsonc
+{ "datasetEpoch": "default",
+  "types": [ { "type": "HKQuantityTypeIdentifierStepCount",
+               "knownFrom": "2024-01-01T00:00:00.000Z", "knownUntil": "2026-10-18T11:40:00.000Z",
+               "sampleCount": 534789 } ] }
+```
+
+- `types` 可选（逗号分隔）；缺省返回全部类型；未知类型不补空行。
+- 覆盖区间是“已落库样本的端点”，**不证明区间内没有空洞**；客户端只能据此**跳过重传**
+  服务端已有历史，不得删除本地游标、不得跳过真正的待办。
+- `datasetEpoch` 与 `/v1/handshake` 同源；epoch 变化后旧结论作废。
+- `/v1/handshake` 新增可选能力位 `syncCoverageVersion`（当前 `1`）；老服务端省略 ⇒ 客户端
+  必须回落“照常重放”，不得假设服务端已覆盖。
+
+### 直连回执的记录计数
+
+`/v1/import-jobs` 的 `summary.directSync`（持久回执，写入后**不可改写**）新增可选块：
+
+```jsonc
+"records": { "parsed": 4500, "inserted": 622, "unchanged": 3878 }
+```
+
+`parsed` = 本批 XML 的 `<Record>` 条数，`inserted` = 新增行数，`unchanged = parsed - inserted`
+（显式删除事件不在 `parsed` 内）。老服务端省略该键 ⇒ 客户端按“未提供”处理，不得当成 0。
+它让“本批 0 新增”可以被回执直接解释；不改变 `ingestStatus` / `analysisStatus` 的既有语义。
 
 ## 训练计划一致性与排期回执（2026-10-09）
 

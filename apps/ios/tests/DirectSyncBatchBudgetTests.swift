@@ -38,12 +38,48 @@ struct DirectSyncBatchBudgetTests {
         )
         let budget = DirectSyncBatchBudget.from(bounds: bounds)
         check(budget.maxXmlBytes == 7_549_747, "xml bytes budget = 8 MiB × 0.9")
-        check(budget.maxRecords == 4_500, "records budget = 5000 × 0.9")
+        // ── P1-4（2026-10-18 同步诊断）：记录条数改为**字节驱动** ──
+        // 旧实现抄服务端 `maxRecords × 0.9`（4500）当 XML 记录条数上限；可服务端直连车道
+        // **只对删除配额**用这个数，对 XML 记录条数没有硬上界（`exceedsServerBounds` 的注释）。
+        // 结果每批被 4500 卡住、字节只用 29%，重放期被切成 118 批。
+        // 新式：min(12_000, max(4_500, 7_549_747 / 480)) = 12_000。
+        check(budget.maxRecords == 12_000,
+              "records budget is byte-driven and capped at 12,000 (7.55 MB / 480 B per record ≈ 15.7k)")
+        check(budget.maxRecords > 4_500,
+              "the byte-driven record budget must actually lift the old 4,500 self-imposed ceiling")
         check(budget.maxDeletions == 4_500, "deletions budget = 5000 × 0.9 (server deletion quota is maxRecords)")
         check(budget.maxRouteFiles == 180, "route files budget = 200 × 0.9")
         check(budget.maxRouteBytes == 60_397_977, "route bytes budget = 64 MiB × 0.9")
         check(DirectSyncBatchBudget.from(bounds: nil) == DirectSyncBatchBudget.conservative,
               "missing bounds falls back to the conservative constant")
+
+        // P1-4 边界：下限 4,500 不被小字节预算缩水；上限 12,000 封顶；两者之间按字节换算。
+        let tinyBounds = DirectSyncBounds(
+            maxXmlBytes: 512 * 1024, maxRecords: 5_000,
+            maxRouteFiles: 200, maxRouteBytes: 64 * 1024 * 1024
+        )
+        let tinyBudget = DirectSyncBatchBudget.from(bounds: tinyBounds)
+        check(tinyBudget.maxXmlBytes == 471_859, "a 512 KiB server bound yields a 471,859 B client budget")
+        check(tinyBudget.maxRecords == 4_500,
+              "a tiny xml budget keeps the 4,500 floor (shrinking it only splits more batches)")
+        let midBounds = DirectSyncBounds(
+            maxXmlBytes: 3 * 1024 * 1024, maxRecords: 5_000,
+            maxRouteFiles: 200, maxRouteBytes: 64 * 1024 * 1024
+        )
+        let midBudget = DirectSyncBatchBudget.from(bounds: midBounds)
+        check(midBudget.maxXmlBytes == 2_831_155, "a 3 MiB server bound yields a 2,831,155 B client budget")
+        check(midBudget.maxRecords == 2_831_155 / 480,
+              "between the floor and the cap the record budget is exactly xmlBytes/480 (byte-driven)")
+        check(midBudget.maxRecords > 4_500 && midBudget.maxRecords < 12_000,
+              "the middle case proves both the floor and the cap are inert where they should be")
+        check(budget.maxRecords == min(12_000, max(4_500, budget.maxXmlBytes / 480)),
+              "the production formula is min(12_000, max(4_500, xmlBytesBudget / 480))")
+        let hugeBounds = DirectSyncBounds(
+            maxXmlBytes: 64 * 1024 * 1024, maxRecords: 5_000,
+            maxRouteFiles: 200, maxRouteBytes: 64 * 1024 * 1024
+        )
+        check(DirectSyncBatchBudget.from(bounds: hugeBounds).maxRecords == 12_000,
+              "the 12,000 cap holds even for a much larger server bound")
 
         // route 闸门边界：恰好等于上界即"已到上界"（>= 语义）——fetch 侧据此停手。
         let probe = DirectSyncBatchBudget(
@@ -86,6 +122,17 @@ struct DirectSyncBatchBudgetTests {
               "the recent-window share stays at 20% of the batch (900 records / 377,487 B)")
         check(backfillShare.maxRecords == 642 && backfillShare.maxBytes == 269_633,
               "the late-backfill share is 1/7 (≈14.3%) — strictly below the 15% ceiling")
+        // P0-4：workout 定向补齐窗口的独立份额 = 25%（排在迟到补读/48h 窗口/anchor 之前）。
+        let workoutWindowShare = DirectSyncBatchBudget.workoutWindowShare(of: conservativeBudget)
+        check(workoutWindowShare.maxRecords == 1_125 && workoutWindowShare.maxBytes == 471_859,
+              "the workout-backfill share is 25% of the batch (1,125 records / 471,859 B)")
+        check(workoutWindowShare.maxRecords + windowSubShare.maxRecords + backfillShare.maxRecords
+                <= conservativeBudget.maxRecords * 60 / 100,
+              "workout window (25%) + recent window (20%) + late backfill (1/7) still leave "
+              + "the anchored stream ≥40% of the record budget")
+        check(workoutWindowShare.maxRecords + windowSubShare.maxRecords + backfillShare.maxRecords
+                <= conservativeBudget.maxRecords,
+              "the three sub-channel shares never add up to more than the whole batch")
         check(windowSubShare.maxRecords + backfillShare.maxRecords <= conservativeBudget.maxRecords * 35 / 100,
               "window + backfill leave at least 65% of the RECORD budget to the anchored stream")
         check(windowSubShare.maxBytes + backfillShare.maxBytes <= conservativeBudget.maxXmlBytes * 35 / 100,

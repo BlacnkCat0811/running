@@ -3,7 +3,13 @@ import SQLite3
 
 @MainActor
 final class SyncTaskStore {
-    private static let schemaVersion = 2
+    /// 同步日志库的 schema 版本（`PRAGMA user_version`）。
+    ///
+    /// - 1：`sync_route_state` 只有 `workout_uuid` 主键（v2 迁移重建为 `(scope, workout_uuid)`）。
+    /// - 2：路线降频记忆按 scope 隔离；`sync_pending_routes` 的调度列幂等补齐。
+    /// - 3（P0-4/P1-3，2026-10-18）：`sync_route_state.delivered_route_hash`（已交付轨迹摘要）
+    ///   与 `sync_pending_workout_windows`（workout 级定向补齐队列）。
+    private static let schemaVersion = 3
     private var database: OpaquePointer?
     /// 受控重开需要它：`open()` 可能被调用不止一次（见 `reopenIfUnavailable()`）。
     private let directory: URL
@@ -167,6 +173,7 @@ final class SyncTaskStore {
     /// `sync_route_state` 在 v1 只有 `workout_uuid` 主键。不能靠新的 CREATE TABLE IF NOT EXISTS
     /// 修复已安装设备，因为 SQLite 会保留旧表。v2 使用 `(scope, workout_uuid)`，旧行不归属于
     /// 任意新 scope，迁移时安全丢弃（下一次每个 workout 都会按 UNKNOWN 首查）。
+    /// 2026-10-18 起它同时是 schema 迁移的总入口：v1→v2 重建、v2→v3 追加（P0-4/P1-3）。
     ///
     /// 用 `PRAGMA user_version` 做一次性、幂等标记；旧表先改名再创建，避免在同一事务中把旧行
     /// 误归到当前 scope。旧 index 也显式删除，防止改名表留下同名 index 阻塞新建。
@@ -180,7 +187,23 @@ final class SyncTaskStore {
         sqlite3_finalize(versionStatement)
         if version >= Self.schemaVersion {
             return ensureRouteStateSchema(database: database)
+                && ensurePendingWorkoutWindowsTable(database: database)
         }
+        // v1 → v2：`sync_route_state` 改用 `(scope, workout_uuid)` 复合主键。旧行不归属于
+        // 任意新 scope，安全丢弃（下一次每个 workout 都会按 UNKNOWN 首查）。
+        if version < 2 {
+            guard migrateToVersion2(database: database) else { return false }
+        }
+        // v2 → v3（P0-4/P1-3）：路线摘要列 + workout 补齐窗口表。与 v2 分开成两步，
+        // 而不是把 v2 的建表一起改到 3：老设备可能停在 v1、也可能停在 v2，两条路都要能走。
+        guard migrateToVersion3(database: database) else { return false }
+        return true
+    }
+
+    /// v1 → v2：重建 `sync_route_state`（旧行没有可信 scope）。**保留** `PRAGMA user_version = 2`
+    /// 这条字面量：结构门禁 `check-background-capabilities.py` §14 用它钉"已安装的库有显式
+    /// 版本化迁移"，它仍是这次迁移的真实出口。
+    private func migrateToVersion2(database: OpaquePointer) -> Bool {
         guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
         var committed = false
         defer {
@@ -216,6 +239,26 @@ final class SyncTaskStore {
         return true
     }
 
+    /// v2 → v3（2026-10-18 同步诊断 P0-4/P1-3）：新增已交付轨迹摘要列与 workout 补齐窗口表。
+    ///
+    /// 两条都是**纯追加**：列可空（老行 = 没有交付证据 ⇒ 照旧重发/重查，安全方向），
+    /// 新表不依赖旧数据。失败整段回滚，`PRAGMA user_version` 不会被推上去。
+    private func migrateToVersion3(database: OpaquePointer) -> Bool {
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        // `ensureRouteStateSchema` 同时补：`delivered_route_hash` 列、冷却索引、
+        // `sync_route_discovery` 表（手写/损坏的 v2 库可能缺其中任意一项，全部幂等）。
+        guard ensureRouteStateSchema(database: database) else { return false }
+        guard ensurePendingWorkoutWindowsTable(database: database) else { return false }
+        guard SQLiteSupport.execute("PRAGMA user_version = 3", database: database) else { return false }
+        guard SQLiteSupport.execute("COMMIT", database: database) else { return false }
+        committed = true
+        return true
+    }
+
     private func ensureRouteStateSchema(database: OpaquePointer) -> Bool {
         SQLiteSupport.execute("""
             CREATE TABLE IF NOT EXISTS sync_route_state (
@@ -227,6 +270,8 @@ final class SyncTaskStore {
                 route_hash TEXT,
                 last_checked_at REAL NOT NULL,
                 stable_check_count INTEGER NOT NULL,
+                -- P1-3（2026-10-18）：服务端已确认收到的轨迹内容摘要（老行 NULL = 无交付证据）。
+                delivered_route_hash TEXT,
                 PRIMARY KEY (scope, workout_uuid)
             );
             CREATE INDEX IF NOT EXISTS idx_route_status_cooling
@@ -237,7 +282,55 @@ final class SyncTaskStore {
             );
             """, database: database)
         guard ensurePendingRouteColumns(database: database) else { return false }
+        guard ensureDeliveredRouteHashColumn(database: database) else { return false }
         return true
+    }
+
+    /// P1-3（2026-10-18）：`sync_route_state.delivered_route_hash` 的**幂等补齐**。
+    ///
+    /// 判据与 `ensurePendingRouteColumns` 同源：这列是纯追加且可空，对已有行无损。
+    /// 单独抽出来是因为它同时出现在 v2→v3 迁移与每次打开（`version >= 3` 的快速路径）里 ——
+    /// 两处必须走同一个"缺哪补哪"的判定，否则升级失败的库在重新打开时会静默少一列。
+    private func ensureDeliveredRouteHashColumn(database: OpaquePointer) -> Bool {
+        guard let statement = SQLiteSupport.prepare(
+            "PRAGMA table_info(sync_route_state)", database: database
+        ) else { return false }
+        var columns = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let pointer = sqlite3_column_text(statement, 1) {
+                columns.insert(String(cString: pointer))
+            }
+        }
+        sqlite3_finalize(statement)
+        guard !columns.contains("delivered_route_hash") else { return true }
+        return SQLiteSupport.execute(
+            "ALTER TABLE sync_route_state ADD COLUMN delivered_route_hash TEXT",
+            database: database
+        )
+    }
+
+    /// P0-4（2026-10-18）：workout 级定向补齐队列。建表是幂等的，老库升级走 v3 迁移。
+    ///
+    /// 各列语义见 `WorkoutBackfillWindow`；时间列都是 REAL（写入前必须过 `Date.canonicalForREAL`，
+    /// 否则提交前回读断言会按约一半概率把成功写入判成失败，见 ADR-004 补充 C）。
+    private func ensurePendingWorkoutWindowsTable(database: OpaquePointer) -> Bool {
+        SQLiteSupport.execute("""
+            CREATE TABLE IF NOT EXISTS sync_pending_workout_windows (
+                scope TEXT NOT NULL,
+                workout_uuid TEXT NOT NULL,
+                window_start REAL NOT NULL,
+                window_end REAL NOT NULL,
+                created_at REAL NOT NULL,
+                next_check_at REAL NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                last_sample_count INTEGER NOT NULL,
+                stable_count INTEGER NOT NULL,
+                completed_at REAL,
+                PRIMARY KEY (scope, workout_uuid)
+            );
+            CREATE INDEX IF NOT EXISTS idx_pending_workout_windows_due
+                ON sync_pending_workout_windows(scope, completed_at, next_check_at);
+            """, database: database)
     }
 
     /// R07（2026-10-16）：`sync_pending_routes` 的调度列**幂等补齐**。
@@ -1010,7 +1103,8 @@ final class SyncTaskStore {
         guard isAvailable else { return [:] }
         let columns = """
             SELECT workout_uuid, workout_end_date, route_status, point_count, \
-            route_hash, last_checked_at, stable_check_count FROM sync_route_state
+            route_hash, last_checked_at, stable_check_count, delivered_route_hash \
+            FROM sync_route_state
             """
         var result: [String: RouteSyncRecord] = [:]
         guard let uuids else {
@@ -1063,7 +1157,9 @@ final class SyncTaskStore {
                 pointCount: Int(sqlite3_column_int64(statement, 3)),
                 routeHash: columnText(statement, 4),
                 lastCheckedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
-                stableCheckCount: Int(sqlite3_column_int64(statement, 6))
+                stableCheckCount: Int(sqlite3_column_int64(statement, 6)),
+                // P1-3：旧行/旧库这一列是 NULL ⇒ nil = 没有交付证据 ⇒ 下一轮照旧重发。
+                deliveredHash: columnText(statement, 7)
             )
         }
     }
@@ -1119,7 +1215,10 @@ final class SyncTaskStore {
                 pointCount: record.pointCount,
                 routeHash: record.routeHash,
                 lastCheckedAt: record.lastCheckedAt.canonicalForREAL,
-                stableCheckCount: record.stableCheckCount
+                stableCheckCount: record.stableCheckCount,
+                // P1-3：已交付摘要是 TEXT（不是 REAL），逐字节可回读；仍点名重建，
+                // 让"将来加字段会在这里编译报错"这条纪律继续成立。
+                deliveredHash: record.deliveredHash
             )
         }
         guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
@@ -1132,15 +1231,16 @@ final class SyncTaskStore {
         guard let statement = prepare("""
             INSERT INTO sync_route_state(
                 scope, workout_uuid, workout_end_date, route_status, point_count,
-                route_hash, last_checked_at, stable_check_count
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                route_hash, last_checked_at, stable_check_count, delivered_route_hash
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ON CONFLICT(scope, workout_uuid) DO UPDATE SET
                 workout_end_date = excluded.workout_end_date,
                 route_status = excluded.route_status,
                 point_count = excluded.point_count,
                 route_hash = excluded.route_hash,
                 last_checked_at = excluded.last_checked_at,
-                stable_check_count = excluded.stable_check_count
+                stable_check_count = excluded.stable_check_count,
+                delivered_route_hash = excluded.delivered_route_hash
             """) else { return false }
         defer { sqlite3_finalize(statement) }
         for record in records {
@@ -1177,6 +1277,11 @@ final class SyncTaskStore {
                 fail("route state bind"); return false
             }
             guard sqlite3_bind_int64(statement, 8, Int64(record.stableCheckCount)) == SQLITE_OK else {
+                fail("route state bind"); return false
+            }
+            // P1-3：`delivered_route_hash` 与 `route_hash` 同为 TEXT，NULL 显式绑定
+            // （"没有交付证据"是合法状态，不是错误）。
+            guard bindOptionalText(record.deliveredHash, to: statement, at: 9) else {
                 fail("route state bind"); return false
             }
             guard sqlite3_step(statement) == SQLITE_DONE else { fail("route state upsert"); return false }
@@ -1423,6 +1528,142 @@ final class SyncTaskStore {
         }
         guard SQLiteSupport.execute("COMMIT", database: database) else {
             fail("pending routes remove commit"); return false
+        }
+        committed = true
+        return true
+    }
+
+    // MARK: - Workout 级定向补齐窗口（P0-4，2026-10-18 同步诊断）
+
+    /// 读本 scope 的全部 workout 补齐窗口（键 = 小写 workout UUID）。
+    ///
+    /// 与 `loadRouteStates` 同一条理由整表读：导出跑在脱离主线程的上下文里
+    /// （`HealthSyncCancellation.runDetached`），那里碰不了 `@MainActor` 的 store ——
+    /// 状态必须在导出**开始前**取出来。表很小（每 workout 一行、7 天后收口不删），整表读
+    /// 比"导出中发现一个 UUID 再跨 actor 回查"更省，也少一层竞态。
+    func loadWorkoutBackfillWindows(scope: String) -> [String: WorkoutBackfillWindow] {
+        guard isAvailable else { return [:] }
+        guard let statement = prepare("""
+            SELECT workout_uuid, window_start, window_end, created_at, next_check_at,
+                   attempt_count, last_sample_count, stable_count, completed_at
+            FROM sync_pending_workout_windows WHERE scope = ?
+            """) else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        var result: [String: WorkoutBackfillWindow] = [:]
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return result }
+            guard step == SQLITE_ROW else { fail("read workout windows"); return result }
+            guard let uuidPointer = sqlite3_column_text(statement, 0) else { continue }
+            let uuid = String(cString: uuidPointer)
+            let completedAt: Date? = sqlite3_column_type(statement, 8) == SQLITE_NULL
+                ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 8))
+            result[uuid] = WorkoutBackfillWindow(
+                workoutUUID: uuid,
+                windowStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+                windowEnd: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
+                nextCheckAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                attemptCount: Int(sqlite3_column_int64(statement, 5)),
+                lastSampleCount: Int(sqlite3_column_int64(statement, 6)),
+                stableCount: Int(sqlite3_column_int64(statement, 7)),
+                completedAt: completedAt
+            )
+        }
+    }
+
+    /// 登记/刷新一批 workout 补齐窗口。**三条护栏与 `upsertRouteStates` 同源**：
+    /// 单事务、逐行 `sqlite3_changes() == 1`、提交**前**回读断言。
+    ///
+    /// 时间列必须过 `Date.canonicalForREAL` 再写：`Date` ↔ `timeIntervalSince1970` 不是双射
+    /// （实测约一半有损），而下面的回读断言比对的是整个 `WorkoutBackfillWindow` ——
+    /// 不规范化就会按约一半概率把一次成功写入判成失败（ADR-004 补充 C 的同一条坑）。
+    ///
+    /// 登记时机：**导出发现变更 workout 之后、任务行持久化锚点之前**（先表后锚，与
+    /// `upsertPendingRoutes` 同一纪律）。失败方向：多登记一条窗口 ⇒ 下批多查一次，安全。
+    @discardableResult
+    func upsertWorkoutBackfillWindows(
+        _ windows: [WorkoutBackfillWindow], scope: String
+    ) -> Bool {
+        guard isAvailable, let database else { fail("workout windows upsert"); return false }
+        guard !windows.isEmpty else { return true }
+        lastError = nil
+        let records = WorkoutBackfillScheduler.normalized(windows).map { window in
+            WorkoutBackfillWindow(
+                workoutUUID: window.workoutUUID.lowercased(),
+                windowStart: window.windowStart.canonicalForREAL,
+                windowEnd: window.windowEnd.canonicalForREAL,
+                createdAt: window.createdAt.canonicalForREAL,
+                nextCheckAt: window.nextCheckAt.canonicalForREAL,
+                attemptCount: window.attemptCount,
+                lastSampleCount: window.lastSampleCount,
+                stableCount: window.stableCount,
+                completedAt: window.completedAt?.canonicalForREAL
+            )
+        }
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
+            fail("workout windows begin"); return false
+        }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard let statement = prepare("""
+            INSERT INTO sync_pending_workout_windows(
+                scope, workout_uuid, window_start, window_end, created_at, next_check_at,
+                attempt_count, last_sample_count, stable_count, completed_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(scope, workout_uuid) DO UPDATE SET
+                window_start = excluded.window_start,
+                window_end = excluded.window_end,
+                next_check_at = excluded.next_check_at,
+                attempt_count = excluded.attempt_count,
+                last_sample_count = excluded.last_sample_count,
+                stable_count = excluded.stable_count,
+                completed_at = excluded.completed_at
+            """) else { return false }
+        defer { sqlite3_finalize(statement) }
+        for record in records {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            // `created_at` 刻意**不**在 UPSERT 里更新：它是 7 天上限的起点，重开窗口也不刷新
+            // （见 `WorkoutBackfillScheduler.register` 的形态 3）。
+            guard SQLiteSupport.bind(scope, to: statement, at: 1),
+                  SQLiteSupport.bind(record.workoutUUID, to: statement, at: 2),
+                  sqlite3_bind_double(statement, 3, record.windowStart.timeIntervalSince1970) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 4, record.windowEnd.timeIntervalSince1970) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 5, record.createdAt.timeIntervalSince1970) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 6, record.nextCheckAt.timeIntervalSince1970) == SQLITE_OK,
+                  sqlite3_bind_int64(statement, 7, Int64(record.attemptCount)) == SQLITE_OK,
+                  sqlite3_bind_int64(statement, 8, Int64(record.lastSampleCount)) == SQLITE_OK,
+                  sqlite3_bind_int64(statement, 9, Int64(record.stableCount)) == SQLITE_OK,
+                  bindOptionalReal(record.completedAt, to: statement, at: 10) else {
+                fail("workout windows bind"); return false
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                fail("workout windows upsert"); return false
+            }
+            let touched = Int(sqlite3_changes(database))
+            guard touched == 1 else {
+                lastError = "workout 补齐窗口未能写入，本次提交已回滚。"
+                SQLiteSupport.report("workout windows upsert touched \(touched) row(s)", database: database)
+                return false
+            }
+        }
+        // 提交前回读：整条记录逐字段相等（时间列已在上面规范化，所以可以严格比）。
+        let written = loadWorkoutBackfillWindows(scope: scope)
+        guard lastError == nil else { return false }
+        for record in records {
+            guard written[record.workoutUUID] == record else {
+                lastError = "workout 补齐窗口写入后无法读回一致的值，本次提交已回滚。"
+                SQLiteSupport.report("workout windows read-back mismatch", database: database)
+                return false
+            }
+        }
+        guard SQLiteSupport.execute("COMMIT", database: database) else {
+            fail("workout windows commit"); return false
         }
         committed = true
         return true

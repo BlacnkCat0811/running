@@ -39,6 +39,19 @@ nonisolated struct RouteSyncRecord: Codable, Equatable, Sendable {
     var lastCheckedAt: Date
     /// 连续多少次观测与上一次**完全一致**（点数 + 摘要）。任何变化都清零。
     var stableCheckCount: Int
+    /// P1-3（2026-10-18 同步诊断）：**服务端已确认收到的那一版轨迹内容摘要**。
+    ///
+    /// 为什么需要它：`routeHash` 只说"手机此刻看到的轨迹是什么"，不是"服务端有没有这一版"。
+    /// 2026-10-18 的诊断实测，跑完 24h 内路线状态是 `.active`（每批都查），于是**同一份
+    /// GPX 每批重发**，并且因为 `routeFiles` 非空，workout XML 也跟着重发（约 2527 点/批）。
+    /// 记下交付过的摘要之后，导出侧才能在"内容没变、workout 没变更、也不是显式重试"时
+    /// 不再把这份 GPX 放进载荷。
+    ///
+    /// 🔴 写入时机 = **批次成功提交之后**（与 `routeStates` 同一个结算事务，
+    /// `SyncTaskStore.upsertRouteStates`）。绝不能在上传/导入之前写：那会把一份**从未被
+    /// 服务端确认**的轨迹记成"已交付"，此后所有批次都不再重发它 —— 方向是**静默丢数据**。
+    /// 老 payload/老行缺这一列 ⇒ `nil` = "没有交付证据" ⇒ 照旧每轮重查/重发（安全方向）。
+    var deliveredHash: String? = nil
 }
 
 /// 待查路线（O02/WP-11）：**预算拒绝时未能查询**的训练的持久待办。
@@ -429,5 +442,227 @@ nonisolated enum RouteCommitSettlement {
             unproven: unproven,
             discoveryCursor: candidate.discoveryCursor
         )
+    }
+}
+
+/// P0-4（2026-10-18 同步诊断）：一条「刚完成的训练」的**定向补齐窗口**。
+///
+/// ## 为什么需要它
+///
+/// 2026-10-18 的 6km 跑步实测：跑完 97 s 内服务端只拿到 HR/步幅/PhysicalEffort 四类，
+/// speed/power/cadence/VO/GCT 一条都没有。原因不是导出顺序，而是 **Apple Watch → iPhone
+/// 的样本是流式到达的**：每次同步只是"当时手机里已有样本"的快照。而客户端**只有**路线侧的
+/// 持久待办（`sync_pending_routes`），没有 workout 级待办 ⇒ 一次训练缺哪些类型、还差多久，
+/// 没有任何机制记录与补齐。历史重放期里，新数据只能挤 48h 窗口的 20% 份额。
+///
+/// 本类型是那个缺口的持久载体：把"这次训练的时间窗还没补齐"写成一行（与路线待办同库、
+/// 同一条"成功后才结算"纪律），后续每批在**任何历史重放之前**按窗口做一次**全类型**有界
+/// 查询，直到"连续两次观测样本数不变"或 7 天到期才收口。
+///
+/// ## 为什么窗口要加 5 分钟
+///
+/// 训练前后的恢复心率/PhysicalEffort 常落在 `[start, end]` 之外几十秒；查询窗口取
+/// `[start − 5min, end + 5min]` 才能把"跑完那一刻才到的样本"也覆盖进来。服务端按
+/// `RAIHealthKitSampleUUID` 幂等，重复写到正式流已覆盖的样本不会产生重复事实。
+///
+/// ## 与正式 anchor/窗口的关系
+///
+/// 窗口 pass 用**无锚点 + 时间谓词**查询（`HealthKitExport` 的 `recentSamples`），
+/// **绝不推进**正式 anchor，也不改任何游标记账 —— 它只是一条并行的恢复通道。
+/// 它写进载荷的样本也与 48h 窗口 pass / 正式 anchor 段可能重复：那是**有意接受**的，
+/// 因为服务端按 UUID last-wins 幂等，而窗口自己是有界、有限次（≤ 5 次检查）的。
+nonisolated struct WorkoutBackfillWindow: Codable, Equatable, Sendable {
+    /// 小写化的 workout UUID（口径与 `HealthKitExport.routeFileWorkoutId` 同源）。
+    let workoutUUID: String
+    /// 查询下界 = `workout.startDate − 5min`（见 `WorkoutBackfillScheduler.windowPadding`）。
+    var windowStart: Date
+    /// 查询上界 = `workout.endDate + 5min`。
+    var windowEnd: Date
+    /// **首次**登记时刻。它同时是 7 天到期判据的起点，重开窗口也**不**刷新它 ——
+    /// 否则一条反复变更的老训练可以让窗口永远活着（无界重复查询）。
+    let createdAt: Date
+    /// 下一次允许查询的时刻（重试序列见 `WorkoutBackfillScheduler.retryIntervals`）。
+    var nextCheckAt: Date
+    /// 已完成的**整窗查询**次数（预算没跑完的一趟不计数）。
+    var attemptCount: Int
+    /// 最近一次整窗查询**写进载荷**的样本数。判据是"与上一次相同" ⇒ 连续稳定。
+    var lastSampleCount: Int
+    /// 连续多少次观测的样本数与上一次相同（首查后为 0；第二次相同 ⇒ 1）。
+    var stableCount: Int
+    /// 非 nil = 已收口（连续稳定或 7 天到期），不再查询；行保留供诊断。
+    var completedAt: Date?
+
+    var isCompleted: Bool { completedAt != nil }
+
+    /// 7 天上限的到期时刻（诊断用；判据在 `WorkoutBackfillScheduler.afterPass`）。
+    var expiresAt: Date { createdAt.addingTimeInterval(WorkoutBackfillScheduler.completionWindow) }
+}
+
+/// P0-4 的**纯逻辑**调度器：登记/刷新、到期判定、重试序列、收口判据。
+///
+/// 为什么必须是纯函数、且住在 `RouteSyncState.swift`：`HealthKitExport` 依赖 HealthKit，
+/// 不能被任何回归编译；而"什么时候该再查一次 / 什么时候算补齐了"正是这条修复里**最容易
+/// 写错又最贵**的判据（写成无限重试 ⇒ 每批白读 18 次 HealthKit；写得太早收口 ⇒ 迟到样本
+/// 重新永久缺失，正是 2026-10-14 事故的形态）。放在这里，`RouteSyncStateMachineTests`
+/// 与 `RouteSyncStatePersistenceRegression` 都能直接钉它。
+nonisolated enum WorkoutBackfillScheduler {
+    /// 窗口两侧的 padding（见 `WorkoutBackfillWindow` 的说明）。
+    static let windowPadding: TimeInterval = 5 * 60
+
+    /// 只给"最近这段时间内结束"的训练登记窗口。更老的不再新增（历史重放自己会覆盖），
+    /// 也避免一条老训练因元数据变化被反复登记。
+    static let registrationLookback: TimeInterval = 7 * 24 * 60 * 60
+
+    /// 窗口从**首次登记**起最多存活这么久，到点无论观测如何都收口。
+    /// 依据：10-14 实测迟到样本 36–72 h 到达；7 天给足两轮完整迟到窗口，同时给"无界补齐"封顶。
+    static let completionWindow: TimeInterval = 7 * 24 * 60 * 60
+
+    /// 到期重试序列：15 min / 1 h / 6 h / 24 h / 72 h（第 5 次之后保持 72 h 直到 7 天到期）。
+    static let retryIntervals: [TimeInterval] = [15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60, 72 * 60 * 60]
+
+    /// 单批最多处理几条窗口（有界是判据的一部分：每条窗口 × 18 个类型，不能把一批变成
+    /// 上百次查询）。按 `nextCheckAt` 最早优先，同龄按 UUID 稳定排序。
+    static let passBatchLimit = 4
+
+    /// 单类型单窗口的查询上限（`recentSamples` 的 limit）。有界同 `recentWindowLimit`。
+    static let perTypeLimit = 1500
+
+    /// 连续多少次"与上次样本数相同"算稳定（= 两次观测一致）。
+    static let stabilityToComplete = 1
+
+    /// 是否该为这条 workout 登记/刷新窗口。
+    /// - Parameter endDate: workout 的结束时刻（**不是**开始时刻：轨迹/统计跑完才成形）。
+    static func shouldRegister(endDate: Date, now: Date) -> Bool {
+        let age = now.timeIntervalSince(endDate)
+        return age >= -windowPadding && age <= registrationLookback
+    }
+
+    /// 第 `attempts` 次整窗查询之后的等待时长（调用方传**新的** `attemptCount`，从 1 起）。
+    static func retryInterval(attempts: Int) -> TimeInterval {
+        let index = min(max(0, attempts - 1), retryIntervals.count - 1)
+        return retryIntervals[index]
+    }
+
+    /// 登记/刷新一条窗口。返回 `nil` = 这条 workout 不在登记窗口内（太老/时间在未来）。
+    ///
+    /// 三种输入形态：
+    /// 1. 没有旧行：新建，`nextCheckAt = now`（本批就会查一次）。
+    /// 2. 有旧行、窗口**没有变宽**：原样返回。这是 `hasWorkoutChange` 因元数据/统计变化
+    ///    反复命中的常见形态 —— 不刷新调度、不重开已收口的窗口，否则"每批都改一行元数据"
+    ///    就能让这条窗口永远排队（无界重复查询）。
+    /// 3. 有旧行、窗口**变宽了**（endDate 后移/startDate 前移 ⇒ 确实出现新的样本区间）：
+    ///    重新排队（清 `completedAt`/稳定计数/尝试次数），但**保留 `createdAt`** ——
+    ///    7 天上限仍然从首次登记起算。已过 7 天的窗口不再重开。
+    static func register(
+        workoutUUID: String,
+        startDate: Date,
+        endDate: Date,
+        existing: WorkoutBackfillWindow?,
+        now: Date
+    ) -> WorkoutBackfillWindow? {
+        guard shouldRegister(endDate: endDate, now: now) else { return nil }
+        let start = startDate.addingTimeInterval(-windowPadding)
+        let end = endDate.addingTimeInterval(windowPadding)
+        if let existing {
+            let widened = start < existing.windowStart || end > existing.windowEnd
+            guard widened else { return existing }
+            // 已过 7 天上限 ⇒ 不再重开（重开也只会被 `afterPass` 立刻收口）。
+            guard now.timeIntervalSince(existing.createdAt) < completionWindow else { return existing }
+            var refreshed = existing
+            refreshed.windowStart = min(existing.windowStart, start)
+            refreshed.windowEnd = max(existing.windowEnd, end)
+            refreshed.nextCheckAt = now
+            refreshed.attemptCount = 0
+            refreshed.lastSampleCount = 0
+            refreshed.stableCount = 0
+            refreshed.completedAt = nil
+            return refreshed
+        }
+        return WorkoutBackfillWindow(
+            workoutUUID: workoutUUID,
+            windowStart: start,
+            windowEnd: end,
+            createdAt: now,
+            nextCheckAt: now,
+            attemptCount: 0,
+            lastSampleCount: 0,
+            stableCount: 0,
+            completedAt: nil
+        )
+    }
+
+    /// 本批要处理的窗口（到期、未收口；有界 + 公平序）。
+    static func due(
+        _ windows: [WorkoutBackfillWindow],
+        now: Date,
+        limit: Int = passBatchLimit
+    ) -> [WorkoutBackfillWindow] {
+        guard limit > 0 else { return [] }
+        return windows
+            .filter { !$0.isCompleted && $0.nextCheckAt <= now }
+            .sorted { lhs, rhs in
+                if lhs.nextCheckAt != rhs.nextCheckAt { return lhs.nextCheckAt < rhs.nextCheckAt }
+                return lhs.workoutUUID < rhs.workoutUUID
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// 一趟**整窗**查询之后的记账（只有整窗所有类型都查完才调用；预算没跑完的一趟不记账）。
+    ///
+    /// 判据（2026-10-18 Lead 复核修正）：
+    /// - 连续两次观测到**相同且为正**的样本数，且此前确实观测过 ⇒ `stableCount += 1`；
+    ///   样本数变化**或为 0** ⇒ 清零；
+    /// - `stableCount >= stabilityToComplete`（= 连续两次一致）或 7 天到期 ⇒ 收口；
+    /// - 否则按重试序列排下一次检查。
+    ///
+    /// 🔴 **为什么"0 样本"不能靠稳定收口**：Apple Watch → iPhone 的迟到样本实测 36–72 h
+    /// 才到（`docs/HEALTHKIT_RECORD_SYNC_V2.md` §54-86 与 2026-10-14/17 两次事故）。若空窗在
+    /// 15m/1h 两次空查后就判"稳定、已收口"，那正好把"样本还没到手机"读成"这条训练没有这些
+    /// 类型"—— P0-4 会在最需要它的场景里失效。空观测不是"数据已稳定"的证据（与 10-14
+    /// "空窗不得推进水位"同一条纪律：**没读到 ≠ 没有**）。
+    /// 因此空窗只能靠**7 天到期**强制收口；期间按 15m/1h/6h/24h/72h 继续重试。
+    /// 一旦样本数从 0 变正，就更新计数并清零稳定计数；之后仍按"有样本 + 连续两次相同"收口。
+    static func afterPass(
+        _ window: WorkoutBackfillWindow,
+        observedSamples: Int,
+        now: Date
+    ) -> WorkoutBackfillWindow {
+        var next = window
+        let observed = max(0, observedSamples)
+        // 「稳定」的前提是**两次都看到真实样本**：空观测永远不会让 stableCount 前进。
+        let stableObservation = window.attemptCount > 0
+            && observed > 0
+            && observed == window.lastSampleCount
+        next.stableCount = stableObservation ? window.stableCount + 1 : 0
+        next.lastSampleCount = observed
+        next.attemptCount = window.attemptCount + 1
+        let expired = now.timeIntervalSince(window.createdAt) >= completionWindow
+        if (observed > 0 && next.stableCount >= stabilityToComplete) || expired {
+            next.completedAt = now
+            next.nextCheckAt = now
+            return next
+        }
+        next.completedAt = nil
+        next.nextCheckAt = now.addingTimeInterval(retryInterval(attempts: next.attemptCount))
+        return next
+    }
+
+    /// 收口的可读原因（日志/任务行只记原因，不记样本值）。
+    static func completionReason(_ window: WorkoutBackfillWindow) -> String {
+        guard window.isCompleted else { return "pending" }
+        if window.attemptCount > 0, window.stableCount >= stabilityToComplete {
+            return "stable"
+        }
+        return "expired"
+    }
+
+    /// 需要持久化的窗口集合（去重 + 稳定排序；表键 `(scope, workout_uuid)`）。
+    static func normalized(_ windows: [WorkoutBackfillWindow]) -> [WorkoutBackfillWindow] {
+        var byUUID: [String: WorkoutBackfillWindow] = [:]
+        for window in windows {
+            byUUID[window.workoutUUID.lowercased()] = window
+        }
+        return byUUID.values.sorted { $0.workoutUUID < $1.workoutUUID }
     }
 }

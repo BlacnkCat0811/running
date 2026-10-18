@@ -23,15 +23,28 @@ struct TechHomeActions: View {
                         // 让这次刷新带出全部轮次的数据。
                         await RaiStartup.handOffUncoveredGenerations(healthSync: sync, session: session)
                         await native.refreshAll(requestHandshake: false)
+                        // 2026-10-18（事故复盘 P0-6）：收工提示要自解释，且**不许**在还有
+                        // 未读完的页时说"完成"（75 批待读时界面显示"完成"是这次的原始症状）。
+                        // 判据与文案都在 `SyncResultCopy`（纯函数、有回归）。
+                        await native.reloadOpenWorkoutIfStale(isForeground: true)
                         userSyncBusy = false
                         guard configuration == native.feedbackScope + session.apiToken else { return }
-                        if sync.phase == "succeeded", sync.lastError == nil, !sync.hasPendingTask {
-                            userSyncResult = "健康数据检查完成。"
-                        } else if sync.phase == "cancelled" {
-                            userSyncResult = "已取消同步。"
-                        } else {
-                            userSyncResult = "更新尚未完成，可在设置查看状态。"
-                        }
+                        userSyncResult = SyncResultCopy.manualResult(
+                            hasPendingContinuation: sync.hasPendingContinuation,
+                            hasPendingTask: sync.hasPendingTask,
+                            isCancelled: sync.phase == "cancelled",
+                            hasError: sync.lastError != nil || sync.phase == "failed",
+                            succeeded: sync.phase == "succeeded" && sync.lastError == nil,
+                            counts: sync.lastExportSummary.map {
+                                // 老服务端没有回执计数 ⇒ 三个字段都是 nil ⇒ 文案退回"检查完成"，
+                                // **不**把"不知道"说成"本批 0 新增"。
+                                SyncResultCopy.BatchCounts(
+                                    parsed: $0.recordsParsed,
+                                    inserted: $0.recordsInserted,
+                                    unchanged: $0.recordsUnchanged
+                                )
+                            }
+                        )
                         try? await Task.sleep(for: .seconds(4))
                         userSyncResult = nil
                     }
@@ -116,6 +129,9 @@ struct TechSyncAction: View {
             // R1（2026-10-15）：同今日页按钮——手动入口收工后接手未覆盖的代次 / 未读完的页。
             await RaiStartup.handOffUncoveredGenerations(healthSync: sync, session: session)
             await native.refreshAll(requestHandshake: false)
+            // 2026-10-18（事故复盘 P0-6）：设置页的手动同步同样要让"正打开的那条训练"跟着更新
+            // —— 否则数据到了，详情页还是旧的，用户只能再下拉一次。
+            await native.reloadOpenWorkoutIfStale(isForeground: true)
         }
     }
 }
@@ -136,7 +152,11 @@ struct TechSyncStatus: View {
     @Environment(HealthKitSync.self) private var sync
     private var state: TechSyncPresentation {
         .resolve(phase: sync.phase, isBusy: sync.isBusy, hasError: sync.lastError != nil,
-                 hasSyncDate: sync.lastSyncAt != nil, hasPendingTask: sync.hasPendingTask,
+                 hasSyncDate: sync.lastSyncAt != nil,
+                 // 2026-10-18（事故复盘 P0-6）：待续槽（`sync_continuation`）同样算"盘上还有
+                 // 没读完的页"。旧实现只看任务行，而任务行提交后即删 —— 于是还有 ≈75 批待读
+                 // 时界面显示「健康同步完成」（D10 的原始症状）。
+                 hasPendingTask: sync.hasPendingTask || sync.hasPendingContinuation,
                  // 阻塞判据只从 `SyncPhase` 来（本文件只被类型检查、不进任何回归单元，
                  // 所以引得到它）—— 展示层不自己抄一份阶段名单。
                  isBlockedPhase: SyncPhase.migrate(sync.phase).isBlocked)
@@ -168,6 +188,8 @@ struct TechSyncStatus: View {
     /// 图标同样要分开：锁、钥匙、未完成的下载是三种不同的"等"，同一个图标会让
     /// 用户在两种完全不同的处境下看到同一个界面。
     private var pendingIcon: String {
+        // 待续页优先：它不是"被挡住了"，而是"还没读完"，用下载图标才不会让人以为要手动处理。
+        if sync.hasPendingContinuation { return "arrow.down.circle.dotted" }
         switch SyncPhase.migrate(sync.phase) {
         case .deferredProtectedData: return "lock.fill"
         case .authRequired: return "key.fill"
@@ -193,11 +215,16 @@ struct TechSyncStatus: View {
                     // "没走完、不用重读 HealthKit"，但原因各不相同 —— 锁屏时本机**没有**
                     // 待发数据（预检查在导出之前就返回了），而凭证失效时数据完好、缺的只是登录。
                     // 三件事共用一句正文会让其中两句变成假话，所以按阶段分流。
-                    Label(techSyncPhase(sync.phase), systemImage: pendingIcon)
+                    //
+                    // 2026-10-18（事故复盘 P0-6）：还有未读完的页时用 `SyncContinuationCopy`
+                    // 的固定文案 —— 这一档**不许**落到"上次健康同步"或"完成"。
+                    Label(sync.hasPendingContinuation ? SyncContinuationCopy.pendingTitle : techSyncPhase(sync.phase),
+                          systemImage: pendingIcon)
                         .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.cyan)
-                    Text(pendingDetail)
+                    Text(sync.hasPendingContinuation ? SyncContinuationCopy.pendingDetail : pendingDetail)
                         .font(.caption).foregroundStyle(TechColor.muted)
-                    if showsActions { TechSyncAction(title: "继续同步", compact: true) }
+                        .fixedSize(horizontal: false, vertical: true)
+                    if showsActions { TechSyncAction(title: SyncContinuationCopy.pendingAction, compact: true) }
                 } else if state == .busy {
                     Label(techSyncPhase(sync.phase), systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
                         .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.cyan)
@@ -225,7 +252,14 @@ struct TechSyncStatus: View {
                             Text(date, format: .dateTime.year().month().day().hour().minute())
                                 .font(.caption).foregroundStyle(TechColor.muted)
                             if state == .succeeded, let message = sync.message, !message.isEmpty {
-                                Text(message).font(.caption).foregroundStyle(TechColor.muted)
+                                // 2026-10-18（事故复盘 P0-6 文案缺陷）：满载批的旧尾注说
+                                // "该类型本轮零进展"，而那一批明明写了 4500 条 —— 展示层做
+                                // 一次定向替换（判据在 `SyncExportSummaryCopy`）。
+                                Text(SyncExportSummaryCopy.clarifiedMessage(
+                                    message,
+                                    hasMorePages: sync.lastExportSummary?.hasMorePages == true
+                                )).font(.caption).foregroundStyle(TechColor.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         Spacer(minLength: 0)

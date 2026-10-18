@@ -1300,7 +1300,12 @@ struct TechWorkoutRow: View {
                 Text(nativeSessionName(workout.sessionType) + (workout.indoor == true ? " · 室内" : ""))
                     .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.muted)
                 Text(techKilometers(workout.distanceKm)).techScaledFont(20, weight: .bold, relativeTo: .title3).monospacedDigit().foregroundStyle(TechColor.ink)
-                Text(nativeDate(workout.startedAt)).font(.caption2).foregroundStyle(TechColor.muted)
+                HStack(spacing: 6) {
+                    Text(nativeDate(workout.startedAt)).font(.caption2).foregroundStyle(TechColor.muted)
+                    // 2026-10-18（事故复盘 P0-3）：事实已提交、分析未发布的行，配速/评分是 "--"。
+                    // 一个显式「分析中」比一个空值更接近事实（也不至于被读成"设备没数据"）。
+                    if workout.analysisPublishStatus == "pending" { TechBadge(title: "分析中") }
+                }
             }
             Spacer(minLength: 6)
             VStack(alignment: .trailing, spacing: 6) {
@@ -1318,15 +1323,32 @@ struct TechWorkoutRow: View {
 
 struct TechWorkoutDetailView: View {
     @Environment(NativeAppModel.self) private var native
+    @Environment(\.scenePhase) private var scenePhase
     let workoutId: String
     @State private var feedbackDetail: WorkoutDetailResponse?
     @State private var summaryExpanded = false
+
+    /// 详情页的取数/轮询任务 key（2026-10-18 事故复盘 P0-3 / P0-6）。
+    ///
+    /// 把 `scenePhase == .active` 编进 key 是**刻意**的：`scenePhase` 变化会重算 body、
+    /// 但**不会**重启 `.task(id:)` —— 如果只把 phase 读进循环闭包里，循环拿到的永远是
+    /// 进入详情页那一刻的值，App 切后台后轮询会继续发请求。编进 key 之后：切后台 ⇒ 旧任务
+    /// 被取消（`Task.sleep` 立刻抛出）⇒ 没有任何后台轮询；回前台 ⇒ 任务重启并重取一次。
+    private var detailTaskKey: String {
+        workoutId + "|" + (scenePhase == .active ? "active" : "inactive")
+    }
 
     var body: some View {
         ScrollView {
             if let detail = native.selectedWorkout, detail.workout.id == workoutId {
                 let series = native.selectedSeries.flatMap { $0.trainingSessionId == workoutId ? $0 : nil }
                 LazyVStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
+                    if let banner = WorkoutFreshnessPresentation.banner(
+                        freshness: native.selectedFreshness,
+                        publishStatus: detail.workout.analysisPublishStatus
+                    ) {
+                        freshnessPanel(banner)
+                    }
                     routePanel(detail, series: series)
                     detailOverview(detail, grade: series?.grade)
                     trainingEffectPanel(detail)
@@ -1385,11 +1407,53 @@ struct TechWorkoutDetailView: View {
             }
         }
         .sheet(item: $feedbackDetail) { TechWorkoutFeedbackView(detail: $0) }
-        .task(id: workoutId) {
-            summaryExpanded = false
+        .task(id: detailTaskKey) {
+            // 后台不发起 UI 级读（会跨过后台到期点，`NativeViews` 里同源说明）。
+            guard scenePhase == .active else { return }
+            if native.selectedWorkout?.workout.id != workoutId {
+                summaryExpanded = false
+            }
             await native.loadWorkout(id: workoutId)
+            // 2026-10-18（事故复盘 P0-3）：freshness 仍是 partial 时，在**详情页可见期间**
+            // 做有界前台轮询（2/5/10/15 秒，最多 4 次）。页面消失或切后台时这个任务被取消，
+            // `Task.sleep` 抛出即停 —— 不新增任何后台机制。
+            await native.pollOpenWorkoutFreshnessWhileVisible(id: workoutId)
         }
         .refreshable { await native.loadWorkout(id: workoutId) }
+    }
+
+    /// 2026-10-18（事故复盘 P0-3）：详情页顶部的补齐状态横幅。
+    ///
+    /// 三种状态必须分得开（判据在 `WorkoutFreshnessPresentation.banner`）：分析中 / 数据仍在补齐
+    /// （含"Apple Watch 数据仍在传输：xx 待到达"）/ 分析未完成。它的存在本身就是为了消灭 D9：
+    /// 旧页面把"还没到"渲染成空数组/`null`，与"设备没有这项能力"不可区分。
+    @ViewBuilder private func freshnessPanel(_ banner: WorkoutFreshnessPresentation.Banner) -> some View {
+        TechPanel(tint: banner.kind == .analysisFailed ? TechColor.coral : TechColor.cyan,
+                  fill: banner.kind == .analysisFailed ? TechColor.coral.opacity(0.08) : TechColor.paper) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: freshnessIcon(banner.kind))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(banner.kind == .analysisFailed ? TechColor.coral : TechColor.cyan)
+                    .accessibilityHidden(true)
+                Text(banner.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(banner.kind == .analysisFailed ? TechColor.coral : TechColor.ink)
+                Spacer(minLength: 0)
+            }
+            Text(banner.detail)
+                .font(.caption).foregroundStyle(TechColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workout.freshnessStatus")
+    }
+
+    private func freshnessIcon(_ kind: WorkoutFreshnessPresentation.Banner.Kind) -> String {
+        switch kind {
+        case .analyzing: return "hourglass"
+        case .waitingForSamples: return "applewatch"
+        case .analysisFailed: return "exclamationmark.circle"
+        }
     }
 
     private func detailOverview(_ detail: WorkoutDetailResponse, grade: WorkoutGradeSummary?) -> some View {
@@ -1409,6 +1473,17 @@ struct TechWorkoutDetailView: View {
                 Text(nativeDate(workout.startedAt))
                     .font(.caption.monospacedDigit()).foregroundStyle(TechColor.muted)
                     .accessibilityIdentifier("workout.summary.date")
+                if WorkoutFreshnessPresentation.analysisIsPending(
+                    native.selectedFreshness,
+                    publishStatus: workout.analysisPublishStatus
+                ) {
+                    // 派生字段（等强配速/训练负荷/评分）在分析发布前就是 null。旧页面把它们
+                    // 渲染成 "--"/0，读者只能猜"是数据不好还是还没算完"。这里明说「分析中」。
+                    Text("分析中：评分与等强配速会在分析发布后自动填充，空值不代表 0。")
+                        .font(.caption2).foregroundStyle(TechColor.cyan)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("workout.summary.analysisPending")
+                }
                 TechFlowLayout(spacing: 12) {
                     Label("天气 \(weather.title)", systemImage: weather.symbol)
                         .accessibilityIdentifier("workout.summary.weather")
@@ -1633,8 +1708,18 @@ struct TechWorkoutDetailView: View {
     private func seriesPanels(_ series: WorkoutSeriesResponse, workout: WorkoutDetail, zones: WorkoutZoneSummary?) -> some View {
         ForEach(TechWorkoutMetric.allCases) { metric in
             VStack(alignment: .leading, spacing: 12) {
-                TechWorkoutSeriesChart(metric: metric, series: metric.series(in: series.series),
-                                       average: metric.average(in: workout), durationSeconds: workout.elapsedSeconds).equatable()
+                TechWorkoutSeriesChart(
+                    metric: metric,
+                    series: metric.series(in: series.series),
+                    average: metric.average(in: workout),
+                    durationSeconds: workout.elapsedSeconds,
+                    // P0-3：`not_seen_yet` 必须说"尚未到达"，不能说成"暂无"。
+                    emptySeriesNote: WorkoutFreshnessPresentation.emptySeriesPlaceholder(
+                        metricKey: metric.rawValue,
+                        title: metric.title,
+                        freshness: native.selectedFreshness
+                    )
+                ).equatable()
                 if let zones, metric == .pace || metric == .heartRate {
                     zoneDistribution(zones, metric: metric)
                 }
@@ -1788,9 +1873,15 @@ struct TechWorkoutDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 TechSectionHeader(title: "公里分段", trailing: "\(splits.count) 段")
                 if splits.isEmpty {
-                    Text("没有分段数据")
+                    // 2026-10-18（事故复盘 P0-3）：`splits = 0` 在今天这次跑步里的真实原因是
+                    // "配速序列还没到"，不是"这次训练没有分段"。两者必须分开说。
+                    let paceNotSeenYet = WorkoutFreshnessPresentation.metricState(
+                        "pace", freshness: native.selectedFreshness
+                    ) == "not_seen_yet"
+                    Text(paceNotSeenYet ? "配速样本尚未到达；分段会在到齐后自动生成。" : "没有分段数据")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     ForEach(splits) { split in
                         VStack(alignment: .leading, spacing: 2) {
@@ -1821,31 +1912,53 @@ struct TechWorkoutDetailView: View {
     }
 
     private func qualityPanel(_ detail: WorkoutDetailResponse) -> some View {
-        TechPanel {
+        // 2026-10-18（事故复盘 P0-3）：分析未发布时，`qualityScore` / 可信度 / 模型版本都是
+        // 占位值（0 / 空串）。把它们照原样渲染出来，读者只会得到"这次训练质量是 0 分"的结论
+        // —— 那不是事实，只是"还没算完"。所以整块换成一句状态。
+        let analysisPending = WorkoutFreshnessPresentation.analysisIsPending(
+            native.selectedFreshness,
+            publishStatus: detail.workout.analysisPublishStatus
+        )
+        return TechPanel {
             VStack(alignment: .leading, spacing: 10) {
-                TechSectionHeader(title: "质量与模型", trailing: detail.workout.modelVersion, trailingColor: TechColor.cyan)
-                HStack(spacing: 8) {
-                    TechMetricTile(title: "心率覆盖", value: nativePercent(detail.workout.heartRateCoverage), accent: TechColor.cyan)
-                    TechMetricTile(title: "来源可信度", value: nativePercent(detail.workout.sourceConfidence), accent: TechColor.green)
-                    TechMetricTile(title: "刺激可信度", value: nativePercent(detail.workout.stimulusConfidence), accent: TechColor.yellow)
-                }
-                HStack(spacing: 8) {
-                    techMetricCaption("评估状态", value: techStatusName(detail.workout.assessmentStatus))
-                    techMetricCaption("样本数", value: "\(detail.workout.heartRateSampleCount)")
-                    techMetricCaption("路线质量", value: nativePercent(detail.workout.routeQuality))
-                }
-                if !detail.workout.missingReasons.isEmpty {
-                    Text("数据不足：\(detail.workout.missingReasons.joined(separator: "、"))")
+                TechSectionHeader(title: "质量与模型",
+                                  trailing: analysisPending ? "分析中" : detail.workout.modelVersion,
+                                  trailingColor: TechColor.cyan)
+                if analysisPending {
+                    Text(analysisPendingQualityNote)
                         .font(.footnote)
-                        .foregroundStyle(TechColor.coral)
-                }
-                if !detail.workout.explanationCodes.isEmpty {
-                    Text(detail.workout.explanationCodes.joined(separator: " · "))
-                        .font(.caption)
                         .foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(spacing: 8) {
+                        TechMetricTile(title: "心率覆盖", value: nativePercent(detail.workout.heartRateCoverage), accent: TechColor.cyan)
+                        TechMetricTile(title: "来源可信度", value: nativePercent(detail.workout.sourceConfidence), accent: TechColor.green)
+                        TechMetricTile(title: "刺激可信度", value: nativePercent(detail.workout.stimulusConfidence), accent: TechColor.yellow)
+                    }
+                    HStack(spacing: 8) {
+                        techMetricCaption("评估状态", value: techStatusName(detail.workout.assessmentStatus))
+                        techMetricCaption("样本数", value: "\(detail.workout.heartRateSampleCount)")
+                        techMetricCaption("路线质量", value: nativePercent(detail.workout.routeQuality))
+                    }
+                    if !detail.workout.missingReasons.isEmpty {
+                        Text("数据不足：\(detail.workout.missingReasons.joined(separator: "、"))")
+                            .font(.footnote)
+                            .foregroundStyle(TechColor.coral)
+                    }
+                    if !detail.workout.explanationCodes.isEmpty {
+                        Text(detail.workout.explanationCodes.joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundStyle(TechColor.muted)
+                    }
                 }
             }
         }
+    }
+
+    /// 分析未发布时「质量与模型」面板的正文。**刻意不写**"数据不足"：现在缺的是分析，
+    /// 不是训练数据；而且 `missingReasons` 在 pending 行上本身就是空的。
+    private var analysisPendingQualityNote: String {
+        "评分、可信度与质量指标会在分析发布后自动填充；现在的空值不代表 0 分。"
     }
 
     private func overridePanel(_ override: WorkoutOverride) -> some View {

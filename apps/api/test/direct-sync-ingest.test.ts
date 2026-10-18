@@ -200,6 +200,44 @@ test("record-only 载荷：事实+账本+回执同事务落库，回执 not_requ
   });
 });
 
+test("P0-3/P2-3：回执带 records 计数（parsed/inserted/unchanged），提交成功的批次带四段阶段账本", async () => {
+  await fixture(async ({ main, input }) => {
+    // 同一份载荷会被第二个 job 再收一次：parsed 不变、inserted 掉到 0、unchanged 顶上。
+    // 这正是生产里"6 批 27,000 条解析、有效新增 1,111 条"的可观测形态。
+    const first = await applyOrFail(await input(record(a) + record(b, "25"), { job: "records-1" }));
+    const firstRecords = first.summary.directSync?.records;
+    assert.equal(firstRecords?.parsed, 2, "parsed = 本批 XML 里的 <Record> 条数");
+    assert.equal(firstRecords?.inserted, 2);
+    assert.equal(firstRecords?.unchanged, 0);
+    // 老字段语义一个字节都没动：records 是**追加**键，不是替代。
+    assert.equal(first.summary.directSync?.ingestStatus, "committed");
+    assert.equal(first.summary.directSync?.analysisStatus, "not_required");
+    assert.equal(first.summary.directSync?.receiptId, "records-1");
+
+    // P2-3：四段观测键随成功结果带回；拒收/重放没有完整四段（见类型注释）。
+    // 它们进 `performance.computeStagesMs`（开放键），**不**进 `stagesMs` 的闭集。
+    assert.deepEqual(Object.keys(first.stagesMs ?? {}).sort(), [
+      "directSync.commit", "directSync.identity", "directSync.ledger", "directSync.parse"
+    ], "提交成功的批次必须带回接收器内部四段耗时");
+    for (const [stage, milliseconds] of Object.entries(first.stagesMs ?? {})) {
+      assert.ok(Number.isFinite(milliseconds) && milliseconds >= 0, `${stage} 必须是有限非负数`);
+    }
+
+    const second = await applyOrFail(await input(record(a) + record(b, "25"), { job: "records-2" }));
+    assert.equal(second.summary.directSync?.records?.parsed, 2);
+    assert.equal(second.summary.directSync?.records?.inserted, 0, "同一内容再收一次不得再报新增");
+    assert.equal(second.summary.directSync?.records?.unchanged, 2);
+
+    const db = new DatabaseSync(main, { readOnly: true });
+    try {
+      assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM health_records"), 2,
+        "重复批次不得改变记录行数");
+      // 持久回执与返回的 summary 同源（客户端之后只能从回执读到这些计数）。
+      assert.deepEqual(readImportReceipt(main, "records-1")?.directSync?.records, firstRecords);
+    } finally { db.close(); }
+  });
+});
+
 test("Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）", async () => {
   await fixture(async ({ main, input }) => {
     const batch = await input(workout());

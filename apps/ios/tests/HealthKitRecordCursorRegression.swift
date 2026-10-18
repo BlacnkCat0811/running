@@ -370,6 +370,125 @@ struct HealthKitRecordCursorRegression {
         } catch Failure.fixture {}
         check(returned == nil, "partial failure cannot return an advanced cursor")
 
+        // ── P1-1（2026-10-18 同步诊断）：服务端覆盖探测的纯逻辑 ──────────────────────
+        // 缺陷形态：本地游标丢失后从 nil 重放全部历史并重传。生产实测 43 批/19.25 万条只新增
+        // 8,117 条（≈95.8% 重复）。判据：服务端说"已覆盖到 knownUntil"时，历史段查询起点
+        // 抬到 `knownUntil − 24h`；不知道/太空/太旧/老服务端一律回落全量重放。
+        check(legacyCursor.historyCoverageFloor == nil,
+              "a legacy payload decodes with no coverage floor (next replay stays full history)")
+        let floored = HealthKitRecordCursor(
+            anchor: Data([7]), historyReadAt: now,
+            historyReplayPhase: .history,
+            historyCoverageFloor: now.addingTimeInterval(-3 * 24 * 3600)
+        )
+        let flooredRound = try JSONDecoder().decode(
+            HealthKitRecordCursor.self, from: JSONEncoder().encode(floored)
+        )
+        check(flooredRound == floored,
+              "the coverage floor survives pending-batch serialization (resume needs the same predicate)")
+        // 🔴 Lead 复核修正：覆盖下界"粘住"——历史段跑完（`historyReplayPhase == nil`）之后也
+        // 保留，该类型后续增量查询继续带同一个谓词。清空它会拿旧锚点去跑 predicate:nil，
+        // 而 HKQueryAnchor 与 predicate 的绑定关系 Apple 没有承诺可换。
+        let stickyFloor = now.addingTimeInterval(-3 * 24 * 3600)
+        let sticky = HealthKitRecordCursor(
+            anchor: Data([7]), historyReadAt: now,
+            historyReplayPhase: nil, historyCoverageFloor: stickyFloor
+        )
+        let stickyRound = try JSONDecoder().decode(
+            HealthKitRecordCursor.self, from: JSONEncoder().encode(sticky)
+        )
+        check(stickyRound == sticky && stickyRound.historyCoverageFloor == stickyFloor,
+              "a completed replay keeps its coverage floor (the predicate must stick for incremental queries)")
+
+        // parseTimestamp：服务端可能给带毫秒的 ISO8601，也可能给整秒。
+        check(SyncCoveragePolicy.parseTimestamp("2026-10-18T12:28:46Z") ==
+              Date(timeIntervalSince1970: 1_792_326_526),
+              "an ISO8601 timestamp without fractional seconds parses")
+        check(SyncCoveragePolicy.parseTimestamp("2026-10-18T12:28:46.000Z") != nil,
+              "an ISO8601 timestamp with fractional seconds parses")
+        check(SyncCoveragePolicy.parseTimestamp(nil) == nil
+              && SyncCoveragePolicy.parseTimestamp("") == nil
+              && SyncCoveragePolicy.parseTimestamp("not-a-time") == nil,
+              "missing/garbage coverage timestamps are 'unknown' (never a date)")
+        check(SyncCoveragePolicy.parseTimestamp("2026-10-18T12:28:46Z") ==
+              SyncCoveragePolicy.parseTimestamp("2026-10-18T12:28:46.000Z"),
+              "both ISO8601 shapes agree on the same instant")
+
+        // needsCoverageQuery：只有"确实要重放"的类型才值得一次覆盖探测。
+        let incrementalCursor = HealthKitRecordCursor(anchor: Data([2]), historyReadAt: now)
+        check(SyncCoveragePolicy.needsCoverageQuery(
+                cursors: [:],
+                types: ["HKQuantityTypeIdentifierHeartRate"]),
+              "no cursor at all means 'needs a coverage query' (first install / repaired cursor)")
+        check(SyncCoveragePolicy.needsCoverageQuery(
+                cursors: ["HKQuantityTypeIdentifierHeartRate": replaying],
+                types: ["HKQuantityTypeIdentifierHeartRate"]),
+              "an interrupted history replay still asks for coverage")
+        check(!SyncCoveragePolicy.needsCoverageQuery(
+                cursors: ["HKQuantityTypeIdentifierHeartRate": incrementalCursor],
+                types: ["HKQuantityTypeIdentifierHeartRate"]),
+              "steady-state incremental sync does not spend a coverage request")
+        check(!SyncCoveragePolicy.needsCoverageQuery(cursors: [:], types: []),
+              "an empty type list needs no request")
+
+        // historyFloor：knownUntil − 24h，四种"不知道/不可用"一律 nil。
+        let coverageNow = Date(timeIntervalSince1970: 1_792_326_526)  // 2026-10-18T12:28:46Z
+        let freshCoverage: [String: SyncCoveragePolicy.TypeCoverage] = [
+            "hr": .init(type: "hr", knownUntil: coverageNow.addingTimeInterval(-3_600), sampleCount: 1_000),
+            "empty": .init(type: "empty", knownUntil: nil, sampleCount: 0),
+            "old": .init(type: "old", knownUntil: coverageNow.addingTimeInterval(-120 * 24 * 3600), sampleCount: 10),
+            "future": .init(type: "future", knownUntil: coverageNow.addingTimeInterval(3_600), sampleCount: 10),
+            "unparsed": .init(type: "unparsed", knownUntil: nil, sampleCount: 10)
+        ]
+        check(SyncCoveragePolicy.historyFloor(type: "hr", coverage: freshCoverage, now: coverageNow) ==
+              coverageNow.addingTimeInterval(-3_600 - 24 * 3600),
+              "a fresh coverage point yields knownUntil − 24h (the 24h overlap protects the edge)")
+        check(SyncCoveragePolicy.historyFloor(type: "missing", coverage: freshCoverage, now: coverageNow) == nil,
+              "a type the server did not report keeps the old full-history replay")
+        check(SyncCoveragePolicy.historyFloor(type: "empty", coverage: freshCoverage, now: coverageNow) == nil,
+              "sampleCount == 0 means 'the server has nothing' ⇒ never skip that history")
+        check(SyncCoveragePolicy.historyFloor(type: "old", coverage: freshCoverage, now: coverageNow) == nil,
+              "a coverage point older than 90 days is not worth skipping history for")
+        check(SyncCoveragePolicy.historyFloor(type: "unparsed", coverage: freshCoverage, now: coverageNow) == nil,
+              "an unparsable knownUntil falls back to full replay (fail open)")
+        let clamped = SyncCoveragePolicy.historyFloor(type: "future", coverage: freshCoverage, now: coverageNow)
+        check(clamped == coverageNow.addingTimeInterval(-24 * 3600),
+              "a coverage point slightly in the future is clamped to now before subtracting the overlap")
+        check(SyncCoveragePolicy.historyFloor(type: "hr", coverage: [:], now: coverageNow) == nil,
+              "an empty coverage table (old server / failed probe) is the full-replay fallback")
+
+        // shouldRestartHistory：只把"旧的、没有下界的续读"换成带下界的新重放。
+        check(SyncCoveragePolicy.shouldRestartHistory(cursor: replaying, floor: clamped),
+              "a legacy replay without a stored floor is restarted with the coverage floor")
+        check(!SyncCoveragePolicy.shouldRestartHistory(cursor: replaying, floor: nil),
+              "without a coverage floor there is nothing to restart for")
+        check(!SyncCoveragePolicy.shouldRestartHistory(cursor: incrementalCursor, floor: clamped),
+              "a steady incremental cursor is never restarted by coverage")
+        check(!SyncCoveragePolicy.shouldRestartHistory(
+                cursor: HealthKitRecordCursor(
+                    anchor: Data([8]), historyReadAt: now, historyReplayPhase: .history,
+                    historyCoverageFloor: now.addingTimeInterval(-3_600)),
+                floor: clamped),
+              "a replay that already carries a floor resumes (restarting would loop at the page head)")
+
+        // RecordReplayPlan × coverageRestart：旧续读重启 vs 带下界续读续段。
+        check(RecordReplayPlan.segments(
+                decodedAvailable: true, history: true, resumingHistoryPhase: true,
+                coverageRestart: true) == [.historyFromScratch],
+              "an interrupted legacy replay restarts history from nil once coverage is known")
+        check(RecordReplayPlan.segments(
+                decodedAvailable: true, history: true, resumingHistoryPhase: true,
+                coverageRestart: false) == [.historyResume],
+              "an interrupted replay that already has a floor resumes the same segment")
+        check(RecordReplayPlan.segments(
+                decodedAvailable: true, history: true, resumingHistoryPhase: false,
+                coverageRestart: true) == [.incremental, .historyFromScratch],
+              "a fresh replay still drains the old cursor first (deletions) before the floored history")
+        check(RecordReplayPlan.segments(
+                decodedAvailable: true, history: false, resumingHistoryPhase: false,
+                coverageRestart: true) == [.incremental],
+              "coverage never touches a steady incremental segment")
+
         print("HealthKit record cursor regression: \(checks) checks passed")
     }
 }

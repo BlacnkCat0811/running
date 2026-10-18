@@ -9,9 +9,15 @@ struct TechWorkoutSeriesChart: View, Equatable {
     let series: MetricSeries
     let average: Double?
     let durationSeconds: Double
+    /// 空图占位。2026-10-18（事故复盘 P0-3）：`freshness.series[].state == not_seen_yet` 的
+    /// 指标是"样本还在 Apple Watch 里"，与"设备没有这项数据"必须用不同的话说 ——
+    /// 旧实现两种情形都渲染成「暂无…时序样本」，于是用户没法判断该等还是该放弃。
+    /// 文案由 `WorkoutFreshnessPresentation.emptySeriesPlaceholder` 给出（纯函数、有回归）。
+    var emptySeriesNote: String? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.metric == rhs.metric && lhs.average == rhs.average && lhs.durationSeconds == rhs.durationSeconds
+            && lhs.emptySeriesNote == rhs.emptySeriesNote
             && lhs.series.unit == rhs.series.unit && lhs.series.totalSamples == rhs.series.totalSamples
             && lhs.series.points.elementsEqual(rhs.series.points) {
                 $0.offsetSeconds == $1.offsetSeconds && $0.value == $1.value
@@ -20,7 +26,8 @@ struct TechWorkoutSeriesChart: View, Equatable {
 
     var body: some View {
         TechPreparedWorkoutSeriesChart(metric: metric, data: TechSeriesData(points: metric.chartSeries(from: series).points),
-                                       average: average, durationSeconds: durationSeconds)
+                                       average: average, durationSeconds: durationSeconds,
+                                       emptySeriesNote: emptySeriesNote)
     }
 }
 
@@ -29,6 +36,7 @@ private struct TechPreparedWorkoutSeriesChart: View {
     let data: TechSeriesData
     let average: Double?
     let durationSeconds: Double
+    var emptySeriesNote: String? = nil
 
     private var accent: Color {
         switch metric {
@@ -54,9 +62,10 @@ private struct TechPreparedWorkoutSeriesChart: View {
                 .font(.caption.monospacedDigit()).foregroundStyle(TechColor.muted)
             }
             if data.points.isEmpty {
-                Text("暂无\(metric.title)时序样本")
+                Text(emptySeriesNote ?? "暂无\(metric.title)时序样本")
                     .font(.footnote).foregroundStyle(TechColor.muted)
                     .frame(maxWidth: .infinity, minHeight: 72)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 TechPreparedSeriesChart(data: data, unit: metric.unit, durationSeconds: durationSeconds,
                                         chartIdentifier: "workout.series.\(metric.rawValue)",

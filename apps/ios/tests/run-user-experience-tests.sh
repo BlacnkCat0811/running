@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-sources=(apps/ios/RAI/APIModels.swift apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/tests/UserExperienceRegression.swift)
+sources=(apps/ios/RAI/APIModels.swift apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/SyncPresentationPolicy.swift apps/ios/tests/UserExperienceRegression.swift)
 xcrun swiftc -parse-as-library -disable-sandbox "${sources[@]}" apps/ios/RAI/UserDataNoticePolicy.swift -o "$tmp/ux-tests"
 "$tmp/ux-tests"
 python3 - "$tmp" <<'PY'

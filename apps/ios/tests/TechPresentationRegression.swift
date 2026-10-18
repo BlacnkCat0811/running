@@ -596,6 +596,195 @@ struct TechPresentationRegression {
         check(techCoachCurrentWeek(elapsedWeeks: 0) == 1 && techCoachCurrentWeek(elapsedWeeks: 5) == 6, "Current coach elapsed weeks retain natural presentation")
         check(techCoachCurrentWeek(elapsedWeeks: -1) == nil && techCoachCurrentWeek(elapsedWeeks: Int.max) == nil, "Invalid elapsed weeks fail closed rather than overflow")
 
+        // ---------------------------------------------------------------------------
+        // 2026-10-18（同步诊断 P0-3 / P0-5 / P0-6 / P2-3）：补齐状态、自动重取与同步文案。
+        //
+        // 这些判据此前只以"内联字符串"的形式住在视图里，而视图不被任何回归编译
+        // （`TechViews.swift` 依赖 SwiftUI/Charts）—— 改错了只有肉眼能发现。事故里最贵的
+        // 两条恰都是"看着对、其实在说假话"：`not_seen_yet` 被渲染成「暂无样本」，
+        // 75 批待读时界面说「同步完成」。
+        // ---------------------------------------------------------------------------
+        func freshness(completeness: String, analysisStatus: String,
+                       series: [(metric: String, samples: Int, state: String)]) -> WorkoutFreshnessResponse {
+            WorkoutFreshnessResponse(
+                workoutId: "session",
+                facts: WorkoutFreshnessFacts(
+                    committedAt: "2026-10-18T12:29:38Z",
+                    lastBatchAt: "2026-10-18T12:31:43Z",
+                    batches: 6
+                ),
+                analysis: WorkoutFreshnessAnalysis(status: analysisStatus, jobId: "job", publishedAt: nil),
+                series: series.map {
+                    WorkoutFreshnessMetric(metric: $0.metric, samples: $0.samples, state: $0.state)
+                },
+                completeness: completeness
+            )
+        }
+        let partialFreshness = freshness(completeness: "partial", analysisStatus: "published", series: [
+            ("heartRate", 505, "present"),
+            ("strideLength", 482, "present"),
+            ("speed", 0, "not_seen_yet"),
+            ("power", 0, "not_seen_yet"),
+            ("cadence", 0, "not_seen_yet"),
+            ("verticalOscillation", 0, "unsupported")
+        ])
+        let partialBanner = WorkoutFreshnessPresentation.banner(freshness: partialFreshness, publishStatus: nil)
+        check(partialBanner?.kind == .waitingForSamples, "A partial freshness must read as waiting for samples")
+        check(partialBanner?.pollsInForeground == true, "A partial freshness must allow the bounded foreground poll")
+        check(partialBanner?.detail.contains("Apple Watch 数据仍在传输：配速、步频、跑步功率 待到达") == true,
+              "The banner must name the metrics that have not arrived, in a stable order")
+        check(partialBanner?.detail.contains("垂直振幅") == false,
+              "`unsupported` is not 'still transferring' — a device capability gap must never be promised")
+        // 分析未发布优先于"等样本"：此刻缺的是分析，不是样本。
+        let analyzingFreshness = freshness(completeness: "partial", analysisStatus: "running", series: [])
+        let analyzingBanner = WorkoutFreshnessPresentation.banner(freshness: analyzingFreshness, publishStatus: nil)
+        check(analyzingBanner?.kind == .analyzing && analyzingBanner?.title == "分析中",
+              "An unpublished analysis must read as 分析中")
+        check(analyzingBanner?.detail.contains("分析仍在进行") == true,
+              "The analyzing banner must say the analysis is still running")
+        // 失败是**第三种**状态：不能继续用「分析中」，也不能轮询（再算一次是服务端的事）。
+        let failedFreshness = freshness(completeness: "partial", analysisStatus: "failed", series: [])
+        let failedBanner = WorkoutFreshnessPresentation.banner(freshness: failedFreshness, publishStatus: nil)
+        check(failedBanner?.kind == .analysisFailed && failedBanner?.title == "分析未完成",
+              "A failed analysis must not be shown as 分析中")
+        check(failedBanner?.pollsInForeground == false,
+              "Polling cannot fix a failed analysis — the detail page must not spin on it")
+        // 完整 ⇒ 不占位；老服务端（无 freshness）只有 `publishStatus == pending` 才占位。
+        check(WorkoutFreshnessPresentation.banner(
+            freshness: freshness(completeness: "complete", analysisStatus: "published", series: []),
+            publishStatus: "published") == nil,
+            "A complete freshness must not add a banner")
+        check(WorkoutFreshnessPresentation.banner(freshness: nil, publishStatus: nil) == nil,
+              "Without any evidence the detail page must not invent a status")
+        check(WorkoutFreshnessPresentation.banner(freshness: nil, publishStatus: "pending")?.kind == .analyzing,
+              "A legacy server's pending publish status still reads as 分析中")
+        // 时序空态：`not_seen_yet` / `unsupported` / 真的没有 三句话必须不同。
+        check(WorkoutFreshnessPresentation.emptySeriesPlaceholder(
+            metricKey: "pace", title: "配速", freshness: partialFreshness).contains("尚未到达"),
+            "`not_seen_yet` must read as 'not arrived yet', not as 'none'")
+        check(WorkoutFreshnessPresentation.emptySeriesPlaceholder(
+            metricKey: "verticalOscillation", title: "垂直振幅", freshness: partialFreshness).contains("设备未提供"),
+            "`unsupported` must read as a device capability gap")
+        check(WorkoutFreshnessPresentation.emptySeriesPlaceholder(
+            metricKey: "pace", title: "配速", freshness: nil) == "暂无配速时序样本",
+            "Without freshness the placeholder keeps the documented wording")
+        // 指标 key 归一：服务端可能按 HealthKit 类型名写。
+        check(WorkoutFreshnessPresentation.canonicalMetricKey("RunningStrideLength") == "strideLength"
+              && WorkoutFreshnessPresentation.canonicalMetricKey("StepCount") == "cadence"
+              && WorkoutFreshnessPresentation.canonicalMetricKey("VO") == "verticalOscillation"
+              && WorkoutFreshnessPresentation.canonicalMetricKey("GCT") == "groundContactTime"
+              && WorkoutFreshnessPresentation.canonicalMetricKey("speed") == "pace",
+              "HealthKit type names and series names must normalise to one metric key")
+        // 自动重取判据（P0-6）：partial/pending 要重取；已完整的老训练不许每一代次都重读三条接口。
+        let reloadNow = ISO8601DateFormatter().date(from: "2026-10-18T13:00:00Z")!
+        check(WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: nil,
+            freshness: partialFreshness, series: decodeSeries(), now: reloadNow),
+            "A partial freshness must trigger the open-workout refetch")
+        check(!WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published",
+            freshness: freshness(completeness: "complete", analysisStatus: "published", series: []),
+            series: decodeSeries(), now: reloadNow),
+            "A complete, published, old workout must not be refetched on every sync generation")
+        check(WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-18T12:30:00Z", publishStatus: nil, freshness: nil,
+            series: decodeSeries(), now: reloadNow),
+            "A workout that ended minutes ago is always worth one refetch (delayed samples)")
+        check(!WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published", freshness: nil,
+            series: nil, now: reloadNow),
+            "An old workout on a legacy server must not be refetched")
+        check(WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published", freshness: nil,
+            series: decodeSeries(), now: reloadNow),
+            "A workout whose series has no samples at all is still stale")
+        // 详情页可见期间的有界前台轮询（P0-3）：次数、间隔与停止条件都必须是判据。
+        check(WorkoutFreshnessPollPolicy.maxAttempts == WorkoutFreshnessPollPolicy.delays.count,
+              "Each polling attempt must have its own delay")
+        check(WorkoutFreshnessPollPolicy.maxAttempts <= 6,
+              "The foreground poll must stay a short wave, not a background timer")
+        check(WorkoutFreshnessPollPolicy.delays == WorkoutFreshnessPollPolicy.delays.sorted(),
+              "The polling delays must be non-decreasing")
+        check(WorkoutFreshnessPollPolicy.delays.last! <= 60,
+              "The last polling delay must stay within a bounded wave")
+        check(WorkoutFreshnessPollPolicy.delaySeconds(afterAttempt: 0) == WorkoutFreshnessPollPolicy.delays[0],
+              "Attempt indices are clamped instead of trapping")
+        check(WorkoutFreshnessPollPolicy.delaySeconds(afterAttempt: 99) == WorkoutFreshnessPollPolicy.delays.last,
+              "An out-of-range attempt keeps the last delay")
+        check(WorkoutFreshnessPollPolicy.shouldContinue(
+            attempts: 0, isPartial: true, openWorkoutID: "session", expectedID: "session"),
+            "The first poll must run while the detail page is open")
+        check(!WorkoutFreshnessPollPolicy.shouldContinue(
+            attempts: WorkoutFreshnessPollPolicy.maxAttempts, isPartial: true,
+            openWorkoutID: "session", expectedID: "session"),
+            "The foreground poll must be bounded")
+        check(!WorkoutFreshnessPollPolicy.shouldContinue(
+            attempts: 0, isPartial: false, openWorkoutID: "session", expectedID: "session"),
+            "A complete freshness must stop the poll")
+        check(!WorkoutFreshnessPollPolicy.shouldContinue(
+            attempts: 0, isPartial: true, openWorkoutID: "other", expectedID: "session"),
+            "The poll must stop when the user switched to another workout")
+        // P0-5 / P0-6 文案：还有没读完的页时**不许**说完成。
+        let pendingResult = SyncResultCopy.manualResult(
+            hasPendingContinuation: true, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true, counts: nil)
+        check(pendingResult == SyncContinuationCopy.manualResult && pendingResult.contains("还有未读完的页"),
+              "A pending continuation must be reported as unfinished")
+        check(pendingResult != "健康数据检查完成。",
+              "Seventy-five pending batches must never be reported as 'checks complete'")
+        check(SyncResultCopy.manualResult(
+            hasPendingContinuation: true, hasPendingTask: false, isCancelled: true,
+            hasError: true, succeeded: false, counts: nil).contains("还有未读完的页"),
+            "The pending continuation outranks cancellation and failure in the result line")
+        check(SyncResultCopy.manualResult(
+            hasPendingContinuation: false, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true, counts: nil) == "健康数据检查完成。",
+            "A plain successful sync keeps the documented result line")
+        let unchangedOnly = SyncResultCopy.manualResult(
+            hasPendingContinuation: false, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true,
+            counts: SyncResultCopy.BatchCounts(parsed: 4500, inserted: 0, unchanged: 4500))
+        check(unchangedOnly.contains("均为已有记录，没有新增"),
+              "A zero-insert batch must explain itself instead of reading as a broken sync")
+        let mixed = SyncResultCopy.manualResult(
+            hasPendingContinuation: false, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true,
+            counts: SyncResultCopy.BatchCounts(parsed: 4500, inserted: 12, unchanged: 4488))
+        check(mixed.contains("新增 12 条") && mixed.contains("4488"), "The result line carries the receipt counts")
+        check(SyncResultCopy.manualResult(
+            hasPendingContinuation: false, hasPendingTask: true, isCancelled: false,
+            hasError: false, succeeded: true, counts: nil) == "更新尚未完成，可在设置查看状态。",
+            "A pending task keeps the unfinished wording")
+        check(SyncResultCopy.countsNote(SyncResultCopy.BatchCounts()) == nil,
+              "Missing receipt counts must not be fabricated as zero")
+        check(SyncResultCopy.countsNote(SyncResultCopy.BatchCounts(parsed: 4500))?.contains("未返回新增计数") == true,
+              "A parsed-only receipt must say the insert count is unknown")
+        // P2-3：同步详情页的「本批」一行与预算停因解释。
+        check(SyncExportSummaryCopy.batchLine(recordCount: 4500, workoutCount: 1, routeCount: 1)
+              == "本批记录 4500 条 · 训练 1 条 · 路线 1 个",
+              "The batch line names every exported dimension")
+        let fullBatchNote = SyncExportSummaryCopy.budgetNote(budgetStopReason: "recordNone", hasMorePages: true)
+        check(fullBatchNote?.contains("已满") == true && fullBatchNote?.contains("下一批继续") == true,
+              "A full batch must read as 'batch full', not as 'this type made no progress'")
+        check(SyncExportSummaryCopy.budgetNote(budgetStopReason: nil, hasMorePages: false) == nil,
+              "No budget stop and no remaining pages means no note")
+        check(SyncExportSummaryCopy.budgetNote(budgetStopReason: nil, hasMorePages: true) != nil,
+              "Remaining pages without a stop reason still need a note")
+        check(SyncExportSummaryCopy.continuationNote(hasPendingContinuation: true) != nil
+              && SyncExportSummaryCopy.continuationNote(hasPendingContinuation: false) == nil,
+              "The continuation note exists exactly when there are unread pages")
+        // 满载批的旧尾注是反话（"该类型本轮零进展"）：展示层必须能在**还有下一页**时把它
+        // 改读成"本批已满"，而在没有下一页时保留原意（那种情形下"零进展"可能是真的）。
+        let misleadingTail = "健康数据已保存（单条记录放不进本批剩余预算，该类型本轮零进展）"
+        check(!SyncExportSummaryCopy.clarifiedMessage(misleadingTail, hasMorePages: true).contains("该类型本轮零进展"),
+              "A full batch's misleading tail must not be shown as 'this type made no progress'")
+        check(SyncExportSummaryCopy.clarifiedMessage(misleadingTail, hasMorePages: true).contains("本批记录条数已满"),
+              "A full batch's tail is rewritten as 'batch full'")
+        check(SyncExportSummaryCopy.clarifiedMessage(misleadingTail, hasMorePages: false) == misleadingTail,
+              "Without a remaining page the original wording is preserved")
+        check(SyncExportSummaryCopy.clarifiedMessage("健康数据已保存", hasMorePages: true) == "健康数据已保存",
+              "A message without the misleading clause is passed through untouched")
+
         print("Technology presentation: \(checks) checks passed")
         print(String(format: "50,000 points preparation: %.2f ms/run (host microbenchmark without -O, not device FPS)",
                      Date().timeIntervalSince(start) * 100))

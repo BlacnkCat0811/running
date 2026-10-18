@@ -215,6 +215,11 @@ export interface HandshakeResponse {
     maxRouteFiles: number;
     maxRouteBytes: number;
   };
+  /**
+   * 服务端覆盖探测能力（P1-1）：1 = 支持 `GET /v1/sync/coverage`。
+   * 老服务端省略；客户端据此决定是否跳过已覆盖类型的历史重放。
+   */
+  syncCoverageVersion?: number;
 }
 
 export interface MobilePlanOperationScope {
@@ -357,7 +362,23 @@ export interface WorkoutListItem {
   confidence: number | null;
   trueAbilityDelta: number | null;
   hasRoute: boolean;
+  /**
+   * 可见性状态（P0-1，2026-10-18 同步诊断）：
+   * 事实已提交但分析尚未发布时，列表/详情仍可读（派生字段为 null/占位），
+   * 用本字段诚实标出 `pending`。老服务端省略 ⇒ undefined，消费方按已发布处理。
+   */
+  analysisPublishStatus?: AnalysisPublishStatus;
 }
+
+/**
+ * 读侧可见性状态（P0-1）。
+ *
+ * - `pending`：事实（workout/session/records）已提交，派生分析尚未发布；
+ *   派生字段必须为 null/占位，**不得**把 pending 当失败或不存在。
+ * - `published`：分析已发布，派生字段可用。
+ * - `failed`：分析任务失败；事实仍可读。
+ */
+export type AnalysisPublishStatus = "pending" | "published" | "failed";
 
 export interface DashboardResponse {
   generatedAt: string;
@@ -412,6 +433,70 @@ export interface WorkoutListResponse {
    */
   currentFacts?: FactsView | null;
   publishedAnalysis?: AnalysisView | null;
+}
+
+/**
+ * `GET /v1/workouts/:id/freshness`（P0-3，2026-10-18 同步诊断）。
+ *
+ * 只回答"这次训练的事实到齐了多少、分析到哪一步"，不读派生评分。
+ * 每指标 `state` 必须区分「已见到」与「还没见到」——后者不等于设备不支持。
+ */
+export interface WorkoutFreshnessMetric {
+  /** 逻辑指标名（heartRate/speed/power/cadence/strideLength/verticalOscillation/groundContactTime/elevation）。 */
+  metric: string;
+  /** 本次训练窗口内的样本数（elevation 为路线点数）。 */
+  samples: number;
+  /** `not_seen_yet` = 目前没有样本，可能是手表还没送达；不是"设备没有该能力"。 */
+  state: "present" | "not_seen_yet";
+  /** P2-2：该指标最近一次被服务端接收的时刻（`health_records.available_at`）；旧库/旧行为 null。 */
+  lastAvailableAt?: string | null;
+}
+
+export interface WorkoutFreshnessFacts {
+  /** workout 实体第一次被提交的批次完成时刻；null = 尚未找到（异常/旧库）。 */
+  committedAt: string | null;
+  /** 最近一次把本训练窗口事实写入服务端的批次完成时刻。 */
+  lastBatchAt: string | null;
+  /** 触及本训练的批次数（workout + 窗口内记录）。 */
+  batches: number;
+}
+
+export interface WorkoutFreshnessAnalysis {
+  status: AnalysisPublishStatus;
+  /** 触发本训练分析的 recompute job id；无则 null。 */
+  jobId: string | null;
+  /** 分析发布（active model run 激活）时刻；未发布为 null。 */
+  publishedAt: string | null;
+}
+
+export interface WorkoutFreshnessResponse {
+  workoutId: string;
+  facts: WorkoutFreshnessFacts;
+  analysis: WorkoutFreshnessAnalysis;
+  series: WorkoutFreshnessMetric[];
+  /**
+   * `complete` = 分析已发布且最近 24h 没有新事实到达（数据已稳定）；
+   * `partial` = 仍可能继续补齐（手表迟到样本/分析中）。
+   * 这是**传输/分析**的完整性，不是"设备是否具备某项传感器能力"。
+   */
+  completeness: "partial" | "complete";
+}
+
+/**
+ * `GET /v1/sync/coverage`（P1-1）：服务端每个记录类型已知覆盖区间。
+ *
+ * 只用于**避免重传服务端已有历史**；客户端不得据此删除本地游标或跳过真正的待办。
+ */
+export interface SyncCoverageType {
+  type: string;
+  knownFrom: string | null;
+  knownUntil: string | null;
+  sampleCount: number;
+}
+
+export interface SyncCoverageResponse {
+  datasetEpoch: string;
+  types: SyncCoverageType[];
 }
 
 export interface RoutePointDto {

@@ -597,6 +597,299 @@ struct RouteSyncStatePersistenceRegression {
         check(store.loadPendingRoutes(scope: settleScope)[observedUUID] != nil,
               "B01: the retry lead survives an evidence-free settlement")
 
+        // ── P1-3（2026-10-18 同步诊断）：已交付轨迹摘要的落盘 ─────────────────────────
+        // 判据：`deliveredHash` 只描述"服务端已确认收到哪一版内容"，必须能跨进程读回；
+        // NULL（老行/从未交付）与"摘要为空串"不是一回事 —— 前者 ⇒ 下一轮照旧重发。
+        let deliveredUUID = "deliver-0000-0000-0000-0000000000d1"
+        var delivered = record(deliveredUUID, .active, checked: t0)
+        check(delivered.deliveredHash == nil, "a fresh route record has no delivered hash (old payload shape)")
+        check(store.upsertRouteStates([delivered], scope: scopeA),
+              "a route state without a delivered hash persists (additive column, NULL is legal)")
+        check(store.loadRouteStates(scope: scopeA, uuids: [deliveredUUID])[deliveredUUID]?.deliveredHash == nil,
+              "NULL delivered hash reads back as nil, never as an empty string")
+        delivered.deliveredHash = "sha256-delivered-1"
+        check(store.upsertRouteStates([delivered], scope: scopeA),
+              "a delivered hash persists with the observation")
+        let independentlyReopened = SyncTaskStore(directory: root)
+        check(independentlyReopened.loadRouteStates(scope: scopeA, uuids: [deliveredUUID])[deliveredUUID] == delivered,
+              "the delivered hash survives a different connection (P1-3 needs it across syncs)")
+        check(independentlyReopened.loadRouteStates(scope: scopeB, uuids: [deliveredUUID])[deliveredUUID] == nil,
+              "the delivered hash is scope-isolated like every other route field")
+        // 失败整批回滚：摘要与观测在同一事务里，不会出现"内容变了、摘要没变"的半份状态。
+        let originalDeliveredUUID = deliveredUUID
+        var redelivery = delivered
+        redelivery.deliveredHash = "sha256-delivered-2"
+        redelivery.pointCount += 1
+        precondition(sqlite3_exec(control, """
+            CREATE TRIGGER reject_delivered_hash_update BEFORE UPDATE ON sync_route_state
+            BEGIN SELECT RAISE(ABORT, 'injected delivered-hash failure'); END;
+            """, nil, nil, nil) == SQLITE_OK)
+        check(!store.upsertRouteStates([redelivery], scope: scopeA),
+              "an injected failure rolls back the delivered hash together with the observation")
+        check(store.loadRouteStates(scope: scopeA, uuids: [originalDeliveredUUID])[originalDeliveredUUID] == delivered,
+              "a failed write never leaves a newer delivered hash behind (that would suppress a real resend)")
+        sqlite3_exec(control, "DROP TRIGGER reject_delivered_hash_update", nil, nil, nil)
+
+        // ── P0-4（2026-10-18 同步诊断）：workout 定向补齐窗口的纯逻辑 ─────────────────
+        // 判据三件事：登记只覆盖"最近 7 天结束"的训练；重试序列 15m/1h/6h/24h/72h；
+        // "连续两次样本数一致"或 7 天到期才收口。写错任何一条的后果都是"要么每批白读
+        // 一次 HealthKit，要么迟到样本重新永久缺失"。
+        let windowNow = Date(timeIntervalSince1970: 1_800_000_000)
+        check(WorkoutBackfillScheduler.windowPadding == 300,
+              "the workout window pads 5 minutes on both sides (recovery HR / late PE live there)")
+        check(WorkoutBackfillScheduler.registrationLookback == 7 * 24 * 3600,
+              "only workouts that ended within the last 7 days get a window")
+        let expectedLadder: [TimeInterval] = [
+            15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60, 72 * 60 * 60
+        ]
+        let schedulerLadder: [TimeInterval] = WorkoutBackfillScheduler.retryIntervals
+        check(schedulerLadder == expectedLadder,
+              "the retry ladder is exactly 15m / 1h / 6h / 24h / 72h")
+        check(WorkoutBackfillScheduler.retryInterval(attempts: 1) == 15 * 60,
+              "after the first completed pass the next check is in 15 minutes")
+        check(WorkoutBackfillScheduler.retryInterval(attempts: 5) == 72 * 3_600,
+              "the fifth pass waits 72 hours")
+        check(WorkoutBackfillScheduler.retryInterval(attempts: 99) == 72 * 3_600,
+              "the ladder caps at 72 hours (bounded; no unbounded backoff growth)")
+
+        let endedRecently = windowNow.addingTimeInterval(-3_600)
+        check(WorkoutBackfillScheduler.shouldRegister(endDate: endedRecently, now: windowNow),
+              "a just-finished workout is inside the registration lookback")
+        check(!WorkoutBackfillScheduler.shouldRegister(
+                endDate: windowNow.addingTimeInterval(-9 * 24 * 3600), now: windowNow),
+              "a 9-day-old workout is not registered again (history replay covers it)")
+        check(!WorkoutBackfillScheduler.shouldRegister(
+                endDate: windowNow.addingTimeInterval(6 * 3600), now: windowNow),
+              "a workout that ends too far in the future is not registered")
+
+        let registered = WorkoutBackfillScheduler.register(
+            workoutUUID: "window-workout",
+            startDate: endedRecently.addingTimeInterval(-2_700),
+            endDate: endedRecently,
+            existing: nil,
+            now: windowNow
+        )
+        check(registered != nil, "a recent workout registers a window")
+        if let registered {
+            check(registered.windowStart == endedRecently.addingTimeInterval(-2_700 - 300)
+                  && registered.windowEnd == endedRecently.addingTimeInterval(300),
+                  "the window is [start − 5min, end + 5min]")
+            check(registered.attemptCount == 0 && registered.stableCount == 0
+                  && registered.completedAt == nil && registered.nextCheckAt == windowNow,
+                  "a fresh window is due immediately with no observations booked yet")
+            check(WorkoutBackfillScheduler.due([registered], now: windowNow).count == 1,
+                  "a fresh window is due")
+            // 第一次整窗查询：查到 40 条 ⇒ 记账（不完成）。
+            let firstPass = WorkoutBackfillScheduler.afterPass(
+                registered, observedSamples: 40, now: windowNow)
+            check(firstPass.attemptCount == 1 && firstPass.lastSampleCount == 40
+                  && firstPass.stableCount == 0 && firstPass.completedAt == nil,
+                  "the first completed pass only records the baseline (one observation is not 'stable')")
+            check(firstPass.nextCheckAt == windowNow.addingTimeInterval(15 * 60),
+                  "the next check follows the ladder (15 minutes after the first pass)")
+            check(WorkoutBackfillScheduler.due([firstPass], now: windowNow.addingTimeInterval(14 * 60)).isEmpty,
+                  "a window is not re-read before its nextCheckAt (the ladder bounds the queries)")
+            check(WorkoutBackfillScheduler.due([firstPass], now: windowNow.addingTimeInterval(15 * 60)).count == 1,
+                  "the window becomes due exactly at nextCheckAt")
+            // 第二次查询样本数变化 ⇒ 稳定计数清零（不能提前收口）。
+            let changedPass = WorkoutBackfillScheduler.afterPass(
+                firstPass, observedSamples: 41, now: windowNow.addingTimeInterval(15 * 60))
+            check(changedPass.stableCount == 0 && changedPass.lastSampleCount == 41
+                  && changedPass.completedAt == nil,
+                  "a changed sample count resets stability (still receiving samples)")
+            check(changedPass.attemptCount == 2
+                  && changedPass.nextCheckAt == windowNow.addingTimeInterval(15 * 60 + 3_600),
+                  "the second pass schedules the next check 1 hour later")
+            // 第三次样本数与上次相同 ⇒ 连续两次一致 ⇒ 收口。
+            let stablePass = WorkoutBackfillScheduler.afterPass(
+                changedPass, observedSamples: 41, now: windowNow.addingTimeInterval(15 * 60 + 3_600))
+            check(stablePass.stableCount == 1 && stablePass.isCompleted,
+                  "two consecutive equal counts complete the window (nothing new arrived)")
+            check(WorkoutBackfillScheduler.completionReason(stablePass) == "stable",
+                  "completion reason distinguishes 'stable' from 'expired'")
+            check(WorkoutBackfillScheduler.due([stablePass], now: windowNow.addingTimeInterval(10 * 24 * 3600)).isEmpty,
+                  "a completed window is never queried again")
+            // 🔴 Lead 复核修正：空窗（0 样本）**不得**靠"连续两次相同"收口 ——
+            // Apple Watch 迟到样本实测 36–72h 才到，15m/1h 两次空查就关闭会把
+            // "样本还没到手机"读成"这条训练没有这些类型"（与 10-14 空窗不推进水位同源）。
+            let emptyFirst = WorkoutBackfillScheduler.afterPass(
+                registered, observedSamples: 0, now: windowNow)
+            check(emptyFirst.isCompleted == false && emptyFirst.stableCount == 0,
+                  "the first empty pass does not complete the window (empty is not 'stable')")
+            let emptySecond = WorkoutBackfillScheduler.afterPass(
+                emptyFirst, observedSamples: 0, now: windowNow.addingTimeInterval(15 * 60))
+            check(emptySecond.isCompleted == false && emptySecond.stableCount == 0
+                  && emptySecond.lastSampleCount == 0,
+                  "two empty passes still do NOT complete the window (the samples may still be on the watch)")
+            // 样本数从 0 变正 ⇒ 更新计数、清零稳定；下一次相同（正数）才收口。
+            // ⚠️ 这一段必须在**走完整条重试阶梯之前**做：阶梯累计 >7 天，之后的观测会先被
+            // 7 天上限收口，掩盖"0→正数"的记账语义。
+            let becamePositive = WorkoutBackfillScheduler.afterPass(
+                emptySecond, observedSamples: 7,
+                now: windowNow.addingTimeInterval(15 * 60 + 60 * 60))
+            check(becamePositive.isCompleted == false
+                  && becamePositive.lastSampleCount == 7
+                  && becamePositive.stableCount == 0,
+                  "a 0→positive transition records the samples and resets stability")
+            let positiveStable = WorkoutBackfillScheduler.afterPass(
+                becamePositive, observedSamples: 7,
+                now: windowNow.addingTimeInterval(15 * 60 + 60 * 60 + 60))
+            check(positiveStable.isCompleted && positiveStable.stableCount == 1,
+                  "after real samples arrive, two consecutive equal counts complete the window")
+            // 空窗继续走重试阶梯：15m / 1h / 6h / 24h / 72h，每一次都不得收口。
+            var emptyLadder = emptySecond
+            var emptyWaits: [TimeInterval] = []
+            var emptyNow = windowNow.addingTimeInterval(15 * 60)
+            for step in 0..<5 {
+                let expected = WorkoutBackfillScheduler.retryInterval(attempts: step + 2)
+                emptyWaits.append(emptyLadder.nextCheckAt.timeIntervalSince(emptyNow))
+                check(emptyLadder.isCompleted == false,
+                      "empty window step \(step) must not complete before the 7-day cap")
+                check(emptyLadder.nextCheckAt.timeIntervalSince(emptyNow) == expected,
+                      "empty window step \(step) follows the retry ladder")
+                emptyNow = emptyLadder.nextCheckAt
+                emptyLadder = WorkoutBackfillScheduler.afterPass(
+                    emptyLadder, observedSamples: 0, now: emptyNow)
+            }
+            let expectedEmptyWaits: [TimeInterval] = [
+                60 * 60, 6 * 60 * 60, 24 * 60 * 60, 72 * 60 * 60, 72 * 60 * 60
+            ]
+            let actualEmptyWaits: [TimeInterval] = emptyWaits
+            check(actualEmptyWaits == expectedEmptyWaits,
+                  "the empty-window ladder is 1h / 6h / 24h / 72h / 72h after the first 15m check")
+            // 空窗在 7 天上限到达时**强制**收口。
+            let emptyExpired = WorkoutBackfillScheduler.afterPass(
+                emptyLadder, observedSamples: 0,
+                now: registered.createdAt.addingTimeInterval(WorkoutBackfillScheduler.completionWindow))
+            check(emptyExpired.isCompleted
+                  && WorkoutBackfillScheduler.completionReason(emptyExpired) == "expired",
+                  "the 7-day cap force-completes an empty window (bounded retries, not forever)")
+
+            // 7 天到期：即便样本数一直在变，也必须收口（否则永远补下去）。
+            var expiring = registered
+            expiring.lastSampleCount = 40
+            expiring.attemptCount = 1
+            let expiredPass = WorkoutBackfillScheduler.afterPass(
+                expiring, observedSamples: 99,
+                now: registered.createdAt.addingTimeInterval(WorkoutBackfillScheduler.completionWindow))
+            check(expiredPass.isCompleted
+                  && WorkoutBackfillScheduler.completionReason(expiredPass) == "expired",
+                  "the 7-day cap completes the window even when the count keeps changing")
+        }
+
+        // 窗口刷新：变宽才重开（同一 UUID 反复出现元数据变更不能无限重排）。
+        let registeredBase = WorkoutBackfillScheduler.register(
+            workoutUUID: "window-refresh", startDate: windowNow.addingTimeInterval(-3_600),
+            endDate: windowNow.addingTimeInterval(-60), existing: nil, now: windowNow)
+        check(registeredBase != nil, "registration fixture exists")
+        if let base = registeredBase {
+            let sameWidth = WorkoutBackfillScheduler.register(
+                workoutUUID: "window-refresh", startDate: windowNow.addingTimeInterval(-3_600),
+                endDate: windowNow.addingTimeInterval(-60), existing: base, now: windowNow.addingTimeInterval(600))
+            check(sameWidth == base,
+                  "an unchanged window is returned untouched (no schedule refresh, no reopen)")
+            var completedBase = base
+            completedBase.completedAt = windowNow
+            let widenedCompleted = WorkoutBackfillScheduler.register(
+                workoutUUID: "window-refresh", startDate: windowNow.addingTimeInterval(-3_600),
+                endDate: windowNow.addingTimeInterval(-60) + 600, existing: completedBase,
+                now: windowNow.addingTimeInterval(3_600))
+            check(widenedCompleted != nil && widenedCompleted?.isCompleted == false,
+                  "a wider window reopens a completed one (late statistics changed the workout)")
+            check(widenedCompleted?.createdAt == base.createdAt,
+                  "reopening preserves createdAt so the 7-day cap is not refreshed")
+        }
+        // 有界与公平：单批最多 passBatchLimit 条，按 nextCheckAt 最早优先。
+        let manyDue = (0..<7).map { index in
+            WorkoutBackfillWindow(
+                workoutUUID: String(format: "due-%02d", index),
+                windowStart: windowNow.addingTimeInterval(-3_600),
+                windowEnd: windowNow,
+                createdAt: windowNow,
+                nextCheckAt: windowNow.addingTimeInterval(TimeInterval(index)),
+                attemptCount: 0, lastSampleCount: 0, stableCount: 0, completedAt: nil
+            )
+        }
+        let dueBatch = WorkoutBackfillScheduler.due(manyDue, now: windowNow.addingTimeInterval(100))
+        check(dueBatch.count == WorkoutBackfillScheduler.passBatchLimit,
+              "one batch is bounded by passBatchLimit windows (no unbounded HealthKit reads)")
+        check(dueBatch.map(\.workoutUUID) == ["due-00", "due-01", "due-02", "due-03"],
+              "due windows are taken in nextCheckAt order (fairness: oldest due first)")
+
+        // ── P0-4：窗口在真库上的落盘（登记 / 结算 / 重启后仍在） ────────────────────
+        let windowScope = "window-scope"
+        check(store.loadWorkoutBackfillWindows(scope: windowScope).isEmpty,
+              "a fresh scope has no workout backfill windows")
+        if let registered {
+            check(store.upsertWorkoutBackfillWindows([registered], scope: windowScope),
+                  "a workout window registers in the sync journal")
+            check(store.loadWorkoutBackfillWindows(scope: windowScope)[registered.workoutUUID] == registered,
+                  "the registered window reads back field for field (times canonicalized)")
+            let afterFirstPass = WorkoutBackfillScheduler.afterPass(
+                registered, observedSamples: 40, now: windowNow.addingTimeInterval(60))
+            check(store.upsertWorkoutBackfillWindows([afterFirstPass], scope: windowScope),
+                  "the settled window (attempt/nextCheck) persists after commit")
+            check(store.loadWorkoutBackfillWindows(scope: windowScope)[registered.workoutUUID] == afterFirstPass,
+                  "the settlement survives in the journal")
+            check(SyncTaskStore(directory: root)
+                .loadWorkoutBackfillWindows(scope: windowScope)[registered.workoutUUID] == afterFirstPass,
+                "the window survives a different connection (it must outlive the process)")
+            check(store.loadWorkoutBackfillWindows(scope: scopeA).isEmpty,
+                  "windows are scope-isolated like route memory")
+            // 失败整批回滚：本批的窗口记账不能半份落盘。
+            precondition(sqlite3_exec(control, """
+                CREATE TRIGGER reject_window_update BEFORE UPDATE ON sync_pending_workout_windows
+                BEGIN SELECT RAISE(ABORT, 'injected window failure'); END;
+                """, nil, nil, nil) == SQLITE_OK)
+            var corrupted = afterFirstPass
+            corrupted.windowEnd = afterFirstPass.windowEnd.addingTimeInterval(600)
+            check(!store.upsertWorkoutBackfillWindows([corrupted], scope: windowScope),
+                  "an injected window failure fails the batch")
+            check(store.loadWorkoutBackfillWindows(scope: windowScope)[registered.workoutUUID] == afterFirstPass,
+                  "a failed window batch leaves the previous schedule intact")
+            sqlite3_exec(control, "DROP TRIGGER reject_window_update", nil, nil, nil)
+        }
+
+        // ── 已安装 v2 库的 v2→v3 迁移：加列 + 建表，且不丢既有数据 ─────────────────
+        let v2Root = root.appendingPathComponent("v2-installed")
+        try FileManager.default.createDirectory(at: v2Root, withIntermediateDirectories: true)
+        var v2DB: OpaquePointer?
+        precondition(sqlite3_open(v2Root.appendingPathComponent("sync.sqlite").path, &v2DB) == SQLITE_OK)
+        precondition(sqlite3_exec(v2DB, """
+            PRAGMA user_version = 2;
+            CREATE TABLE sync_tasks (scope TEXT PRIMARY KEY, updated_at REAL NOT NULL, payload BLOB NOT NULL);
+            INSERT INTO sync_tasks VALUES ('v2-scope', 1700000000, X'0A0B');
+            CREATE TABLE sync_route_state (
+              scope TEXT NOT NULL, workout_uuid TEXT NOT NULL, workout_end_date REAL NOT NULL,
+              route_status TEXT NOT NULL, point_count INTEGER NOT NULL, route_hash TEXT,
+              last_checked_at REAL NOT NULL, stable_check_count INTEGER NOT NULL,
+              PRIMARY KEY (scope, workout_uuid));
+            INSERT INTO sync_route_state VALUES ('v2-scope', 'v2-workout', 1700000000, 'cooling', 321, 'v2-hash', 1700000000, 2);
+            """, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(v2DB)
+        let migratedV3 = SyncTaskStore(directory: v2Root)
+        check(migratedV3.isAvailable, "an installed v2 journal migrates to v3")
+        check(migratedV3.load(scope: "v2-scope") == Data([0x0A, 0x0B]),
+              "v2→v3 migration preserves pending task bytes")
+        let migratedRecord = migratedV3.loadRouteStates(scope: "v2-scope")["v2-workout"]
+        check(migratedRecord?.pointCount == 321 && migratedRecord?.routeHash == "v2-hash",
+              "v2→v3 migration preserves the installed route memory")
+        check(migratedRecord?.deliveredHash == nil,
+              "the added delivered_route_hash column reads as nil for pre-existing rows (safe: resend once)")
+        check(migratedV3.loadWorkoutBackfillWindows(scope: "v2-scope").isEmpty,
+              "the added workout-window table exists and starts empty")
+        check(migratedV3.upsertWorkoutBackfillWindows([registered ?? WorkoutBackfillWindow(
+                workoutUUID: "v3-workout", windowStart: windowNow, windowEnd: windowNow,
+                createdAt: windowNow, nextCheckAt: windowNow,
+                attemptCount: 0, lastSampleCount: 0, stableCount: 0, completedAt: nil
+              )], scope: "v2-scope"),
+              "the migrated journal accepts workout windows")
+        // 迁移是幂等的：再打开一次不重建、不丢数据。
+        let reopenedV3 = SyncTaskStore(directory: v2Root)
+        check(reopenedV3.isAvailable
+              && reopenedV3.loadRouteStates(scope: "v2-scope")["v2-workout"]?.pointCount == 321,
+              "reopening a migrated journal is a no-op (PRAGMA user_version pins it)")
+
         print("\(checks) route state persistence regression checks passed")
     }
 }

@@ -19,6 +19,7 @@ import {
 } from "@rai/health-export-parser";
 
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
+import { ImportPerformanceTracker } from "./import-performance.js";
 import { assertDirectSyncRequestShape } from "./direct-sync-plan.js";
 import { importPayloadSha256 } from "./import-payload-identity.js";
 import { digestHealthKitExportContent } from "./import-sources.js";
@@ -334,6 +335,17 @@ export type DirectSyncImportResult = {
   summary: NonNullable<ImportJobResponse["summary"]>;
   replayed: boolean;
   payloadClass: "record-only" | "analysis-required";
+  /**
+   * 本批接收的**子阶段耗时**（P2-3，2026-10-18 同步诊断）。
+   *
+   * 键是 `directSync.identity` / `directSync.parse` / `directSync.ledger` /
+   * `directSync.commit`：它们是**观测键**，不是 `ImportStage` 闭集里的成员
+   * （`stagesMs` 的枚举由公开 schema 钉住，不能为了一个诊断数字扩契约）。
+   * 主线程把它们原样写进 `performance.computeStagesMs`（该字段本来就是开放键），
+   * 于是"每批 5–8 s 花在哪"不必再靠读代码推断（`lane-api.md` §6 的 P2-1）。
+   * 拒收批次没有该键：被拒的批没有"提交"这一段，写 0 会把"没发生"说成"很快"。
+   */
+  stagesMs?: Record<string, number>;
 };
 
 interface PreparedPayload {
@@ -691,6 +703,19 @@ function countWorkoutChanges(db: DatabaseSync, batchId: string): Record<"inserte
  * 线程边界，原型链会被结构化克隆剥掉）。
  */
 export async function applyDirectSyncImport(input: DirectSyncImportInput): Promise<DirectSyncImportResult | DirectSyncRejection> {
+  // P2-3（2026-10-18 同步诊断）：本批的四段耗时交给 `ImportPerformanceTracker` 记账。
+  // 复用它的原因不是少写几行，而是**口径必须一致**：同名阶段累加、非正数/非有限值不落账、
+  // 不把"没发生"写成 0。四个键是观测键（见 `DirectSyncImportResult.stagesMs`），
+  // 不走 `ImportStage` 闭集；`record` 的参数类型在运行期没有意义，故用接口放宽一处，
+  // 而不是为一个诊断数字去扩公开 schema 的枚举。
+  const timing = new ImportPerformanceTracker();
+  const stageRecord = timing as unknown as { record(stage: string, milliseconds: number): void };
+  let stageStartedAt = performance.now();
+  const finishStage = (stage: string): void => {
+    stageRecord.record(stage, performance.now() - stageStartedAt);
+    stageStartedAt = performance.now();
+  };
+
   assertDirectSyncRequestShape(input);
   if (!existsSync(input.databasePath)) {
     return rejectDirect("database_not_found", "read", { detail: "主库文件不存在" });
@@ -718,6 +743,8 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
   } finally {
     probe.close();
   }
+  // 身份段到此结束：载荷预检/摘要复核 + 库身份三态 + 待应用迁移探测。
+  finishStage("directSync.identity");
 
   const store = await RaiDatabase.open(input.databasePath, { transactionOwner: "caller" });
   const db = store.database;
@@ -789,6 +816,12 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         { id: string; startAt: string | null } | undefined;
       if (row !== undefined && row.startAt !== null) routeOwnerBefore.set(row.id, row.startAt);
     }
+    // ── 解析段（P2-3）：事务开启/批次行/路线归属快照 + XML/GPX 解析 +
+    // 训练会话与恢复事实的局部 canonical。
+    // 这一段与"逐条身份解析"（parser 内部）不可再拆：拆它需要改 parser 的写路径，
+    // 而本工作包不改 parser（另一 lane 的所有权）。四段账本回答的是接收器层面
+    // "5–8 s 花在哪"，不是单条记录层面的剖析；"接收准备"并入解析段，
+    // 保证 identity 之后到 commit 之前的每一毫秒都落在某个键上（否则四段之和对不上车道耗时）。
     const parsed = await parseAppleHealthXml(payload.xmlPath, store, {
       fileSize: payload.xmlFileBytes,
       healthKitRecordIdentity: true,
@@ -837,6 +870,9 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       { mainCount: 0, napCount: 0, hrvCount: 0 }
     );
 
+    finishStage("directSync.parse");
+
+    // ── 账本段（P2-3）：账本装配 → 分类 → 代次推进 → 分析任务登记 + 脏证据落库。
     const facts = ledgerFacts(db, input.jobId, payload.manifest, routes.changedRouteIds?.length ?? routes.importedRouteCount);
     const classification = classifyDirectSyncPayload(facts);
     const analysisRequired = classification.payloadClass === "analysis-required";
@@ -912,6 +948,9 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       );
     }
 
+    finishStage("directSync.ledger");
+
+    // ── 提交段（P2-3）：批次终态 + 回执 + 四组提交前回读断言 + COMMIT。
     const changes = countWorkoutChanges(db, input.jobId);
     const summary: NonNullable<ImportJobResponse["summary"]> = {
       recomputeReasons: classification.reasons.length > 0
@@ -944,7 +983,24 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         receiptId: input.jobId,
         dependencyGeneration: String(generations.dependency),
         publishedReleaseId: null,
-        parentBatchId: null
+        parentBatchId: null,
+        // 2026-10-18（P0-3，同步诊断 §2.5 / P2-3）：回执只承诺到批次，而客户端把
+        // "批次 succeeded"读成"记录齐了"。这里补**本批记录计数**，让"这批什么也没带来"
+        // 成为回执自己能说的话（生产实测：6 批 27,000 条解析、有效新增 1,111 条）。
+        //
+        // 口径（逐条来自解析器返回值，不是二次估算）：
+        // - `parsed` = 本批 XML 里的 `<Record>` 条数（`recordCount`）；
+        // - `inserted` = 其中**新增**行数（`insertedRecordCount`；更正/恢复也算 inserted 口径）；
+        // - `unchanged` = `parsed - inserted`，即本批携带但库里内容已一致（或已被墓碑拦下）的条数。
+        //   ⚠️ **不是**"本批未变化的工作量"：逐条管线仍然跑过（见 lane-api.md §4.3），
+        //   本字段只描述结果，不描述成本。
+        // 显式删除（manifest `deletedRecords`）不在 `parsed` 里，故三者不互相包含；
+        // 老服务端省略本键 ⇒ 客户端按"未提供"处理，不得当 0。
+        records: {
+          parsed: Number(parsed.recordCount ?? 0),
+          inserted: Number(parsed.insertedRecordCount ?? 0),
+          unchanged: Math.max(0, Number(parsed.recordCount ?? 0) - Number(parsed.insertedRecordCount ?? 0))
+        }
       },
       // 🔴 回执里放**分析任务 id**（`null` = 本批不登记分析）。它不是"分析状态"的更新通道
       // —— 回执仍然是**写入时刻的凭证**，本字段写进去之后一辈子不变（§8.5：消费者不得改写它）。
@@ -1022,7 +1078,12 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       throw new Error("Direct sync receipt failed its pre-commit assertion");
     }
     store.commitCallerTransaction();
-    return { summary, replayed: false, payloadClass: classification.payloadClass };
+    finishStage("directSync.commit");
+    return {
+      summary, replayed: false, payloadClass: classification.payloadClass,
+      // 只在本批**真的提交**之后带回：拒收/重放没有完整四段，不能拿半份账本冒充。
+      stagesMs: { ...timing.snapshot().stagesMs } as Record<string, number>
+    };
   } catch (error) {
     store.rollbackCallerTransaction();
     if (error instanceof DirectSyncIngestRejected) return error.rejection;

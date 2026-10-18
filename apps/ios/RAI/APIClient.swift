@@ -362,6 +362,19 @@ struct RaiAPIClient {
         try await get(path: "/v1/workouts/\(escapedPath(id))/series", baseURL: baseURL, token: token)
     }
 
+    /// P0-3：事实/分析/时序补齐状态。详情页在 `partial` 时显示「仍在补齐」并自动重取。
+    func workoutFreshness(id: String, baseURL: URL, token: String) async throws -> WorkoutFreshnessResponse {
+        try await get(path: "/v1/workouts/\(escapedPath(id))/freshness", baseURL: baseURL, token: token)
+    }
+
+    /// P1-1：服务端已覆盖区间，用于跳过已入库历史的重放。服务端不支持时调用方必须回落全量重放。
+    func syncCoverage(types: [String], baseURL: URL, token: String) async throws -> SyncCoverageResponse {
+        let query: [URLQueryItem] = types.isEmpty
+            ? []
+            : [URLQueryItem(name: "types", value: types.joined(separator: ","))]
+        return try await get(path: "/v1/sync/coverage", query: query, baseURL: baseURL, token: token)
+    }
+
     /// D9 分享卡片：服务端已按隐私区裁剪轨迹，客户端只画 `polylines`。
     func shareCard(id: String, baseURL: URL, token: String) async throws -> ShareCardResponse {
         try await get(path: "/v1/workouts/\(escapedPath(id))/share-card", baseURL: baseURL, token: token)

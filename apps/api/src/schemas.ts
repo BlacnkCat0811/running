@@ -62,6 +62,22 @@ export const workoutListQuerySchema = {
   }
 } as const;
 
+/**
+ * `GET /v1/sync/coverage?types=a,b`（P1-1，2026-10-18 同步诊断）。
+ *
+ * `types` 是逗号分隔的 HealthKit 类型标识（`HKQuantityTypeIdentifier…` / `HKCategoryType…`）。
+ * 缺省 = 全部类型；空串 = 缺省。故意**不**在这里校验类型是否已知：未知类型返回空数组
+ * （客户端据此回落全量重放），把它变成 400 只会让一次拼写错误阻断整个同步。
+ */
+export const syncCoverageQuerySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    // 允许空串（`?types=`）：它等价于缺省 = 全部类型，不应因为一个空参数 400。
+    types: { type: "string", maxLength: 4096, pattern: "^[A-Za-z0-9_.,-]*$" }
+  }
+} as const;
+
 export const trendQuerySchema = {
   type: "object",
   additionalProperties: false,
@@ -736,6 +752,8 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "查询原发布操作：committed、notFound 或 expired": ["status", "operationId"],
     "训练详情": ["workout", "dimensions"],
     "训练内时间序列": ["trainingSessionId", "series"],
+    "训练事实与分析到齐程度（是否仍可能补齐）": ["workoutId", "facts", "analysis", "series", "completeness"],
+    "同步覆盖探测：每个记录类型在服务端已知的覆盖区间": ["datasetEpoch", "types"],
     "追加训练覆盖 revision 并重算": ["overrideId", "jobId"],
     "CA、TA、Decay 与 GV 趋势": ["startDate", "endDate", "daily", "workouts"],
     "恢复趋势：睡眠与 HRV 的每日时间线": ["generatedAt", "asOf", "timezone", "latestDataDate", "days"],
@@ -909,7 +927,14 @@ export const openapiDocument = {
     }) },
     "/v1/workouts/{id}": { get: operation(["Workouts"], "训练详情", { parameters: pathId }) },
     "/v1/workouts/{id}/series": { get: operation(["Workouts"], "训练内时间序列", { parameters: pathId }) },
+    "/v1/workouts/{id}/freshness": { get: operation(["Workouts"], "训练事实与分析到齐程度（是否仍可能补齐）", { parameters: pathId }) },
     "/v1/workouts/{id}/share-card": { get: operation(["Workouts"], "分享卡片（服务端已按隐私区裁剪轨迹）", { parameters: pathId }) },
+    "/v1/sync/coverage": { get: operation(["Jobs"], "同步覆盖探测：每个记录类型在服务端已知的覆盖区间", {
+      parameters: [{
+        name: "types", in: "query", required: false, schema: syncCoverageQuerySchema.properties.types,
+        description: "逗号分隔的 HealthKit 类型标识；缺省为全部类型"
+      }]
+    }) },
     "/v1/label-funnel": { get: operation(["Labels"], "标签漏斗、个人校准进度与拟合的个人自校准带（非人群区间）") },
     "/v1/performance-entries": {
       get: operation(["Labels"], "读取手工成绩条目（含已撤销，便于对账）"),

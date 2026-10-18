@@ -20,6 +20,7 @@ import type {
   OverrideWorkoutInput,
   PredictionModelRun,
   RecomputeJobCancellationResponse,
+  SyncCoverageResponse,
   TrainPredictionModelRequest,
   TrainingStatisticsGranularity,
   UpdateMobileGoalsInput,
@@ -96,6 +97,7 @@ import {
   privacyZonesBodySchema,
   recoveryTrendQuerySchema,
   restoreBodySchema,
+  syncCoverageQuerySchema,
   trainingLoadQuerySchema,
   trainingStatisticsHistoryQuerySchema,
   trainingZoneProfileBodySchema,
@@ -293,6 +295,8 @@ const tokenRequiredReadRoutes = new Set([
   "/v1/workouts",
   "/v1/workouts/:id",
   "/v1/workouts/:id/series",
+  // 事实/分析到齐程度（P0-3）：回答「这条训练齐了没有」，与详情同级的健康数据读取面。
+  "/v1/workouts/:id/freshness",
   "/v1/trends",
   "/v1/recovery-trends",
   "/v1/training-statistics/overview",
@@ -320,6 +324,8 @@ const tokenRequiredReadRoutes = new Set([
   "/v1/import-jobs/active",
   "/v1/import-jobs/latest",
   "/v1/import-jobs/:id",
+  // 同步覆盖探测（P1-1）：只读的原始事实覆盖区间，供客户端避免重传已知历史。
+  "/v1/sync/coverage",
   // Server internals: raw database, backup inventory, diagnostics, route table.
   "/v1/backups",
   "/v1/backups/:name",
@@ -989,6 +995,9 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   // 范式见 PR5 §1.2 锚点 20：可选版本字段宣告，客户端 `guard == 1` 之后才去读
   // `currentFacts`/`publishedAnalysis`，否则退回旧字段（旧字段语义没变，所以退回是安全的）。
   factsAnalysisViewContractVersion: 1,
+  // 2026-10-18（P1-1，同步诊断）：覆盖探测能力位。1 = 支持 `GET /v1/sync/coverage`。
+  // 老服务端省略该键 ⇒ 客户端必须回落"照常重放"，不能假设服务端已覆盖。
+  syncCoverageVersion: 1,
   // 观测阶段 1（S1.2）：直连单批上界随握手暴露，客户端（iOS 分批版）据此收敛拆批预算。
   // 数值**单一来源** = `direct-sync-ingest.ts` 的顶层常量 —— 不要在这里写数字字面量，
   // 两处各写一份数字，收口时必然有一处漂移。
@@ -999,6 +1008,18 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
     maxRouteBytes: DIRECT_SYNC_MAX_ROUTE_BYTES
   }
 }));
+/**
+ * 同步覆盖探测（P1-1，2026-10-18 同步诊断）。
+ *
+ * 回答"服务端每个记录类型已知覆盖到哪儿"，只用于让客户端**避免重传**已有历史。
+ * 不是"完整"证明：覆盖区间内可以有空洞，客户端不得据此清除本地游标或跳过真正的待办。
+ * `datasetEpoch` 复用 handshake 的权威值 —— 数据集更换后旧 epoch 的覆盖结论立即作废。
+ */
+app.get<{ Querystring: { types?: string } }>("/v1/sync/coverage",
+  { schema: { querystring: syncCoverageQuerySchema } }, async (request): Promise<SyncCoverageResponse> => {
+    const types = request.query.types?.split(",").map((type) => type.trim()).filter(Boolean);
+    return { datasetEpoch, types: withReadStore((store) => store.syncCoverage(types)) };
+  });
 app.get("/v1/openapi.json", async () => openapiDocument);
 app.get("/v1/performance", async () => ({
   ...telemetry.snapshot(), admission: taskAdmission.snapshot(),
@@ -1108,6 +1129,21 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id/series", { schema: { param
   if (!series) return reply.code(404).send({ message: "未找到该训练的时间序列" });
   return series;
 });
+
+/**
+ * 训练的**事实/分析到齐程度**（P0-3，2026-10-18 同步诊断）。
+ *
+ * 只读、无派生评分；与详情端点同级：事实在 ⇒ 200，事实不在（或已删）⇒ 404。
+ * 客户端据此在详情页显示「分析中 / 手表数据仍在传输」，而不是把"还没到"读成"设备没有"。
+ * 鉴权与参数 schema 与 `/v1/workouts/:id` 完全一致（同一个 `identifierParamsSchema`）。
+ */
+app.get<{ Params: { id: string } }>("/v1/workouts/:id/freshness",
+  { schema: { params: identifierParamsSchema } }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const freshness = withReadStore((store) => store.workoutFreshness(request.params.id));
+    if (!freshness) return reply.code(404).send({ message: "未找到该训练记录" });
+    return freshness;
+  });
 
 /**
  * Share card: numbers plus the **already trimmed** route (docs/DECISIONS.md D9).

@@ -55,7 +55,7 @@ records = body(export, "private static func writeGlobalRecords(", "private stati
 quantity = body(export, "private static func recordXML(", "private static func sampleMetadataXML(")
 commit = body(store, "func commitSuccess(", "func loadRecordCursors(")
 
-check("HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit)" in query,
+check("HKAnchoredObjectQuery(type: type, predicate: predicate, anchor: anchor, limit: limit)" in query,
       "the record query must carry a **shrinkable** limit (a fixed literal cannot shrink an oversized page)")
 check("private static let recordPageLimit = 1000" in export,
       "the full-page cap must stay a named constant (1000) - it is where the shrink path starts")
@@ -65,10 +65,31 @@ check("withTaskCancellationHandler" in query and "box.cancel()" in query,
       "the anchored record query lost its cancellation handling")
 # B1（2026-10-16）：锚点从 `records`（writeGlobalRecords 全体）收窄到 `query`
 # （anchoredRecords 本体）—— 窗口 pass 是**有意**引入的、独立于正式 anchor 的近期通道，
-# 它用时间谓词恰恰是它的定义；而"历史/增量 anchor 查询不得事件时间过滤"这条不变式
-# 依然逐字成立（:58 的 `predicate: nil` 与这里构成双保险）。
-check("predicateForSamples" not in query,
-      "historical changes cannot be event-date filtered (the anchored record query stays predicate-free)")
+# 它用时间谓词恰恰是它的定义。
+#
+# P1-1（2026-10-18）：普通增量查询仍是 `predicate: nil`；唯一允许的非 nil 谓词是
+# "历史段的覆盖下界"（`startDate` 参数，来自服务端 knownUntil−24h）。所以判据从
+# "谓词必须不存在"改成"谓词只能由 `startDate` 构造、且默认 nil"：
+check("let predicate: NSPredicate? = startDate.map" in query
+      and "HKQuery.predicateForSamples(withStart: $0, end: nil, options: .strictStartDate)" in query,
+      "the only predicate on the anchored record query must be the coverage floor derived from "
+      "startDate — any other event-time filter would permanently hide old-sample corrections/deletions")
+check("startDate: Date? = nil" in query,
+      "the coverage floor parameter must default to nil: ordinary incremental queries stay predicate-free")
+check("startDate: floor" in records
+      and "case .incremental: return previous?.historyCoverageFloor" in records
+      and "case .historyFromScratch: return previous?.historyCoverageFloor ?? coverageFloor" in records
+      and "case .historyResume: return previous?.historyCoverageFloor" in records,
+      "P1-1: the coverage floor must STICK — once a type has a persisted floor, the incremental "
+      "segment uses the same predicate too (an anchor built under a date predicate must never be "
+      "continued with predicate:nil; HKQueryAnchor/predicate binding is not documented as swappable)")
+check("historyCoverageFloor: interruptedPhase == .history\n"
+      "                        ? interruptedCoverageFloor : currentQueryFloor" in export,
+      "P1-1: after the history segment completes, the cursor must KEEP the floor used by its "
+      "final query — clearing it would switch the next incremental query to predicate:nil")
+check("? interruptedCoverageFloor : nil" not in export,
+      "P1-1 regression: the completed-history batch clears historyCoverageFloor again — that "
+      "reintroduces the undocumented predicate swap (the 2026-10-18 Lead review's risk #1)")
 check("HealthKitRecordCursor.drain" in records,
       "tested pagination must drive the production query")
 # 2026-10-17（边界收紧）：全量重导通道被**删除**（不是隐藏）。判据改成"通道不存在、
@@ -357,6 +378,88 @@ check("settlePendingRouteCommit()" in sync
       "non-atomic removal would drop the only discovery path for stateless uuids if the state "
       "flush fails or the payload is never accepted (R03). B01: the removal set is derived from "
       "the persisted candidate (observation + uuid), never from a bare uuid")
+
+# --- P0-4 / P1-1 / P1-3 / P1-4（2026-10-18 同步诊断）的接线判据 ----------------
+# 这一批的失效方向同样全是"改错了照样编译通过"：worker 队列没接到导出上、窗口 pass 排在
+# 历史重放之后、覆盖下界没持久化、已交付摘要没写回……每一条都只会表现为"同步变慢/数据
+# 迟迟不齐"，而单元回归跑不到 HealthKitExport / HealthKitSync（两者都锁在 #if os(iOS)）。
+# 行为判据在 `RouteSyncStatePersistenceRegression`（调度器 + 真库）与
+# `HealthKitRecordCursorRegression`（覆盖策略）里；这里只钉调用点与参数。
+
+# P0-4：workout 定向补齐窗口 —— 表、读写、调度器调用、两条落盘时机。
+check("CREATE TABLE IF NOT EXISTS sync_pending_workout_windows" in store
+      and "func loadWorkoutBackfillWindows(" in store
+      and "func upsertWorkoutBackfillWindows(" in store,
+      "P0-4: the workout backfill queue must exist in the sync journal with its load/upsert pair "
+      "(a memory-only queue loses every window across the process — the same defect as O02 routes)")
+check("workoutWindowRegistrations: WorkoutBackfillScheduler.normalized" in export
+      and "workoutWindowUpdates: WorkoutBackfillScheduler.normalized" in export,
+      "P0-4: registrations (write before the anchor) and pass bookkeeping (settle after success) "
+      "must be returned as two separate sets — one array cannot express the two write timings")
+check("WorkoutBackfillScheduler.register(" in export
+      and "WorkoutBackfillScheduler.due(" in export
+      and "WorkoutBackfillScheduler.afterPass(" in export,
+      "P0-4: the exporter must register/due/afterPass through the pure scheduler (inline rules "
+      "would be untestable and drift from the regression)")
+check("DirectSyncBatchBudget.workoutWindowShare(of: budget)" in export
+      and "let workoutWindowShare = DirectSyncBatchBudget.workoutWindowShare(of: budget)" in export,
+      "P0-4: the window pass must run on its own 25% share (otherwise it starves the anchor stream)")
+check(ordered(records, "for window in WorkoutBackfillScheduler.due(",
+              "try await runLateBackfill(enforceShare: true)",
+              "for offset in 0..<descriptors.count"),
+      "P0-4: the workout-window pass must come BEFORE the late backfill / 48h window / history "
+      "replay — behind them it would never get budget during a replay (the 2026-10-14/18 shape)")
+check("taskStore.upsertWorkoutBackfillWindows(" in sync
+      and "exported.workoutWindowRegistrations, scope: activeScope" in sync,
+      "P0-4: new windows must be registered BEFORE the task row persists the advanced anchor "
+      "(register-after-anchor loses the window if the process dies)")
+check("workoutWindowUpdates: exported.workoutWindowUpdates" in sync
+      and "taskStore.upsertWorkoutBackfillWindows(workoutWindowUpdates, scope: activeScope)" in sync,
+      "P0-4: window bookkeeping may only be settled AFTER commitSuccess — settling before the "
+      "batch is accepted would mark a window complete for data the server never got")
+
+# P1-1：服务端覆盖探测。
+check("SyncCoveragePolicy.needsCoverageQuery(" in sync
+      and "api.syncCoverage(" in sync
+      and "SyncCoveragePolicy.historyFloor(" in export,
+      "P1-1: the client must ask /v1/sync/coverage before replaying history and turn knownUntil "
+      "into a history start floor (otherwise a lost cursor replays ~53万 records again)")
+check("if (identity.syncCoverageVersion ?? 0) >= 1" in sync,
+      "P1-1: the coverage probe must be gated on the handshake capability (old servers keep replaying)")
+check("NSLog(\"[RAI] 覆盖探测失败，回落全量历史重放" in sync,
+      "P1-1: a failed coverage probe must FALL BACK to full replay, never abort the sync")
+check("if response.datasetEpoch == identity.datasetEpoch" in sync,
+      "P1-1: coverage from another datasetEpoch must not be used (it would skip a real gap)")
+check("case .historyResume: return previous?.historyCoverageFloor" in export
+      and "currentQueryFloor" in export
+      and "historyCoverageFloor" in cursor,
+      "P1-1: the coverage floor must persist with an interrupted history segment and be reused on "
+      "resume (a different predicate would restart the anchor at the page head every batch)")
+check("coverageRestart: coverageRestart" in export
+      and "SyncCoveragePolicy.shouldRestartHistory(" in export,
+      "P1-1: a pre-coverage interrupted replay must be restarted with the floor "
+      "(RecordReplayPlan.coverageRestart), or it would finish uploading the old history")
+check("_ = try await runSegment(index: segmentIndex, floor: nil)" in export,
+      "P1-1: an empty floored history page must fall back to an unfiltered replay — never "
+      "`missingRecordAnchor` (which would fail the whole batch forever)")
+
+# P1-3：已交付轨迹摘要。
+check("delivered_route_hash" in store
+      and "deliveredHash: columnText(statement, 7)" in store,
+      "P1-3: route state must persist/read the delivered hash column")
+check('"ALTER TABLE sync_route_state ADD COLUMN delivered_route_hash TEXT"' in store,
+      "P1-3: installed journals need the additive column migration (v2→v3)")
+check("RouteDeliveredContent.shouldIncludeGPX(" in export
+      and "deliveredHash: previous.deliveredHash" in export,
+      "P1-3: the export loop must consult the delivered hash before putting the GPX in the payload")
+check("deliveredHash: record.deliveredHash" in store,
+      "P1-3: the canonical record rebuild in upsertRouteStates must carry deliveredHash (a field "
+      "dropped here would silently resend every GPX forever)")
+# P1-4：记录条数按字节驱动（常量门禁在 DirectSyncBatchBudgetTests，这里只钉形态）。
+check("min(12_000, max(4_500, xmlBytesBudget / 480))" in budget,
+      "P1-4: the record budget must be byte-driven min(12_000, max(4_500, xmlBytesBudget / 480))")
+check("Int(Double(bounds.maxRecords) * 0.9)" in budget,
+      "P1-4: the deletion quota must stay bounds.maxRecords × 0.9 (the server only limits deletions)")
 
 # --- 判据注册表：自报常数 ⇒ **行为断言**（2026-10-18 深度审查 P3-29） -----------
 # 旧写法是文件末尾一个常量 `MIN_CHECKS = 77`，历史上每加一条判据就要手工重设一次。

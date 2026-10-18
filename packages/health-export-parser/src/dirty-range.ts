@@ -16,8 +16,22 @@ import { healthTypes, scoringHealthTypes } from "@rai/contracts";
  * 一并压低边界。
  *
  * 区间语义：一条记录变更携带新旧**两个区间**（时间前后移时旧范围同样脏，取并集）；
- * 删除只有旧/账本时刻。fail-safe 保留：任何不可解析/非法区间或 vo2Max 变更 ⇒ `full`
+ * 删除只有旧/账本时刻。fail-safe 保留：任何不可解析/非法区间 ⇒ `full`
  * （方向永远是"宁可全算，不可错复用"）。
+ *
+ * 🔴 P0-2（2026-10-18）：`vo2Max` 变更**不再**升级为 `full`。它是一条**可界定的证据变更**：
+ * 把该样本区间当作普通脏区间（与训练相交时回绕到训练起点），边界落进 `domains.fitness`
+ * （分区／阈值／能力时间线按此边界重算）。旧实现命中 `vo2_evidence_changed` 就
+ * `full = true`，生产实测「1 条 VO2Max 样本 ⇒ 286 条历史训练全量重算 103 s」。
+ *
+ * ⚠️ 为什么计划里三个域都拿到同一个边界（而不是只给 `fitness`）：本计划类型没有
+ * "该域不脏"的取值 —— 某域为 `null` 的语义是**该域不可增量、必须全算**（见
+ * `recompute-pipeline` 的 `DomainBoundaries`）。特征前缀复用要求 `domains.features` 非空；
+ * 而能力时间线复用读的正是 `domains.features`（`resumeModelReplay`）。VO2Max 不进训练特征，
+ * 所以"把边界给 features"的代价只是重算边界之后那一段（通常 1 场训练），
+ * 方向仍是保守（多算一段，不错复用）。
+ *
+ * 只有区间不可解析/无边界时才是 `full`（`invalid_health_interval` / `health_boundary_unknown`）。
  */
 
 /** 一条待分析变更（账本行 + 当前行 JOIN 后的合并视图）。 */
@@ -176,7 +190,8 @@ export function planIncrementalAnalysisDirtyRange(input: {
         if (change.entityKind === "record") {
           if (!(scoringHealthTypes as readonly unknown[]).includes(side.type)) continue;
           if (side.type === healthTypes.vo2Max) {
-            full = true;
+            // P0-2（2026-10-18）：**不再 full**。只记原因；边界由下面的通用区间逻辑
+            // （并集 + 相交训练回退）给出。区间非法/无边界时仍由 fail-safe 分支转 full。
             reasons.add("vo2_evidence_changed");
           }
         }

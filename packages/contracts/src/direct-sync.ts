@@ -88,6 +88,15 @@ export interface DirectSyncReceipt {
   publishedReleaseId: string | null;
   /** 大包分片时的父批 id；未分片为 `null`（§5.2）。 */
   parentBatchId: string | null;
+  /**
+   * 本批记录计数（P0-3，2026-10-18）：让"这批到底带来了什么"可被客户端自解释。
+   * 老服务端省略本键；`parsed = inserted + unchanged + removed`。
+   */
+  records?: {
+    parsed: number;
+    inserted: number;
+    unchanged: number;
+  };
 }
 
 /**

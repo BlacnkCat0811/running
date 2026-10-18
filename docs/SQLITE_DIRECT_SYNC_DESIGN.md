@@ -415,6 +415,66 @@ receiptId / parentBatchId / routeReceipts
 的双端哨兵钉住；服务端失败一律带稳定码（`ImportJobResponse.failureCode`），
 不再存在“静默回退到慢链路”的中间态。
 
+### 10.4 回执计数：让“这批什么也没带来”由回执自己说（2026-10-18）
+
+2026-10-18 生产诊断（`output/diagnosis-2026-10-18-run-partial/lane-api.md` §2.5 / §3）的缺口是
+**回执只承诺到批次**：一批补了 1 条 PhysicalEffort 与一批补了整条 HR 序列，回执长得一模一样，
+客户端只能把“上传队列空了”读成“记录齐了”。
+
+服务端在直连回执（`summary.directSync`，持久键 `rai.applied-import.<jobId>`）里**追加**一个可选块：
+
+```jsonc
+"records": { "parsed": 4500, "inserted": 622, "unchanged": 3878 }
+```
+
+- `parsed` = 本批 XML 的 `<Record>` 条数；`inserted` = 其中新增行数；`unchanged = parsed - inserted`。
+- 显式删除（manifest `deletedRecords`）不在 `parsed` 内，三者不互相包含；`records` 描述**结果**，
+  不描述成本（重复记录仍然逐条走完身份/账本管线，见 lane-api §4.3）。
+- 回执仍然是**写入时刻的凭证**（§8.5：消费者不得改写）；`records` 只描述这一批。
+- 老服务端/老车道省略本键；客户端必须按“未提供”处理，不得当成 `0`。
+
+### 10.5 跨批新鲜度：`GET /v1/workouts/:id/freshness`（2026-10-18）
+
+回执是批次的，用户看的是训练。服务端新增只读端点，把“这次训练的事实到齐了多少、分析到哪一步”
+变成可查询状态（全部来自现有表，不新增存储）：
+
+- `facts.committedAt` = 第一次写入该 workout 实体的批次完成时刻；`lastBatchAt` = 最近一次触及
+  该训练窗口（workout 实体或窗口内记录账目）的批次完成时刻；`batches` = 触及批次数。
+- `analysis.status` = `published`（存在指向 active model run 的评估行）/
+  `failed`（最近关联分析任务终态失败）/ `pending`；关联键是
+  `recompute_jobs.request_json.importBatchId`。
+- `series[]` = 与 `/series` **同口径**的窗口内样本数（去重键、`source_name`、`start_at` 边界一致），
+  外加 `elevation` = 可读路线点数；每项 `state ∈ {present, not_seen_yet}`。
+  `not_seen_yet` 是**允许且诚实**的状态：它表示“目前没见到样本”，**不是**“设备没有该能力”。
+- `completeness = complete` 的判据是显式的：**已发布** 且 `lastBatchAt` 距 `now` ≥ 24h；
+  其余一律 `partial`。24h 是“手表迟到样本最晚在下一轮同步到达”的稳定性下界，
+  不是“以后不会再有数据”的断言——`complete` 只是“数据已稳定”的下界证据。
+- 会话不存在或事实已软删 ⇒ 404（与详情端点同一条判据）。
+
+### 10.6 覆盖探测：`GET /v1/sync/coverage`（2026-10-18，P1-1）
+
+```jsonc
+{ "datasetEpoch": "default",
+  "types": [ { "type": "HKQuantityTypeIdentifierStepCount",
+               "knownFrom": "2024-01-01T00:00:00.000Z", "knownUntil": "2026-10-18T11:40:00.000Z",
+               "sampleCount": 534789 } ] }
+```
+
+- `types` 查询参数（逗号分隔）可选，缺省 = 全部类型；未知名不补空行（“没有这个类型”也是信息）。
+- `knownFrom` / `knownUntil` = `MIN(start_at)` / `MAX(end_at)`，是**已落库样本覆盖的端点**，
+  不证明区间内没有空洞；`sampleCount` 是未去重的行数。
+- `datasetEpoch` 复用 `/v1/handshake` 的权威值：数据集更换后旧 epoch 的覆盖结论立即作废。
+- 服务端 `handshake.syncCoverageVersion = 1` 宣告本能力；老服务端省略该键，客户端必须回落全量重放。
+- 客户端只可据此**避免重传**服务端已有历史；不得删除本地游标、不得跳过真正的待办，
+  也不得把覆盖区间当成“完整”证明（§5.1：数据模型不表达“该有什么”）。
+
+### 10.7 阶段耗时：接收器内部的四段账本（2026-10-18，P2-3）
+
+`import-worker` 的 `performance.computeStagesMs`（开放键）新增四个观测键：
+`directSync.identity` / `directSync.parse` / `directSync.ledger` / `directSync.commit`。
+它们**不**进 `stagesMs` 的闭集枚举（那是公开契约的一部分）：四段回答“一批 5–8 s 花在哪”，
+不是“哪条车道跑了多久”。拒收/重放批次没有完整四段，因此不带这些键。
+
 ## 11. 项目退出备份责任
 
 目标不是只去掉UI文案，而是清理项目的自动备份入口：

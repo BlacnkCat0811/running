@@ -1,5 +1,68 @@
 import Foundation
 
+/// P2-3（2026-10-18 同步诊断）：一批导出的**通道计数**。
+///
+/// 为什么需要它：诊断时最大的盲区是"每批 4500 条里到底谁占的"——服务端只能看到
+/// `insertedRecordCount` 总数，客户端则连类型直方图都没有，只能从预算数学反推
+/// "900 条窗口份额 + 642 条补读份额装不满 4500 ⇒ 一定是 anchor/重放填的"。
+/// 本类型把**每批各通道写入条数 / 写入类型数 / 重放中类型数**写成计数往下传，
+/// 日志与任务行都能回答"这一批是谁在填预算"。
+///
+/// 🔴 边界：**只写计数，不写样本值、UUID、日期或类型以外的任何内容**。它不是健康数据，
+/// 是同步自身的度量。字段全部 `Int` + `Codable`：任务行跨进程恢复时还能把"这批带来了什么"
+/// 带到恢复轮（`loadTask` 解不开的代价是整批任务消失，见 `SyncTaskState` 头注释）。
+nonisolated struct ExportChannelCounts: Codable, Equatable, Sendable {
+    /// 正式 anchor/历史重放段写入的记录数。
+    var anchorRecords: Int = 0
+    /// 近 48h 窗口 pass 写入的记录数。
+    var windowRecords: Int = 0
+    /// 跑步动态「迟到样本」补读（两趟合计）写入的记录数。
+    var backfillRecords: Int = 0
+    /// workout 定向补齐窗口（P0-4）写入的记录数。
+    var workoutWindowRecords: Int = 0
+    /// 本批真正写进 export.xml 的记录类型数。
+    var writtenTypes: Int = 0
+    /// 本批开始时处于历史重放/首读（`needsHistoryRead` 或没有游标）的类型数。
+    var replayingTypes: Int = 0
+    /// P1-1：本批因服务端覆盖探测而**跳过重放历史**的类型数。
+    var historySkippedTypes: Int = 0
+    /// 本批处理的 workout 补齐窗口数（整窗查询完成 = 记一次尝试）。
+    var workoutWindows: Int = 0
+    /// 其中本批收口的窗口数。
+    var workoutWindowsCompleted: Int = 0
+
+    static let zero = ExportChannelCounts()
+
+    init(
+        anchorRecords: Int = 0,
+        windowRecords: Int = 0,
+        backfillRecords: Int = 0,
+        workoutWindowRecords: Int = 0,
+        writtenTypes: Int = 0,
+        replayingTypes: Int = 0,
+        historySkippedTypes: Int = 0,
+        workoutWindows: Int = 0,
+        workoutWindowsCompleted: Int = 0
+    ) {
+        self.anchorRecords = anchorRecords
+        self.windowRecords = windowRecords
+        self.backfillRecords = backfillRecords
+        self.workoutWindowRecords = workoutWindowRecords
+        self.writtenTypes = writtenTypes
+        self.replayingTypes = replayingTypes
+        self.historySkippedTypes = historySkippedTypes
+        self.workoutWindows = workoutWindows
+        self.workoutWindowsCompleted = workoutWindowsCompleted
+    }
+
+    /// 日志口径（只计数；`NSLog` 直接用，避免各处手拼格式串再漂移）。
+    var logLine: String {
+        "anchor=\(anchorRecords) window=\(windowRecords) backfill=\(backfillRecords) "
+            + "workoutWindow=\(workoutWindowRecords) types=\(writtenTypes) replay=\(replayingTypes) "
+            + "historySkipped=\(historySkippedTypes) windows=\(workoutWindows)(done \(workoutWindowsCompleted))"
+    }
+}
+
 /// 传输层的自述状态，与 `phase` **正交**。
 ///
 /// 为什么要单独一个字段：`phase` 说的是"同步走到哪一步"，而上传这件事有两套完全不同的
@@ -139,6 +202,16 @@ nonisolated struct SyncTaskState: Codable {
     /// 同时消失。`nil`（老 payload / 本轮没查路线）= 不结算、不删待办。
     var routeCommit: RouteCommitCandidate?
 
+    /// P2-3（2026-10-18 同步诊断）：本批各通道的**计数**（`ExportChannelCounts`）。
+    ///
+    /// 与 `workoutCount` 的分工：那个是"本批交付了几条训练"（展示与对账用），这里是
+    /// "这批记录到底是谁在填预算"（重放进度观测用）。恢复轮把它原样带进 `lastExportSummary`
+    /// 与日志，于是"崩在提交前的一批带来了什么"不必重读 HealthKit 才能知道。
+    ///
+    /// `nil`（老 payload 缺键）= 未记录。它不是健康数据，丢了一层也不影响正确性；
+    /// 但解码仍然走 `decodeIfPresent`：任何新键都不许让整份任务消失（文件头兼容纪律）。
+    var lastExportCounts: ExportChannelCounts?
+
     init(
         target: String,
         serverId: String? = nil,
@@ -170,7 +243,8 @@ nonisolated struct SyncTaskState: Codable {
         pendingDeletions: Data? = nil,
         lastAnalysisStatus: DirectSyncAnalysisStatus? = nil,
         completedRouteTodos: [String]? = nil,
-        routeCommit: RouteCommitCandidate? = nil
+        routeCommit: RouteCommitCandidate? = nil,
+        lastExportCounts: ExportChannelCounts? = nil
     ) {
         self.target = target
         self.serverId = serverId
@@ -203,6 +277,7 @@ nonisolated struct SyncTaskState: Codable {
         self.lastAnalysisStatus = lastAnalysisStatus
         self.completedRouteTodos = completedRouteTodos
         self.routeCommit = routeCommit
+        self.lastExportCounts = lastExportCounts
     }
 
     /// 显式解码：老键保持必填，新键一律 `decodeIfPresent`。
@@ -264,6 +339,8 @@ nonisolated struct SyncTaskState: Codable {
         // 这与"损坏证据失败关闭"不矛盾：失败关闭发生在**结算**侧（`RouteCommitSettlement`
         // 校验失败 ⇒ 一条待办都不删），不是发生在**解码**侧（解码失败 ⇒ 这一轮不结算）。
         routeCommit = try? container.decodeIfPresent(RouteCommitCandidate.self, forKey: .routeCommit)
+        // P2-3：纯计数，解不开也只是少一条观测 —— 与 `routeCommit` 同一条降级纪律。
+        lastExportCounts = try? container.decodeIfPresent(ExportChannelCounts.self, forKey: .lastExportCounts)
     }
 
     /// 落盘的那个字符串 → 闭集取值。老 payload 的 `recomputing` 在这里归一到 `importing`。

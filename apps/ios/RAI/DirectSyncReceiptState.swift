@@ -68,6 +68,13 @@ nonisolated enum DirectSyncAnalysisOutcome: Equatable, Sendable {
 /// `SyncTaskState` 是 `Codable`，`lastReceipt` 要跟着它落盘（§10.1 的"重启丢进度：
 /// 从主库 receipt/analysis jobs 恢复"），而它的 `encode(to:)` 是合成的 ⇒ 只声明
 /// `Decodable` 会让整个 iOS 目标编译不过。
+/// P0-3：本批记录计数（服务端 `summary.directSync.records`）。
+nonisolated struct DirectSyncRecordCounts: Codable, Equatable, Sendable {
+    let parsed: Int
+    let inserted: Int
+    let unchanged: Int
+}
+
 nonisolated struct DirectSyncReceipt: Codable, Equatable, Sendable {
     /// 客户端认得的回执合同版本，与 T1 在 `/v1/handshake` 宣告的
     /// `factsAnalysisContractVersion: 1`（`apps/api/src/server.ts`，声明在
@@ -103,6 +110,8 @@ nonisolated struct DirectSyncReceipt: Codable, Equatable, Sendable {
     let publishedReleaseId: String?
     /// 大包分片时的父批 id；未分片为 `nil`（§5.2）。
     let parentBatchId: String?
+    /// P0-3：本批记录计数；老服务端省略 ⇒ nil。用于同步结果自解释（新增/重复）。
+    let records: DirectSyncRecordCounts?
 
     init(
         ingestStatus: DirectSyncIngestStatus,
@@ -110,7 +119,8 @@ nonisolated struct DirectSyncReceipt: Codable, Equatable, Sendable {
         analysisStatus: DirectSyncAnalysisStatus,
         dependencyGeneration: String? = nil,
         publishedReleaseId: String? = nil,
-        parentBatchId: String? = nil
+        parentBatchId: String? = nil,
+        records: DirectSyncRecordCounts? = nil
     ) {
         self.ingestStatus = ingestStatus
         self.receiptId = receiptId
@@ -118,11 +128,12 @@ nonisolated struct DirectSyncReceipt: Codable, Equatable, Sendable {
         self.dependencyGeneration = dependencyGeneration
         self.publishedReleaseId = publishedReleaseId
         self.parentBatchId = parentBatchId
+        self.records = records
     }
 
     private enum CodingKeys: String, CodingKey {
         case ingestStatus, receiptId, analysisStatus
-        case dependencyGeneration, publishedReleaseId, parentBatchId
+        case dependencyGeneration, publishedReleaseId, parentBatchId, records
     }
 
     /// 显式解码，好让"哪些键必须在"写在代码里（合成解码器的行为等价，但看不见边界）。
@@ -137,6 +148,7 @@ nonisolated struct DirectSyncReceipt: Codable, Equatable, Sendable {
         dependencyGeneration = try container.decodeIfPresent(String.self, forKey: .dependencyGeneration)
         publishedReleaseId = try container.decodeIfPresent(String.self, forKey: .publishedReleaseId)
         parentBatchId = try container.decodeIfPresent(String.self, forKey: .parentBatchId)
+        records = try container.decodeIfPresent(DirectSyncRecordCounts.self, forKey: .records)
     }
 
     /// 这一批的原始事实是否已经持久提交 —— **只**回答事实那一半（§1.4）。

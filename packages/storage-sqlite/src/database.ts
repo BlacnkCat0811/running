@@ -21,6 +21,7 @@ import { migrateModelV42 } from "./v42-migration.js";
 import { migrateModelV43 } from "./v43-migration.js";
 import { migrateModelV44 } from "./v44-migration.js";
 import { migrateModelV45 } from "./v45-migration.js";
+import { migrateModelV46 } from "./v46-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1692,7 +1693,8 @@ const migrations: readonly Migration[] = [
   { version: 42, name: "analysis_job_merge_links", up: migrateModelV42 },
   { version: 43, name: "readable_route_points_view", up: migrateModelV43 },
   { version: 44, name: "coverage_evidence_columns", up: migrateModelV44 },
-  { version: 45, name: "batch_analysis_dirty_evidence", up: migrateModelV45 }
+  { version: 45, name: "batch_analysis_dirty_evidence", up: migrateModelV45 },
+  { version: 46, name: "health_record_availability", up: migrateModelV46 }
 ];
 
 /**
@@ -1780,7 +1782,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   42: "964c0218cf5634cb17372029e784f45bb5f3cc36790b5e205153b4797532b0a9",
   43: "878e51d8d84763824ca5434c6e34234d9c4abae6273e7a839e9772351668ee59",
   44: "468191aa5d7f6742d2b135d797bf8cb4e977ccecf679cb45ebb64c2edcd20970",
-  45: "2112d288848cb7b253d0e9f46e45b82da8c676dd3628da14cd04444222f6e9d1"
+  45: "2112d288848cb7b253d0e9f46e45b82da8c676dd3628da14cd04444222f6e9d1",
+  46: "166c725f159a0dfd1f40dd1a529d5adf39a852eabdb31e26f1aaf2c552743973"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -1824,6 +1827,9 @@ export class RaiDatabase {
   private deleteRouteByPathStatement!: StatementSync;
   private insertRoutePointStatement!: StatementSync;
   private insertIssueStatement!: StatementSync;
+  /** P1-2：热路径语句懒准备（见 `saveHealthKitRecordFact` / `healthKitRecordFactLookup`）。 */
+  private healthKitRecordFactStatement?: StatementSync;
+  private healthKitRecordFactLookupStatement?: StatementSync;
   private inTransaction = false;
   private objectsSinceCommit = 0;
   private atomicImport = false;
@@ -2110,15 +2116,18 @@ export class RaiDatabase {
       INSERT INTO health_records (
         id, type, source_name, source_category, source_version, device,
         unit, value_numeric, value_text, start_at, end_at, created_at,
-        metadata_json, raw_attributes_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        metadata_json, raw_attributes_json, available_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         type = excluded.type, source_name = excluded.source_name,
         source_category = excluded.source_category, source_version = excluded.source_version,
         device = excluded.device, unit = excluded.unit, value_numeric = excluded.value_numeric,
         value_text = excluded.value_text, start_at = excluded.start_at, end_at = excluded.end_at,
         created_at = excluded.created_at, metadata_json = excluded.metadata_json,
-        raw_attributes_json = excluded.raw_attributes_json
+        raw_attributes_json = excluded.raw_attributes_json,
+        -- v46 / P2-2：**更新行刷新**可得时间（这一版内容从本次到达起可得）；
+        -- 调用方没给（老调用点 / 测试）时保留原值，不用 NULL 抹掉已知的可得时间。
+        available_at = COALESCE(excluded.available_at, health_records.available_at)
     `);
     this.insertWorkoutStatement = this.database.prepare(`
       INSERT INTO workouts (
@@ -2393,10 +2402,16 @@ export class RaiDatabase {
       .run(JSON.stringify(attributes));
   }
 
+  /**
+   * @param options.availableAt v46 / P2-2 记录级**可得时间**（到达服务端的 ISO 时刻）。
+   *   省略 = 不写（插入时 NULL，更新时保留原值）。写侧唯一来源是解析器的本批解析开始
+   *   时刻 / 显式 option（见 `apple-health-parser.ts` 的 `availableAt`）。
+   */
   insertRecord(
     record: CanonicalHealthRecord,
     sourceCategory: string,
-    rawAttributes: Record<string, string>
+    rawAttributes: Record<string, string>,
+    options?: { availableAt?: string | null }
   ): void {
     this.begin();
     this.insertRecordStatement.run(
@@ -2413,7 +2428,8 @@ export class RaiDatabase {
       record.endAt,
       record.createdAt,
       JSON.stringify(record.metadata),
-      JSON.stringify(rawAttributes)
+      JSON.stringify(rawAttributes),
+      options?.availableAt ?? null
     );
     this.markObject();
   }
@@ -3153,18 +3169,92 @@ export class RaiDatabase {
     return id;
   }
 
-  /** Snapshot every accepted UUID, including one hidden by another UUID's last
-   * write to a shared canonical ID. Never overwrite this with a deleted replay. */
+  /**
+   * Snapshot every accepted UUID, including one hidden by another UUID's last
+   * write to a shared canonical ID. Never overwrite this with a deleted replay.
+   *
+   * ## P1-2（2026-10-18）：条件 UPSERT，消除删+插写放大
+   *
+   * 旧实现是 `INSERT OR REPLACE`：即使内容**完全没变**也走"删旧行 + 插新行"，
+   * 于是 AUTOINCREMENT 主键每批被无意义推进。生产实测（2026-10-18）：
+   * `healthkit_record_facts` 行数 **534,723** vs `MAX(sequence)` **1,231,215**
+   * —— 约 69.6 万次虚增，每次同步 4,500 条重复记录各来一次。
+   *
+   * 现在改成 `ON CONFLICT(sample_type, sample_uuid) DO UPDATE … WHERE excluded.content_hash
+   * <> healthkit_record_facts.content_hash`：内容摘要相同 ⇒ **不写任何行**（不删、不插、
+   * 不动 sequence），内容变了才原地 UPDATE。`UNIQUE(sample_type, sample_uuid)` 由
+   * v31 迁移建立（`v31-migration.ts:47`），ON CONFLICT 的目标合法。
+   *
+   * 为什么"摘要相同就跳过"不会留下过期 JSON：`record_json` / `raw_attributes_json`
+   * 都是 `(attributes, metadata)` 的确定性函数，而 `contentHash` 正是对同一对输入的
+   * `stableId("record_content", …)` —— 摘要相同 ⇒ 三个载荷列必然等价（与
+   * `native-record-writer.ts` 的 B4 注释同一条论证）。
+   *
+   * ⚠️ 下面这条语句是**懒准备**的：热路径每条记录调用一次，逐条 `prepare` 的代价
+   * （node:sqlite 每次 20–50 µs × 4,500 条）本身就是这次要削的固定底。
+   */
   saveHealthKitRecordFact(
     record: CanonicalHealthRecord, uuid: string, category: string,
     attributes: Record<string, string>, contentHash: string
   ): void {
     this.begin();
-    this.database.prepare(`
-      INSERT OR REPLACE INTO healthkit_record_facts
+    (this.healthKitRecordFactStatement ??= this.database.prepare(`
+      INSERT INTO healthkit_record_facts
         (sample_type, sample_uuid, record_json, source_category, raw_attributes_json, content_hash)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(record.type, uuid.toLowerCase(), JSON.stringify(record), category, JSON.stringify(attributes), contentHash);
+      ON CONFLICT(sample_type, sample_uuid) DO UPDATE SET
+        record_json = excluded.record_json,
+        source_category = excluded.source_category,
+        raw_attributes_json = excluded.raw_attributes_json,
+        content_hash = excluded.content_hash
+      WHERE excluded.content_hash <> healthkit_record_facts.content_hash
+    `)).run(record.type, uuid.toLowerCase(), JSON.stringify(record), category,
+      JSON.stringify(attributes), contentHash);
+  }
+
+  /**
+   * P1-2（2026-10-18）：重复记录**前置跳过**所需的点查（单条 SQL，热路径每条一次）。
+   *
+   * 返回既有 source fact 的画面：
+   * - `contentHash`：上次被接受的内容摘要（`healthkit_record_facts.content_hash`）；
+   * - `recordId`：`healthkit_record_sources` 里这个 `(type, uuid)` 的权威行 id
+   *   （`null` = 身份映射还没建立 ⇒ 调用方**不得**走轻路径）；
+   * - `sourceDeleted` / `entityTombstoned`：两种墓碑（显式删除来源 / 实体删除）。
+   *   任一为真 ⇒ 必须走完整路径（墓碑判定、计数、carried deletion 都在那里）。
+   *
+   * 查不到 fact 行返回 `null`：没有可比对的既有内容摘要 ⇒ 完整路径（安全方向）。
+   * 读、不写（解析器的轻路径靠它，写放大修复见 {@link saveHealthKitRecordFact}）。
+   */
+  healthKitRecordFactLookup(type: string, uuid: string): {
+    contentHash: string;
+    recordId: string | null;
+    sourceDeleted: boolean;
+    entityTombstoned: boolean;
+  } | null {
+    const row = (this.healthKitRecordFactLookupStatement ??= this.database.prepare(`
+      SELECT fact.content_hash AS contentHash,
+             source.record_id AS recordId,
+             EXISTS (
+               SELECT 1 FROM import_source_tombstones tomb
+               WHERE tomb.entity_kind = 'record' AND tomb.source_identifier = ?
+             ) AS sourceDeleted,
+             EXISTS (
+               SELECT 1 FROM import_entity_tombstones tomb
+               WHERE tomb.entity_kind = 'record' AND tomb.entity_id = source.record_id
+             ) AS entityTombstoned
+      FROM healthkit_record_facts fact
+      LEFT JOIN healthkit_record_sources source
+        ON source.sample_type = fact.sample_type AND source.sample_uuid = fact.sample_uuid
+      WHERE fact.sample_type = ? AND fact.sample_uuid = ?
+    `)).get(this.healthKitRecordSourceIdentifier(type, uuid), type, uuid.toLowerCase()) as
+      { contentHash: string; recordId: string | null; sourceDeleted: number; entityTombstoned: number } | undefined;
+    if (row === undefined) return null;
+    return {
+      contentHash: String(row.contentHash),
+      recordId: row.recordId === null || row.recordId === undefined ? null : String(row.recordId),
+      sourceDeleted: Number(row.sourceDeleted) !== 0,
+      entityTombstoned: Number(row.entityTombstoned) !== 0
+    };
   }
 
   /** Older v30 imports may already have forked a known XML alias into an

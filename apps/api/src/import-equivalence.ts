@@ -6,7 +6,13 @@ export function importEquivalence(path: string): Record<string, { rows: number; 
   const db = new DatabaseSync(path, { readOnly: true });
   const volatile = ["id", "model_run_id", "feature_run_id", "feature_id", "training_metric_run_id", "zone_profile_id", "last_assessment_id", "computed_at", "created_at"];
   const domains: Record<string, string[]> = {
-    profile: [], health_records: [],
+    profile: [],
+    // 🔴 P2-2（v46，2026-10-18）：`available_at` 是**墙上时钟**（服务端这一次拿到/刷新
+    // 该事实的到达时刻），不是数据内容。TS 解析器写它、Rust worker 不写，两个独立进程
+    // 对同一份导入必然得到不同的毫秒值 —— 按本函数的既定口径（"不含作业 UUID 与墙上时钟
+    // 审计时间戳"）必须从摘要里忽略。忽略它不会让"到齐/未到齐"不可见：本列只是可得性
+    // 时间戳，导入事实本身与账本仍在比对范围内。
+    health_records: ["available_at"],
     // `deleted_at` 是**墙上时钟**（删除发生的时刻），按本函数的既定口径（"不含作业 UUID 与
     // 墙上时钟审计时间戳"）必须忽略 —— 两个独立进程做同一次删除会得到不同的毫秒值。
     // ⚠️ 忽略它**不会**让"删除"变得不可见：删除同时写 tombstone 与 `import_entity_changes`

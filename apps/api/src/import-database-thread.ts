@@ -91,7 +91,11 @@ export async function runImportLanesTask(input: ImportLanesInput): Promise<Impor
     payloadSha256: input.payloadSha256,
     startedAtMs: input.startedAtMs
   });
-  const timings = (): ImportLaneTimings => ({ laneMs: { ...laneMs }, taskMs: performance.now() - startedAt });
+  let directSyncStagesMs: Record<string, number> | undefined;
+  const timings = (): ImportLaneTimings => ({
+    laneMs: { ...laneMs }, taskMs: performance.now() - startedAt,
+    ...(directSyncStagesMs === undefined ? {} : { directSyncStagesMs: { ...directSyncStagesMs } })
+  });
 
   laneAttempts.push("data-only");
   const dataOnlyStarted = performance.now();
@@ -103,6 +107,8 @@ export async function runImportLanesTask(input: ImportLanesInput): Promise<Impor
   const directStarted = performance.now();
   const direct = await applyDirectSyncImport(laneInput());
   laneMs["direct-sync"] = performance.now() - directStarted;
+  // P2-3：只有提交成功的批次才带回四段账本；拒收没有"提交"这一段，如实不报。
+  if (!isDirectSyncRejection(direct)) directSyncStagesMs = direct.stagesMs;
   if (isDirectSyncRejection(direct)) {
     return { kind: "rejected", laneAttempts, rejection: direct, timings: timings() };
   }

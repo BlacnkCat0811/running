@@ -81,12 +81,14 @@ import type {
   RecoveryTrendResponse,
   TrendResponse,
   WorkoutDetailResponse,
+  WorkoutFreshnessResponse,
   WorkoutMetricSeries,
   WorkoutListItem,
   WorkoutListResponse,
   WorkoutOverrideDto,
   WorkoutZoneSummary,
-  WorkoutSeriesResponse
+  WorkoutSeriesResponse,
+  SyncCoverageType
 } from "@rai/api-contracts";
 import { buildPlanExecution } from "./plan-execution.js";
 import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } from "./workout-environment.js";
@@ -156,6 +158,15 @@ export function recentWeeklyKm(
 }
 
 export const mobileLocalDate = (): string => localDateInShanghai(new Date());
+
+/**
+ * `freshness.completeness = "complete"` 的稳定性窗口（P0-3）。
+ *
+ * 24h 是**显式判据**而不是经验值：health_records 是追加事实，手表迟到样本最晚在下一轮
+ * 同步到达；"最近 24h 没有新批次"是系统能证明的最小稳定期。窗口内的训练一律 `partial`，
+ * 因为"现在还缺 stride"与"stride 永远不会来"在服务端不可区分（本次事故的核心）。
+ */
+const FRESHNESS_STABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const shiftMobileDate = (date: string, days: number): string => {
   const value = new Date(`${date}T00:00:00Z`);
@@ -1494,6 +1505,10 @@ export class RaiReadStore {
       confidence: row.confidence,
       trueAbilityDelta: row.trueAbilityDelta,
       hasRoute: row.hasRoute,
+      // 2026-10-18（P0-1）：事实已提交但分析未发布时，这一行仍是 200 —— 派生字段是
+      // null/占位（`qualityScore 0`、`modelVersion ''`、`eligibilityStatus 'pending'`），
+      // 由本字段解释"为什么它们还不是结论"。旧实现让整个响应变成 404，与"不存在"同形。
+      analysisPublishStatus: row.analysisPublishStatus,
       elapsedSeconds: Math.max(0, (Date.parse(row.endedAt) - Date.parse(row.startedAt)) / 1000),
       activeEnergyKcal: this.workoutsRepository.workoutStatistic(
         row.canonicalWorkoutId,
@@ -1587,13 +1602,18 @@ export class RaiReadStore {
     // 两类事实都不依赖坐标，所以公开读也能给出：分析行的存在性（`assessment`）与
     // 已发布版本指针（`pointer`）。指针本身不是坐标，公开它是安全的 —— 客户端需要它
     // 才知道"这块路线是版本内容还是退化内容"。
-    const assessed = this.workoutsRepository.getDetailRow(row.sessionId) !== null;
+    //
+    // 🔴 2026-10-18（P0-1）：这里此前是 `getDetailRow(row.sessionId) !== null` ——
+    // 而 `row` 就是 `getDetailRow` 的返回值，所以 `assessed` 恒为 true，详情端点的
+    // `analysisState: "pending"` 分支是**死代码**。现在判据改为行上的发布状态，
+    // 事实侧能诚实地报 `pending`，分析块在没有已发布 release 时显式给 `null`。
+    const assessed = row.analysisPublishStatus === "published";
     const pointer = this.workoutsRepository.routePointer(row.canonicalWorkoutId);
     const publishedVersionId = pointer?.publishedRouteVersionId ?? null;
     const currentRoute = includeRoute
       ? this.seriesRepository.routePoints(row.canonicalWorkoutId) as RoutePointDto[]
       : [];
-    const versionRoute = !includeRoute || publishedVersionId === null
+    const versionRoute = !assessed || !includeRoute || publishedVersionId === null
       ? null
       : this.seriesRepository.routePointsByVersion(publishedVersionId) as RoutePointDto[] | null;
     return {
@@ -1606,16 +1626,21 @@ export class RaiReadStore {
         routeVersionId: null,
         analysisState: assessed ? "analyzed" : "pending"
       },
-      analysis: {
-        workoutId: row.sessionId,
-        releaseId: null,
-        // 退化分支：指针 NULL（老库）**或**版本内容读不到 ⇒ 用当前轨迹，并**标注** null。
-        route: versionRoute ?? currentRoute,
-        routeVersionId: versionRoute === null ? null : publishedVersionId,
-        // 退化读（或公开读）不是"那次发布的输入"，所以如实标 stale。
-        stale: versionRoute === null,
-        factDeleted: false
-      }
+      // 没有已发布 release 时**显式** `null`，而不是伪造一个 `releaseId: null` 的分析块：
+      // "分析块存在"与"分析已发布"在客户端是两件事，混成一个空对象会让 pending 读起来
+      // 像"分析过、但没有路线"。`WorkoutDetailResponse.analysis` 本来就允许 null。
+      analysis: assessed
+        ? {
+            workoutId: row.sessionId,
+            releaseId: null,
+            // 退化分支：指针 NULL（老库）**或**版本内容读不到 ⇒ 用当前轨迹，并**标注** null。
+            route: versionRoute ?? currentRoute,
+            routeVersionId: versionRoute === null ? null : publishedVersionId,
+            // 退化读（或公开读）不是"那次发布的输入"，所以如实标 stale。
+            stale: versionRoute === null,
+            factDeleted: false
+          }
+        : null
     };
   }
 
@@ -1897,6 +1922,56 @@ export class RaiReadStore {
       }),
       series
     };
+  }
+
+  /**
+   * `GET /v1/workouts/:id/freshness`（P0-3，2026-10-18 同步诊断）。
+   *
+   * 只回答"事实到齐多少、分析到哪一步"，**不**读派生评分，也**不**把"还没见到"
+   * 说成"设备没有这个指标"（每指标 `state = not_seen_yet` 是允许的）。
+   *
+   * `completeness` 的判据是**显式**的（`docs/SQLITE_DIRECT_SYNC_DESIGN.md` §10.4）：
+   * 已发布 **且** 最近一次触及本训练的事实批次距 `now` ≥ 24h 才算 `complete`；
+   * 其余一律 `partial`。24h 内没有新批次 ≠ "永不补齐"：手表迟到样本仍可能在下一轮到达，
+   * 所以 `complete` 是"数据已稳定"的下界证据，`partial` 是"仍可能继续补"的诚实状态。
+   *
+   * `now` 可注入，便于测试固定时间；生产路径不传。
+   */
+  workoutFreshness(id: string, now = new Date()): WorkoutFreshnessResponse | null {
+    const stored = this.workoutsRepository.freshness(id);
+    if (!stored) return null;
+    const lastBatchMs = stored.lastBatchAt === null ? Number.NaN : Date.parse(stored.lastBatchAt);
+    const stable = Number.isFinite(lastBatchMs) && now.getTime() - lastBatchMs >= FRESHNESS_STABLE_WINDOW_MS;
+    return {
+      workoutId: stored.sessionId,
+      facts: {
+        committedAt: stored.committedAt,
+        lastBatchAt: stored.lastBatchAt,
+        batches: stored.batches
+      },
+      analysis: stored.analysis,
+      series: stored.metrics.map((metric) => ({
+        metric: metric.metric,
+        samples: metric.samples,
+        // `present` 只表示"窗口内已见到样本"；0 条时**不得**推断设备不支持该指标。
+        state: metric.samples > 0 ? "present" : "not_seen_yet",
+        lastAvailableAt: metric.lastAvailableAt
+      })),
+      completeness: stored.analysis.status === "published" && stable ? "complete" : "partial"
+    };
+  }
+
+  /**
+   * `GET /v1/sync/coverage` 的类型覆盖（P1-1）。
+   *
+   * 用 `cached()` 做进程内 memo：它按 `PRAGMA data_version` 失效 —— 比 60s TTL 更准，
+   * 任何导入/直连提交（别的连接）都会让下一次调用重新统计，而连续读不会重复扫表。
+   * 键里带 types：不同过滤组合各自一份，互不覆盖。
+   */
+  syncCoverage(types?: string[]): SyncCoverageType[] {
+    const normalized = types === undefined || types.length === 0 ? undefined : [...new Set(types)].sort();
+    return this.cached(`syncCoverage:${normalized?.join(",") ?? "*"}`,
+      () => this.workoutsRepository.syncCoverageTypes(normalized));
   }
 
   /**

@@ -392,6 +392,41 @@ struct RouteSyncStateMachineTests {
         check(secondFailure.nextRetryAt == end.addingTimeInterval(3_600 + 7_200),
               "the second backoff doubles (base x 2^2) instead of resetting")
 
+        // ── P1-3（2026-10-18 同步诊断）：轨迹内容没变就不再重发 ──────────────────────
+        // 缺陷形态：跑完 24h 内状态是 `.active`（每批都查 —— 查询语义正确），但旧实现把
+        // "查到了内容"等同于"要重新上传"：同一份 2527 点 GPX 每批重发，workout XML 也跟着
+        // 重发（`hasWorkoutChange || !routeFiles.isEmpty`）。重放期 ≈75 批 ⇒ ≈75 份重复 GPX。
+        let routeHash = "sha256-route-v1"
+        let view = RouteObservation(pointCount: 2527, routeHash: routeHash)
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: view, deliveredHash: routeHash,
+                workoutChanged: false, isExplicitRetry: false) == false,
+              "same content, no workout change, no explicit retry ⇒ the GPX is NOT resent")
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: view, deliveredHash: routeHash,
+                workoutChanged: true, isExplicitRetry: false),
+              "a workout change must resend the GPX it references (the XML is resent anyway)")
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: view, deliveredHash: routeHash,
+                workoutChanged: false, isExplicitRetry: true),
+              "an explicit per-workout retry must always resend (the user asked for it)")
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: view, deliveredHash: "sha256-route-v0",
+                workoutChanged: false, isExplicitRetry: false),
+              "a different content hash is a different route ⇒ resend")
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: view, deliveredHash: nil,
+                workoutChanged: false, isExplicitRetry: false),
+              "no delivery evidence (old row / failed batch) ⇒ resend (never suppress blindly)")
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: RouteObservation(pointCount: 0, routeHash: nil),
+                deliveredHash: nil, workoutChanged: false, isExplicitRetry: false),
+              "an empty route has no hash to compare ⇒ keep the old behaviour")
+        check(RouteDeliveredContent.shouldIncludeGPX(
+                observation: view, deliveredHash: "",
+                workoutChanged: false, isExplicitRetry: false),
+              "an empty delivered hash is not 'same content'")
+
         print("\(checks) route sync state machine checks passed")
     }
 }

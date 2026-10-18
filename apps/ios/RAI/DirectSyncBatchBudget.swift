@@ -49,11 +49,34 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
     )
 
     /// 用握手 bounds 收敛出预算。`nil`（老服务端 / 未握手）⇒ 保守常量。
+    ///
+    /// ## P1-4（2026-10-18 同步诊断）：记录维度改为**字节驱动**
+    ///
+    /// 缺陷形态：旧实现直接抄服务端 `bounds.maxRecords × 0.9`（= 4500）当**XML 记录条数**
+    /// 上限用。可服务端直连车道**只对删除配额**用这个数（`direct-sync-ingest.ts`：
+    /// `deletions > DIRECT_SYNC_MAX_RECORDS`），对 XML 里的记录条数**没有硬上界**
+    /// —— `DirectSyncBatchBudget.exceedsServerBounds` 的注释早就写明了两者语义不同。
+    /// 结果：每批都被条数卡在 4500，而字节只用了 2.19 MB / 7.55 MB（29%）。重放期 ≈75 批
+    /// 的历史数据被这个自限切成 118 批。
+    ///
+    /// 新口径：`min(12_000, max(4_500, xmlBytesBudget / 480))`。
+    ///   - `480 B/条` = 2026-10-18 生产实测 `export.xml` 的均值（2,187,876 B / 4500 条 ≈ 486 B，
+    ///     取 480 略偏大 ⇒ 估算的条数偏少，方向保守）；
+    ///   - `4_500` 下限 = 旧口径。字节预算小（保守档 1.8 MiB ⇒ 3937 条）时**不缩水**：
+    ///     4,500 是历史上稳定的单批规模，缩它只会多分几批、无收益；
+    ///   - `12_000` 上限 = 字节预算 7.55 MB 按 480 B/条 ≈ 15,700 条的保守封顶。**这是客户端
+    ///     自限**（服务端只按 8 MiB 字节 / 删除配额判定），留出约 3,700 条的余量给
+    ///     `renderedRecordPage` 的每记录字节波动；超界仍由 `accepts` 的字节闸门兜住。
+    ///
+    /// 🔴 `maxDeletions` **仍**取 `bounds.maxRecords × 0.9`：删除配额是服务端真实上界，
+    /// 不能跟着记录条数一起放大（两者语义不同，见 `maxDeletions` 的字段注释）。
     static func from(bounds: DirectSyncBounds?) -> DirectSyncBatchBudget {
         guard let bounds else { return conservative }
+        let xmlBytesBudget = Int(Double(bounds.maxXmlBytes) * 0.9)
         return DirectSyncBatchBudget(
-            maxXmlBytes: Int(Double(bounds.maxXmlBytes) * 0.9),
-            maxRecords: Int(Double(bounds.maxRecords) * 0.9),
+            maxXmlBytes: xmlBytesBudget,
+            // P1-4：记录条数由字节预算换算（客户端自限，见上方注释）。
+            maxRecords: min(12_000, max(4_500, xmlBytesBudget / 480)),
             maxDeletions: Int(Double(bounds.maxRecords) * 0.9),
             maxRouteFiles: Int(Double(bounds.maxRouteFiles) * 0.9),
             maxRouteBytes: Int(Double(bounds.maxRouteBytes) * 0.9)
@@ -389,6 +412,24 @@ nonisolated extension DirectSyncBatchBudget {
     /// 另一种方式复现。独立份额保证它**每批都拿到一点进展**，且永不饿死正式流。
     static func lateBackfillShare(of budget: DirectSyncBatchBudget) -> (maxBytes: Int, maxRecords: Int) {
         (maxBytes: budget.maxXmlBytes / 7, maxRecords: budget.maxRecords / 7)
+    }
+
+    /// workout 级定向补齐窗口的**独立份额**（P0-4，2026-10-18 同步诊断）。
+    ///
+    /// 语义：本批最多用单批总预算的 **25%** 去读"刚完成的训练"的时间窗。它排在迟到补读、
+    /// 48h 窗口与历史重放**之前**运行 —— 顺序本身就是这条修复的意义：重放期 anchor 流每批
+    /// 都会把预算用满，任何排在它后面的通道都会被饿死（这正是 2026-10-14 与 2026-10-18 两次
+    /// "样本到了却送不出去"的形态）。给它独立份额 + 排在前面，才能保证"新训练到达后的下一个
+    /// 同步轮就把该窗口的所有类型送齐"。
+    ///
+    /// 为什么是 25%：一份跑步时间窗约 40–90 分钟、11–18 个类型，正常数据量远小于整批预算；
+    /// 25% 足以在一个批次里装下完整窗口，同时让出 ≥75% 给 48h 窗口与正式 anchor 流。
+    /// 用不满的份额**不回流**（正式流仍按 `accepts` 的总额判定，天然可用剩余部分）。
+    ///
+    /// 🔴 与 48h 窗口份额（1/5）、补读份额（1/7）**互不借用**：三条通道各自有界，
+    /// 合计上限 25% + 20% + 14.3% ≈ 59.3%，正式 anchor 流至少还剩 40% 以上。
+    static func workoutWindowShare(of budget: DirectSyncBatchBudget) -> (maxBytes: Int, maxRecords: Int) {
+        (maxBytes: budget.maxXmlBytes / 4, maxRecords: budget.maxRecords / 4)
     }
 
     /// 子通道（近期窗口 / 迟到补读）的**份额裁决**：页必须**同时**满足份额与全量预算。

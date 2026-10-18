@@ -83,38 +83,51 @@ enum RaiStartup {
         }
     }
 
-    /// 一轮同步收工后，把"**这一轮没有覆盖到的那一代**"接过去。
+    /// 一轮同步收工后，把"**这一轮没有覆盖到的那一代**"与"**没读完的页**"接过去。
     ///
     /// 为什么必须有这一步：代次确认只负责把导出起点之后到达的通知**留下**（不被本轮吞掉），
     /// 不负责找人来跑它。少接这一手，那条通知会一直躺在盘上，直到下一次切后台或下一次投递
     /// —— 那正是"自动同步停在原地"的形态。
     ///
-    /// 🔴 判据住在 `SyncFollowUp.handoff`（纯函数、有执行者），这里只做接线与额度递减。
-    /// 额度是硬的：HealthKit 大批导入期间会连发投递，没有上限的"补跑"就是前台自旋，而每次
-    /// 自旋都是一轮 GB 级导出。超出的那一代交给后台的 `resubmitDelay` 兜着。
+    /// 🔴 判据住在 `SyncFollowUp.handoff` / `SyncFollowUp.shouldStopWave`（纯函数、有执行者），
+    /// 这里只做接线、扣预算与进度判定。
+    ///
+    /// 2026-10-18 事故复盘 P0-6：待续页的前台额度从"固定 3 轮"改成**有界时间预算**
+    /// （`ForegroundContinuationBudget`：一波 ≤60 s，另有轮数兜底）。旧形态下 ≈75 批历史重放
+    /// 每点一次只推进 4 批，剩下约 19 次要靠用户重复点击；新形态仍然有界，但不再把
+    /// "读得完多少"绑死在点击次数上。**没有新增任何后台机制**：额度用尽照旧走
+    /// `submitBackgroundRun(after:)`。
+    ///
+    /// 🔴 进度判据用 `healthSync.dataUpdatedGeneration`：它在 `markSuccess` 里每成功提交一批
+    /// 才 +1（服务端 job 还在算的那一轮不算）。"这一轮一批都没提交成功"必须**立刻收手** ——
+    /// 否则一次 5xx/断网会被 60 秒预算放大成反复重放同一个失败请求，而每次重放都是一轮
+    /// GB 级 HealthKit 导出。没有这条，预算越大越伤。
     ///
     /// ⚠️ 这里读的是**这一轮自己按目标现读的快照**（`probePendingWork`），不是
     /// `lastError` / `phase` 这类展示字段：单飞被拒的那一次什么都没跑，拿它的落点判断
     /// "有没有没覆盖的活儿"就是拿别人的结论给自己打分。
     ///
     /// ⚠️ 自 2026-10-15（R1）起它是**跨文件入口**：视图层的手动同步与"回到前台"也调用它。
-    /// 改动调用形态（含本文件 :69 / :175 两处字面量）必须同步
+    /// 改动调用形态（含本文件 :69 / :179 两处字面量）必须同步
     /// `check-background-capabilities.py` 的 `ordered()` 与 `check-background-mutations.py` 的锚点。
     @MainActor
     static func handOffUncoveredGenerations(healthSync: HealthKitSync, session: ServerSession) async {
         guard let serverURL = session.serverURL else { return }
         var roundsLeft = SyncFollowUp.maxForegroundRounds
-        var continuationRoundsLeft = SyncFollowUp.maxForegroundContinuationRounds
+        // 预算起点是**这一波第一次续读之前**：一次手动同步本身可能已经花掉几十秒，
+        // 从"用户点同步那一刻"起算会让预算在续读开始前就用完。
+        var budget = ForegroundContinuationBudget(startedAt: Date())
         while true {
             let pending = healthSync.probePendingWork(for: serverURL)
             let hasUncoveredGeneration = pending?.hasUncoveredGeneration ?? true
             let hasPendingContinuation = pending?.hasPendingContinuation ?? false
+            let isForeground = UIApplication.shared.applicationState == .active
             switch SyncFollowUp.handoff(
                 hasUncoveredGeneration: hasUncoveredGeneration,
                 hasPendingContinuation: hasPendingContinuation,
-                isForeground: UIApplication.shared.applicationState == .active,
+                isForeground: isForeground,
                 foregroundRoundsLeft: roundsLeft,
-                continuationRoundsLeft: continuationRoundsLeft
+                continuationBudgetLeft: budget.allows(now: Date())
             ) {
             case .nothing:
                 return
@@ -122,9 +135,10 @@ enum RaiStartup {
                 submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
                 return
             case .runAgain:
-                // 按**本轮实际的挂起类型**扣对应额度 —— 扣账口径必须与 `handoff` 的判定
+                // 按**本轮实际的挂起类型**扣预算 —— 扣账口径必须与 `handoff` 的判定
                 // 逐条对齐（两者同时挂起时,handoff 走"新代次"分支，这里同样优先扣新代次额度）。
-                if hasUncoveredGeneration { roundsLeft -= 1 } else { continuationRoundsLeft -= 1 }
+                if hasUncoveredGeneration { roundsLeft -= 1 } else { budget.recordRound() }
+                let generationBefore = healthSync.dataUpdatedGeneration
                 await healthSync.syncIfNeeded(
                     to: serverURL,
                     apiToken: session.apiToken,
@@ -132,6 +146,11 @@ enum RaiStartup {
                     // 前台的 15 分钟节流挡掉（那正是它被留下来的原因）。
                     force: true
                 )
+                let madeProgress = healthSync.dataUpdatedGeneration != generationBefore
+                if SyncFollowUp.shouldStopWave(budget: budget, now: Date(), madeProgress: madeProgress) {
+                    submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
+                    return
+                }
             }
         }
     }

@@ -89,6 +89,7 @@ struct BackgroundSyncPolicyRegression {
         try unfinishedWorkResubmitsItself()
         try uncoveredGenerationsAreHandedOff()
         try pendingContinuationGetsItsOwnBudget()
+        try foregroundContinuationWaveIsTimeBounded()
         try identifiersAreStableAndDistinct()
         try systemReloadedUploadsAreOnlyKeptWhenTracked()
         print("Background sync policy regression tests passed")
@@ -605,7 +606,7 @@ struct BackgroundSyncPolicyRegression {
                 hasPendingContinuation: false,
                 isForeground: row.foreground,
                 foregroundRoundsLeft: row.left,
-                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+                continuationBudgetLeft: true
             )
             try require(
                 handoff == row.expected,
@@ -627,7 +628,7 @@ struct BackgroundSyncPolicyRegression {
             SyncFollowUp.handoff(
                 hasUncoveredGeneration: true, hasPendingContinuation: false,
                 isForeground: true, foregroundRoundsLeft: 0,
-                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+                continuationBudgetLeft: true
             ) == .scheduleBackground,
             "foreground follow-up rounds are unbounded"
         )
@@ -659,7 +660,7 @@ struct BackgroundSyncPolicyRegression {
         try require(
             SyncFollowUp.handoff(
                 hasUncoveredGeneration: false, hasPendingContinuation: true,
-                isForeground: true, foregroundRoundsLeft: 0, continuationRoundsLeft: 1
+                isForeground: true, foregroundRoundsLeft: 0, continuationBudgetLeft: true
             ) == .runAgain,
             "a pending page lost its own foreground budget (the second batch would always be deferred)"
         )
@@ -667,7 +668,7 @@ struct BackgroundSyncPolicyRegression {
         try require(
             SyncFollowUp.handoff(
                 hasUncoveredGeneration: false, hasPendingContinuation: true,
-                isForeground: true, foregroundRoundsLeft: 0, continuationRoundsLeft: 0
+                isForeground: true, foregroundRoundsLeft: 0, continuationBudgetLeft: false
             ) == .scheduleBackground,
             "the continuation budget is unbounded"
         )
@@ -676,7 +677,7 @@ struct BackgroundSyncPolicyRegression {
             SyncFollowUp.handoff(
                 hasUncoveredGeneration: true, hasPendingContinuation: true,
                 isForeground: true, foregroundRoundsLeft: 0,
-                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+                continuationBudgetLeft: true
             ) == .scheduleBackground,
             "an uncovered generation must keep its own budget semantics when both are pending"
         )
@@ -685,7 +686,7 @@ struct BackgroundSyncPolicyRegression {
             SyncFollowUp.handoff(
                 hasUncoveredGeneration: false, hasPendingContinuation: true,
                 isForeground: false, foregroundRoundsLeft: 3,
-                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+                continuationBudgetLeft: true
             ) == .scheduleBackground,
             "a background round must never spin in the foreground"
         )
@@ -694,7 +695,7 @@ struct BackgroundSyncPolicyRegression {
             SyncFollowUp.handoff(
                 hasUncoveredGeneration: false, hasPendingContinuation: false,
                 isForeground: true, foregroundRoundsLeft: 3,
-                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+                continuationBudgetLeft: true
             ) == .nothing,
             "a non-existent pending page must not schedule anything"
         )
@@ -713,6 +714,84 @@ struct BackgroundSyncPolicyRegression {
         try require(
             !pending(verdict: .empty, hasPendingContinuation: true).hasUncoveredGeneration,
             "a pending page was mistaken for an uncovered generation (the front-spin guard would weaken)"
+        )
+    }
+
+    /// 🔴 契约（2026-10-18 事故复盘 P0-6）：待续页的前台续读是**有界时间预算**，不是
+    /// "固定 1+3 批"。
+    ///
+    /// 旧形态的可见后果：≈75 批历史重放每点一次只推进 4 批，剩下约 19 次全靠用户重复点击
+    /// （跑后 6 批的 +12 s / +44 s / +55 s / +21 s / +13 s 就是它的指纹）。新形态把"这一波
+    /// 最多占用用户多久"写成时间，而不是"固定几批" —— 单批成本随样本量从秒级到几十秒不等，
+    /// "3 批"在轻量增量上是 10 秒、在 GB 级重放上是 3 分钟。
+    ///
+    /// 期望值逐格手写：预算的两个维度（时间、轮数）与两个停因（预算尽、无进展）都必须各自
+    /// 可辨 —— 混成一条会让"预算没生效"与"进度判据没生效"看起来一模一样。
+    private static func foregroundContinuationWaveIsTimeBounded() throws {
+        // 预算与常量同源：改了常量却忘了同步 `ForegroundContinuationBudget`，会让界面说明与
+        // 真实额度分叉（而两者都不会报错）。
+        try require(
+            ForegroundContinuationBudget.timeBudget == SyncFollowUp.foregroundContinuationTimeBudget,
+            "the wave budget and the published time budget drifted apart"
+        )
+        try require(
+            ForegroundContinuationBudget.maxRounds == SyncFollowUp.maxForegroundContinuationRounds,
+            "the wave budget and the published round cap drifted apart"
+        )
+        // 时间预算必须是"一小段"：0 等于删掉续读；几十分钟等于把前台当后台用。
+        try require(
+            ForegroundContinuationBudget.timeBudget >= 10 && ForegroundContinuationBudget.timeBudget <= 300,
+            "the foreground continuation budget is not a bounded wave "
+                + "(\(ForegroundContinuationBudget.timeBudget)s)"
+        )
+
+        let started = now
+        var budget = ForegroundContinuationBudget(startedAt: started)
+        try require(
+            budget.rounds == 0 && budget.allows(now: started),
+            "a fresh wave cannot start its first round"
+        )
+        // 时间边界：59.9 s 还能开一轮，整 60 s 必须停（边界值属于"停"的那一侧）。
+        try require(
+            budget.allows(now: started.addingTimeInterval(59.9)),
+            "the wave stopped before its time budget"
+        )
+        try require(
+            !budget.allows(now: started.addingTimeInterval(ForegroundContinuationBudget.timeBudget)),
+            "the time budget does not stop the wave at its boundary"
+        )
+        // 轮数边界：跑满 `maxRounds` 后即使时间没到也必须停 —— 单页导出可能比预算快得多。
+        for _ in 0..<ForegroundContinuationBudget.maxRounds { budget.recordRound() }
+        try require(
+            budget.rounds == ForegroundContinuationBudget.maxRounds,
+            "recordRound did not count the round"
+        )
+        try require(!budget.allows(now: started), "the round cap does not stop the wave")
+
+        // 停因二分：预算尽是**预期**停因；无进展是**异常**停因 —— 没有后者，一次 5xx/断网
+        // 会被时间预算放大成"在 60 s 内反复重放同一个失败请求"，而每次重放都是一轮 GB 级导出。
+        let fresh = ForegroundContinuationBudget(startedAt: started)
+        try require(
+            !SyncFollowUp.shouldStopWave(budget: fresh, now: started, madeProgress: true),
+            "a productive round inside the budget stopped the wave"
+        )
+        try require(
+            SyncFollowUp.shouldStopWave(budget: fresh, now: started, madeProgress: false),
+            "a round that committed nothing did not stop the wave"
+        )
+        var spent = ForegroundContinuationBudget(startedAt: started)
+        for _ in 0..<ForegroundContinuationBudget.maxRounds { spent.recordRound() }
+        try require(
+            SyncFollowUp.shouldStopWave(budget: spent, now: started, madeProgress: true),
+            "the wave ignored its own round budget"
+        )
+        try require(
+            SyncFollowUp.shouldStopWave(
+                budget: fresh,
+                now: started.addingTimeInterval(ForegroundContinuationBudget.timeBudget + 1),
+                madeProgress: true
+            ),
+            "the wave kept going past its time budget"
         )
     }
 

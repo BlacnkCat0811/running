@@ -61,6 +61,89 @@ nonisolated enum DirectSyncCopy {
     }
 }
 
+/// P0-6 / P2-3（2026-10-18 同步诊断）：**本批导出的轻量摘要**，供 UI 只读展示。
+///
+/// 为什么 UI 不能自己拼：本文件里"这一批到底带来了什么"的权威值来自
+/// `HealthKitExportResult`（通道计数、预算停因、续页结论）与 `DirectSyncReceipt.records`
+/// （服务端算出的新增/重复数），而两者都只在本进程内可见。摘要把它们折成一个值类型，
+/// 每批导出完成时写入、`markSuccess` 拿到回执后补齐计数。
+///
+/// 🔴 三条纪律：
+///   1. **只读、不轮询**：它是快照，不是进度流；UI 在 `dataUpdatedGeneration` 变化后读一次。
+///   2. **不写健康数据**：只含计数与预算停因，不含样本值/UUID/日期。
+///   3. `recordsInserted` / `recordsUnchanged` / `recordsParsed` 在**老服务端没有回执计数**时
+///      保持 `nil` —— 绝不用 0 冒充"服务端说本批 0 新增"（那会把"不知道"说成"重复"）。
+nonisolated struct ExportSummary: Equatable, Sendable {
+    /// 本批 `export.xml` 里的记录条数（客户端口径）。
+    let recordCount: Int
+    /// 本批交付的训练 XML 条数。
+    let workoutCount: Int
+    /// 本批**查询过**的 workout 数（routeCount 的历史口径，见 `HealthKitExportResult`）。
+    let routeCount: Int
+    /// 本批实际发出的删除引用数（manifest 两段之和）。
+    let deletionCount: Int
+    /// 预算停因（`HealthKitExportResult.BudgetStopReason.rawValue`；`nil` = 没被预算停住）。
+    let budgetStopReason: String?
+    /// 本批是否还有未读页（= 被预算停住）。与 `hasPendingContinuation` 的"盘上待续槽"互补：
+    /// 一个是"刚导出的这一批",一个是"已提交的待续哨兵"。
+    let hasMorePages: Bool
+    /// 服务端回执的记录计数；老服务端省略 `records` 时三者都 `nil`。
+    let recordsParsed: Int?
+    let recordsInserted: Int?
+    let recordsUnchanged: Int?
+    /// P0-4：本批处理/收口的 workout 定向补齐窗口数（只做展示与诊断）。
+    let workoutWindowCount: Int
+    let workoutWindowCompletedCount: Int
+    /// 摘要写入时刻。
+    let updatedAt: Date
+
+    init(
+        recordCount: Int,
+        workoutCount: Int,
+        routeCount: Int,
+        deletionCount: Int,
+        budgetStopReason: String?,
+        hasMorePages: Bool,
+        recordsParsed: Int? = nil,
+        recordsInserted: Int? = nil,
+        recordsUnchanged: Int? = nil,
+        workoutWindowCount: Int = 0,
+        workoutWindowCompletedCount: Int = 0,
+        updatedAt: Date
+    ) {
+        self.recordCount = recordCount
+        self.workoutCount = workoutCount
+        self.routeCount = routeCount
+        self.deletionCount = deletionCount
+        self.budgetStopReason = budgetStopReason
+        self.hasMorePages = hasMorePages
+        self.recordsParsed = recordsParsed
+        self.recordsInserted = recordsInserted
+        self.recordsUnchanged = recordsUnchanged
+        self.workoutWindowCount = workoutWindowCount
+        self.workoutWindowCompletedCount = workoutWindowCompletedCount
+        self.updatedAt = updatedAt
+    }
+
+    /// 回执到达后补齐计数（其余字段原样保留）。
+    func withReceiptCounts(parsed: Int, inserted: Int, unchanged: Int) -> ExportSummary {
+        ExportSummary(
+            recordCount: recordCount,
+            workoutCount: workoutCount,
+            routeCount: routeCount,
+            deletionCount: deletionCount,
+            budgetStopReason: budgetStopReason,
+            hasMorePages: hasMorePages,
+            recordsParsed: parsed,
+            recordsInserted: inserted,
+            recordsUnchanged: unchanged,
+            workoutWindowCount: workoutWindowCount,
+            workoutWindowCompletedCount: workoutWindowCompletedCount,
+            updatedAt: updatedAt
+        )
+    }
+}
+
 @Observable
 @MainActor
 final class HealthKitSync {
@@ -121,6 +204,33 @@ final class HealthKitSync {
     /// 写入点只有两处，都是**进度本身的写点**：`saveTask`（有进度了）与 `clearTask`
     /// （进度没了）。放在别处就会与 `sync_tasks` 的真实内容漂移。
     private(set) var hasPendingTask = false
+
+    /// P0-6（2026-10-18 同步诊断）：盘上是否还有**没读完的页**（待续槽非空），或刚导出的
+    /// 本批仍被预算停住（`lastExportSummary.hasMorePages`）。
+    ///
+    /// 与 `hasPendingTask` 的分工：后者是"磁盘上卡着一批未走完的工作"（任务行/意图），
+    /// 本属性回答的是"**这一轮之后还有续页要读**" —— 界面据此在 `.pending` 档说
+    /// 「同步尚未完成（还有未读完的页）」，而不是说「同步完成」（诊断 D10 的核心症状：
+    /// 任务行提交后即删，75 批待读时界面显示"完成"）。
+    ///
+    /// ⚠️ 读盘失败不能被当成"没有待续"：`loadContinuation` 读失败返回 nil，而这时正确
+    /// 的表态是"还有未完成的工作"（与 `probePendingWork` 的 `.unknown` 同向）。因此
+    /// 读盘失败时回落到 `lastExportSummary?.hasMorePages ?? false` 之外，还要看
+    /// `hasPendingTask` —— 宁可多显示一句"未完成"，也不要在还有活的时候说"完成"。
+    var hasPendingContinuation: Bool {
+        if lastExportSummary?.hasMorePages == true { return true }
+        if taskStore.loadContinuation(scope: activeScope) != nil { return true }
+        // R3b：删除余量非空也是"还有未发完的工作"（`commitSuccess` 在写删除槽时会同时写待续
+        // 哨兵，所以这条在正常路径上是冗余的；保留它是为了覆盖手改/老库只有槽没有哨兵的形态）。
+        if taskStore.loadPendingDeletions(scope: activeScope) != nil { return true }
+        return taskStore.lastError != nil && hasPendingTask
+    }
+
+    /// P0-6 / P2-3：本批导出的轻量摘要（**只读**，每批导出完成/成功收尾时更新）。
+    ///
+    /// UI 的消费点：同步面板尾注、同步详情页「本批」一行、P0-5 的"新增 N / 其余 M 已有"。
+    /// `nil` = 本进程还没导出过批次（重启后不保留：它是展示快照，不是持久事实）。
+    private(set) var lastExportSummary: ExportSummary?
 
     /// 本次同步里，当前这批是否已被服务端**确定性拒绝**（`SyncUploadRecovery.abandonBatch`）。
     ///
@@ -1070,6 +1180,11 @@ final class HealthKitSync {
         // 进度写点已在 `saveTask`/`clearTask` 里维护这个标志；这里补一次是为了让**重启后
         // 第一次读盘**也反映到界面上（`loadTask` 是唯一能看见磁盘上旧进度的地方）。
         hasPendingTask = restoredTask != nil
+        // P2-3：恢复轮把任务行里的**本批通道计数**打出来（只写计数）。这样"崩在提交前的
+        // 那一批带来了什么"在日志里仍可回答，不必重读一遍 HealthKit 才能知道。
+        if let restored = restoredTask, let restoreCounts = restored.lastExportCounts {
+            Self.logExportCounts(restoreCounts, scope: activeScope)
+        }
         if restoredTask?.pendingRecordCursors != nil, (identity.healthKitRecordSyncVersion ?? 0) < 2 {
             // A backend downgrade must not acknowledge a saved v2 archive while
             // silently ignoring its typed deletion events. Keep the same batch
@@ -1485,6 +1600,48 @@ final class HealthKitSync {
             if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
             let pendingDeletions = pendingDeletionsData
                 .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) } ?? .empty
+            // P0-4：workout 级定向补齐窗口（上一批登记的「刚完成的训练」时间窗）。
+            // 与 routeStates 同一条理由在导出**开始前**整批读出（导出跑在脱离主线程的上下文，
+            // 碰不了 `@MainActor` 的 store）；读失败时为空 ⇒ 本批不补窗口，方向安全
+            // （窗口待办留在表里，下一批再读）。
+            let workoutBackfillWindows = taskStore.loadWorkoutBackfillWindows(scope: activeScope)
+            if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
+            // P1-1（2026-10-18 同步诊断）：服务端覆盖探测。
+            //
+            // 触发条件（缺一不可）：服务端宣告了 `syncCoverageVersion >= 1`、且确实有类型需要
+            // 历史重放（游标缺失或上轮重放未完成）。稳态增量不花这次请求。
+            // 失败/老服务端 ⇒ 覆盖表为空 ⇒ 导出回落全量重放；**绝不让探测失败中断同步**。
+            var coverage: [String: SyncCoveragePolicy.TypeCoverage] = [:]
+            if (identity.syncCoverageVersion ?? 0) >= 1 {
+                let decodedCursors = recordCursors
+                    .flatMap { try? JSONDecoder().decode([String: HealthKitRecordCursor].self, from: $0) }
+                    ?? [:]
+                let recordTypes = HealthKitExport.recordTypeIdentifiers
+                if SyncCoveragePolicy.needsCoverageQuery(cursors: decodedCursors, types: recordTypes) {
+                    do {
+                        let response = try await api.syncCoverage(
+                            types: recordTypes, baseURL: serverURL, token: apiToken
+                        )
+                        try checkCancellation()
+                        // datasetEpoch 是覆盖数据的身份：与握手权威值不一致时**不用**它
+                        // （跨数据集复用覆盖点会跳过一段服务端其实没有的历史 ⇒ 方向错误）。
+                        if response.datasetEpoch == identity.datasetEpoch {
+                            coverage = Self.coverageTable(from: response)
+                            NSLog("[RAI] 覆盖探测：%d 个类型可用，历史段将跳过服务端已覆盖部分",
+                                  coverage.count)
+                        } else {
+                            NSLog("[RAI] 覆盖探测的 datasetEpoch 与握手不一致，回落全量重放")
+                        }
+                    } catch {
+                        // 老服务端 / 网络失败 / 取消以外的错误：只留一行诊断，回落到全量重放。
+                        // （取消由外层 `handleCancellation` 处理 —— 这里不再区分。）
+                        NSLog("[RAI] 覆盖探测失败，回落全量历史重放：%@", String(describing: error))
+                    }
+                }
+            }
+            // `runDetached` 的闭包是 `@Sendable`：被捕获的 `var coverage` 必须先冻结成不可变
+            // 快照（Swift 6 语言模式下"捕获可变变量进并发闭包"是错误，不是警告）。
+            let coverageSnapshot = coverage
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
                     // 任何来源的中止一旦发生就不再发布晚到的进度：原因分类只影响 phase 怎么写，
@@ -1540,6 +1697,10 @@ final class HealthKitSync {
                         // 据此决定"本批可执行子集"（blocked/退避未到期的不查）并按结局回传
                         // 调度更新；登记/移除仍由本函数在提交前后按既有纪律执行。
                         pendingRouteTodos: Array(pendingRouteTodos.values),
+                        // P0-4：到期窗口（导出在迟到补读/48h 窗口/历史重放之前先查它们）。
+                        workoutBackfillWindows: Array(workoutBackfillWindows.values),
+                        // P1-1：覆盖表（空 = 回落全量重放）。
+                        coverage: coverageSnapshot,
                         // B2：类型轮转起点（上一批读到的位置；让历史重放无类型饿死）。
                         typeRotationStart: self.loadRecordTypeRotation(),
                         onProgress: onProgress
@@ -1569,6 +1730,17 @@ final class HealthKitSync {
             }
             transientExportURL = exported.zipURL
             try checkCancellation()
+            // P2-3：本批通道计数只进日志（**只写计数**，不含样本值/UUID/日期）。
+            Self.logExportCounts(exported.channelCounts, scope: activeScope)
+            // P0-4：窗口的**超前登记**（先表后锚）—— 与路线待办同一条纪律：崩在随后任何一步
+            // 只会让窗口早到（下批多查一次，幂等），绝不会丢；锚的提交链在任务行与回执之后。
+            guard taskStore.upsertWorkoutBackfillWindows(
+                exported.workoutWindowRegistrations, scope: activeScope
+            ) else {
+                throw SyncHTTPError(message: taskStore.lastError ?? "workout 补齐窗口未能写入")
+            }
+            // P0-6 / P2-3：UI 只读快照。回执计数由 `markSuccess` 在服务端确认后补齐。
+            lastExportSummary = Self.exportSummary(from: exported)
             // 只把 scope 目录快照交给 worker；分块哈希/复制/原子发布都不触碰 MainActor 状态。
             message = "正在保存健康数据批次"
             let prepared = try await HealthSyncArchive.prepare(exported.zipURL, in: artifactFolder())
@@ -1630,7 +1802,10 @@ final class HealthKitSync {
                 // 结算完成之间时，本地仍有一份可执行的结算证据，不必重读 HealthKit。
                 routeCommit: Self.routeCommitCandidate(
                     scope: activeScope, batchId: payloadHash, exported: exported
-                )
+                ),
+                // P2-3：本批通道计数随任务行落盘 —— 恢复轮把它原样带进日志与摘要，
+                // 于是"崩在提交前的一批带来了什么"不必重读 HealthKit 才能回答。
+                lastExportCounts: exported.channelCounts
             ))
             // B2：轮转起点在**导出成功之后**立刻落盘（与任务行同批；即使随后上传失败，
             // 下一轮从新起点继续 —— 起点只影响"从哪个类型先读"，多走一步无害）。
@@ -1676,6 +1851,8 @@ final class HealthKitSync {
                     ),
                     // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
                     pendingDeletions: exported.pendingDeletions,
+                    // P0-4：本批窗口的整窗查询记账（成功后才结算）。
+                    workoutWindowUpdates: exported.workoutWindowUpdates,
                     // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
                     requiresReceipt: false
                 )
@@ -1703,6 +1880,8 @@ final class HealthKitSync {
                     ),
                     // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
                     pendingDeletions: exported.pendingDeletions,
+                    // P0-4：本批窗口的整窗查询记账（成功后才结算）。
+                    workoutWindowUpdates: exported.workoutWindowUpdates,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1921,6 +2100,15 @@ final class HealthKitSync {
         // `SyncTaskStore.commitSuccess` 的同名参数逐字一致：`nil` = 不改旧槽；空 = 清；非空 = 写；
         // 新增调用点必须显式表达属于哪一种（漏传 = 编译失败）。
         pendingDeletions: DirectSyncPendingDeletions?,
+        // P0-4（2026-10-18 同步诊断）：本批**整窗查询过**的 workout 补齐窗口记账。
+        //
+        // 与 `pendingDeletions` 的"无默认值"不同，这里**给默认空数组**是安全的：
+        // 漏传的唯一后果是该窗口的下一次检查时刻/收口没有推进 ⇒ 下一批再查一次
+        // （服务端按 UUID 幂等吸收重复样本）。恢复轮本来就没有新导出，传空即正确。
+        //
+        // 🔴 写入时机必须在 `commitSuccess` **之后**（与路线待办同一条"成功后才结算"）：
+        // 上传/导入失败的批次不能留下"已经补齐了"的证据。
+        workoutWindowUpdates: [WorkoutBackfillWindow] = [],
         // O02/WP-11 + R03：本批已成功交付、可从待办队列移除的 UUID。
         // 🔴 只有**完整观测**（`RouteFetch.Outcome.observation`，含合法零点）才会成为
         // 候选 —— 读取失败（`.unreadable`）绝不进这里（2026-10-16 复查：旧实现对
@@ -2088,6 +2276,21 @@ final class HealthKitSync {
         // 结算失败时**保留候选**（不抛错）：durable 的部分已经提交，这里失败的后果只是
         // 下一轮少一次 HealthKit 重读，而不会把一次已保存的同步报成失败。
         settlePendingRouteCommit()
+        // P0-4：workout 补齐窗口的**结算**（重试时刻/样本数/收口），排在 `commitSuccess` 之后。
+        // 写失败不让本次同步变红：durable 的部分已经提交，这里失败的后果只是窗口下批重跑
+        // 一次（服务端按 UUID 幂等）；但**不静默** —— 留一条带原因的诊断。
+        if !workoutWindowUpdates.isEmpty,
+           !taskStore.upsertWorkoutBackfillWindows(workoutWindowUpdates, scope: activeScope) {
+            NSLog("[RAI] workout 补齐窗口结算失败（下批重试）：%@",
+                  taskStore.lastError ?? "unknown")
+        }
+        // P0-6 / P2-3：回执计数只用于展示，**不参与任何提交判据**。
+        // 老服务端没有 `records` 字段 ⇒ 三个计数保持 nil（绝不编造 0）。
+        if let summary = lastExportSummary, let counts = receipt?.records {
+            lastExportSummary = summary.withReceiptCounts(
+                parsed: counts.parsed, inserted: counts.inserted, unchanged: counts.unchanged
+            )
+        }
         // `hasPendingTask` 只在**真的清掉了那一行**之后才翻 —— 它现在与 `clearTask()` 同为
         // 日志清空点，两处是判据要求的全部（多一处就等于界面可以凭空说"没有待办了"）。
         hasPendingTask = false
@@ -2138,6 +2341,48 @@ final class HealthKitSync {
             states: exported.routeStates,
             completedTodoUUIDs: exported.completedRouteTodos,
             discoveryCursor: exported.routeDiscoveryCursor
+        )
+    }
+
+    /// P1-1：把服务端覆盖响应归一成 `SyncCoveragePolicy` 的纯值表。
+    ///
+    /// 只做"字符串 → Date"的解析与类型桥接；**判据**（下界怎么算、什么时候不用）全部住在
+    /// 纯逻辑 `SyncCoveragePolicy`（可被回归编译，本文件不被任何回归编译）。
+    private static func coverageTable(
+        from response: SyncCoverageResponse
+    ) -> [String: SyncCoveragePolicy.TypeCoverage] {
+        var table: [String: SyncCoveragePolicy.TypeCoverage] = [:]
+        for entry in response.types {
+            table[entry.type] = SyncCoveragePolicy.TypeCoverage(
+                type: entry.type,
+                knownUntil: SyncCoveragePolicy.parseTimestamp(entry.knownUntil),
+                sampleCount: entry.sampleCount
+            )
+        }
+        return table
+    }
+
+    /// P2-3：把本批通道计数写进日志（**只写计数**，不写样本值/UUID/日期）。
+    ///
+    /// 为什么值得一条固定格式的日志：诊断时"每批 4500 条里谁占的"只能从服务端
+    /// `insertedRecordCount` 反推，而那个数字连类型都不带。有了这一行，重放/窗口/补读/
+    /// workout 窗口各写了多少条、本批几个类型在重放，可以直接从设备日志读出。
+    private static func logExportCounts(_ counts: ExportChannelCounts, scope: String) {
+        NSLog("[RAI] 本批通道计数 scope=%@ %@", scope, counts.logLine)
+    }
+
+    /// P2-3：导出结果 → UI 只读摘要（回执计数在 `markSuccess` 里补齐）。
+    private static func exportSummary(from exported: HealthKitExportResult) -> ExportSummary {
+        ExportSummary(
+            recordCount: exported.recordCount,
+            workoutCount: exported.workoutCount,
+            routeCount: exported.routeCount,
+            deletionCount: exported.deletionCount,
+            budgetStopReason: exported.budgetStopReason?.rawValue,
+            hasMorePages: exported.hasMorePages,
+            workoutWindowCount: exported.channelCounts.workoutWindows,
+            workoutWindowCompletedCount: exported.channelCounts.workoutWindowsCompleted,
+            updatedAt: Date()
         )
     }
 
@@ -2467,7 +2712,9 @@ final class HealthKitSync {
         // 此处只把三者当成「这一轮有没有读到任何东西」的判据（任一非 0 即非空导出），
         // 所以偏小的值不会误报。⚠️ 将来若要展示「导出了几条轨迹」，**不要**直接读这个字段
         // —— 它会给出一个偏小的数且不报错。详见 `HealthKitExportResult.routeCount` 的声明注释。
-        let budgetNotes = exported.budgetStopReason.map { [Self.budgetStopNote($0)] } ?? []
+        let budgetNotes = exported.budgetStopReason.map {
+            [Self.budgetStopNote($0, hasMorePages: exported.hasMorePages)]
+        } ?? []
         guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0,
               exported.deletionCount == 0 else {
             return latestMessage(base: base, warnings: notes + exported.warnings + budgetNotes)
@@ -2480,10 +2727,25 @@ final class HealthKitSync {
     /// 截断是**设计行为**（分批），但此前完全不可见：用户只看到"同步继续转"，
     /// 分不清"正常分批推进"与"卡在收敛耗尽"。作为尾注与计数同处一对括号
     /// （格式与既有 warnings 一致），只在**发生截断的这一轮**出现。
-    private static func budgetStopNote(_ reason: HealthKitExportResult.BudgetStopReason) -> String {
+    ///
+    /// 🔴 2026-10-18（同步诊断 lane-ios §2.1/§5.5）：`.recordNone` 的旧文案是反话 ——
+    /// 满载批（`hasMorePages == true`）里该类型明明写了 4500 条，却说"该类型本轮零进展"。
+    /// 两者必须分开：
+    ///   * 满载（`hasMorePages`）⇒「本批记录条数已满，剩余记录下一批继续」；
+    ///   * 预算有余量却连一条都放不进（`hasMorePages == false`）⇒ 保留"该类型零进展"，
+    ///     因为那种情形下它**确实**可能是权限/单条过大等真实原因。
+    private static func budgetStopNote(
+        _ reason: HealthKitExportResult.BudgetStopReason,
+        hasMorePages: Bool
+    ) -> String {
         switch reason {
         case .recordPage: return "本批达单批预算，记录按页截断，将分批继续"
-        case .recordNone: return "单条记录放不进本批剩余预算，该类型本轮零进展"
+        case .recordNone:
+            // `.recordNone` = 收缩到 `limit == 1` 仍放不下。两种成因必须分开说：
+            // 满载批是"整批满了"（正常分批），有余量时才是"该类型真的零进展"。
+            return hasMorePages
+                ? "本批记录条数已满，剩余记录下一批继续"
+                : "单条记录放不进本批剩余预算，该类型本轮零进展"
         case .routeFile: return "轨迹文件放不进本批剩余预算，本轮未取新轨迹"
         case .workoutBytes: return "本批达单批预算，workout 按页截断，将分批继续"
         }

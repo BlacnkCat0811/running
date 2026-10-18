@@ -31,6 +31,8 @@ struct RaiHandshake: Codable, Equatable {
     /// 唯一消费点 `DirectSyncBatchBudget.from(bounds:)`：`nil` 时回落保守常量。
     /// 客户端**不得**把它当"能力位"用（不是 `guard == 1` 那类门），它只是数值参数。
     var directSyncBounds: DirectSyncBounds? = nil
+    /// 服务端覆盖探测能力（P1-1）：1 = 支持 `GET /v1/sync/coverage`。老服务端省略。
+    var syncCoverageVersion: Int? = nil
 }
 
 /// 服务端 `/v1/handshake` 的 `directSyncBounds`（与 `packages/api-contracts/src/index.ts`
@@ -294,6 +296,9 @@ struct WorkoutListItem: Codable, Identifiable, Equatable {
     let confidence: Double?
     let trueAbilityDelta: Double?
     let hasRoute: Bool
+    /// P0-1：事实已提交但分析未发布时为 `pending`；老服务端省略 ⇒ nil（按已发布处理）。
+    /// 派生字段在 pending 时可能为 null/占位，消费方必须看本字段而不是猜。
+    var analysisPublishStatus: String? = nil
 }
 
 struct AbilityMetricSet: Codable, Equatable {
@@ -1449,6 +1454,8 @@ struct WorkoutDetail: Codable {
     let endedAt: String
     let durationSeconds: Double
     let elapsedSeconds: Double
+    /// P0-1：事实已提交但分析未发布时为 `pending`；老服务端省略 ⇒ nil（按已发布处理）。
+    var analysisPublishStatus: String? = nil
     let distanceKm: Double?
     let activeEnergyKcal: Double?
     let elevationGainMeters: Double?
@@ -1584,6 +1591,50 @@ struct OptionalWorkoutTrainingLoad: Codable {
     let loadRatio: Double?
     let strain: Double?
     let trainingStatus: String?
+}
+
+/// `GET /v1/sync/coverage`（P1-1）：服务端每个记录类型的已覆盖区间。
+nonisolated struct SyncCoverageResponse: Codable, Equatable, Sendable {
+    let datasetEpoch: String
+    let types: [SyncCoverageType]
+}
+
+nonisolated struct SyncCoverageType: Codable, Equatable, Sendable {
+    let type: String
+    let knownFrom: String?
+    let knownUntil: String?
+    let sampleCount: Int
+}
+
+/// `GET /v1/workouts/:id/freshness`（P0-3）：事实/分析/时序的补齐状态。
+nonisolated struct WorkoutFreshnessResponse: Codable, Equatable, Sendable {
+    let workoutId: String
+    let facts: WorkoutFreshnessFacts
+    let analysis: WorkoutFreshnessAnalysis
+    let series: [WorkoutFreshnessMetric]
+    /// `complete` = 分析已发布且最近 24h 无新事实；`partial` = 仍可能补齐。
+    let completeness: String
+}
+
+nonisolated struct WorkoutFreshnessFacts: Codable, Equatable, Sendable {
+    let committedAt: String?
+    let lastBatchAt: String?
+    let batches: Int
+}
+
+nonisolated struct WorkoutFreshnessAnalysis: Codable, Equatable, Sendable {
+    let status: String
+    let jobId: String?
+    let publishedAt: String?
+}
+
+nonisolated struct WorkoutFreshnessMetric: Codable, Equatable, Sendable {
+    let metric: String
+    let samples: Int
+    /// `present` / `not_seen_yet`（后者 ≠ 设备不支持）。
+    let state: String
+    /// P2-2：该指标最近一次被服务端接收的时刻；旧服务端省略 ⇒ nil。
+    var lastAvailableAt: String? = nil
 }
 
 struct WorkoutSeriesResponse: Codable {

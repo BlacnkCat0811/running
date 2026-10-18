@@ -18,6 +18,7 @@ xcrun swiftc -parse-as-library -disable-sandbox apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift \
   apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift \
   apps/ios/RAI/Skins/Technology/TechWorkoutDetailPresentation.swift \
+  apps/ios/RAI/SyncPresentationPolicy.swift \
   apps/ios/RAI/Skins/Technology/TechRunCoachPresentation.swift \
   apps/ios/tests/TechPresentationRegression.swift -o "$tmp/tech-presentation"
 "$tmp/tech-presentation"

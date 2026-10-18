@@ -61,6 +61,10 @@ test("真实 /v1/handshake 宣告 factsAnalysisContractVersion=1，且既有能�
     assert.equal(handshake.planSnapshotContractVersion, 1);
     assert.equal(handshake.coachLoopContractVersion, 1);
     assert.equal(handshake.planReceiptContractVersion, 2);
+    // P1-1（2026-10-18 同步诊断）：覆盖探测能力位。客户端 `guard == 1` 才去调
+    // `GET /v1/sync/coverage` 跳过服务端已有的历史；老服务端省略 ⇒ 回落全量重放。
+    assert.equal(handshake.syncCoverageVersion, 1,
+      "缺这个能力位，客户端无法安全跳过已知历史（P1-1 的服务端契约）");
 
     // 观测阶段 1（S1.2）：直连单批上界随握手暴露 —— iOS 分批版据此收敛拆批预算。
     // 数值与 `direct-sync-ingest.ts` 的常量同源；这里按**字面量**钉住，
@@ -89,6 +93,13 @@ test("HandshakeResponse 上能力位必须声明为可选：改成必填会让�
   assert.ok(declaration, "找不到 factsAnalysisContractVersion 的声明");
   assert.match(declaration, /^\s*factsAnalysisContractVersion\?: number;$/,
     "能力位必须是可选的 `?:`：老服务端省略它，老客户端也不会因为它而 decode 失败");
+  // 同一条纪律适用于 P1-1 的覆盖探测能力位（老服务端省略 ⇒ 客户端回落全量重放）。
+  const coverageDeclarations = body.split(/\r?\n/)
+    .filter((line) => /^\s*syncCoverageVersion\??\s*:/.test(line));
+  assert.equal(coverageDeclarations.length, 1,
+    `syncCoverageVersion 应有且只有一条声明，实际：${JSON.stringify(coverageDeclarations)}`);
+  assert.match(coverageDeclarations[0] ?? "", /^\s*syncCoverageVersion\?: number;$/,
+    "syncCoverageVersion 必须是可选 `?:`：新客户端在旧服务端上必须能正常 decode");
   // 观测阶段 1 的 bounds 同属"可选新增"：老服务端（收口前）省略它，iOS 走保守常量。
   assert.match(body, /directSyncBounds\?:\s*\{/,
     "directSyncBounds 必须声明为可选属性（`?:`）：省略它不能破坏任何一端的 decode");

@@ -2326,6 +2326,112 @@ final class RequestLog: @unchecked Sendable {
             }
             StubProtocol.extraHeaders = nil
         }
+        // ---------------------------------------------------------------------------
+        // 2026-10-18（同步诊断 P0-3 / P0-6）：打开会话的 freshness 与**自动重取**。
+        //
+        // 这条链此前完全没有执行者：`dataUpdatedGeneration` 只接 `refreshAll()`，而
+        // `refreshAll` 不碰 `selectedWorkout`/`selectedSeries` —— 详情只在 `.task` / 下拉刷新
+        // 时读。服务端证据里那句"列表 12:29:42Z 已变，App 直到 12:31:55Z 才第一次读新详情"
+        // 就是它。判据：代次变化且存在打开会话 ⇒ 真的发出一次 detail+series+freshness 读。
+        // ---------------------------------------------------------------------------
+        let refreshNow = ISO8601DateFormatter().date(from: "2026-10-18T13:00:00Z")!
+        func refreshDetail(_ id: String, endedAt: String, publishStatus: String?) -> String {
+            let publish = publishStatus.map { ",\"analysisPublishStatus\":\"\($0)\"" } ?? ""
+            return """
+            {"workout":{"id":"\(id)","startedAt":"2026-10-18T11:46:38Z","endedAt":"\(endedAt)","durationSeconds":2528,"elapsedSeconds":2528,"sourceCategory":"apple_health","sessionType":"easy","stimulusType":"easy","eligibilityStatus":"eligible","missingReasons":[],"qualityScore":1,"hasRoute":false,"modelVersion":"test","updatedTrueAbility":false,"heartRateSampleCount":0,"routePointCount":0,"sourceConfidence":1,"effectiveWeights":{},"confidenceFactors":{},"explanationCodes":[]\(publish)},"dimensions":{},"route":[]}
+            """
+        }
+        func refreshSeries(_ id: String) -> String {
+            let metrics = ["heartRate", "speed", "power", "cadence", "elevation",
+                           "strideLength", "verticalOscillation", "groundContactTime"]
+                .map { "\"\($0)\":{\"unit\":\"x\",\"totalSamples\":0,\"points\":[]}" }
+                .joined(separator: ",")
+            return """
+            {"trainingSessionId":"\(id)","startedAt":"2026-10-18T11:46:38Z","endedAt":"2026-10-18T12:28:46Z","sourceCategory":"apple_health","splits":[],"series":{\(metrics)}}
+            """
+        }
+        func refreshFreshness(_ id: String, completeness: String, analysis: String) -> String {
+            return """
+            {"workoutId":"\(id)","facts":{"committedAt":"2026-10-18T12:29:38Z","lastBatchAt":"2026-10-18T12:31:43Z","batches":6},"analysis":{"status":"\(analysis)","jobId":"job","publishedAt":null},"series":[{"metric":"heartRate","samples":505,"state":"present"},{"metric":"speed","samples":0,"state":"not_seen_yet"}],"completeness":"\(completeness)"}
+            """
+        }
+        let refreshSession = ServerSession()
+        refreshSession.serverURL = URL(string: "https://workout-refresh.invalid")
+        let refreshModel = NativeAppModel(session: refreshSession, api: api, now: { refreshNow })
+        let refreshLog = RequestLog()
+        let detailPath = "/v1/workouts/run-1"
+        let seriesPath = "/v1/workouts/run-1/series"
+        let freshnessPath = "/v1/workouts/run-1/freshness"
+        StubProtocol.handler = { request in
+            refreshLog.record(request)
+            switch request.url!.path {
+            case freshnessPath:
+                return (200, refreshFreshness("run-1", completeness: "partial", analysis: "published"), 0)
+            case seriesPath:
+                return (200, refreshSeries("run-1"), 0)
+            default:
+                return (200, refreshDetail("run-1", endedAt: "2026-10-18T12:28:46Z", publishStatus: nil), 0)
+            }
+        }
+        await refreshModel.loadWorkout(id: "run-1")
+        check(refreshModel.selectedFreshness?.completeness == "partial",
+              "opening a workout must fetch detail, series and freshness")
+        check(refreshLog.count(method: "GET", path: detailPath) == 1
+              && refreshLog.count(method: "GET", path: seriesPath) == 1
+              && refreshLog.count(method: "GET", path: freshnessPath) == 1,
+              "detail, series and freshness are fetched together")
+        // 后台（不在前台）不重取：后台窗口里的 UI 级读会跨过后台到期点被系统挂起。
+        let backgroundReload = await refreshModel.reloadOpenWorkoutIfStale(isForeground: false, coalescing: 0)
+        check(backgroundReload == false, "a background activation must not start a UI-level read")
+        check(refreshLog.count(method: "GET", path: detailPath) == 1,
+              "a background reload must not touch the network")
+        // 代次变化且存在打开会话 ⇒ 重取（这是 P0-6 的核心判据）。
+        let generationReload = await refreshModel.reloadOpenWorkoutIfStale(isForeground: true, coalescing: 0)
+        check(generationReload, "a stale open workout must be refetched after a sync generation")
+        check(refreshLog.count(method: "GET", path: detailPath) == 2
+              && refreshLog.count(method: "GET", path: seriesPath) == 2
+              && refreshLog.count(method: "GET", path: freshnessPath) == 2,
+              "the refetch refreshes detail, series and freshness together")
+        // 350 ms 合并窗口：同一波里的第二次调用复用第一次的重取，不把 burst 变成 N 倍读。
+        let burstFirst = Task { await refreshModel.reloadOpenWorkoutIfStale(isForeground: true, coalescing: 0.05) }
+        try await Task.sleep(for: .milliseconds(5))
+        let burstSecond = Task { await refreshModel.reloadOpenWorkoutIfStale(isForeground: true, coalescing: 0.05) }
+        let firstReloaded = await burstFirst.value
+        let secondReloaded = await burstSecond.value
+        check(firstReloaded && secondReloaded, "both callers of a burst share one refetch")
+        check(refreshLog.count(method: "GET", path: detailPath) == 3,
+              "the coalescing window merges a burst into a single refetch")
+        // 老服务端（freshness 404）：详情照常可用，只是没有补齐状态 —— 绝不把整页报成失败。
+        let legacySession = ServerSession()
+        legacySession.serverURL = URL(string: "https://workout-legacy.invalid")
+        let legacyModel = NativeAppModel(session: legacySession, api: api, now: { refreshNow })
+        StubProtocol.handler = { request in
+            if request.url!.path.hasSuffix("/freshness") { return (404, "{\"message\":\"未找到\"}", 0) }
+            if request.url!.path.hasSuffix("/series") { return (200, refreshSeries("run-1"), 0) }
+            return (200, refreshDetail("run-1", endedAt: "2026-10-18T12:28:46Z", publishStatus: nil), 0)
+        }
+        await legacyModel.loadWorkout(id: "run-1")
+        check(legacyModel.selectedWorkout?.workout.id == "run-1" && legacyModel.selectedFreshness == nil,
+              "a server without the freshness endpoint must not break the detail page")
+        // 已完整、已发布、且结束很久的训练：代次变化不再重取（否则每批都白读三条接口）。
+        StubProtocol.handler = { request in
+            refreshLog.record(request)
+            switch request.url!.path {
+            case freshnessPath:
+                return (200, refreshFreshness("run-1", completeness: "complete", analysis: "published"), 0)
+            case seriesPath:
+                return (200, refreshSeries("run-1"), 0)
+            default:
+                return (200, refreshDetail("run-1", endedAt: "2026-10-14T12:00:00Z", publishStatus: "published"), 0)
+            }
+        }
+        await refreshModel.loadWorkout(id: "run-1")
+        let beforeSettled = refreshLog.count(method: "GET", path: detailPath)
+        let settledReload = await refreshModel.reloadOpenWorkoutIfStale(isForeground: true, coalescing: 0)
+        check(settledReload == false, "a complete, published, old workout must not be refetched")
+        check(refreshLog.count(method: "GET", path: detailPath) == beforeSettled,
+              "a settled workout must not cost a network read per sync generation")
+
         print("All model regression checks passed.")
     }
 }

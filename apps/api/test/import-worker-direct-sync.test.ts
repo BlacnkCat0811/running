@@ -164,6 +164,16 @@ test("2e：含 Workout 的增量在 worker 里走统一接收器——登记分�
         "record-only 快通路必须**先被尝试**（它的入口判据更严），阶段账本里要有它的耗时");
       assert.ok((done.performance?.stagesMs.directSyncApply ?? 0) > 0,
         "统一接收器必须真的跑了 —— 只有判据放开、没有调用方时这里恒为 undefined");
+      // P2-3（2026-10-18 同步诊断）：接收器内部四段耗时经 worker 线程回传，落进
+      // `computeStagesMs`（开放键）。这条断言守的是**跨线程接线**：direct-sync-ingest
+      // 自己算出四段还不够，主线程拿不到就等于没记。
+      const directSyncStages = Object.entries(done.performance?.computeStagesMs ?? {})
+        .filter(([stage]) => stage.startsWith("directSync."))
+        .map(([stage]) => stage)
+        .sort();
+      assert.deepEqual(directSyncStages, [
+        "directSync.commit", "directSync.identity", "directSync.ledger", "directSync.parse"
+      ], "直连批次必须把四段观测耗时写进 performance.computeStagesMs");
       // 观测（阶段 1，S1.3）：直连成功必须如实落 lane 遥测（哪条子车道 + 无否决理由）。
       assert.equal(done.performance?.lane?.outcome, "direct");
       assert.equal(done.performance?.lane?.directSource, "direct-sync",

@@ -112,6 +112,31 @@ import Foundation
         let lateEvening = ISO8601DateFormatter().date(from: "2026-10-08T15:30:00Z")!
         precondition(NativeRaceGoalDraft.businessLocalDate(lateEvening) == "2026-10-08",
                      "23:30 Shanghai stays on the same business day")
+        // 2026-10-18（同步诊断 P0-5 / P0-6）：用户能读到的两句同步结论。
+        //
+        // 这两条属于"用户体验承诺"，不是内部状态机：事故里用户的原话是"界面在还有 75 批
+        // 待读时显示完成"，而"本批 0 新增"被读成"同步坏了"。判据逐字钉在文案上，
+        // 因为它们改错了不会让任何东西变红 —— 只有用户会误解。
+        let pendingCopy = SyncResultCopy.manualResult(
+            hasPendingContinuation: true, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true, counts: nil)
+        precondition(pendingCopy.contains("还有未读完的页"),
+                     "a sync with unread pages must say so instead of reporting completion")
+        precondition(pendingCopy != "健康数据检查完成。",
+                     "an unfinished sync must never be reported as checks complete")
+        let zeroInsertCopy = SyncResultCopy.manualResult(
+            hasPendingContinuation: false, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true,
+            counts: SyncResultCopy.BatchCounts(parsed: 4500, inserted: 0, unchanged: 4500))
+        precondition(zeroInsertCopy.contains("均为已有记录"),
+                     "a 0-insert batch must explain itself (duplicates are the normal state during replay)")
+        precondition(SyncResultCopy.countsNote(SyncResultCopy.BatchCounts()) == nil,
+                     "missing receipt counts must stay unknown instead of being written as zero inserts")
+        precondition(SyncResultCopy.manualResult(
+            hasPendingContinuation: false, hasPendingTask: false, isCancelled: false,
+            hasError: false, succeeded: true, counts: nil) == "健康数据检查完成。",
+            "a plain successful sync keeps the documented result line")
+
         print("User experience policy, reminders and feedback round-trip checks passed")
     }
 }

@@ -709,8 +709,10 @@ test("A17/A06：真实上传→inspect→import-jobs→终态（需要分析 ⇒
     // ⑩ 第 5 步里那条"给 iOS 判据的输入前提"：拿到的回执**含**能力位所承诺的字段。
     //    iOS 侧 `DirectSyncCursorPolicy` 据此推进游标；本机不跑 Swift，这里只说清服务端给了什么。
     //    （按**字段名集合**比较，不按插入顺序 —— JSON 对象顺序不是合同。）
+    // 2026-10-18（P0-3）：回执新增可选 `records` 计数块（parsed/inserted/unchanged）。
+    // 它描述**本批结果**，不改变 ingestStatus/analysisStatus 的既有语义；老服务端省略该键。
     assert.deepEqual(sortedKeys(direct),
-      ["analysisStatus", "dependencyGeneration", "ingestStatus", "parentBatchId", "publishedReleaseId", "receiptId"]);
+      ["analysisStatus", "dependencyGeneration", "ingestStatus", "parentBatchId", "publishedReleaseId", "receiptId", "records"]);
   } finally {
     await server.stop();
     harness.dispose();

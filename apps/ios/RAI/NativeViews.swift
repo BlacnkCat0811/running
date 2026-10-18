@@ -85,6 +85,10 @@ struct NativeRootView: View {
                 bodyMetricsRefreshPending = false
                 await native.refreshBodyMetrics()
             }
+            // 2026-10-18（事故复盘 P0-6）：回到前台也要让"正打开的那条训练"跟上 ——
+            // 后台窗口里发生的同步不会发 UI 级读，这里补一次（自身仍是"有打开会话且 stale"
+            // 才真的发请求，且只在 freshness/分析仍可能变化时才重取）。
+            await native.reloadOpenWorkoutIfStale(isForeground: true)
             while !Task.isCancelled {
                 let timezone = TimeZone(identifier: native.today?.timezone ?? "Asia/Shanghai") ?? .current
                 var calendar = Calendar(identifier: .gregorian)
@@ -114,6 +118,12 @@ struct NativeRootView: View {
                 }
                 await native.refreshAll()
                 await native.refreshBodyMetrics()
+                // 2026-10-18（事故复盘 P0-6）：`refreshAll` **不碰** `selectedWorkout` /
+                // `selectedSeries`，所以数据到了、正打开的那条训练还是旧的（服务端证据
+                // 12:29:42Z 列表已变，App 直到 12:31:55Z 才读新详情）。这里并排补一次
+                // 有界重取：只在有打开会话、且它确实 stale 时才发读（判据在
+                // `WorkoutFreshnessPresentation.shouldReload`，350 ms 合并窗口在模型里）。
+                await native.reloadOpenWorkoutIfStale(isForeground: true)
             }
         }
 
