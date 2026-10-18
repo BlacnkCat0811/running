@@ -4,7 +4,13 @@
 本目录不是第二套产品规范/实施计划，不保存**重复批次** Markdown 或 archive 副本。当轮尚未收尾的审查
 报告可以临时列在下方「当轮审查」一节，并在下一轮并入 `PROJECT_REVIEW` 或删除。
 
-## 当轮审查（未提交改动）
+## 当轮审查（未收尾；含已提交与未提交文档）
+
+> 状态口径（2026-10-18 修正）：本节报告可能**已提交**，也可能仍只存在于工作树；一律按文末「新产物约定」在下一轮并入 `PROJECT_REVIEW` 或删除，不能把本节标题读成"这些文件还没提交"。
+
+- [DEEP_REVIEW_2026-10-18.md](DEEP_REVIEW_2026-10-18.md)：
+  **全项目深度审查（2026-10-18）** —— 5 个并行只读 lane（数据管线 / 领域算法 / API 运行时与安全 / iOS 客户端 / 门禁·CI·文档）在 `HEAD 24aa7d8` 上的复核 + Lead 交叉验证；结论 **P0 0 / P1 0 / P2 11 / P3 42**，含本机基线（typecheck、全量 `npm test` 2038/2035/0 fail/3 skip、iOS 门禁 1132 PASS、`rust:verify` 11/11、五个文档/结构门禁、`npm audit`）与未验证边界。分 lane 证据见 [deep-review-2026-10-18/](deep-review-2026-10-18/README.md)（按 lane 直接打开 01–05 五份文件）。
+  **全部 11 P2 + 42 P3 已同轮修复/决策**：[FIXES_2026-10-18](deep-review-2026-10-18/FIXES_2026-10-18.md)（逐 ID 状态、修复后全量验证、3 项 DECISION 与遗留风险；代码/文档改动已随同轮提交落地）。
 
 - [TRAINING_PLAN_REVIEW_2026-10-18.md](TRAINING_PLAN_REVIEW_2026-10-18.md)：
   **训练计划功能详细审查（2026-10-18）** —— 服务端读取/发布/回执、iOS 状态机与 WorkoutKit 排期、周期化/依从性/摘要协议、文档契约与门禁；结论 **3 项 P1（回执 v2 线格式、revision 冲突 500、coach-loop 读取无跨库回验）+ 18 项 P2**，附本机验证（typecheck / iOS 门禁 / 207 例计划测试）与未验证边界。分 lane 证据见 [training-plan-review-2026-10-18/](training-plan-review-2026-10-18/README.md)。
