@@ -11,22 +11,39 @@ import {
 
 const reference = { temperatureC: 15, humidityPercent: 50, elevationGainMeters: 0 };
 
-test("N02: grade adjustment is monotone in grade and exact at zero", () => {
+test("N02: grade adjustment is exact at zero and monotone where the cost model is monotone", () => {
+  // The Minetti (2002) cost curve is **U-shaped**: it bottoms out around −20 %
+  // (eccentric braking gets expensive again on steeper descents), so the
+  // flat-equivalent pace is monotone only on each side of that minimum. The old
+  // assertion sampled [−6 %, +10 %] and claimed global monotonicity, which the
+  // model does not have; this splits the claim into the part that is true.
   const pace = 300;
   const flat = gradeAdjustedPace(pace, 0);
   assert.equal(flat.paceSecondsPerKm, pace, "a flat split must be its own flat equivalent");
 
-  const grades = [-6, -3, -1, 0, 1, 3, 6, 10];
-  const values = grades.map((grade) => gradeAdjustedPace(pace, grade).paceSecondsPerKm);
-  for (let index = 1; index < values.length; index += 1) {
+  // Uphill side of the minimum: every extra percent of grade costs more, so the
+  // flat-equivalent pace falls monotonically.
+  const uphill = [-5, -1, 0, 1, 3, 6, 10, 20, 30, 45];
+  const uphillValues = uphill.map((grade) => gradeAdjustedPace(pace, grade).paceSecondsPerKm);
+  for (let index = 1; index < uphillValues.length; index += 1) {
     assert.ok(
-      values[index]! < values[index - 1]!,
-      `equivalent flat pace must fall as the grade rises: ${grades[index - 1]}% -> ${grades[index]}%`
+      uphillValues[index]! < uphillValues[index - 1]!,
+      `equivalent flat pace must fall as the grade rises: ${uphill[index - 1]}% -> ${uphill[index]}%`
     );
   }
-  assert.ok(values[0]! > pace, "downhill is slower at flat-equivalent effort");
-  assert.ok(values.at(-1)! < pace, "uphill is faster at flat-equivalent effort");
+  assert.ok(uphillValues.at(-1)! < pace, "uphill is faster at flat-equivalent effort");
+
+  // Steep descent past the cost minimum: the model says a −30 % grade costs more
+  // than a −20 % one, so the "faster because steeper" reading is false there. The
+  // assertion is deliberately about the model, not about a policy choice.
+  const shallowDescent = gradeAdjustedPace(pace, -20).paceSecondsPerKm;
+  const steepDescent = gradeAdjustedPace(pace, -30).paceSecondsPerKm;
+  const steepest = gradeAdjustedPace(pace, -MAXIMUM_GRADE_FRACTION * 100).paceSecondsPerKm;
+  assert.ok(shallowDescent > pace, "a steep descent is slower than flat at equal effort");
+  assert.ok(steepDescent < shallowDescent, "past the cost minimum a steeper descent costs more, so the flat equivalent is slower");
+  assert.ok(steepest < steepDescent, "the same holds at the domain edge");
 });
+
 
 test("N02: the same split measured twice gives the same adjusted pace (no hidden state)", () => {
   const first = gradeAdjustedPace(287.4, 4.2);

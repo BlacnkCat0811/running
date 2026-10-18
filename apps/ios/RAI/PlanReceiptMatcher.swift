@@ -50,9 +50,16 @@ enum PlanReceiptMatcher {
         }
     }
 
-    /// 计划业务时区的解析入口：调用方只允许在已验证的 timezone 字符串上使用。
-    static func planTimeZone(_ identifier: String) -> TimeZone {
-        TimeZone(identifier: identifier) ?? TimeZone(secondsFromGMT: 8 * 3600)!
+    /// 计划业务时区的解析入口（2026-10-18 深度审查 P3-25：**可选**，不再静默兜底）。
+    ///
+    /// 旧实现解析失败时回落 `UTC+8`。它被用在**撤回核验**（`hasResidualEntries`：UUID + 精确
+    /// 时刻的身份比较）上，而"用一个错误的时区去比较绝对时刻"可能把残留判成已清、也可能把
+    /// 已清判成残留 —— 两种都不可接受，而兜底让这种形态**不可见**（没有任何日志、没有失败）。
+    ///
+    /// 语义：`nil` = 这个字符串不是合法 IANA 时区 ⇒ 调用方**不得做身份比较**，必须按
+    /// "不可核验"处理（`cleanupVerified = false`，保留风险账目并留诊断）。
+    static func planTimeZone(_ identifier: String) -> TimeZone? {
+        TimeZone(identifier: identifier)
     }
 
     static func confirm(requests: [PlanSchedulingRequest], listed: [PlanSchedulingReadback], timeZone: TimeZone) -> Set<UUID> {

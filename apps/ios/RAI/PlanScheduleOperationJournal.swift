@@ -105,6 +105,17 @@ final class PlanScheduleJournal {
             durationMilliseconds: max(0, operation.updatedAt.timeIntervalSince(previousTime) * 1000)))
         return persisted
     }
+    /// 记录一条**不可核验/降级**类诊断（2026-10-18 深度审查 P3-25 / P3-27）。
+    ///
+    /// 与 `persist` 里的"阶段推进"诊断不同，这条不改变操作阶段 —— 它只负责让"某件事无法
+    /// 按身份判定"留下痕迹。此前这类形态（例如计划的业务时区字符串无法解析）在 UI 上只会
+    /// 表现为一句笼统的"未能确认撤回"，而导出诊断里没有任何可归因的码。
+    func recordDiagnostic(name: String, errorCode: String?, owed: Int? = nil, confirmed: Int? = nil) {
+        storage.recordPlanDiagnostic(.init(
+            at: Date(), name: name, scopeDigest: operation.scope,
+            operationId: operation.operationId.uuidString, revision: operation.goalsRevision,
+            owed: owed, confirmed: confirmed, errorCode: errorCode))
+    }
     func finish(ledger: PlanWatchLedger?, receipts: [PlanSyncReceipt], verified: Bool) -> Bool {
         operation.phase = verified ? .verified : .partial; operation.updatedAt = Date()
         let confirmed = Set(ledger?.entries.map(\.workoutID) ?? [])

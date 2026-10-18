@@ -279,3 +279,117 @@ test("the declared unavailable comparability sits below the learning gate on pur
   assert.ok(defaultIdentityNormalizationConfig.comparabilityOutOfDomain < 0.9);
   assert.ok(defaultIdentityNormalizationConfig.comparabilityOutOfDomain < defaultIdentityNormalizationConfig.comparabilityUnavailable);
 });
+
+// -----------------------------------------------------------------------------
+// P02 机检：账本声明 ↔ 源码里真实的修正点
+//
+// The ledger used to be a declaration nobody compared against the code: adding a
+// third correction site (or moving an existing one) changed nothing unless a human
+// noticed. This check makes the registry executable:
+//   1. every ledger id must appear as `// condition-ledger:<id>` inside the function
+//      its `location` names;
+//   2. every call to a correction primitive must sit in a ledger-declared function or
+//      in the short allowlist of composition/read-only functions below.
+// -----------------------------------------------------------------------------
+
+const PHYSIOLOGY_FILE = "packages/physiology/src/index.ts";
+
+/** The shared primitives that actually apply a condition correction. */
+const CORRECTION_PRIMITIVES = [
+  "performanceConditionPenaltyFraction(",
+  "heatHumidityPenaltyFraction(",
+  "elevationPenaltyFraction(",
+  "createPhysiologyNormalizationAdapter("
+] as const;
+
+/**
+ * Not correction sites:
+ *   · the composed primitive and its two components (their definitions compose it);
+ *   · the adapter factory (it is *how* a site applies the shared penalty);
+ *   · `buildWorkoutEnvironmentView` (docs §5.1 read-out — it must call the same
+ *     adapter so the number shown equals the number applied, but it changes nothing).
+ */
+const CORRECTION_PRIMITIVE_OWNERS = new Set([
+  "performanceConditionPenaltyFraction",
+  "heatHumidityPenaltyFraction",
+  "elevationPenaltyFraction",
+  "createPhysiologyNormalizationAdapter",
+  "buildWorkoutEnvironmentView"
+]);
+
+/** Name of the function whose body contains `index`, or null at top level. */
+function enclosingFunction(source: string, index: number): string | null {
+  const before = source.slice(0, index);
+  const pattern = /(?:export )?function ([A-Za-z0-9_]+)\(/g;
+  let match: RegExpExecArray | null;
+  let last: string | null = null;
+  while ((match = pattern.exec(before)) !== null) last = match[1]!;
+  return last;
+}
+
+function assertConditionLedgerMatchesSource(
+  ledger: readonly ConditionCorrectionSite[],
+  source: string
+): void {
+  const declared = new Map<string, string>();
+  for (const site of ledger) {
+    const [file, symbol] = site.location.split(":");
+    assert.equal(file, PHYSIOLOGY_FILE, `${site.id}: the scanner only knows ${PHYSIOLOGY_FILE}`);
+    assert.ok(symbol, `${site.id}: location must be 文件:函数`);
+    declared.set(symbol, site.id);
+    const marker = `condition-ledger:${site.id}`;
+    const at = source.indexOf(marker);
+    assert.ok(at >= 0, `${site.id} is not registered in the source: missing \`// ${marker}\``);
+    assert.equal(
+      enclosingFunction(source, at),
+      symbol,
+      `${site.id}: the marker must sit inside ${symbol}, not ${String(enclosingFunction(source, at))}`
+    );
+  }
+  // No anonymous marker may exist without a ledger entry: that is a third site.
+  for (const match of source.matchAll(/condition-ledger:([A-Za-z0-9-]+)/g)) {
+    assert.ok(
+      [...declared.values()].includes(match[1]!),
+      `condition-ledger:${match[1]} has no entry in defaultConditionLedger`
+    );
+  }
+  for (const primitive of CORRECTION_PRIMITIVES) {
+    for (let at = source.indexOf(primitive); at >= 0; at = source.indexOf(primitive, at + 1)) {
+      if (source.slice(Math.max(0, at - "function ".length), at) === "function ") continue; // definition
+      const owner = enclosingFunction(source, at);
+      if (owner === null) continue;
+      if (owner === "performanceConditionPenaltyFraction") continue; // composed from its parts
+      if (CORRECTION_PRIMITIVE_OWNERS.has(owner)) continue;
+      assert.ok(
+        declared.has(owner),
+        `${primitive} is applied inside ${owner}, which is not in defaultConditionLedger — ` +
+        "register the site (and its condition-ledger marker) or move it under a registered function"
+      );
+    }
+  }
+}
+
+test("P02: the condition ledger and the source's correction sites agree", () => {
+  const source = readFileSync(resolve(projectRoot, PHYSIOLOGY_FILE), "utf8");
+  assertConditionLedgerMatchesSource(defaultConditionLedger, source);
+});
+
+test("P02: a third correction site turns the ledger check red", () => {
+  const source = readFileSync(resolve(projectRoot, PHYSIOLOGY_FILE), "utf8");
+  const withThirdSite = `${source}\nexport function leaksThirdCorrection(distanceMeters: number, conditions: PerformanceConditions): number {\n  return heatHumidityPenaltyFraction(conditions.temperatureC, conditions.humidityPercent);\n}\n`;
+  assert.throws(
+    () => assertConditionLedgerMatchesSource(defaultConditionLedger, withThirdSite),
+    /leaksThirdCorrection.*not in defaultConditionLedger/
+  );
+  // A third marker without a ledger entry is a registration, not a silent extra site.
+  assert.throws(
+    () => assertConditionLedgerMatchesSource(
+      defaultConditionLedger,
+      source.replace("condition-ledger:race-prediction-scenario", "condition-ledger:race-prediction-scenario\n    // condition-ledger:third-site")
+    ),
+    /third-site.*has no entry/
+  );
+  // Moving a marker out of its declared function (or deleting it) is drift.
+  const moved = source.replace("condition-ledger:race-prediction-scenario", "condition-ledger:moved");
+  assert.throws(() => assertConditionLedgerMatchesSource(defaultConditionLedger, moved), /race-prediction-scenario/);
+});

@@ -609,9 +609,18 @@ check(
 )
 # 5xx 的 code 会被 `apiErrorPayload` 抹平 —— `SyncUploadRecovery` 必须靠状态码兜底，
 # 这条前置一旦不成立，那边的注释与判据就同时过期了。
+#
+# 2026-10-18（跨 lane 跟进）：服务端把这套映射重构成 `EXPOSED_SERVER_ERROR_CODES`
+# 白名单 + `exposeDetail`（应用审查 P3-16），于是旧的"字面量 `status >= 500`"判据
+# 不再成立，而**语义没变**：≥500 仍默认落到 `internal_error` + 通用文案，只有白名单里的
+# 码原样返回。判据因此改为断言**方向**（默认抹平 + 有 500 的分支），既能接受白名单
+# 扩展（`restore_recovery_required` / `plan_operation_status_unknown`），又仍能抓住
+# "彻底不再抹平 5xx"这种真回归 —— 后者会让上传恢复逻辑误信 5xx 的 code。
 api_error = read(ROOT / "apps" / "api" / "src" / "api-error.ts")
 check(
-    "status >= 500" in api_error and "internal_error" in api_error,
+    "internal_error" in api_error
+    and "本地服务处理请求失败" in api_error
+    and re.search(r"status\s*(?:<|>=)\s*500", api_error) is not None,
     "apiErrorPayload no longer scrubs 5xx codes; SyncUploadRecovery's status-code fallback may be re-derived",
 )
 

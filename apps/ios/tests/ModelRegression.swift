@@ -1404,13 +1404,27 @@ final class RequestLog: @unchecked Sendable {
                 check(PlanMutationDisposition.isTerminalPlanPublicationError(code),
                       "publication terminal code \(code) must be classified terminal")
             }
+            // 2026-10-18（深度审查 P3-19）：受教练合同管理的数据集对 legacy 写路由恒 409
+            // `coach_loop_contract_required`（server.ts preHandler）⇒ 同一份 legacy 载荷
+            // 重放永远不可能成功，必须作废本地账目，否则 `hasPendingPlanPublication` 永久钉住。
+            check(PlanMutationDisposition.isTerminalPlanPublicationError("coach_loop_contract_required"),
+                  "the coach-loop contract guard (409) is terminal for a legacy publication — " +
+                  "replaying the same payload can never succeed while the dataset stays managed")
+            check(PlanMutationDisposition.isTerminalPlanReceiptError("coach_loop_contract_required"),
+                  "the coach-loop contract guard (409) is terminal for a legacy watch receipt too " +
+                  "(/v1/mobile/workout-plan/** is prefix-matched) — otherwise hasPendingPlanReceipts " +
+                  "stays true forever and the user has no exit")
+            check(!PlanMutationDisposition.isTerminalPlanReceiptError("plan_snapshot_changed")
+                    && !PlanMutationDisposition.isTerminalPlanReceiptError("database_busy"),
+                  "the retryable 503 codes must NOT become terminal (they are 're-read, facts changed')")
             for code in ["network", "mutation_conflict", "unauthorized", "http_503", "http_500"] {
                 check(!PlanMutationDisposition.isTerminalPlanPublicationError(code),
                       "transient publication code \(code) must NOT be terminal")
             }
             for code in ["plan_receipt_scope_mismatch", "plan_receipt_evidence_mismatch", "plan_receipt_contract_mismatch",
                          "plan_receipt_date_invalid", "plan_receipt_key_conflict",
-                         "coach_receipt_contract_mismatch", "coach_receipt_evidence_mismatch"] {
+                         "coach_receipt_contract_mismatch", "coach_receipt_evidence_mismatch",
+                         "coach_loop_contract_required"] {
                 check(PlanMutationDisposition.isTerminalPlanReceiptError(code),
                       "receipt terminal code \(code) must be classified terminal")
             }
@@ -1425,6 +1439,45 @@ final class RequestLog: @unchecked Sendable {
             }
             check(!PlanMutationDisposition.isTerminalCoachFeedbackError("network"),
                   "a transient feedback failure must stay retryable")
+        }
+
+        do {
+            // 2026-10-18（深度审查 P3-26）：读取面板失败类别的归并规则。
+            // 这些布尔决定"点亮离线横幅 / 提示升级 App / 说明快照不可信"，改错方向全是
+            // **用户可见的错误指引**，而此前它们是 `refresh()` 里的三个内联布尔，无判据。
+            let allOk = NativeAppModel.ReadPanelTally.of([.ok, .ok, .ok, .ok])
+            check(allOk.failed == 0 && allOk.anySucceeded && allOk.serverAnswered
+                    && !allOk.decodingOnly && !allOk.validationOnly,
+                  "four healthy panels report no failure class")
+            let offline = NativeAppModel.ReadPanelTally.of([.failure, .failure, .failure, .failure])
+            check(offline.failed == 4 && !offline.serverAnswered && !offline.decodingOnly && !offline.validationOnly,
+                  "four network failures are the only shape that lights the offline banner")
+            let decoded = NativeAppModel.ReadPanelTally.of([.decoding, .decoding, .decoding, .decoding])
+            check(decoded.decodingOnly && decoded.serverAnswered && !decoded.validationOnly,
+                  "pure decode failures are contract drift: reachable server, upgrade hint allowed")
+            let validated = NativeAppModel.ReadPanelTally.of([.validation, .validation, .validation, .validation])
+            check(validated.validationOnly && validated.serverAnswered && !validated.decodingOnly,
+                  "pure safety-field failures are reachable-but-untrusted: never an upgrade hint")
+            let mixedKinds = NativeAppModel.ReadPanelTally.of([.validation, .decoding, .decoding, .decoding])
+            check(!mixedKinds.decodingOnly && !mixedKinds.validationOnly && mixedKinds.serverAnswered,
+                  "a mixed snapshot-validation + decode failure is NEITHER pure drift NOR pure validation " +
+                  "(P3-26: the old predicate counted .validation as decoding and told the user to upgrade)")
+            let mixedWithOffline = NativeAppModel.ReadPanelTally.of([.ok, .ok, .decoding, .failure])
+            check(!mixedWithOffline.serverAnswered && !mixedWithOffline.decodingOnly && !mixedWithOffline.validationOnly,
+                  "one real network failure among decode failures keeps the offline classification")
+        }
+
+        do {
+            // 2026-10-18（深度审查 P3-25）：计划业务时区解析**不再静默兜底 UTC+8**。
+            // 旧实现用固定兜底值去比较绝对时刻（撤回残留判据），坏字符串会静默产出错误身份。
+            check(PlanReceiptMatcher.planTimeZone("Asia/Shanghai")?.identifier == "Asia/Shanghai",
+                  "a valid IANA plan timezone parses")
+            check(PlanReceiptMatcher.planTimeZone("America/New_York")?.identifier == "America/New_York",
+                  "a non-default plan timezone parses (no hard-coded fallback involvement)")
+            check(PlanReceiptMatcher.planTimeZone("Not/AZone") == nil
+                    && PlanReceiptMatcher.planTimeZone("") == nil,
+                  "an unparseable plan timezone returns nil — the caller must fail closed instead of " +
+                  "comparing identities with a substituted timezone")
         }
 
         do {
@@ -2039,7 +2092,20 @@ final class RequestLog: @unchecked Sendable {
             check(RaiRetryAfter.seconds(from: " 2 ") == 2, "Retry-After tolerates surrounding whitespace")
             check(RaiRetryAfter.seconds(from: "0") == 0, "Retry-After accepts zero seconds")
             check(RaiRetryAfter.seconds(from: "-3") == 0, "negative Retry-After is clamped to zero, never negative")
-            check(RaiRetryAfter.seconds(from: "9") == 5, "Retry-After above five seconds is clamped")
+            // 2026-10-18（深度审查 P3-28）：**展示**不再夹取 0..5，**调度**才夹取。
+            // 旧实现让 429 文案把"服务端建议 9 秒"说成"建议 5 秒"—— 改写服务端的建议而
+            // 用户不可知。两条口径必须分开断言，否则改回去也不会有判据响。
+            check(RaiRetryAfter.seconds(from: "9") == 9,
+                  "the DISPLAY value keeps the server's suggestion (9 stays 9, not clamped to 5)")
+            check(RaiRetryAfter.schedulingSeconds(from: "9") == 5,
+                  "the SCHEDULING value is clamped to five seconds (a foreground retry must not stall)")
+            check(RaiRetryAfter.seconds(from: "600") == 600
+                    && RaiRetryAfter.seconds(from: "100000") == RaiRetryAfter.displayMaximum,
+                  "the display value only caps absurd waits (600 s ceiling), never rewrites plausible ones")
+            check(RaiRetryAfter.schedulingSeconds(from: "1") == 1
+                    && RaiRetryAfter.schedulingSeconds(from: "-3") == 0
+                    && RaiRetryAfter.schedulingSeconds(from: "abc") == nil,
+                  "the scheduling value keeps the same parse rules and the 0...5 clamp")
             check(RaiRetryAfter.seconds(from: "1.5") == nil, "fractional Retry-After is ignored (integers only)")
             check(RaiRetryAfter.seconds(from: "Wed, 21 Oct 2015 07:28:00 GMT") == nil,
                   "HTTP-date Retry-After is ignored instead of being misread as seconds")
@@ -2111,6 +2177,21 @@ final class RequestLog: @unchecked Sendable {
                           "429 keeps the legacy server error plus its retry hint")
                 } else {
                     check(false, "429 must remain .server, not retryableServer")
+                }
+            } catch {
+                check(false, "429 must throw RaiAPIClientError")
+            }
+            // P3-28 的端到端形态：服务端说 9 秒 ⇒ 文案照说 9 秒（不再被改写为 5 秒）。
+            StubProtocol.extraHeaders = ["Retry-After": "9"]
+            do {
+                _ = try await api.today(baseURL: retryAfterBase, token: "")
+                check(false, "429 must throw")
+            } catch let error as RaiAPIClientError {
+                if case let .server(_, message, _) = error {
+                    check(message.contains("建议 9 秒") && !message.contains("建议 5 秒"),
+                          "a 429 with Retry-After: 9 quotes the server's nine seconds verbatim (P3-28)")
+                } else {
+                    check(false, "429 must remain .server")
                 }
             } catch {
                 check(false, "429 must throw RaiAPIClientError")

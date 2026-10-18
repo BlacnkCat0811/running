@@ -119,6 +119,100 @@ struct HealthKitRecordCursorRegression {
         check(RecentWindowAccounting.nextMark(written: 1, now: now) == now,
               "a window that actually delivered samples advances the watermark to now")
 
+        // ── P3-22（2026-10-18）：补读分页的窗口下界必须**固定**，否则前缘漂移 ──
+        // 缺陷形态：补读跨多批时旧实现每批用当时的 `now` 重算 `now − 14d`，读完最后一页时
+        // 左下沿已经越过最初那段时间，而 `pageOutcome` 按 `oldestSample <= windowStart` 判
+        // "整窗完成" ⇒ 那一小段从未读过却被记成已覆盖（只能等 30 天再补）。
+        check(legacyCursor.lateBackfillWindowStart == nil,
+              "a legacy payload decodes with no backfill window start (first page re-derives it)")
+        let pagingCursor = HealthKitRecordCursor(
+            anchor: Data([9]), historyReadAt: now, recentWindowReadAt: nil,
+            lateBackfillAt: nil, lateBackfillBefore: now.addingTimeInterval(-2 * 24 * 3600),
+            lateBackfillWindowStart: now.addingTimeInterval(-LateDynamicsBackfill.lookback)
+        )
+        let pagingRound = try JSONDecoder().decode(
+            HealthKitRecordCursor.self, from: JSONEncoder().encode(pagingCursor)
+        )
+        check(pagingRound == pagingCursor && pagingRound.lateBackfillWindowStart == pagingCursor.lateBackfillWindowStart,
+              "the fixed backfill window start survives pending-batch serialization")
+        let firstPageStart = LateDynamicsBackfill.windowStart(cursor: cursor, now: now)
+        check(firstPageStart == now.addingTimeInterval(-LateDynamicsBackfill.lookback),
+              "the first page derives the window start from now − lookback")
+        let secondBatchStart = LateDynamicsBackfill.windowStart(
+            cursor: pagingCursor, now: now.addingTimeInterval(6 * 3600))
+        check(secondBatchStart == firstPageStart,
+              "later pages reuse the persisted window start — the leading edge must not drift with the batch clock")
+
+        // 多批补读的覆盖并集：每批 `now` 前移 2h、每页读最新 3 天（模拟单类型上限截断），
+        // 断言 (a) 一直读到固定下界才 `completed`；(b) 各批区间首尾相接、没有缝。
+        var covered: [ClosedRange<Date>] = []
+        var nextPagingCursor: HealthKitRecordCursor? = HealthKitRecordCursor(
+            anchor: Data([1]), historyReadAt: now)
+        var simulationBatches = 0
+        while simulationBatches < 12 {
+            let batchNow = now.addingTimeInterval(Double(simulationBatches) * 7_200)
+            guard let current = nextPagingCursor,
+                  LateDynamicsBackfill.needs(cursor: current, now: batchNow) else { break }
+            let lower = LateDynamicsBackfill.windowStart(cursor: current, now: batchNow)
+            let upper = current.lateBackfillBefore ?? batchNow
+            let pageOldest = max(lower, upper.addingTimeInterval(-3 * 24 * 3600))
+            covered.append(pageOldest...upper)
+            switch LateDynamicsBackfill.pageOutcome(
+                returned: LateDynamicsBackfill.limit, truncated: pageOldest > lower,
+                oldestSample: pageOldest, windowStart: lower,
+                paging: current.lateBackfillBefore != nil
+            ) {
+            case .completed:
+                nextPagingCursor = HealthKitRecordCursor(
+                    anchor: current.anchor, historyReadAt: current.historyReadAt,
+                    lateBackfillAt: batchNow, lateBackfillBefore: nil,
+                    lateBackfillWindowStart: nil)
+            case .nextPage(let before):
+                nextPagingCursor = HealthKitRecordCursor(
+                    anchor: current.anchor, historyReadAt: current.historyReadAt,
+                    lateBackfillAt: current.lateBackfillAt, lateBackfillBefore: before,
+                    lateBackfillWindowStart: lower)
+            case .retry:
+                nextPagingCursor = nil
+            }
+            simulationBatches += 1
+        }
+        let fixedStart = now.addingTimeInterval(-LateDynamicsBackfill.lookback)
+        check(covered.count == 5 && covered.last?.lowerBound == fixedStart,
+              "multi-batch paging reaches the FIXED window start before marking the backfill complete")
+        check(zip(covered, covered.dropFirst()).allSatisfy { $0.upperBound >= $1.lowerBound },
+              "consecutive backfill batches abut each other — no unread gap in the middle")
+        check(nextPagingCursor?.lateBackfillAt != nil && nextPagingCursor?.lateBackfillBefore == nil,
+              "the completion bookkeeping clears the paging bound and the fixed window start")
+        check(nextPagingCursor?.lateBackfillWindowStart == nil,
+              "a completed backfill forgets its window start (the next run re-derives a fresh one)")
+
+        // ── P3-24（2026-10-18）：稳态"该有却没有"只进诊断，不弹用户警告 ──
+        check(LateDynamicsBackfill.steadyStateGapDiagnostics(writtenTypes: [
+                "HKQuantityTypeIdentifierRunningSpeed",
+                "HKQuantityTypeIdentifierRunningStrideLength"
+              ]).count == 2,
+              "a steady-state batch with power AND ground-contact missing reports both (siblings prove the run happened)")
+        check(LateDynamicsBackfill.steadyStateGapDiagnostics(writtenTypes: [
+                "HKQuantityTypeIdentifierRunningSpeed",
+                "HKQuantityTypeIdentifierRunningPower",
+                "HKQuantityTypeIdentifierRunningGroundContactTime"
+              ]).isEmpty,
+              "a batch that wrote both dynamics types reports no gap")
+        check(LateDynamicsBackfill.steadyStateGapDiagnostics(writtenTypes: [
+                "HKQuantityTypeIdentifierHeartRate",
+                "HKQuantityTypeIdentifierStepCount"
+              ]).isEmpty,
+              "without any running-dynamics sibling there is nothing to report (no false permission alarm)")
+        check(LateDynamicsBackfill.steadyStateGapDiagnostics(writtenTypes: [
+                "HKQuantityTypeIdentifierRunningVerticalOscillation",
+                "HKQuantityTypeIdentifierRunningPower"
+              ]) == [
+                "[RAI] 稳态同步缺口：本批写入了其它跑步动态但没有 HKQuantityTypeIdentifierRunningGroundContactTime"
+                  + "（检查读取权限；若是预算/时序问题，下一次补读通道会再覆盖近 14 天）"
+              ],
+              "only the actually-missing type is reported, with a stable diagnostic text")
+
         // ── 读到底：每页（含 deletion-only 页）都被提交，锚点推进到最后 ──
         var drainedQueried: [Int?] = []
         var drainedCommitted: [String] = []

@@ -584,8 +584,8 @@ seedImportGenerations全库补种
 
 - [ ] A01–A18 全部通过，逐项附测试或人工证据；没有仅限步数/体重的例外。
 - [ ] P01–P06 在目标云机代表性规模下完成实测并满足标准；未测项不得宣称达标。
-- [ ] `npm run typecheck`、`npm test`、`npm run build` 通过。
-- [ ] 涉及浏览器流程时，`npm run test:e2e:web` 通过；不运行冻结的响应式覆盖。
+- [ ] `npm run typecheck`、`npm test` 通过。~~`npm run build`~~ 已随 Web/macOS 退役**删除**（[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)），不可复跑、也不得加回 `package.json`；它不再是发布判据。
+- [ ] ~~浏览器流程的 `npm run test:e2e:web`~~ 同随 D17 删除：D17 之后不存在 Web 测试面（无浏览器客户端、无 WKWebView 壳），本条**不适用**，不要按旧句子补跑或把脚本加回。
 - [ ] 涉及 iOS 时，`npm run test:ios` 确实检查源文件；无 Xcode 的跳过不是通过证据。
 - [ ] 真机 HealthKit 自动增量、续传、有效游标保持和新状态完成手动验收。
 - [ ] 所需 schema 迁移在隔离库演练通过，历史迁移 checksum 未改变。

@@ -110,6 +110,13 @@ export interface AppleHealthParseResult {
   insertedWorkoutCount?: number;
   removedRecordCount?: number;
   removedWorkoutCount?: number;
+  /**
+   * 旧值被"值更正"取代掉的 legacy 记录数（仅 `preserveAbsent` 增量车道，
+   * 见 `RaiDatabase.supersedeLegacyRecordCorrections`）。也计入 `removedRecordCount`。
+   */
+  supersededRecordCount?: number;
+  /** 被取代旧行的 `start_at`：调用方据此把删除窗口并入脏范围下界。 */
+  supersededRecordTimes?: string[];
   /** Entities the payload carried but that stayed deleted via a tombstone. */
   tombstonedCount?: number;
   dirtyWorkoutTimes?: string[];
@@ -761,6 +768,22 @@ export async function parseAppleHealthXml(
       assertGenerationConservation(store, entityGeneration, written);
     }
 
+    // 🔴 无 UUID / 无 sync identifier 的记录身份把 value/unit 折进 id：**值更正**
+    // 到达时是一个新实体，而 preserve-absent 增量从不把"载荷里没有"读成删除 ⇒ 旧行会
+    // 永远留着，分析对同一时间窗双计（实测复现：/tmp 合成库 2 行、账本只有 inserted）。
+    // 这里在**写完之后**按批做一次集合扫描，把旧实体按删除语义取代掉。
+    //
+    // 位置刻意放在 `nativeRecords.apply` 之后：Rust 只负责解码/写入记录，身份与取代
+    // 判决仍由 TS 合同决定；两种引擎因此走**同一段**父进程代码，TS↔Rust 不会在这里分叉。
+    //
+    // 只在 `preserveAbsent` 增量车道调用：完整快照（非 incremental / replace）由
+    // `finalizeImportGeneration` 自己删陈旧实体（这里先删会让删除闸门的预览少算）；
+    // 直连 `recordDelta`（UUID 车道，caller 事务）不调用 —— 它的记录由
+    // `healthkit_record_sources` 拥有，本方法也会跳过，但不该在它的账本语义里加写入。
+    const superseded = incremental && incremental.preserveAbsent && !options.recordDelta && incremental.batchId
+      ? store.supersedeLegacyRecordCorrections(incremental.batchId)
+      : { removed: 0, removedIds: [] as string[], removedTimes: [] as string[] };
+
     if (!options.incremental?.preserveAbsent) {
       for (const [type, item] of recordInventory) {
         store.upsertInventory("record", type, item.count, item.firstAt, item.lastAt, {
@@ -814,9 +837,13 @@ export async function parseAppleHealthXml(
     const result: AppleHealthParseResult = {
       recordCount, workoutCount, activitySummaryCount, issueCount,
       insertedRecordCount, insertedWorkoutCount,
-      removedRecordCount: finalized.removedRecords + removedHealthKitRecords,
+      removedRecordCount: finalized.removedRecords + removedHealthKitRecords + superseded.removed,
       removedWorkoutCount: finalized.removedWorkouts,
       tombstonedCount,
+      // 旧值被取代掉的时刻（`start_at`）：调用方把它并进脏范围下界，删除所在窗口
+      // 必须重算 —— 账本 `previous_*` 也写了同一区间，两条消费路径同源。
+      supersededRecordCount: superseded.removed,
+      supersededRecordTimes: superseded.removedTimes,
       dirtyWorkoutTimes: [...insertedWorkoutTimes, ...explicitDeletionTimes, ...finalized.dirtyWorkoutTimes]
     };
     options.recordDelta?.beforeCommit(result, xmlSha256);

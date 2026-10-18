@@ -12,6 +12,9 @@ cd "$(git rev-parse --show-toplevel)"
 node scripts/check-blob-size.mjs
 
 npm run typecheck
+# 文档门禁：孤儿文档、坏链接，以及 `target.md#anchor` 的标题 slug 是否存在
+# （2026-10-18 P3-31：此前只查文件存在，锚点改名/删掉都不会红；行内代码里的
+# 示例链接现在会被剥掉，不再假阳性。时点快照 deliverables/.archify 不做锚点硬校验）。
 npm run check:docs
 
 # 文档里的 `文件:行号` 引用门禁。
@@ -20,7 +23,11 @@ npm run check:docs
 # 但 pre-commit 与 CI 都没有调用 ⇒ "存在判据" ≠ "判据被执行"。2026-10-18 训练计划审查
 # 实测：`docs/TODAY_PLAN_CARDS_REVIEW.md` 引用 `docs/WEB.md` 第 12 行，而该文件已随
 # D17 删除 —— 全仓没有任何一步会因此变红（默认范围当时也完全不含计划文档）。
-# 现在默认范围含三份现行计划文档，且每次提交都跑。毫秒级。
+# 现在默认范围含三份现行计划文档 + P3-40 补入的 deploy/README-UBUNTU.md 等 4 份现行文档，
+# 且每次提交都跑（毫秒级）。
+# ⚠️ 提交钩子只做"越界/无法解析"硬校验；**内容漂移**需要 `.linerefs.json` 基线，日常提交
+# 不要求基线（缺基线时脚本输出"未核对（无基线）"）。发布前的内容级核对用
+# `--write-baseline` + `--require-baseline`，见 docs/OPERATIONS.md「发布检查清单」。
 node scripts/check-doc-line-refs.mjs
 
 # npm script 的跨平台语法闸门（`&&`、纯命令、`node xxx.mjs` 之外的写法一律拦下：

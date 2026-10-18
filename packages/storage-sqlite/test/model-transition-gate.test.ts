@@ -27,6 +27,8 @@ const crossScaleSchema: ModelTransitionGateInput["schema"] = {
 function metrics(overrides: Partial<ModelTransitionMetricsV2> = {}): ModelTransitionMetricsV2 {
   return {
     matchedSessions: 200,
+    baseScoredSessions: 200,
+    candidateScoredSessions: 200,
     baseEligibleSessions: 180,
     candidateEligibleSessions: 180,
     eligibleSessionDelta: 0,
@@ -64,7 +66,8 @@ test("confirmed empty-cohort transition is explicit and does not waive unknown o
   };
   const input: ModelTransitionGateInput = {
     candidateModelRunId: "candidate", baseModelRunId: "base", schema: sameScaleSchema,
-    metrics: metrics({ matchedSessions: 0, baseEligibleSessions: 0, candidateEligibleSessions: 0,
+    metrics: metrics({ matchedSessions: 0, baseScoredSessions: 0, candidateScoredSessions: 0,
+      baseEligibleSessions: 0, candidateEligibleSessions: 0,
       currentAbilityMeanAbsoluteDelta: null, currentAbilityP95AbsoluteDelta: null,
       finalTrueAbilityDelta: null, readinessOutputCoverage: 1, recoveryIsolationHolds: true }),
     emptyCohort: empty
@@ -87,6 +90,133 @@ test("confirmed empty-cohort transition is explicit and does not waive unknown o
   assert.equal(evaluateModelTransitionGateV2({ ...input, schema: { ...sameScaleSchema, baseModelVersion: null } }).status, "not_evaluable");
   for (const patch of [{ invalidValueCount: 1 }, { recoveryIsolationHolds: false }, { readinessOutputCoverage: 0 }]) {
     assert.equal(evaluateModelTransitionGateV2({ ...input, metrics: { ...input.metrics, ...patch } }).status, "failed");
+  }
+});
+
+test("a same-scale release with scored cohorts cannot pass on metrics it could not compute", () => {
+  // Mutation that turns this red: treat `null` as "within limits" again (the old
+  // `exceeds(null, limit) === false`), which let a scored release activate while the
+  // distribution assertions had not actually been evaluated.
+  const unknown = evaluate({
+    metrics: {
+      currentAbilityMeanAbsoluteDelta: null,
+      currentAbilityP95AbsoluteDelta: null,
+      finalTrueAbilityDelta: null,
+      recoveryNullRateDelta: null,
+      recoverySaturationRate: null
+    }
+  });
+  assert.equal(unknown.status, "not_evaluable");
+  assert.equal(unknown.blocksActivation, true);
+  assert.deepEqual(unknown.notEvaluableReasons, [
+    "metric_unavailable:currentAbilityMeanAbsoluteDelta",
+    "metric_unavailable:currentAbilityP95AbsoluteDelta",
+    "metric_unavailable:recoveryNullRateDelta",
+    "metric_unavailable:recoverySaturationRate"
+  ]);
+  // A TA that was never calibrated is recorded, not gated: the CA comparison is what
+  // the same-scale protection is about (see the cold-start test below).
+  assert.ok(unknown.migrationReport.includes("final_true_ability_unavailable"));
+  assert.deepEqual(unknown.failureReasons, []);
+
+  // One uncomputable CA metric is enough: the release is not evaluable, not "mostly fine".
+  const partial = evaluate({ metrics: { currentAbilityP95AbsoluteDelta: null } });
+  assert.equal(partial.status, "not_evaluable");
+  assert.deepEqual(partial.notEvaluableReasons, ["metric_unavailable:currentAbilityP95AbsoluteDelta"]);
+
+  // Cross-scale keeps using its replacement assertions; the null distribution
+  // metrics there are recorded, not gated (S02).
+  const crossScale = evaluate({ schema: crossScaleSchema, metrics: { ...passingCrossScale } });
+  assert.equal(crossScale.status, "passed");
+});
+
+test("a null metric cannot hide a real failure on the same scale", () => {
+  // `null` goes to not_evaluable, but an actual breach must still be `failed`
+  // (failed wins over not_evaluable so the diagnosis is not lost).
+  const result = evaluate({
+    metrics: { currentAbilityP95AbsoluteDelta: null, recoverySaturationRate: 0.5 }
+  });
+  assert.equal(result.status, "failed");
+  assert.ok(result.failureReasons.includes("recovery_saturation_rate"));
+  assert.ok(result.notEvaluableReasons.includes("metric_unavailable:currentAbilityP95AbsoluteDelta"));
+});
+
+test("a cold-start recalculation with no scored cohort on either side is migrated, not blocked", () => {
+  // The real regression this locks: a new runner's first few recalculations have
+  // every assessment in `calibrating`, so CA and final TA are NULL on **both** runs.
+  // The distribution protection is an empty set there — refusing to activate made the
+  // first recalculation of an uncalibrated database fail forever.
+  const result = evaluate({
+    metrics: {
+      matchedSessions: 7,
+      baseScoredSessions: 0,
+      candidateScoredSessions: 0,
+      currentAbilityMeanAbsoluteDelta: null,
+      currentAbilityP95AbsoluteDelta: null,
+      finalTrueAbilityDelta: null,
+      recoveryNullRateDelta: 0,
+      recoverySaturationRate: 0
+    }
+  });
+  assert.equal(result.status, "passed");
+  assert.equal(result.blocksActivation, false);
+  assert.deepEqual(result.failureReasons, []);
+  assert.deepEqual(result.notEvaluableReasons, []);
+  assert.ok(result.migrationReport.includes("no_scored_cohort"));
+  assert.ok(result.migrationReport.includes("final_true_ability_unavailable"));
+});
+
+test("a same-scale release that loses a scored cohort fails hard", () => {
+  // User-visible CA disappeared: that is a failure, not "not evaluable".
+  const lost = evaluate({
+    metrics: {
+      matchedSessions: 7,
+      baseScoredSessions: 7,
+      candidateScoredSessions: 0,
+      currentAbilityMeanAbsoluteDelta: null,
+      currentAbilityP95AbsoluteDelta: null,
+      finalTrueAbilityDelta: null
+    }
+  });
+  assert.equal(lost.status, "failed");
+  assert.equal(lost.blocksActivation, true);
+  assert.ok(lost.failureReasons.includes("scored_cohort_lost"));
+  assert.ok(!lost.notEvaluableReasons.some((reason) => reason.includes("currentAbilityMeanAbsoluteDelta")));
+});
+
+test("a same-scale release that gains a scored cohort is allowed and recorded", () => {
+  const appeared = evaluate({
+    metrics: {
+      matchedSessions: 7,
+      baseScoredSessions: 0,
+      candidateScoredSessions: 7,
+      currentAbilityMeanAbsoluteDelta: null,
+      currentAbilityP95AbsoluteDelta: null,
+      finalTrueAbilityDelta: null
+    }
+  });
+  assert.equal(appeared.status, "passed");
+  assert.equal(appeared.blocksActivation, false);
+  assert.ok(appeared.migrationReport.includes("scored_cohort_appeared"));
+});
+
+test("an uncalibrated final TA is recorded but does not block a scored comparison", () => {
+  const result = evaluate({ metrics: { finalTrueAbilityDelta: null } });
+  assert.equal(result.status, "passed");
+  assert.equal(result.blocksActivation, false);
+  assert.ok(result.migrationReport.includes("final_true_ability_unavailable"));
+  assert.deepEqual(result.notEvaluableReasons, []);
+});
+
+test("scored-cohort counts must be non-negative integers", () => {
+  for (const patch of [
+    { baseScoredSessions: Number.NaN },
+    { candidateScoredSessions: -1 },
+    { baseScoredSessions: 1.5 }
+  ]) {
+    const result = evaluate({ metrics: patch });
+    assert.equal(result.status, "failed", JSON.stringify(patch));
+    assert.ok(result.failureReasons.includes("invalid_scored_session_counts"), JSON.stringify(patch));
   }
 });
 

@@ -725,6 +725,7 @@ const successSchema = (summary: string): Record<string, unknown> => {
   const objects: Record<string, string[]> = {
     "OpenAPI 3.1 契约": ["openapi", "info", "paths"],
     "本地服务健康状态": ["status", "databaseReady", "localOnly", "now"],
+    "服务端身份、数据集与契约版本能力协商": ["serverId", "athleteId", "datasetEpoch", "syncProtocolVersion", "apiVersion"],
     "概览数据": ["generatedAt", "totals"],
     "SQLite 数据资产摘要": ["datasetVersion", "issues"],
     "导入、canonical 与特征质量审计": ["generatedAt", "canonical"],
@@ -737,6 +738,7 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "训练内时间序列": ["trainingSessionId", "series"],
     "追加训练覆盖 revision 并重算": ["overrideId", "jobId"],
     "CA、TA、Decay 与 GV 趋势": ["startDate", "endDate", "daily", "workouts"],
+    "恢复趋势：睡眠与 HRV 的每日时间线": ["generatedAt", "asOf", "timezone", "latestDataDate", "days"],
     "当前周、月、年及滚动负荷摘要": ["generatedAt", "week", "month", "year"],
     "周、月、年训练统计历史": ["generatedAt", "granularity", "periods"],
     "每日训练负荷与状态时间线": ["generatedAt", "days"],
@@ -889,6 +891,9 @@ export const openapiDocument = {
     }) },
     "/v1/openapi.json": { get: operation(["Read"], "OpenAPI 3.1 契约") },
     "/v1/health": { get: operation(["Read"], "本地服务健康状态") },
+    // 能力协商入口：客户端在任何认证流程之前就读它（见 docs/IOS_NATIVE_API_CONTRACT.md）。
+    // 之前漏登记，导致 openapi.json 里查不到这个端点（review P3-17）。
+    "/v1/handshake": { get: operation(["Read"], "服务端身份、数据集与契约版本能力协商") },
     "/v1/dashboard": { get: operation(["Read"], "概览数据") },
     "/v1/data-summary": { get: operation(["Read"], "SQLite 数据资产摘要") },
     "/v1/data-audit": { get: operation(["Read"], "导入、canonical 与特征质量审计") },
@@ -927,6 +932,9 @@ export const openapiDocument = {
     }) },
     "/v1/trends": { get: operation(["Read"], "CA、TA、Decay 与 GV 趋势", {
       parameters: [{ name: "days", in: "query", schema: trendQuerySchema.properties.days }]
+    }) },
+    "/v1/recovery-trends": { get: operation(["Read"], "恢复趋势：睡眠与 HRV 的每日时间线", {
+      parameters: [{ name: "days", in: "query", schema: recoveryTrendQuerySchema.properties.days }]
     }) },
     "/v1/training-statistics/overview": { get: operation(["Read"], "当前周、月、年及滚动负荷摘要") },
     "/v1/training-statistics/history": { get: operation(["Read"], "周、月、年训练统计历史", {

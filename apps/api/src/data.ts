@@ -100,7 +100,8 @@ import { PlanOperationError } from "./plan-publication.js";
 import {
   planReadGuard,
   readSnapshotFileIdentity,
-  readSnapshotGuardSafe,
+  readSnapshotGuard,
+  snapshotFileReplaced,
   type PublicationGuardCapableStore
 } from "./plan-read-consistency.js";
 import { isPublicationGuardPending, publicationGuardChanged } from "./publication-guard.js";
@@ -549,8 +550,15 @@ export class RaiReadStore {
         this.cache.clear();
         continue;
       }
-      const guardBefore = readSnapshotGuardSafe(readGuard);
-      if (guardBefore !== null && isPublicationGuardPending(guardBefore)) {
+      const guardBefore = readSnapshotGuard(readGuard);
+      // A guard that exists but cannot be read cannot prove the snapshot stable:
+      // fail closed (retry, then 503) instead of silently degrading to the
+      // digest-only check exactly when the control database is damaged (P3-02).
+      if (guardBefore.kind === "failed") {
+        this.cache.clear();
+        continue;
+      }
+      if (guardBefore.kind === "ready" && isPublicationGuardPending(guardBefore.state)) {
         this.cache.clear();
         continue;
       }
@@ -637,17 +645,29 @@ export class RaiReadStore {
         // Unreachable: the try block either assigns `built` or rethrows.
         throw new PlanOperationError("plan_snapshot_changed", "训练事实在读取期间变化，请重试完整快照。", 503);
       }
-      const guardAfter = readSnapshotGuardSafe(readGuard);
+      const guardAfter = readSnapshotGuard(readGuard);
       const currentFile = readSnapshotFileIdentity(this.path);
       if (currentFile === null) {
         this.cache.clear();
         continue;
       }
-      if (fileIdentity.ino !== currentFile.ino || fileIdentity.mtimeMs !== currentFile.mtimeMs) {
-        throw new PlanOperationError("plan_snapshot_changed", "训练数据库在读取期间发布，请重读完整快照。", 503);
+      // Only a replacement (a new inode) invalidates the snapshot. `mtime` moves
+      // on every WAL checkpoint without replacing the file, so comparing it here
+      // turned a normal checkpoint by an import/recompute job into a false
+      // `plan_snapshot_changed` 503 (review P2-02; see `snapshotFileReplaced`).
+      // A replacement is a retry, not an immediate 503: file existence is checked
+      // again at the top of the next attempt.
+      if (snapshotFileReplaced(fileIdentity, currentFile)) {
+        this.cache.clear();
+        continue;
       }
-      if (guardBefore !== null && guardAfter !== null &&
-          publicationGuardChanged(guardBefore, guardAfter) !== null) {
+      // An unreadable guard cannot prove the snapshot stable: retry, then 503.
+      if (guardAfter.kind === "failed") {
+        this.cache.clear();
+        continue;
+      }
+      if (guardBefore.kind === "ready" && guardAfter.kind === "ready" &&
+          publicationGuardChanged(guardBefore.state, guardAfter.state) !== null) {
         this.cache.clear();
         continue;
       }
@@ -2108,6 +2128,19 @@ export class RaiReadStore {
     const summary = this.dataSummary();
     const audit = this.dataAudit();
     const active = this.auditRepository.diagnosticsActiveModel();
+    // Import-batch aggregates: the per-batch `xml` result already persists
+    // `tombstonedCount` / `supersededRecordCount`, but until this block existed the
+    // only way to read them was to open the SQLite file. `json_valid` keeps a
+    // malformed historical summary from turning the diagnostics export into a 500
+    // (a bad row contributes 0 rather than throwing).
+    const importLedger = this.database.prepare(`
+      SELECT COUNT(*) AS batches,
+        COALESCE(SUM(CASE WHEN json_valid(summary_json)
+          THEN json_extract(summary_json, '$.xml.tombstonedCount') ELSE 0 END), 0) AS tombstoned,
+        COALESCE(SUM(CASE WHEN json_valid(summary_json)
+          THEN json_extract(summary_json, '$.xml.supersededRecordCount') ELSE 0 END), 0) AS superseded
+      FROM import_batches WHERE status = 'succeeded'
+    `).get() as { batches: number; tombstoned: number | null; superseded: number | null };
     const modelSummary = parseJson<{
       baseline?: { calibrationFeatureIds?: string[] };
     }>(active?.summaryJson, {});
@@ -2133,6 +2166,11 @@ export class RaiReadStore {
           }
         : null,
       calibration: active ? this.dashboardRepository.calibrationProgress() : null,
+      imports: {
+        batches: Number(importLedger.batches ?? 0),
+        tombstonedRecords: Number(importLedger.tombstoned ?? 0),
+        supersededRecords: Number(importLedger.superseded ?? 0)
+      },
       jobs: this.jobs(20),
       issues: audit.issues,
       exclusionReasons: audit.missingReasons

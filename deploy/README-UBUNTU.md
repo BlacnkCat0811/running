@@ -64,20 +64,20 @@ sudo certbot renew --dry-run
 
 不要把 API Token 放进任何浏览器或 Web 构建产物：那会把 Token 发布到 JavaScript（前端已退役，但同类错误仍可能以脚本示例形式出现）。iOS 应用在首次连接页（`apps/ios/RAI/Skins/Technology/TechSetupView.swift:45-56` 的「服务地址」与「访问令牌」）填写 HTTPS 地址与同一个 Token，Token 存 Keychain，只由 App 自身的请求携带（含 HealthKit 同步请求），不注入任何页面。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
 
-### 匿名只读（历史 Web 能力，默认关闭）
+### 匿名只读（历史 Web 能力，默认关闭；2026-10-18 起仅 3 条探活/版本路由）
 
-该模式原本给浏览器 SPA「打开即看」用；Web 退役后**默认不需要**。保留的代码路径与边界如下，供将来确有匿名只读需求时参考：
+该模式原本给浏览器 SPA「打开即看」用；Web 退役后**默认不需要**。2026-10-18 深度审查后（P3-13），`RAI_PUBLIC_HOSTS` 的匿名读范围**收敛为 3 条不含健康数据的路由**；保留该开关只服务于探活/版本检查，以及将来确有匿名只读需求时（那需要单独的产品与安全决定，并显式修改 `publicReadRoutes`）。
 
 默认（`RAI_PUBLIC_HOSTS` 留空）每个 `/v1` 请求都要 Token。
 
-若确需开放匿名读，在 `/etc/rai/rai.env` 里设 `RAI_PUBLIC_HOSTS=<域名>`。效果与边界：
+若确需开放，在 `/etc/rai/rai.env` 里设 `RAI_PUBLIC_HOSTS=<域名>`。效果与边界：
 
-- **公开**：`server.ts` 里 `publicReadRoutes` 列举的读接口（训练列表与不含原始坐标的详情、趋势、统计、训练分区、预测、课表等）。原始轨迹仍需正确令牌。
-- **仍需 Token**：所有写请求（`POST/PUT/PATCH/DELETE`），以及 `GET /v1/backups/:name`、`GET /v1/import-sources/*`、`GET /v1/diagnostics`、`GET /v1/openapi.json`、`GET /v1/jobs*`、`GET /v1/import-jobs*`。
-- Host 白名单与只读白名单**同时生效**：伪造其它 Host 的匿名读仍返回 401，DNS-rebinding 防护不退化。
-- 这是**隐私降级**：知道域名的人仍可看到已公开的健康摘要。`RAI_PUBLIC_HOSTS` 不开放原始轨迹、分享卡或隐私区读路由。
+- **可匿名**：仅 `GET /v1/health`、`GET /v1/handshake`、`GET /v1/runtime-status`（探活/版本，不含任何健康数据）。
+- **仍需 Token**：其余全部 `/v1` 读（`/v1/mobile/*`、`/v1/workouts*`、`/v1/trends`、`/v1/training-statistics/*`、`/v1/training-zones/*`、`/v1/predictions*`、`/v1/model-*`、`/v1/dashboard`、`/v1/data-*`、备份/诊断/导入/分享卡/隐私区等）以及所有写请求（`POST/PUT/PATCH/DELETE`）。
+- Host 白名单与路由白名单**同时生效**：伪造其它 Host 的匿名读仍返回 401，DNS-rebinding 防护不退化。
+- **不再存在「公开健康摘要」**：此开关不会暴露任何健康数据、路线、分享卡或隐私区；不要把它当作"公开健康数据"的开关。
 - 未配置 `RAI_API_TOKEN` 时原始轨迹同样默认隐藏；仅本地显式 `RAI_ALLOW_ANONYMOUS_ROUTES=1` 可开启匿名原始轨迹，生产环境不得设置此开关。
-- 配套限速在 `deploy/nginx-rai.conf` 的 `limit_req_zone`（300 r/m + burst 100），读接口公开后它是防批量抓取与流量包超额的第一道闸，不要单独关掉。
+- 配套限速在 `deploy/nginx-rai.conf` 的 `limit_req_zone`（300 r/m + burst 100），它是防批量抓取与流量包超额的第一道闸，不要单独关掉。
 
 ## 验证
 
@@ -87,9 +87,11 @@ sudo journalctl -u rai-api -n 100 --no-pager
 # 启动日志会打印匿名只读是否开启（"Anonymous read enabled/disabled"），
 # 这是判断 RAI_PUBLIC_HOSTS 是否真的生效的唯一可靠方式。
 curl -fsS https://api.example.com/v1/health -H "Authorization: Bearer $TOKEN"
-# 匿名只读开启后（无 Authorization 头）：
+# 匿名只读开启后（无 Authorization 头）：仅 3 条探活/版本路由可匿名
 curl -fsS https://api.example.com/v1/health          # 期望 200
-curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/backups   # 期望 401
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/dashboard  # 期望 401（业务读不再匿名）
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/workouts   # 期望 401
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/backups    # 期望 401
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: attacker.example' https://api.example.com/v1/health  # 期望 401
 # 站点根路径与静态资源已退役：应返回 404
 curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/                 # 期望 404
@@ -194,7 +196,7 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 可在服务器运行 `bash deploy/check-runtime-readonly.sh` 收集只读运行证据；脚本不重启服务、不迁移、不输出令牌。它不能代替 TLS 检查、实际任务引擎核验或完整运行时恢复演练。环境变量只证明配置意图，备份文件存在也不证明能够完整恢复。
 
-如果 `RAI_PUBLIC_HOSTS` 非空，仍需单独核实健康数据和路线的匿名可见性。本地代码审查不代表已登录服务器核对配置；发布/设备验收见[运维](../docs/OPERATIONS.md)及[iOS runbook](../docs/IOS_NATIVE_RUNBOOK.md)。
+如果 `RAI_PUBLIC_HOSTS` 非空，仍需在服务器上核实它确实只放开了 3 条探活/版本路由（2026-10-18 起健康数据与路线在所有配置下都要求 Token）。本地代码审查不代表已登录服务器核对配置；发布/设备验收见[运维](../docs/OPERATIONS.md)及[iOS runbook](../docs/IOS_NATIVE_RUNBOOK.md)。
 
 ### 运维脚本的执行边界（2026-09-28 审计修订）
 

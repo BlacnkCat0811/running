@@ -152,10 +152,36 @@ jobs:
       - name: Validate maintained documentation and acceptance references
         # `check:doc-refs` 自 2026-10-18 起也在默认范围内核对三份现行计划文档的
         # `文件:行号` 引用（此前它与 pre-commit 都漏了这一步，实测漏掉过一处指向
-        # 已删除 `docs/WEB.md` 的死引用）。
+        # 已删除 `docs/WEB.md` 的死引用）。同日 P3-40 又把 `deploy/README-UBUNTU.md`、
+        # `docs/DECISIONS.md` 等 4 份现行文档补进默认范围。
+        # 内容漂移判据需要 `.linerefs.json` 基线；仓库日常不提交基线（P2-07 决定），
+        # 所以此处**不开** `--require-baseline`：发布前若要内容级核对，见 docs/OPERATIONS.md
+        # 发布清单里的 `--write-baseline` 用法。
         run: npm run check:docs && npm run check:doc-refs && npm run check:acceptance-matrix
 
+      - name: Verify gate scripts, blob ceiling, and package boundaries
+        # 门禁自己也要有回归：`--self-test` 在 os.tmpdir() 现建夹具，验证
+        # 单引号 / 动态 import / require / `.mts` / 跨层 import 都会变红（2026-10-18 P2-08）。
+        # 仓库体积闸门 1.5 MB/文件；包边界四类判据（分层/具名禁线/声明↔实际/边白名单）。
+        run: |
+          npm run check:scripts
+          node scripts/check-blob-size.mjs
+          npm run check:package-boundaries
+          npm run check:package-boundaries -- --self-test
+
+      - name: Model boundary review (R1-R3)
+        # 只读对抗探针（合成库，finally 清理），violationCount>0 时 exit 1。
+        # ⚠️ `scripts/review-model-boundaries.mts` 是 TypeScript（.mts）：必须经 `npm run`/tsx；
+        # 裸 `node scripts/review-model-boundaries.mts` 会 ERR_MODULE_NOT_FOUND
+        # （node 只按扩展名选加载器，不识别 .mts 里的类型语法）。
+        run: npm run review:model-boundaries
+
       - name: Run tests
+        # 高负载/多核 runner 上默认并发可能把 5s/30s 墙钟预算压红（假红，见
+        # scripts/run-tests.mjs 头注释）。CI 用固定并发换取可比较结果；不进 npm script，
+        # 那样会违反"脚本正文不得写 VAR=x cmd"的跨平台规则（这里是 shell step 的 env）。
+        env:
+          RAI_TEST_CONCURRENCY: "2"
         run: npm test
 
       - name: Bootstrap Python training environment

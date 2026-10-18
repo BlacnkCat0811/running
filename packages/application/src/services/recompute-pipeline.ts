@@ -1,6 +1,7 @@
 import { loadPersistedTrainingLoads, loadDailyPhysEvidence } from "../training-load-data.js";
 import { NO_WRITE_GATE, type AnalysisStore, type WriteGate } from "../write-gate.js";
 import { identityNormalizationConfigHash } from "@rai/normalization";
+import { READINESS_SLEEP_RATIO_THRESHOLD } from "@rai/readiness";
 import { readinessForRun } from "../model-v2-snapshots.js";
 import { DURABILITY_MODEL_VERSION, PREPARATION_TARGETS, PREPARATION_WINDOW_DAYS, assessPreparation, assessDurability, buildDurabilitySnapshot } from "@rai/durability";
 import type { ModelLineageV2, WorkoutFeaturePayloadV4 } from "@rai/contracts";
@@ -3644,7 +3645,9 @@ export class RecomputePipeline {
       const rhrBpm = rhrByDate.get(date) ?? null;
       const nightsBelowSleepBaseline = sleepBaseline === null ? 0 : [date, addDays(date, -1), addDays(date, -2)]
         .map((day) => sleepByDate.get(day))
-        .filter((minutes): minutes is number => minutes !== undefined && minutes < sleepBaseline * 0.8).length;
+        // Same compatibility threshold as the single-night rule (`@rai/readiness`):
+        // "three consecutive bad nights" may not mean a different "bad" than one night.
+        .filter((minutes): minutes is number => minutes !== undefined && minutes < sleepBaseline * READINESS_SLEEP_RATIO_THRESHOLD).length;
       result.push({
         localDate: date,
         physState: classifyPhysState({
@@ -3946,7 +3949,12 @@ export class RecomputePipeline {
             adaptiveBaseline: adaptiveBaselines[index] ?? null,
             confidenceV2: score.confidenceV2,
             stratumComparability: score.stratumComparability,
-            learningObservation: score.learningObservation
+            learningObservation: score.learningObservation,
+            // §6.9: the scoring layer is the only owner of *why* a TA update was
+            // refused (it holds the gate); persisting that decision here is what makes
+            // the per-reason report possible without re-deriving the thresholds.
+            // `null` means the update was applied. JSON column ⇒ no migration.
+            refusalReason: update.refusalReason
           },
           assessedAt: feature.workoutStartAt
         };

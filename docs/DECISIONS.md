@@ -32,6 +32,7 @@
 ## D6. iOS边界与后台机制
 
 现有SwiftUI App通过API使用TS计算，只读HealthKit。已授权HealthKit background delivery、BGProcessingTask及background URLSession；未授权独立Watch/macOS产品或HealthKit写入。
+**「只读」的准确边界（2026-10-18 补）**：指健康样本/健康记录——不写入、不修改 `HKQuantitySample`/`HKWorkout` 等健康数据。通过 WorkoutKit 把训练排期写到 Apple Watch 需要 **workout 类型的 HealthKit 写授权**（`NSHealthUpdateUsageDescription`）；该授权只写训练排程，不写入/修改健康记录。除这一项外仍不添加其它 HealthKit 写能力。
 四条容易被“优化”破坏的同步不变式及后续补充保留在 [ADR-004](adr/ADR-004-healthkit-sync-invariants.md)。真机检查见 [iOS runbook](IOS_NATIVE_RUNBOOK.md)。
 
 ## D9. 隐私区在主库，分享卡的裁剪在服务端

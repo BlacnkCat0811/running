@@ -52,6 +52,28 @@ test("streak is consecutive canonical local dates, not count of nonadjacent low 
   assert.throws(() => assessDatedReadiness(value), /unique per date/);
 });
 
+test("R06/§7: the streak night threshold is the single low-sleep threshold (0.75), not a second 0.80 one", () => {
+  // 0.78 is *not* a low night by the documented rule, so three of them cannot make a
+  // streak — the old hardcoded 0.8 here said "strained" while `signals.sleep.low`
+  // said "not low", which is the contradiction this locks shut.
+  const nearMiss = input();
+  nearMiss.signals.sleep = signal(78);
+  nearMiss.nights = [signal(78), signal(78, "2026-09-28"), signal(78, "2026-09-27")];
+  const relaxed = assessDatedReadiness(nearMiss);
+  assert.equal(relaxed.sleepStreak, false);
+  assert.equal(relaxed.signals.sleep.low, false);
+  assert.equal(relaxed.assessment, "no_low_signal");
+
+  const low = input();
+  low.signals.sleep = signal(74);
+  low.nights = [signal(74), signal(74, "2026-09-28"), signal(74, "2026-09-27")];
+  const strained = assessDatedReadiness(low);
+  assert.equal(strained.sleepStreak, true);
+  assert.equal(strained.signals.sleep.low, true);
+  assert.equal(strained.assessment, "multiple_low_signals");
+  assert.deepEqual(strained.reasonCodes, ["sleep_streak"]);
+});
+
 test("invalid/zero measurements and absent references cannot inflate coverage", () => {
   for (const bad of [null, 0, -1, NaN, Infinity]) {
     const value = input();

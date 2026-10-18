@@ -37,57 +37,76 @@ export function readSnapshotFileIdentity(path: string): SnapshotFileIdentity | n
   }
 }
 
+/**
+ * Whether the file at the path is a *different* file than the one the snapshot
+ * was built from.
+ *
+ * Only the inode decides (review P2-02). `mtime` is recorded for diagnostics and
+ * must not participate: every WAL checkpoint writes pages back into the main
+ * database file and moves its mtime without replacing the file — the read
+ * connection keeps serving the same consistent snapshot. Treating that as
+ * "published" made `GET /v1/mobile/training-plan-state` answer a retryable 503
+ * whenever an import/recompute job happened to checkpoint during the read, a
+ * false positive with no mixed snapshot behind it. `read-store-manager.ts`
+ * documents the same reasoning for its cached connection (reopen on inode only).
+ */
+export function snapshotFileReplaced(before: SnapshotFileIdentity, after: SnapshotFileIdentity): boolean {
+  return before.ino !== after.ino;
+}
+
 export interface PublicationGuardCapableStore {
   publicationGuardState?: () => PublicationGuardState;
-  /** Public accessor from `MobileGoalsStore` (preferred over private-field probing). */
-  publicationInFlight?: () => boolean;
 }
 
 /**
- * Returns a guard reader when the goals store exposes one.
+ * One guard read, classified instead of collapsed to `null`.
  *
- * The control-store owner may not have landed `publicationGuardState()` on every
- * code path yet (or a test double may not implement it). In that case callers
- * degrade to the control-digest check, which is the pre-guard behaviour.
+ * Three outcomes must stay distinguishable:
+ *
+ * - `absent`: the store has no guard (no control database, or a test double).
+ *   Callers degrade to the pre-guard digest-only check — that is not a failure,
+ *   it is the documented fallback for stores without a guard.
+ * - `ready`: the guard was read; `state` is authoritative.
+ * - `failed`: the store *has* a guard but reading it threw. Silently degrading
+ *   here would disable the cross-store check exactly when the control database
+ *   is damaged, so callers must treat this as "the snapshot cannot be proven
+ *   stable": retry, then fail closed (review P3-02).
  */
+export type SnapshotGuardRead =
+  | { kind: "absent" }
+  | { kind: "failed" }
+  | { kind: "ready"; state: PublicationGuardState };
+
+/** Returns a guard reader when the goals store exposes one. */
 export function optionalPublicationGuard(store: PublicationGuardCapableStore): (() => PublicationGuardState) | undefined {
   const read = store.publicationGuardState;
   return typeof read === "function" ? () => read.call(store) : undefined;
 }
 
 /**
- * Guard reader for a plan read, with the publishing connection exempted.
+ * Guard reader for a plan read.
  *
- * When the store is inside its own publication transaction the live pending
- * marker belongs to this process: it is the publisher revalidating its own
- * in-flight write (e.g. `/synced` computing `matchesCurrent`), not a cross-store
- * reader. Honoring the marker there would make every receipt registration fail
- * closed on itself. External writers cannot commit control state while that
- * transaction holds the write lock, so the control digest pair remains
- * sufficient in this window.
+ * The reader is returned whenever the store supports the guard — including while
+ * that same store is inside its own publication transaction (review P3-03).
+ * `MobileGoalsStore.publicationGuardState()` already hides *its own* live
+ * `pending_since` marker (the publisher revalidating its own write, e.g.
+ * `/synced` computing `matchesCurrent`, must not fail closed on itself) while
+ * preserving `epoch`, so the before/after epoch comparison still detects a
+ * foreign publication that started in between. Suppressing the reader here as
+ * well used to disable epoch detection for that whole transaction, which is
+ * strictly weaker and no longer needed.
  */
-export function planReadGuard(
-  store: PublicationGuardCapableStore & { publicationTransaction?: boolean }
-): (() => PublicationGuardState) | undefined {
-  const readGuard = optionalPublicationGuard(store);
-  if (readGuard === undefined) return undefined;
-  // Prefer the store's public accessor; the private-field fallback keeps older
-  // stores (and test doubles) working without a compile-time dependency.
-  const publishing = typeof store.publicationInFlight === "function"
-    ? store.publicationInFlight() === true
-    : store.publicationTransaction === true;
-  return publishing ? undefined : readGuard;
+export function planReadGuard(store: PublicationGuardCapableStore): (() => PublicationGuardState) | undefined {
+  return optionalPublicationGuard(store);
 }
 
-/** Reads the guard without letting a broken guard table mask a read failure. */
-export function readSnapshotGuardSafe(
-  readGuard: (() => PublicationGuardState) | undefined
-): PublicationGuardState | null {
-  if (!readGuard) return null;
+/** Reads the guard once, classifying failure instead of swallowing it. */
+export function readSnapshotGuard(readGuard: (() => PublicationGuardState) | undefined): SnapshotGuardRead {
+  if (!readGuard) return { kind: "absent" };
   try {
-    return readGuard();
+    return { kind: "ready", state: readGuard() };
   } catch {
-    return null;
+    return { kind: "failed" };
   }
 }
 
@@ -112,9 +131,29 @@ export function readSnapshotGuardSafe(
  * When `readGuard` is supplied, a cross-store publication that starts (epoch
  * changes) or is still pending also discards the attempt — the control digest
  * alone cannot see a main-database commit whose control transaction has not
- * committed yet. A missing or failing guard degrades to the digest-only
- * behaviour. A pending marker older than the guard lease (crashed publisher)
- * does not block reads.
+ * committed yet. A missing guard degrades to the digest-only behaviour; a guard
+ * that *fails to read* does not (see {@link SnapshotGuardRead}). A pending marker
+ * older than the guard lease (crashed publisher) does not block reads.
+ *
+ * ### Why the retries are synchronous (P3-15, deliberate)
+ *
+ * Attempts run back to back with no sleep. That is a decision, not an oversight:
+ *
+ * - the contended window is a *synchronous* publication on this event loop
+ *   (`MobileGoalsStore.withPublicationTransaction` never awaits), so an
+ *   in-process publish either starts and finishes inside our own inter-attempt
+ *   gap — which the epoch check catches — or it cannot run at all while this
+ *   loop is running. The cross-process case is bounded by the SQLite
+ *   control-database write transaction, which is milliseconds, not seconds;
+ * - sleeping between attempts while `/v1/mobile/workout-plan/synced` holds its
+ *   control write transaction would extend the lock hold for every other
+ *   writer, and the client already has the retry semantic it needs: a 503 with
+ *   `Retry-After: 1` (see `api-error.ts`).
+ *
+ * Cost ceiling: at most `attempts` (≤ 5, default 3) control pairs and builds.
+ * Measured on a ~42.6k-row synthetic library, `trainingPlanState`'s build is
+ * p50 ≈ 15.7 ms / p95 ≈ 26.4 ms, so the worst case here is ~80 ms of synchronous
+ * work before failing closed — the same order as one successful plan read.
  */
 export function readStableSnapshot<Control, Result>(options: {
   readControl: () => Control;
@@ -131,19 +170,23 @@ export function readStableSnapshot<Control, Result>(options: {
     : DEFAULT_ATTEMPTS;
   const now = options.now ?? Date.now;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const guardBefore = readSnapshotGuardSafe(options.readGuard);
+    const guardBefore = readSnapshotGuard(options.readGuard);
+    // An unreadable guard cannot prove the snapshot stable: fail closed instead
+    // of silently disabling the cross-store check (review P3-02).
+    if (guardBefore.kind === "failed") continue;
     // A publication that is visibly in progress cannot produce a stable view:
     // skip the build instead of spending it on a snapshot we will discard.
-    if (guardBefore !== null && isPublicationGuardPending(guardBefore, now())) continue;
+    if (guardBefore.kind === "ready" && isPublicationGuardPending(guardBefore.state, now())) continue;
     const control = options.readControl();
     // Digest before building: the caller's builder receives the snapshot and
     // must not be able to turn an unmoved store into a false mismatch.
     const controlDigest = digest(control);
     const result = options.build(control);
     const controlUnchanged = controlDigest === digest(options.readControl());
-    const guardAfter = readSnapshotGuardSafe(options.readGuard);
-    if (guardBefore !== null && guardAfter !== null &&
-        publicationGuardChanged(guardBefore, guardAfter, now()) !== null) continue;
+    const guardAfter = readSnapshotGuard(options.readGuard);
+    if (guardAfter.kind === "failed") continue;
+    if (guardBefore.kind === "ready" && guardAfter.kind === "ready" &&
+        publicationGuardChanged(guardBefore.state, guardAfter.state, now()) !== null) continue;
     if (controlUnchanged) return result;
   }
   throw options.changedError();

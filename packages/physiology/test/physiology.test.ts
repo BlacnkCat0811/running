@@ -18,6 +18,8 @@ import {
   performanceVdotEvidence,
   performanceSecondsFromVdot,
   predictRaceTimes,
+  UNMODELED_READINESS_CONFIDENCE_PRIOR,
+  type PredictionReadiness,
   vdotFromPerformance
 } from "../src/index.js";
 
@@ -238,6 +240,67 @@ test("race scenarios expose separate environment, elevation, and fatigue adjustm
   assert.ok((difficult.elevationAdjustmentSeconds ?? 0) > 0);
   assert.ok((difficult.fatigueAdjustmentSeconds ?? 0) > 0);
   assert.equal(difficult.method, "daniels_vdot_conditions_v3");
+});
+
+test("§11: missing preparation readiness is unmodeled and neutral — it is never a default penalty", () => {
+  // Mutation that turns this red: restore `readiness[distance] ?? defaultRaceReadiness[distance]`
+  // (0.7 / 0.6 / 0.45), which penalised the runner whose preparation we could not see.
+  const estimate = {
+    status: "available" as const,
+    valueMlKgMin: 50,
+    rangeMlKgMin: { lower: 48, upper: 52 },
+    confidence: 0.8,
+    confidenceLevel: "moderate" as const,
+    evidenceCount: 3,
+    latestEvidenceAt: "2026-01-01T00:00:00.000Z",
+    method: "robust_evidence_ensemble_v1" as const,
+    evidenceCodes: []
+  };
+  const neutral = predictRaceTimes(estimate, { five_k: 1, ten_k: 1, half_marathon: 1 });
+  const missing = predictRaceTimes(estimate, {});
+  // `PredictionReadiness` types the values as numeric, but a caller that cleans a
+  // partial record can still hand us `null` at runtime; the predictor must treat it
+  // exactly like an absent key rather than falling into a default penalty.
+  const explicitNull = predictRaceTimes(
+    estimate,
+    { five_k: null, ten_k: null, half_marathon: null } as unknown as PredictionReadiness
+  );
+  for (const [index, prediction] of missing.entries()) {
+    const reference = neutral[index]!;
+    assert.ok(prediction);
+    assert.equal(prediction.predictedSeconds, reference.predictedSeconds, `${prediction.distance}: unknown readiness must not slow the prediction`);
+    assert.equal(prediction.readiness, null);
+    assert.equal(prediction.readinessAdjustmentSeconds, null);
+    assert.equal(prediction.method, "daniels_vdot_v1");
+    assert.ok(prediction.evidenceCodes.includes("endurance_readiness_unmodeled"));
+    assert.ok(!prediction.evidenceCodes.includes("race_readiness_applied"));
+    // An explicit null is the same statement as an absent key: unknown, not "applied".
+    assert.deepEqual(explicitNull[index], prediction);
+    // Point estimate stays neutral, but confidence must not pretend the missing
+    // preparation was observed: it uses the documented maximum-uncertainty prior.
+    const expectedConfidence = Math.min(0.95, estimate.confidence *
+      (0.55 + 0.45 * UNMODELED_READINESS_CONFIDENCE_PRIOR));
+    assert.ok(Math.abs(prediction.confidence - expectedConfidence) < 1e-12,
+      `${prediction.distance}: unmodeled readiness must use the confidence prior, got ${prediction.confidence}`);
+    assert.ok(prediction.confidence < reference.confidence,
+      `${prediction.distance}: unknown preparation cannot be more confident than fully-ready`);
+  }
+  // A supplied value is still modelled, penalised and labelled as such.
+  const low = predictRaceTimes(estimate, { ten_k: 0.6 })[1]!;
+  assert.ok((low.predictedSeconds ?? 0) > missing[1]!.predictedSeconds!);
+  assert.equal(low.readiness, 0.6);
+  assert.ok((low.readinessAdjustmentSeconds ?? 0) > 0);
+  assert.equal(low.method, "daniels_vdot_readiness_v2");
+  assert.ok(low.evidenceCodes.includes("race_readiness_applied"));
+  // A supplied value keeps the original confidence formula; the prior is only for
+  // "not modelled", and it is deliberately lower than this 0.6 readiness.
+  assert.ok(Math.abs(low.confidence - estimate.confidence * (0.55 + 0.45 * 0.6)) < 1e-12);
+  assert.ok(missing[1]!.confidence < low.confidence);
+  // A non-finite value is not silently clamped into a modelled readiness.
+  const broken = predictRaceTimes(estimate, { ten_k: Number.NaN })[1]!;
+  assert.equal(broken.readiness, null);
+  assert.equal(broken.readinessAdjustmentSeconds, null);
+  assert.ok(broken.evidenceCodes.includes("endurance_readiness_unmodeled"));
 });
 
 test("lactate threshold exposes one-hour pace and heart-rate uncertainty", () => {

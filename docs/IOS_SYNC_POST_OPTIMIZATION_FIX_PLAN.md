@@ -512,8 +512,12 @@ npm run check:scripts
 npm run check:docs
 ```
 
-涉及共享契约或 Web 消费时再补 `npm run build`；
-确有桌面浏览器交互变化才运行 `npm run test:e2e:web`，不运行冻结的响应式／移动 E2E。
+~~涉及共享契约或 Web 消费时再补 `npm run build`；~~
+~~确有桌面浏览器交互变化才运行 `npm run test:e2e:web`，不运行冻结的响应式／移动 E2E。~~
+> **2026-10-18 更正（D17）**：Web 与 macOS 已于 2026-10-17 退役删除，`npm run build` 与
+> `test:e2e:web` 随之**删除、不可复跑**（不是"本轮不运行"）；上面两行保留仅为历史可追溯，
+> 不要再把它们当发布判据，也不要加回 `package.json`
+> （[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)）。
 平台不支持的 iOS 检查必须显式跳过，不能把“没有检查”报成通过。
 新增 Swift／脚本／工程文件按仓库规则验证 LF。
 

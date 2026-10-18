@@ -99,7 +99,7 @@ R1两次重算使用同一当日时间窗口，避免把数月停跑衰减误当
 | `CARGO_NET_OFFLINE=true npm run rust:verify` | 现有工具链离线构建通过；Rust **2项**、TS/原生导入 **11项**通过，无skip |
 | `npm run smoke:api` | 隔离临时runtime启动/关闭检查通过 |
 | `npm audit --omit=dev --json` | registry报告production依赖已知漏洞 **0**；不代表完整安全审计无风险 |
-| 文档 / matrix / package boundaries | 通过；matrix **54 cited / 0 declared-gap / 0 missing**，包边界 **15 packages / 30 src edges** |
+| 文档 / matrix / package boundaries | 通过；matrix **54 cited / 0 declared-gap / 0 missing**，包边界 **15 packages / 30 src edges**（⚠️ 均为 **2026-09-30 时点**；当前值：matrix **80**、包边界 **16 packages / 31 src edges**，以 `npm run check:acceptance-matrix` / `check:package-boundaries` 的输出为准） |
 | 文档检查器回归+部署文档合同 | **5项通过**，包含坏链接/孤立文档/越界目标拒绝 |
 | 新增边界审查 | **未通过：R1、R2、R3均已复现**；不隐藏在上面的通过数中 |
 

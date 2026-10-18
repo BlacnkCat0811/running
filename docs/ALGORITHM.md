@@ -16,7 +16,7 @@
 - physiology：[physiology](../packages/physiology/src/index.ts)；Coach：[api-contracts](../packages/api-contracts/src/index.ts)。
 - schema / 冻结 migration checksum：[database](../packages/storage-sqlite/src/database.ts)。
 
-本轮代码为 feature v4/config v11、scoring v2.0.0/config v12、physiology v1.8.0、residual/CatBoost family v5、load config v5、zone config v4、SQLite migrations 1–32。
+本轮代码为 feature v4/config v11、scoring v2.0.0/config v12、physiology v1.8.0、residual/CatBoost family v5、load config v5、zone config v4。SQLite 迁移版本**不在此抄写**：以 [database](../packages/storage-sqlite/src/database.ts) 的 `MIGRATION_VERSIONS`（与冻结 checksum 表）为唯一事实源，文档里的数字迟早会与它漂移。
 这是源码版本，不证明任何本地/线上数据库已迁移或模型已激活。
 
 ## 2. 职责与不变量
@@ -81,6 +81,8 @@
 
 分段级证据来自同一次跑的路线点海拔（`route_points.elevation_meters`）：窗口内少于 2 个采样、分段短于 50 m、或 |坡度| 超过 60% 时，`gradePercent` 与等强配速都是 `null` 并给出理由码；**未知不是平坦**。汇总值是已覆盖分段的距离加权平均，并显式报告覆盖段数。
 
+**单调性只在成本模型的单调区间成立**（2026-10-18 订正）：Minetti 曲线是 U 形，能耗在约 −20% 处最低——更陡的下坡因制动/离心成本重新变贵，因此"坡度越大、等强配速越快"只对**上坡侧**（约 −15% 以上）与零坡度恒等成立；−20% → −45% 区间是反向的（−30% 的平地等效配速比 −20% 慢）。测试与矩阵按这一真实形状断言，不把模型写成它没有的性质；超出 |i| > 45% 仍夹取并给理由码。
+
 ## 6. Fitness 与基线
 
 [评分实现](../packages/scoring/src/model.ts) 保留 Median/MAD、初始至少 6 次有效训练/跨度 14 日、V2-A 控制组与最低覆盖保护；Recovery/Cardio 不作为 V4 有效权重。
@@ -102,6 +104,7 @@ not_due 不后移检查时间；重复同证据/截止时间应幂等；不同 e
 ## 7. Readiness
 
 唯一规则源：[readiness](../packages/readiness/src/index.ts)。兼容阈值：sleep ratio 0.75、HRV ratio 0.85、RHR ratio 1.03、连续差睡眠 3 夜。
+"差的一夜"必须是**同一个** 0.75 口径：连续三夜的每一夜与单夜规则用 `READINESS_SLEEP_RATIO_THRESHOLD` 判定（2026-10-18 统一；此前连续夜用的是另一处 0.80 字面量，导致三夜 78% 即报 `strained`，而单夜信号 `sleep.low` 仍是 false）。
 coverage 与 assessment 分开；读数存在但 baseline 缺失不增加可比较覆盖；旧夜不能填充今天的恢复完整度。
 Readiness state 带 heuristic_rules / not_empirically_validated；no_low_signal 不等于已证实健康。
 一天多个窗口、跨午夜、午睡、迟到、更正和缺失必须保留各自来源与可得性。
@@ -220,6 +223,7 @@ HR/Pace coherence 解释间歇心率滞后，不按稳态规则硬判全部间�
 ## 11. Prediction policy
 
 [编排](../packages/application/src/prediction-report.ts) 区分 neutral_potential / current_prepared / race_day_scenario。
+**缺失准备度 = 未建模 = 中性，不应用默认罚分**（2026-10-18 订正）：`predictRaceTimes` 只在调用方给出 finite `readiness[distance]` 时按 `raceReadinessVdotPenalty` 罚分；缺失或 `null` 时 `readinessValue = 1`、且 `readinessAdjustmentSeconds = null`。已退役的 `defaultRaceReadiness`（0.7 / 0.6 / 0.45）会让"看不见的准备度"变成随距离加大的猜测罚分（半马约 +6%），正是 §8/D01 禁止的"未知覆盖度当成低准备度"。证据码只在真正建模时给 `race_readiness_applied`，否则给 `endurance_readiness_unmodeled`；method 与 readiness 字段必须一致（契约断言强制）。**置信度单独处理**（2026-10-18 补充）：点估计不罚时间，但缺失准备度按距离无关的中性先验 `UNMODELED_READINESS_CONFIDENCE_PRIOR = 0.5` 打折（乘子 `0.55 + 0.45×0.5 = 0.775`）——"未知"不能比"已知准备充分"更自信；该先验是政策常量，不是对跑者准备度的估计。
 Baseline → Preparation → target environment/fatigue → 一个 point residual policy → interval；不堆叠 bias/Ridge/CatBoost。
 Fitness 不能未经校准线性换算 VDOT。直接 VO₂max 与同场 race/test VDOT 不重复进入 ensemble。
 未来比赛不能永久继承今天的低恢复罚分；原有情景/ledger 必须可解释。
@@ -327,7 +331,12 @@ P80/P90 只有独立 calibration artifact、独立 test cohort、适用域、样
 [重算](../packages/application/src/services/recompute-pipeline.ts)、[transition gate](../packages/storage-sqlite/src/model-transition-gate.ts)、[release repository](../packages/storage-sqlite/src/model-release-repository.ts) 负责谱系、快照完整性和原子指针。
 同标尺比较保留分布保护；跨标尺用明确不变量替代不适用的 recovery null 阈值，不填伪恢复值绕过。
 已知 inactive 删除与无解释候选漏行应区分；候选不能继续含删除训练，校准证据被删时可重校准/回到不足状态。
-not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
+not_evaluable 是正式状态，不能按“不是 failed”绕过激活。同标尺 gate 按**是否存在可评分 cohort** 分情形（2026-10-18 订正，`baseScoredSessions`/`candidateScoredSessions`）：
+- 一侧有评分证据（CA 非 NULL）而另一侧全丢 ⇒ `scored_cohort_lost` **失败**（用户可见的 CA 消失）；
+- 两侧都无评分证据（冷启动/标定未完成，CA 与最终 TA 都算不出）⇒ 记 `no_scored_cohort` 迁移说明，**不拦**，本次激活的分布保护是空集；这与 `verifiedEmpty` 是同一结论的两级证据；
+- 两侧都有评分证据 ⇒ CA 均值/P95 算不出、或 matchedSessions>0 时 recovery null 率/饱和率算不出 ⇒ `not_evaluable`（`metric_unavailable:<name>`）；最终 TA 未校准（`null`）只记 `final_true_ability_unavailable`，不拦（同标尺保护针对 CA 分布）；
+- 反向变化（base 无 CA、candidate 有）记 `scored_cohort_appeared`，不拦；
+- `verifiedEmpty`（已用完整空数据证明）例外保持：不因上述指标 `null` 判 not_evaluable。
 回滚只到仍保留、数据 generation 兼容的完整 bundle；不承诺恢复任意已清理 run/历史二进制。
 原始健康事实不随算法回滚被删改；checkpoint 只在精确兼容配置/版本下复用。
 激活/回滚还须匹配当前有效override快照（V4 lineage hash、V3 metric config ID序列）；不匹配时拒绝并保留两个active指针，同事实回滚仍允许。
@@ -405,7 +414,7 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 | I02 | 无 calibration/域匹配/足够独立评估 | 不展示为 P80/P90 保证；只保留明确 heuristicRange | API/UI |
 | T03 | 已标注结果不合格、重复、更正或撤销 | 漏斗计数可对账、理由可见、失效传播正确 | application/evaluation |
 | N01 | 环境三项缺一 / 三项齐全且为零 / 三项齐全且有修正 | unavailable 不产出部分修正、not_needed 显式 0、applied 与证据同一计算；可得率按解析结果计数 | physiology/API/UI |
-| N02 | 上坡 / 下坡 / 平坦的同一配速 | 等强配速随坡度单调、零坡度恒等、超出成本模型域时夹取并给理由 | physiology/API |
+| N02 | 上坡 / 下坡 / 平坦的同一配速 | 零坡度恒等；成本模型的单调区间（上坡侧）内等强配速随坡度单调；−20% 以下如实呈现成本回升（非单调），不写成"越陡越快"；超出成本模型域时夹取并给理由 | physiology/API |
 | N03 | 无海拔采样 / 单点采样 / 坡度超出可信范围 / 分段过短 | gradePercent 与等强配速均为 null 且带理由码，未知不得渲染为 0 | API/UI |
 | L05 | 日指标叠加状态曲线 | 持久化字段逐位不变；chronic=0/NaN ⇒ insufficient_data 而非中性档；分档在边界上归属明确 | training-load/UI |
 | M05 | 个人区间试图带人群词汇 / 换掉免责声明 | 断言拒绝：个人带不得出现 nominalCoverage/coverageP80/coverageP90，免责声明必须逐字 | model-eval/API/UI |

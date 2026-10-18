@@ -21,6 +21,7 @@ ZIP先检查路径/大小/数量/重复条目及导出根目录，不能信任�
 - payload摘要包含内容、canonical合同、preserveAbsent语义、引擎name@version和身份算法行为fingerprint。
 - 指纹更改必须审查是否有意、是否会触发全量重导；不能直接更新冻结值使红灯消失。
 - tombstone、来源删除和override revision是事实，不因重导相同ZIP被复活。
+- **值更正取代（supersede，2026-10-18）**：没有 sample UUID 的记录，身份把 value/unit 折进 id，因此"值更正"会表现为一个新实体。`preserveAbsent` 增量会把同一自然键 `(type, source_name, start_at, end_at)` 的旧身份按**删除持久**处理（账本 `removed` + 墓碑 + 删行），而不是让两行共存。这是刻意的方向：上传是 at-least-once，延迟重试的旧批次不能把已更正的值写回去；代价是"值又改回旧值"同样会被墓碑拦住、不会复活。被拦下的数量可通过 `GET /v1/diagnostics` 的 `imports.tombstonedRecords` / `imports.supersededRecords` 观察到（来自 succeeded import_batches 的 `summary_json.xml` 聚合）。
 - `created_at`可能是数据源创建时间，不自动等于系统首次收到记录的时间。
 
 ## 3. 三种时间不能互换
@@ -52,7 +53,7 @@ Override保存修订和可得性。反馈保存之后的重算失败不应撤销
 
 ## 6. 存储与版本
 
-[database](../packages/storage-sqlite/src/database.ts) 定义migrations 1–32；历史migration正文/checksum冻结，不允许原地修改以“修复”旧库。
+[database](../packages/storage-sqlite/src/database.ts) 的迁移注册表是版本唯一来源（导出的 `MIGRATION_VERSIONS` / `FROZEN_MIGRATION_CHECKSUMS`；本文**不写死**版本区间或条数，避免随每次新增迁移过期）；历史migration正文/checksum冻结，不允许原地修改以“修复”旧库。
 
 | 结构 | 责任 |
 |---|---|

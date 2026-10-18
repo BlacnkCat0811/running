@@ -21,12 +21,16 @@ WKWebView path and no macOS destination any more; the API is reached directly
 over HTTPS with a Bearer token. HealthKit read-only sync is authorized: the iOS
 app may request Apple Health read permission, export running-related samples to
 the existing Apple Health ZIP/XML import pipeline, and upload them to the API.
+"Read-only" here refers to **health samples and records**: scheduling workouts
+to Apple Watch through WorkoutKit requires workout-type HealthKit write
+authorization (`NSHealthUpdateUsageDescription`). That authorization covers the
+workout schedule only — the app must not write or modify health samples/records.
 Do not rewrite the TypeScript scoring core on device, and do not add HealthKit
-write, or a standalone Watch/macOS/mobile product unless the user explicitly
-asks. HealthKit background delivery, BGProcessingTask, and a background
-URLSession are authorized for the iOS health sync pipeline (2026-09-22 product
-decision); any further background mechanism still requires explicit user
-request.
+write of health samples/records, or a standalone Watch/macOS/mobile product
+unless the user explicitly asks. HealthKit background delivery, BGProcessingTask,
+and a background URLSession are authorized for the iOS health sync pipeline
+(2026-09-22 product decision); any further background mechanism still requires
+explicit user request.
 
 The API keeps every `/v1` route that existed before the retirement, including
 routes that were only consumed by the retired Web SPA (backups, model and
@@ -39,7 +43,10 @@ product decision, not part of the Web retirement.
 Choose checks proportionate to the change. For ordinary API / package work:
 
 - `npm run typecheck`
-- `npm test`
+- `npm test` — on a multi-core or busy host prefer `RAI_TEST_CONCURRENCY=2 npm test`
+  (see the `scripts/run-tests.mjs` header: the default concurrency is the host's
+  parallelism, and the 5 s / 30 s wall-clock budgets in the heavy suites can fail
+  spuriously under load). A release record must state the concurrency used.
 - `npm run check:docs` when README, AGENTS, or anything under `docs/` changes
 - `npm run check:acceptance-matrix` when tests or `docs/ALGORITHM.md` change
 - `npm run smoke:api` when server startup or `deploy/` changes

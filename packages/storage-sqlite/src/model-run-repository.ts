@@ -58,6 +58,13 @@ export interface ModelValidationGateResult {
     baseModelVersion?: string | null;
     candidateModelVersion?: string | null;
     matchedSessions: number;
+    /**
+     * Matched sessions whose base / candidate assessment actually carries a CA.
+     * `ModelTransitionGateMetricsV2` reads these to tell "cold start, nothing scored
+     * yet" apart from "the candidate lost its scored cohort".
+     */
+    baseScoredSessions: number;
+    candidateScoredSessions: number;
     baseEligibleSessions: number;
     candidateEligibleSessions: number;
     eligibleSessionDelta: number;
@@ -243,7 +250,8 @@ export class SqliteModelRunRepository {
         gateVersion,
         status: "skipped",
         metrics: {
-          matchedSessions: 0, baseEligibleSessions: 0, candidateEligibleSessions: 0,
+          matchedSessions: 0, baseScoredSessions: 0, candidateScoredSessions: 0,
+          baseEligibleSessions: 0, candidateEligibleSessions: 0,
           eligibleSessionDelta: 0, recoveryNullRateBase: null, recoveryNullRateCandidate: null,
           recoveryNullRateDelta: null, recoverySaturationRate: null,
           currentAbilityMeanAbsoluteDelta: null, currentAbilityP95AbsoluteDelta: null,
@@ -306,6 +314,8 @@ export class SqliteModelRunRepository {
       baseModelVersion: baseVersion,
       candidateModelVersion: candidateVersion,
       matchedSessions: comparison.matchedSessions,
+      baseScoredSessions: comparison.baseScoredSessions,
+      candidateScoredSessions: comparison.candidateScoredSessions,
       baseEligibleSessions: baseEligible,
       candidateEligibleSessions: candEligible,
       eligibleSessionDelta: del(baseEligible, candEligible),
@@ -376,6 +386,8 @@ export class SqliteModelRunRepository {
 
   compareMetrics(baseId: string, candidateId: string, excludeOverridden = false): {
     matchedSessions: number;
+    baseScoredSessions: number;
+    candidateScoredSessions: number;
     currentAbilityMeanDelta: number | null;
     currentAbilityMeanAbsoluteDelta: number | null;
     confidenceMeanDelta: number | null;
@@ -398,6 +410,8 @@ export class SqliteModelRunRepository {
       .prepare(`
         SELECT
           COUNT(*) AS matched_sessions,
+          SUM(CASE WHEN b.current_ability IS NOT NULL THEN 1 ELSE 0 END) AS base_scored_sessions,
+          SUM(CASE WHEN c.current_ability IS NOT NULL THEN 1 ELSE 0 END) AS candidate_scored_sessions,
           AVG(c.current_ability - b.current_ability) AS ca_mean_delta,
           AVG(ABS(c.current_ability - b.current_ability)) AS ca_mean_abs_delta,
           AVG(c.confidence - b.confidence) AS confidence_mean_delta,
@@ -444,6 +458,8 @@ export class SqliteModelRunRepository {
       typeof value === "number" && Number.isFinite(value) ? value : null;
     return {
       matchedSessions: Number(metrics.matched_sessions ?? 0),
+      baseScoredSessions: Number(metrics.base_scored_sessions ?? 0),
+      candidateScoredSessions: Number(metrics.candidate_scored_sessions ?? 0),
       currentAbilityMeanDelta: asNumber(metrics.ca_mean_delta),
       currentAbilityMeanAbsoluteDelta: asNumber(metrics.ca_mean_abs_delta),
       confidenceMeanDelta: asNumber(metrics.confidence_mean_delta),

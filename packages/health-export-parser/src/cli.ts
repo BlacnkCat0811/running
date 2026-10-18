@@ -410,7 +410,10 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       FROM import_entity_changes WHERE batch_id = ? GROUP BY change_type
     `).all(batchId) as unknown as Array<{ changeType: string; count: number }> : [];
     const changes = Object.fromEntries(changeRows.map((row) => [row.changeType, row.count]));
-    const dirtyFromAt = dirtyWorkoutTimes.sort()[0] ?? null;
+    // 本批删除/取代过的记录时刻也必须压低分析下界：只取训练时刻会让"值更正"
+    // 这类记录-only 批次的窗口落在边界之外（`supersededRecordTimes` 来自解析器，
+    // 是被取代旧行的 `start_at`；账本 `previous_*` 写着同一区间）。
+    const dirtyFromAt = [...dirtyWorkoutTimes, ...(xmlResult.supersededRecordTimes ?? [])].sort()[0] ?? null;
     if (incremental) store.database.prepare(`
       UPDATE import_batches SET xml_sha256 = ?, route_bundle_sha256 = ?, status = 'succeeded',
         dataset_version = ?, dirty_from_at = ?, summary_json = ?, completed_at = ? WHERE id = ?

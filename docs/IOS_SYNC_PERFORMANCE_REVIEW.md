@@ -619,7 +619,11 @@ npm run check:docs
 ```
 
 纯后端／iOS 改造不需要为本方案运行移动或响应式 Web E2E。
-若触及 Web 展示或共享契约，补 `npm run build`，确有桌面交互变化再运行 `npm run test:e2e:web`。
+~~若触及 Web 展示或共享契约，补 `npm run build`，确有桌面交互变化再运行 `npm run test:e2e:web`。~~
+> **2026-10-18 更正（D17）**：Web 与 macOS 已于 2026-10-17 退役删除，
+> `npm run build` 与 `test:e2e:web` 已不存在 —— 不是"本轮不运行"，而是**不可复跑**。
+> 共享契约变更的判据改为 `npm run typecheck` + `npm test` + `npm run test:ios`；
+> 不要再把这两条加回 `package.json`（[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)）。
 真机验收覆盖前后台切换、锁屏、离线、恢复与连续分页；模拟器结果不能代替真实 HealthKit 证明。
 
 ### 7.2 schema 前置检查：不是全量同步，也不创建备份

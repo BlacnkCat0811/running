@@ -285,6 +285,12 @@ export interface ConditionCorrectionSite {
 /**
  * 现状登记（2026-09-28 对照源码确认）。两处都对同一组字段施加修正，
  * 但**对象不同**（过去 vs 未来），正是 §5.5 明确允许的组合。
+ *
+ * 这张表不是纯文档：`packages/normalization/test/normalization.test.ts` 会
+ * 把每个 `location` 与 physiology 源码里对应的 `// condition-ledger:<id>` 标记、
+ * 以及所有"修正原语"的调用点对账。新增第三处修正点（或把标记搬进别的函数）
+ * 会让该测试变红，直到这张表被同步更新 —— 这是 P02"同一责任只能应用一次"
+ * 唯一可机检的形式。
  */
 export const defaultConditionLedger: readonly ConditionCorrectionSite[] = [
   {

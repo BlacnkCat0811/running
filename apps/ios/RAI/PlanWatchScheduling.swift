@@ -287,8 +287,19 @@ enum PlanWatchScheduling {
         await scheduler.removeEntries(outcome.submittedEntries)
         let left = await scheduler.readBack()
         // UUID + 精确时刻的身份匹配；与 WorkoutKitBridge.removeEntries 一致。
-        outcome.cleanupVerified = !PlanReceiptMatcher.hasResidualEntries(outcome.submittedEntries, in: left,
-            timeZone: PlanReceiptMatcher.planTimeZone(journal.operation.timezone))
+        // 2026-10-18（深度审查 P3-25）：时区不可解析 ⇒ **不能**做身份比较（旧实现在这里静默
+        // 回落 UTC+8，等于用一个错误的时区判"己方条目还在不在"，可能把残留判成已清）。
+        // fail-closed：`cleanupVerified = false` + 留诊断，风险账目保留、UI 继续要求核验。
+        if let zone = PlanReceiptMatcher.planTimeZone(journal.operation.timezone) {
+            outcome.cleanupVerified = !PlanReceiptMatcher.hasResidualEntries(
+                outcome.submittedEntries, in: left, timeZone: zone)
+        } else {
+            outcome.cleanupVerified = false
+            outcome.storageError = "计划的业务时区无法解析，无法核验撤回结果；风险账目已保留，请重新连接后重试"
+            journal.recordDiagnostic(name: "withdrawal_unverifiable",
+                                     errorCode: "plan_timezone_unparseable",
+                                     owed: outcome.submittedEntries.count)
+        }
         outcome.clearVerified = left.isEmpty && outcome.didAttemptClear
         outcome.verified = false
         outcome.receipts = []
@@ -321,9 +332,18 @@ enum PlanWatchScheduling {
             else { await scheduler.removeEntries(entries) }
             let remaining = await scheduler.readBack()
             // 同 withdrawSuperseded：UUID + 精确 scheduledAt 才是本操作的条目身份。
-            outcome.cleanupVerified = journal.operation.clearAll ? remaining.isEmpty
-                : !PlanReceiptMatcher.hasResidualEntries(entries, in: remaining,
-                    timeZone: PlanReceiptMatcher.planTimeZone(journal.operation.timezone))
+            // 2026-10-18（P3-25）：时区不可解析 ⇒ 不可核验 ⇒ fail-closed（不清账、不算撤回成功）。
+            if journal.operation.clearAll {
+                outcome.cleanupVerified = remaining.isEmpty
+            } else if let zone = PlanReceiptMatcher.planTimeZone(journal.operation.timezone) {
+                outcome.cleanupVerified = !PlanReceiptMatcher.hasResidualEntries(entries, in: remaining, timeZone: zone)
+            } else {
+                outcome.cleanupVerified = false
+                outcome.storageError = "计划的业务时区无法解析，无法核验撤回结果；风险账目已保留，请重新连接后重试"
+                journal.recordDiagnostic(name: "withdrawal_unverifiable",
+                                         errorCode: "plan_timezone_unparseable",
+                                         owed: entries.count)
+            }
             outcome.clearVerified = remaining.isEmpty
             outcome.verified = outcome.cleanupVerified && isCurrent()
             if !journal.persist(outcome.verified ? .verifying : .withdrawalRequired) {

@@ -3296,6 +3296,107 @@ export class RaiDatabase {
     return removed;
   }
 
+  /**
+   * Supersede the **legacy** record rows that a value correction turned into
+   * duplicates.
+   *
+   * ## 为什么需要它
+   *
+   * 无 sync identifier、无 sample UUID 的记录，身份把 `value`/`unit` 折进 id
+   * （`apple-health-parser.ts` 的 `buildRecord`）。于是**值更正**不是一次 `updated`，
+   * 而是一个**新实体**：旧行仍占着同一个自然键 `(type, source_name, start_at, end_at)`。
+   * 而 `preserveAbsent` 增量从不把"载荷里没有"读成删除，旧行就永远不会被清掉 ——
+   * 分析按全部健康记录读取，同一时间窗里两条互斥样本会被**双计**，且账本里连一条
+   * `removed` 都没有（脏范围看不见这次替换）。
+   *
+   * ## 做什么
+   *
+   * 每个批次跑**一次**集合查询，找出"本批写过的 record × 同自然键、不同 id 的旧行"，
+   * 用**既有删除语义**取代旧行：账本 `removed` + 墓碑 + 删行 + 删代次。不是逐条查询：
+   * `EXPLAIN QUERY PLAN` 实测本批写入侧走 `import_entity_changes` 主键、旧行侧走
+   * `health_records` 的 `(type, end_at, start_at)` 索引等值 seek（v40 的
+   * `idx_health_records_type_end`；基线库则由 `idx_health_records_type_time` 承接），
+   * 代价与本批记录数同阶，没有全表扫描。
+   *
+   * ## 判据与边界（每一条都是刻意收窄，别放宽）
+   *
+   * - 只看本批账本里 **`inserted`/`updated`** 的新行（`removed`/`unchanged` 不算写入）；
+   * - 旧行必须共享自然键且 **id 不同**（同 id 是普通内容更正，`observeImportEntity`
+   *   已经记成 `updated`，这里不碰）；
+   * - 旧行 **不得是 v2 UUID 身份的行**（`healthkit_record_sources` 有映射）：那是权威
+   *   身份，清理由 UUID 车道自己的删除路径（`removeHealthKitRecords`）负责；本方法若
+   *   删它，账本/墓碑会与 UUID 车道对同一实体各说一套；
+   * - 旧行 **不得是本批写过的实体**（账本已有行）：同一批里新旧值同时到达时，
+   *   "后到的覆盖先到的"不是删除理由 —— 宁可两份都留，也不在批内互相抹掉；
+   * - `previous_*` 写旧行自己的区间：`loadDirtyRangeInput` 对 `removed` 记录的旧侧
+   *   正是取这三列，写 NULL 会让这次删除退化成"无边界"（消费端只能全量）。
+   *
+   * 墓碑不带 `source_identifier`：与 `applyManifestDeletions` 的普通删除同形，
+   * 目的是"旧值的同一载荷不能再回来"，而不是按 UUID 来源登记删除。
+   *
+   * 调用方限定：`preserveAbsent` 的增量接收（完整快照由 `finalizeImportGeneration`
+   * 自己删陈旧实体；UUID 车道与直连 `recordDelta` 不调用）。
+   */
+  supersedeLegacyRecordCorrections(batchId: string): {
+    removed: number; removedIds: string[]; removedTimes: string[];
+  } {
+    this.begin();
+    // 旧库（v30 之前）可能没有 UUID 身份表；迁移后一定有，但判据不该依赖版本。
+    const ownedClause = this.tableExists("healthkit_record_sources")
+      ? "AND NOT EXISTS (SELECT 1 FROM healthkit_record_sources source WHERE source.record_id = candidate.id)"
+      : "";
+    try {
+      const candidates = this.database.prepare(`
+        SELECT DISTINCT candidate.id AS id, candidate.start_at AS startAt,
+          candidate.end_at AS endAt, candidate.type AS type
+        FROM import_entity_changes change
+        JOIN health_records written ON written.id = change.entity_id
+        JOIN health_records candidate
+          ON candidate.type = written.type
+         AND candidate.source_name = written.source_name
+         AND candidate.start_at = written.start_at
+         AND candidate.end_at = written.end_at
+         AND candidate.id <> written.id
+        WHERE change.batch_id = ? AND change.entity_kind = 'record'
+          AND change.change_type IN ('inserted', 'updated')
+          AND NOT EXISTS (
+            SELECT 1 FROM import_entity_changes kept
+            WHERE kept.batch_id = change.batch_id AND kept.entity_kind = 'record'
+              AND kept.entity_id = candidate.id)
+          ${ownedClause}
+      `).all(batchId) as Array<{ id: string; startAt: string; endAt: string; type: string }>;
+      if (candidates.length === 0) return { removed: 0, removedIds: [], removedTimes: [] };
+      const ledger = this.database.prepare(`
+        INSERT OR REPLACE INTO import_entity_changes (
+          batch_id, entity_kind, entity_id, change_type, effective_at, content_hash,
+          previous_effective_at, previous_end_at, previous_type
+        ) VALUES (?, 'record', ?, 'removed', ?, ?, ?, ?, ?)
+      `);
+      const dropGeneration = this.database.prepare(
+        "DELETE FROM import_entity_generations WHERE entity_kind = 'record' AND entity_id = ?"
+      );
+      const dropRecord = this.database.prepare("DELETE FROM health_records WHERE id = ?");
+      for (const candidate of candidates) {
+        this.recordEntityTombstones("record", [candidate.id], { batchId });
+        ledger.run(
+          batchId, candidate.id, candidate.startAt, candidate.id,
+          candidate.startAt, candidate.endAt, candidate.type
+        );
+        dropGeneration.run(candidate.id);
+        dropRecord.run(candidate.id);
+      }
+      if (!this.atomicImport) this.flushIfOwned();
+      return {
+        removed: candidates.length,
+        removedIds: candidates.map((candidate) => candidate.id),
+        removedTimes: candidates.map((candidate) => candidate.startAt)
+      };
+    } catch (error) {
+      this.rollbackIfOwned();
+      throw error;
+    }
+  }
+
   /** Register before scanning additions: payload order cannot let a carried
    * deleted UUID overwrite a live replacement with the same legacy identity. */
   markHealthKitRecordDeletions(

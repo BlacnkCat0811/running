@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,7 +13,8 @@ import {
   optionalPublicationGuard,
   planReadGuard,
   readSnapshotFileIdentity,
-  readStableSnapshot
+  readStableSnapshot,
+  snapshotFileReplaced
 } from "../src/plan-read-consistency.js";
 import { PUBLICATION_GUARD_STALE_MS } from "../src/publication-guard.js";
 
@@ -157,17 +159,46 @@ test("G: a stale pending marker left by a crashed publisher no longer blocks rea
   assert.equal(builds, 1, `a pending marker older than ${PUBLICATION_GUARD_STALE_MS} ms is a lease, not a lock`);
 });
 
-test("G: a failing or unsupported guard degrades to the digest-only check", () => {
+test("P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check", () => {
+  let reads = 0, builds = 0, guardReads = 0;
+  assert.throws(() => readStableSnapshot<Control, number>({
+    readControl: () => { reads += 1; return snapshot(4); },
+    build: control => { builds += 1; return control.revision; },
+    changedError,
+    readGuard: () => { guardReads += 1; throw new Error("guard table unreadable"); }
+  }), (error: unknown) => error instanceof PlanOperationError &&
+    error.code === "coach_snapshot_changed" && error.statusCode === 503);
+  assert.equal(guardReads, 3, "the guard is retried once per attempt before failing closed");
+  assert.equal(builds, 0, "no build is spent without a provably stable snapshot");
+  assert.equal(reads, 0, "the control snapshot is not even read when the guard cannot be read");
+});
+
+test("P3-02: a guard that starts failing after the build also fails closed", () => {
+  const stable = { epoch: 1, pendingSince: null };
+  let guardReads = 0, builds = 0;
+  assert.throws(() => readStableSnapshot<Control, number>({
+    readControl: () => snapshot(4),
+    build: control => { builds += 1; return control.revision; },
+    changedError,
+    // The first read (before the build) succeeds; every later one throws.
+    readGuard: () => { guardReads += 1; if (guardReads === 1) return stable; throw new Error("guard vanished"); }
+  }), PlanOperationError);
+  // Attempt 1 read the guard before (ok) and after the build (throws); attempts
+  // 2 and 3 fail on the before-read. One build total, then fail closed.
+  assert.equal(builds, 1, "only the first attempt spent a build");
+  assert.equal(guardReads, 4, "two reads in the first attempt, one per retry");
+});
+
+test("P3-02: a store without any guard still degrades to the digest-only check", () => {
   let reads = 0, builds = 0;
   const result = readStableSnapshot<Control, number>({
     readControl: () => { reads += 1; return snapshot(4); },
     build: control => { builds += 1; return control.revision; },
-    changedError,
-    readGuard: () => { throw new Error("guard table unreadable"); }
+    changedError
   });
   assert.equal(result, 4);
   assert.equal(builds, 1);
-  assert.equal(reads, 2, "without a usable guard the digest pair is still verified");
+  assert.equal(reads, 2, "absent guard support is the documented pre-guard fallback");
 });
 
 test("G: optionalPublicationGuard binds a store method and is absent when unsupported", () => {
@@ -212,6 +243,14 @@ test("P2-5: a transient file identity read returns null instead of throwing into
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("P2-02: only an inode change counts as a replaced database file", () => {
+  const before = { ino: 42, mtimeMs: 1_000 };
+  assert.equal(snapshotFileReplaced(before, { ino: 42, mtimeMs: 9_999 }), false,
+    "a WAL checkpoint moves mtime without replacing the file — not a publication");
+  assert.equal(snapshotFileReplaced(before, { ino: 43, mtimeMs: 9_999 }), true,
+    "a rename/import publication lands on a new inode");
 });
 
 // ---------------------------------------------------------------------------
@@ -283,14 +322,101 @@ test("trainingPlanState reads one control pair before and one after the build", 
   }
 });
 
-test("G: planReadGuard exempts this store's own in-flight publication", () => {
-  const state = { epoch: 4, pendingSince: new Date().toISOString() };
-  const base = { publicationGuardState: () => state };
-  assert.ok(planReadGuard(base), "a plain reader honors a live marker");
-  assert.equal(planReadGuard({ ...base, publicationInFlight: () => true }), undefined,
-    "MobileGoalsStore.publicationInFlight(): the publisher must not fail closed on its own marker");
-  assert.ok(planReadGuard({ ...base, publicationInFlight: () => false }), "outside a publication the guard is honored");
-  // Older stores / test doubles without the public accessor keep working.
-  assert.equal(planReadGuard({ ...base, publicationTransaction: true }), undefined,
-    "private-field fallback: the publishing connection must not fail closed on its own pending marker");
+test("P3-03: planReadGuard never disables itself, even inside the store's own publication", () => {
+  // `publicationGuardState()` already hides the store's own marker while keeping
+  // the epoch. A reader that suppressed the guard inside the transaction would
+  // additionally lose foreign-epoch detection, which is strictly weaker.
+  let inFlight = true;
+  const base = {
+    publicationGuardState: () => inFlight
+      // What MobileGoalsStore returns inside its own transaction: own pending
+      // hidden, epoch preserved.
+      ? { epoch: 7, pendingSince: null }
+      : { epoch: 7, pendingSince: new Date().toISOString() }
+  };
+  const read = planReadGuard(base);
+  assert.ok(read, "the guard is honored while the store publishes");
+  // A foreign publication that starts during the build is still detected: the
+  // hidden own-marker does not hide the epoch move.
+  const guards = [
+    { epoch: 7, pendingSince: null },
+    { epoch: 8, pendingSince: null },
+    { epoch: 8, pendingSince: null },
+    { epoch: 8, pendingSince: null }
+  ];
+  let guardReads = 0, builds = 0;
+  const result = readStableSnapshot<Control, number>({
+    readControl: () => snapshot(3),
+    build: control => { builds += 1; return control.revision * 10; },
+    changedError,
+    readGuard: () => guards[Math.min(guardReads++, guards.length - 1)]!
+  });
+  assert.equal(result, 30);
+  assert.equal(builds, 2, "the foreign epoch change forced one rebuild instead of being ignored");
+  inFlight = false;
+  assert.ok(planReadGuard(base));
+  // A store without the method still has no guard.
+  assert.equal(planReadGuard({}), undefined);
+});
+
+
+// ---------------------------------------------------------------------------
+// P3-14：启动时清掉崩溃发布者遗留的 pending marker
+// ---------------------------------------------------------------------------
+
+test("P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-guard-startup-"));
+  const controlPath = join(root, "control.sqlite");
+  try {
+    const first = new MobileGoalsStore(root, controlPath);
+    first.close();
+    // Simulate the state after SIGKILL between `beginPublicationMarker` and the
+    // business transaction: epoch committed, pending marker not cleared.
+    const marker = new DatabaseSync(controlPath);
+    try {
+      marker.prepare("UPDATE mobile_publication_guard SET epoch = 11, pending_since = ? WHERE id = 1")
+        .run(new Date().toISOString());
+    } finally { marker.close(); }
+    const reopened = new MobileGoalsStore(root, controlPath);
+    try {
+      assert.deepEqual(reopened.publicationGuardState(), { epoch: 11, pendingSince: null },
+        "a marker from a dead process is not a live publication; the epoch must survive for readers");
+    } finally { reopened.close(); }
+    // Re-opening again is a no-op (idempotent startup path).
+    const again = new MobileGoalsStore(root, controlPath);
+    try { assert.deepEqual(again.publicationGuardState(), { epoch: 11, pendingSince: null }); }
+    finally { again.close(); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P3-15：同步重试的成本上限（不含 sleep 的既定取舍）
+// ---------------------------------------------------------------------------
+
+test("P3-15: a publication that keeps changing bounds the cost to attempts x build", t => {
+  // The retry loop deliberately does not sleep between attempts (see the
+  // `readStableSnapshot` docstring). The contract callers rely on is the cost
+  // ceiling: at most `attempts` builds, and the whole call stays a small,
+  // synchronous span.
+  const now = 1_800_000_000_000;
+  for (const attempts of [1, 3, 5]) {
+    let epoch = 1, builds = 0, guardReads = 0;
+    const started = performance.now();
+    assert.throws(() => readStableSnapshot<Control, number>({
+      readControl: () => snapshot(2),
+      build: control => { builds += 1; return control.revision; },
+      changedError,
+      // Every guard read reports a new epoch: no attempt can be proven stable.
+      readGuard: () => { guardReads += 1; epoch += 1; return { epoch, pendingSince: null }; },
+      now: () => now,
+      attempts
+    }), PlanOperationError);
+    const elapsedMs = performance.now() - started;
+    assert.equal(builds, attempts, `attempts=${attempts}: one build per attempt, never more`);
+    assert.equal(guardReads, attempts * 2, `attempts=${attempts}: guard read pair per attempt`);
+    assert.ok(elapsedMs < 500, `attempts=${attempts}: synchronous retry budget stayed ${elapsedMs.toFixed(1)}ms`);
+    if (attempts === 3) t.diagnostic(`3-attempt fail-closed span: ${elapsedMs.toFixed(3)}ms (no sleep by design)`);
+  }
 });

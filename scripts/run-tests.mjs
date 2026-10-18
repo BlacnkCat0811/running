@@ -1,20 +1,76 @@
 #!/usr/bin/env node
-import { readdirSync, existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 测试文件名口径：`*.test.{ts,tsx,mts,cts,js,jsx,mjs,cjs}`。
+ *
+ * 2026-10-18（深度审查 P3-32）：第一版只收 `*.test.ts`，于是把测试命名成
+ * `.test.mts`（仓库里 `.mts` 脚本很常见）或放进 `test/` 子目录时会**静默不跑**，
+ * 而 `npm test` 依旧全绿。现在两处一起收：扩展名放宽 + 递归子目录。
+ */
+const TEST_FILE = /\.test\.(?:[cm]?[jt]sx?)$/;
 
 /** Explicit paths, not shell globs: identical test discovery on cmd and POSIX. */
 export function nodeTestFiles(directory = root) {
   const packages = readdirSync(join(directory, "packages"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory()).map((entry) => join("packages", entry.name, "test"));
   const folders = [...packages, join("apps", "api", "test")];
-  return folders.flatMap((folder) => existsSync(join(directory, folder))
-    ? readdirSync(join(directory, folder), { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".test.ts"))
-      .map((entry) => join(folder, entry.name)) : []).sort();
+  const files = [];
+  const walk = (relativeFolder) => {
+    const absolute = join(directory, relativeFolder);
+    let entries;
+    try {
+      entries = readdirSync(absolute, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === "dist") continue;
+      const relative = join(relativeFolder, entry.name);
+      if (entry.isDirectory()) walk(relative);
+      else if (entry.isFile() && TEST_FILE.test(entry.name)) files.push(relative);
+    }
+  };
+  for (const folder of folders) walk(folder);
+  return files.sort();
+}
+
+/** git 里被跟踪的测试类文件（用于反向断言：不存在"写了测试但从未被跑"的静默漏跑）。 */
+export function trackedTestFiles(directory = root) {
+  return execFileSync("git", ["ls-files"], { cwd: directory, maxBuffer: 1 << 28 })
+    .toString()
+    .split("\n")
+    .filter(Boolean)
+    .filter((path) => TEST_FILE.test(path))
+    .sort();
+}
+
+/**
+ * tracked 测试文件集合 ⊆ 被发现集合。任何差异都意味着"这份测试不会被 `npm test` 执行"，
+ * 而那正是最安静的一种假绿——所以这里直接抛错，而不是打一行警告。
+ * 没有 git 的环境（例如解压出来的 tarball）无法做这条断言：显式打印 NOT CHECKED 后继续。
+ */
+export function assertAllTrackedTestsDiscovered(discovered, directory = root) {
+  let tracked;
+  try {
+    tracked = trackedTestFiles(directory);
+  } catch {
+    console.error("NOT CHECKED: git unavailable; tracked-test coverage could not be verified.");
+    return;
+  }
+  const discoveredSet = new Set(discovered.map((path) => path.split(sep).join("/")));
+  const missing = tracked.filter((path) => !discoveredSet.has(path));
+  if (missing.length > 0) {
+    throw new Error(
+      `Test files are tracked but NOT discovered by npm test (they would never run):\n  ${missing.join("\n  ")}\n` +
+        "Move them under packages/*/test/ or apps/api/test/ with a *.test.* name, or widen scripts/run-tests.mjs."
+    );
+  }
 }
 
 /** Both suites run after ordinary failures; signals/startup errors never pass. */
@@ -93,6 +149,7 @@ export function nodeSuiteArgs(files, concurrency) {
 export function main() {
   const files = nodeTestFiles();
   if (!files.length) throw new Error("No Node test files found; refuse an empty green test run");
+  assertAllTrackedTestsDiscovered(files);
   return executeSuites([
     { name: "Node", cwd: root, args: nodeSuiteArgs(files, testConcurrency()) }
   ]);

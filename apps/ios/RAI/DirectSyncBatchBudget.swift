@@ -368,6 +368,76 @@ nonisolated extension DirectSyncBatchBudget {
     static func recentWindowShare(of budget: DirectSyncBatchBudget) -> (maxBytes: Int, maxRecords: Int) {
         (maxBytes: budget.maxXmlBytes / 5, maxRecords: budget.maxRecords / 5)
     }
+
+    /// 跑步动态「迟到样本」补读的**独立份额**（2026-10-18 深度审查 P2-06）。
+    ///
+    /// 缺陷形态（审查推演，真机未复现）：补读循环此前只受**全量** `accepts` 约束，而它排在
+    /// 窗口 pass 与正式 anchor 循环**之前** ⇒ 4 个类型 × `LateDynamicsBackfill.limit`（1500）
+    /// = 最多 6000 条 / ~1.4 MB，足以在同一批里吃光 4500 条 / 1.84 MB 的预算。后果不是丢数据
+    /// （账目按批提交、分页上界持久），而是"心率/睡眠/步数等 anchor 流在被补读的那几批里
+    /// 零进展"—— 用户看到的是同步变慢且无从归因。
+    ///
+    /// 语义（与 `recentWindowShare` 同手法，两个份额**互不借用**）：
+    /// - 补读最多使用单批总预算的 **15%**（此处取 1/7 ≈ 14.3%，向下取整更保守）；
+    /// - 窗口 20% + 补读 15% ⇒ 正式 anchor 流**至少保留 65%**；
+    /// - 补读用不满的份额**不回流**（正式流仍按 `accepts` 的总额判定，天然可用剩余部分）；
+    /// - 15% 是**待基准校准的初始值**：比窗口更小，因为补读是"恢复通道"、窗口是"近期交付"。
+    ///
+    /// 🔴 为什么不是"把补读挪到 anchor 循环之后"：补读存在的理由是**历史重放可能持续数天**
+    /// （见 `HealthKitRecordCursor` 头注释"锚点流排在历史重放队尾"），而 anchor 流在重放期
+    /// 每批都会把预算用满 —— 挪到之后等于让恢复通道永远排在队尾，2026-10-14 的缺失形态会以
+    /// 另一种方式复现。独立份额保证它**每批都拿到一点进展**，且永不饿死正式流。
+    static func lateBackfillShare(of budget: DirectSyncBatchBudget) -> (maxBytes: Int, maxRecords: Int) {
+        (maxBytes: budget.maxXmlBytes / 7, maxRecords: budget.maxRecords / 7)
+    }
+
+    /// 子通道（近期窗口 / 迟到补读）的**份额裁决**：页必须**同时**满足份额与全量预算。
+    ///
+    /// 抽成纯函数（2026-10-18 深度审查 P2-06）的唯一理由：两条子通道此前各写一份内联判定，
+    /// 补读那一份**漏了份额**（只调 `accepts`）—— 而"漏写一个 `&&`"在类型检查与现有全部
+    /// 回归下都看不出来（`HealthKitExport` 不进任何可执行回归）。集中到一处后，两条通道的
+    /// 语义差异只剩"用哪个份额"这一件事，且本文件被 `DirectSyncBatchBudgetTests` 单独编译。
+    ///
+    /// - Parameters:
+    ///   - shareBytesUsed / shareRecordsUsed: 本批该子通道**已经写进** export.xml 的字节/条数。
+    ///   - xmlBytes / records: 本批**已经提交**的全局字节/条数（含其它通道）。
+    static func acceptsWithin(
+        budget: DirectSyncBatchBudget,
+        share: (maxBytes: Int, maxRecords: Int),
+        shareBytesUsed: Int,
+        shareRecordsUsed: Int,
+        xmlBytes: UInt64,
+        records: Int,
+        pageBytes: Int,
+        pageRecords: Int
+    ) -> Bool {
+        shareBytesUsed + max(0, pageBytes) <= share.maxBytes
+            && shareRecordsUsed + max(0, pageRecords) <= share.maxRecords
+            && budget.accepts(xmlBytes: xmlBytes, records: records,
+                              pageBytes: pageBytes, pageRecords: pageRecords)
+    }
+
+    /// 子通道本页的**取数上限**（纯函数，P2-06 的第二个必需半边）。
+    ///
+    /// 为什么必须有它：只加份额闸门会把补读**锁死** —— `LateDynamicsBackfill.limit` 是 1500 条，
+    /// 而 15% 份额在保守预算上只有 642 条 / 269,633 B。满页必然同时越过"份额条数"与"份额字节"
+    /// 两条线 ⇒ `acceptsWithin` 恒 false ⇒ 补读永远零进展（修复比缺陷更糟）。所以要先按剩余
+    /// 份额把本页 `limit` 收进去：`min(满页, 剩余份额条数, 剩余份额字节 / 每记录字节估计)`。
+    ///
+    /// - Returns: 本页取数上限（≥1）；`0` = 本批该通道份额已用尽/已无字节余量 ⇒ 下一批再来。
+    /// - Parameter estimatePerRecord: 每记录字节估计；调用方用"本批已写均值"，没有历史时给
+    ///   **偏大**的保守值（高估只会让页更小，不会让页超份额）。
+    static func shareLimitedPageSize(
+        pageLimit: Int,
+        shareBytesLeft: Int,
+        shareRecordsLeft: Int,
+        estimatePerRecord: Int
+    ) -> Int {
+        guard pageLimit > 0, shareBytesLeft > 0, shareRecordsLeft > 0 else { return 0 }
+        let perRecord = max(1, estimatePerRecord)
+        let bytesCap = max(1, shareBytesLeft / perRecord)
+        return max(1, min(pageLimit, min(shareRecordsLeft, bytesCap)))
+    }
 }
 
 /// workout 页被字节闸门拒绝时的**收缩决策**（O01/WP-10，纯函数）。

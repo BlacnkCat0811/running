@@ -45,12 +45,16 @@ npm run check:acceptance-matrix
 npm run check:package-boundaries
 ```
 
+`npm test` 的默认并发 = 本机可用并行度；在多核/高负载机器上，几个重文件会互相挤占，测试里 5 s / 30 s 的墙钟预算可能被压红（假红，详见 [run-tests](scripts/run-tests.mjs) 头注释）。要一份可复现的独占结果：`RAI_TEST_CONCURRENCY=2 npm test`；**发布记录必须写明所用并发**。
+`check:doc-refs` 的内容漂移判据需要 `.linerefs.json` 基线；日常提交不要求基线（缺基线时输出会写"未核对（无基线）"，不会写成"0 处漂移"），发布前的内容级核对见 [运维](docs/OPERATIONS.md)「发布检查清单」。
+
 现有 iOS 用 `npm run test:ios`；Python 用 `npm run ml:test`。缺 Xcode/平台导致跳过必须报告，不能当通过。
 真机 HealthKit、后台唤醒、地图与视觉验收不能由上述自动检查替代。
 
-**本仓库的远端是 gitee，GitHub Actions 不会被 gitee 的提交触发**（`.github/workflows/ci.yml` 只为将来镜像到 GitHub 准备，镜像后可手动 dispatch）。所以不要把"没有 CI 红"读成"提交已验证"：
-- 提交时 `.githooks/pre-commit` 会跑 typecheck、文档链接、**文档行号引用**、npm 脚本跨平台语法、**计划定向回归**（计划相关路径有改动时，约 5 s）、§16.1 验收矩阵、包边界；`apps/ios/` 或 `packages/storage-sqlite/` 有改动时各自再跑对应门禁。
-- 发布前必须在能跑全量的机器上把上面这段清单逐条执行一遍（`npm test` 是分钟级，不在提交钩子里）。
+**本仓库的远端是 gitee，GitHub Actions 不会被 gitee 的提交触发**（`.github/workflows/ci.yml` 只为将来镜像到 GitHub 准备，镜像后可手动 dispatch；`.workflow/master-ci.yml` 是未启用的 Gitee Go 草案）。所以不要把"没有 CI 红"读成"提交已验证"：
+- 提交时 `.githooks/pre-commit` 会跑 typecheck、文档链接、**文档行号引用**、npm 脚本跨平台语法、**仓库体积闸门（1.5 MB/文件）**、**计划定向回归**（计划相关路径有改动时，约 5 s）、§16.1 验收矩阵、包边界；`apps/ios/` 或 `packages/storage-sqlite/` 有改动时各自再跑对应门禁（含迁移冻结与表分类清单一致性）。
+- 发布前必须在能跑全量的机器上把上面这段清单逐条执行一遍（`npm test` 是分钟级，不在提交钩子里），另跑 `npm run review:model-boundaries`（R1–R3 只读对抗探针）与 `npm run check:package-boundaries -- --self-test`。
+- 发布记录必须写明：**gitee 侧 CI 未启用、判据来自本机实跑**、`RAI_TEST_CONCURRENCY` 取值，以及被跳过的检查。
 - 缺 Xcode / 缺平台导致**跳过**的检查要单独列出，不能合并进"通过"。
 
 跨平台写法是硬规则，不是风格建议：npm script 正文只用 `&&`、纯命令、`node xxx.mjs`

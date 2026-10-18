@@ -1123,15 +1123,20 @@ export function fitPersonalInterval(input: {
     )
     .filter((value) => Number.isFinite(value) && value > 0);
   // The floor is on *labels*: at seven labels the band would be five quantile points
-  // pretending to be a distribution. One unusable pair is tolerated inside an
-  // otherwise sufficient set (the label still counts, the ratio does not).
-  if (input.samples.length < policy.minimumSamples || ratios.length < policy.minimumSamples - 1) return null;
+  // pretending to be a distribution.
+  if (input.samples.length < policy.minimumSamples) return null;
+  // Leave-one-out means every label but **at most one** contributed its own held-out
+  // ratio — the same requirement the presentation gate below enforces. A band fitted
+  // from fewer residuals than that is not returned at all: returning one would either
+  // put an undisplayable band in an API response or make the self-assertion throw on
+  // a data condition (several unusable pairs) rather than a programming error.
+  if (ratios.length < input.samples.length - 1 || ratios.length < policy.minimumSamples - 1) return null;
   const lower = personalQuantile(ratios, policy.lowerQuantile);
   const upper = personalQuantile(ratios, policy.upperQuantile);
   if (lower === null || upper === null || !(lower <= upper)) return null;
   const center = personalQuantile(ratios, 0.5);
   if (center === null) return null;
-  return {
+  const evidence: PersonalIntervalEvidence = {
     policyVersion: PERSONAL_CALIBRATION_POLICY_VERSION,
     method: "leave_one_out_relative_residual_v1",
     samples: input.samples.length,
@@ -1141,6 +1146,11 @@ export function fitPersonalInterval(input: {
     relativeUpper: Math.round(upper * 10_000) / 10_000,
     coverageClaim: "personal_self_calibrated_not_population_guarantee"
   };
+  // §12.11 / M05: the presentation gate is not a test-only helper. Fitting returns
+  // the only evidence object the API may show, so it asserts its own contract here —
+  // before a caller can spread it, rename a field or attach population vocabulary.
+  assertPersonalIntervalPresentation(evidence);
+  return evidence;
 }
 
 /** Applies the ratio band to a point prediction. Null when the point is unusable. */

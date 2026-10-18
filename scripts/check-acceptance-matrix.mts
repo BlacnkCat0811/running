@@ -113,6 +113,12 @@ const staleGaps = Object.keys(KNOWN_GAPS).filter((id) => !ids.includes(id) || ci
 process.stdout.write(
   `§16.1 矩阵：${ids.length} 条；cited ${cited.length}；declared-gap ${declared.length}；missing ${missing.length}\n`
 );
+// 🔴 2026-10-18（深度审查 P3-30）：`cited` 是**机械判据**——只证明"某个测试的标题里写了这个 ID"。
+// 一条不带任何断言（甚至不 import 被测模块）的空测试同样会让它变绿。这里显式写出来，
+// 避免把 `cited 80 / missing 0` 读成"80 条断言都被覆盖"。
+process.stdout.write(
+  "  注：cited 仅表示测试**标题**引用了该 ID，不代表断言存在；覆盖强度请看测试内容，不要只看这个数字。\n"
+);
 for (const id of declared) process.stdout.write(`  ⚪ ${id} — ${KNOWN_GAPS[id]}\n`);
 for (const id of missing) process.stdout.write(`  🔴 ${id} — 既未被测试引用，也未在 KNOWN_GAPS 中声明\n`);
 for (const id of staleGaps) {

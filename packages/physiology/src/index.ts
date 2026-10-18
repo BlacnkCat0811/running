@@ -97,7 +97,16 @@ export interface PhysiologyConfig {
   lactateThresholdDurationMinutes: number;
   lactateThresholdHeartRateReserveFraction: number;
   lactateThresholdHeartRateUncertaintyBpm: number;
-  defaultRaceReadiness: Record<RaceDistance, number>;
+  /**
+   * VDOT points removed from a *known* preparation readiness in [0, 1].
+   *
+   * There is deliberately no `defaultRaceReadiness` next to it: a missing
+   * preparation score is **unmodeled**, not an average athlete. Substituting
+   * per-distance defaults (0.7 / 0.6 / 0.45) silently penalised exactly the runner
+   * whose preparation we could not see — the "unknown ≠ low preparation" rule from
+   * docs/ALGORITHM.md §8 — by up to 6 % on the half marathon. Missing readiness now
+   * means "applied no readiness adjustment" and says so in the evidence codes.
+   */
   raceReadinessVdotPenalty: Record<RaceDistance, number>;
 }
 
@@ -114,17 +123,29 @@ export const defaultPhysiologyConfig: PhysiologyConfig = {
   lactateThresholdDurationMinutes: 60,
   lactateThresholdHeartRateReserveFraction: 0.85,
   lactateThresholdHeartRateUncertaintyBpm: 5,
-  defaultRaceReadiness: {
-    five_k: 0.7,
-    ten_k: 0.6,
-    half_marathon: 0.45
-  },
   raceReadinessVdotPenalty: {
     five_k: 3,
     ten_k: 4,
     half_marathon: 6
   }
 };
+
+/**
+ * Confidence-only prior used when a race readiness was **never modelled**.
+ *
+ * Why it exists: deleting `defaultRaceReadiness` (2026-10-18 review P2-04) stopped a
+ * missing preparation score from penalising the *point* estimate. Confidence is a
+ * different claim: an unobserved preparation must not make a prediction look more
+ * certain than evidence supports. The structural multiplier is `0.55 + 0.45 × value`,
+ * so this prior contributes `0.775` — the same multiplier as a literal 0.5 on the
+ * readiness scale.
+ *
+ * 0.5 is a **maximum-uncertainty prior on [0,1]**, not an estimate of the runner's
+ * preparation and not a distance-scaled guess. It is a policy constant (no empirical
+ * calibration yet); changing it changes displayed confidence, so treat it like a
+ * contract number and cover it with a regression.
+ */
+export const UNMODELED_READINESS_CONFIDENCE_PRIOR = 0.5;
 
 const sourceWeight: Record<Vo2EvidenceSource, number> = {
   apple_health: 1,
@@ -395,6 +416,7 @@ export function performanceVdotEvidence(input: {
   quality: number;
   conditions?: PerformanceConditions;
 }): PerformanceVdotEvidence {
+  // condition-ledger:vdot-evidence-history-debias
   const normalized = createPhysiologyNormalizationAdapter().normalize({distanceMeters:input.distanceMeters,
     durationSeconds:input.durationSeconds,conditions:input.conditions??{}});
   const penalty = {total:normalized.legacyPartialPenalty};
@@ -942,11 +964,17 @@ export function predictRaceTimes(
 ): RaceTimePrediction[] {
   return (Object.keys(raceDistanceMeters) as RaceDistance[]).map((distance) => {
     const distanceMeters = raceDistanceMeters[distance];
-    const readinessValue = clamp(
-      readiness[distance] ?? config.defaultRaceReadiness[distance],
-      0,
-      1
-    );
+    // "Unknown" is not "average preparation". Only a finite value the caller actually
+    // supplied is modelled; anything else applies **no** readiness penalty and says
+    // `endurance_readiness_unmodeled` (docs/ALGORITHM.md §11). The removed
+    // `defaultRaceReadiness` (0.7 / 0.6 / 0.45) turned a missing field into a
+    // distance-scaled guess, i.e. the longer the race the more under-trained the
+    // runner was assumed to be — the exact D01/§8 mistake, one layer lower.
+    const suppliedReadiness = readiness[distance];
+    const modelledReadiness = typeof suppliedReadiness === "number" && Number.isFinite(suppliedReadiness)
+      ? clamp(suppliedReadiness, 0, 1)
+      : null;
+    const readinessValue = modelledReadiness ?? 1;
     if (vo2Max.status !== "available" || vo2Max.valueMlKgMin === null) {
       return {
         distance,
@@ -963,7 +991,7 @@ export function predictRaceTimes(
         machineLearningFallbackReason: null,
         optimisticSeconds: null,
         pessimisticSeconds: null,
-        readiness: readiness[distance] ?? null,
+        readiness: modelledReadiness,
         confidence: 0,
         confidenceLevel: "low",
         method: "daniels_vdot_v1",
@@ -974,6 +1002,7 @@ export function predictRaceTimes(
     const readinessPenalty = (1 - readinessValue) * config.raceReadinessVdotPenalty[distance];
     const adjustedVdot = Math.max(config.minimumVo2Max, vo2Max.valueMlKgMin - readinessPenalty);
     const preparedSeconds = performanceSecondsFromVdot(distanceMeters, adjustedVdot);
+    // condition-ledger:race-prediction-scenario
     const environmentPenalty = heatHumidityPenaltyFraction(
       conditions.temperatureC,
       conditions.humidityPercent
@@ -1013,7 +1042,8 @@ export function predictRaceTimes(
           )
         ) * (1 + totalConditionPenalty * 1.4);
     const evidenceCodes: PhysiologyEvidenceCode[] = ["race_prediction_vdot_baseline"];
-    if (readiness[distance] === undefined) {
+    if (modelledReadiness === null) {
+      // No readiness evidence reached this prediction: neutral, and explicit about it.
       evidenceCodes.push("endurance_readiness_unmodeled");
     } else {
       evidenceCodes.push("race_readiness_applied");
@@ -1023,8 +1053,12 @@ export function predictRaceTimes(
     if (elevationPenalty > 0) evidenceCodes.push("elevation_adjustment");
     if (fatiguePenalty > 0) evidenceCodes.push("fatigue_adjustment");
     if (totalConditionPenalty === 0) evidenceCodes.push("standard_conditions");
+    // Time uses the neutral point estimate (no penalty); confidence still pays for the
+    // missing evidence: an unmodeled readiness means the *uncertainty* is real, even
+    // though the point estimate must not guess a preparation level (review P2-04).
+    const confidenceReadiness = modelledReadiness ?? UNMODELED_READINESS_CONFIDENCE_PRIOR;
     const confidence = clamp(
-      vo2Max.confidence * (0.55 + 0.45 * readinessValue),
+      vo2Max.confidence * (0.55 + 0.45 * confidenceReadiness),
       0,
       0.95
     );
@@ -1034,7 +1068,10 @@ export function predictRaceTimes(
       status: "available",
       potentialSeconds,
       predictedSeconds,
-      readinessAdjustmentSeconds: preparedSeconds - potentialSeconds,
+      // A null readiness is exactly this: no adjustment. Reporting a zero here would
+      // claim we modelled preparation and found it perfect.
+      readinessAdjustmentSeconds:
+        modelledReadiness === null ? null : preparedSeconds - potentialSeconds,
       environmentAdjustmentSeconds,
       elevationAdjustmentSeconds,
       fatigueAdjustmentSeconds,
@@ -1043,12 +1080,12 @@ export function predictRaceTimes(
       machineLearningFallbackReason: null,
       optimisticSeconds,
       pessimisticSeconds,
-      readiness: readiness[distance] ?? null,
+      readiness: modelledReadiness,
       confidence,
       confidenceLevel: confidenceLevel(confidence),
       method: totalConditionPenalty > 0
         ? "daniels_vdot_conditions_v3"
-        : readiness[distance] === undefined
+        : modelledReadiness === null
           ? "daniels_vdot_v1"
           : "daniels_vdot_readiness_v2",
       evidenceCodes

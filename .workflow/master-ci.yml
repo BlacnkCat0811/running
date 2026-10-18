@@ -1,15 +1,24 @@
-# Gitee Go 主干门禁（草案）
+# Gitee Go 主干门禁（**草案 —— 未启用**）
+#
+# 🔴 状态：本文件是**草案**，当前仓库**没有**任何已启用的远程 CI。
+#    · GitHub Actions 不会被 gitee 的 push 触发（`.github/workflows/ci.yml` 只为将来镜像准备）；
+#    · 本文件要生效，必须在 gitee 仓库页「服务 → Gitee Go」手动开通，并由平台模板生成
+#      `.workflow/*.yml` 后把下面的 commands 替换进去（字段名以平台官方模板为准）。
+#    · 因此"没有 CI 红"**不**等于"提交已验证"。发布记录的判据必须写明：判据来自本机实跑，
+#      以及 gitee 侧 CI 未启用（见 docs/OPERATIONS.md「发布检查清单」）。
 #
 # 交付说明（迁移自 .github/workflows/ci.yml 的语义）：
 # 1. 先在仓库页 服务 → Gitee Go 开通（免费额度：仓库 200 分钟 + 个人/组织每月 500 分钟）。
 # 2. 建议用平台模板生成 .workflow/ 后，将本文件 commands 替换进 node 模板；
 #    字段名（nodeVersion / commands 等）以平台生成的官方模板为准，若保存失败请按模板微调。
 # 3. Gitee Go 容器默认无 Chrome / 未配置 Python 训练环境，故本门禁覆盖
-#    typecheck + 全仓测试 + 生产冒烟；ml:test 仍需本地 `npm run ml:test`
+#    typecheck + 文档/门禁脚本 + 全仓测试 + 生产冒烟；ml:test 仍需本地 `npm run ml:test`
 #    （与既有 GitHub Actions 的职责划分一致）。Web 前端已退役，不再有 build/e2e 步骤。
+# 4. 2026-10-18（深度审查 P3-36）：补齐与 `.github/workflows/ci.yml` 对齐的文档/结构门禁
+#    与包边界自测；`npm test` 固定并发，避免多核容器把 5s/30s 墙钟预算压成假红。
 version: '1.0'
 name: rai-master-ci
-displayName: RAI 主干门禁
+displayName: RAI 主干门禁（草案，未启用）
 triggers:
   trigger: auto
   push:
@@ -19,16 +28,26 @@ triggers:
 stages:
   - stage:
       name: verify
-      displayName: 安装 / 类型 / 测试 / 冒烟
+      displayName: 安装 / 类型 / 文档与门禁 / 测试 / 冒烟
       strategy: naturally
       trigger: auto
       steps:
         - step: nodejs-build
           name: ci-gate
-          displayName: npm ci && typecheck && test && smoke
+          displayName: npm ci && typecheck && gates && test && smoke
           nodeVersion: '22'
+          env:
+            RAI_TEST_CONCURRENCY: '2'
           commands:
             - npm ci
             - npm run typecheck
+            - npm run check:docs
+            - npm run check:doc-refs
+            - npm run check:scripts
+            - npm run check:acceptance-matrix
+            - node scripts/check-blob-size.mjs
+            - npm run check:package-boundaries
+            - npm run check:package-boundaries -- --self-test
+            - npm run review:model-boundaries
             - npm test
             - npm run smoke:api

@@ -16,6 +16,10 @@
 }
 ```
 
+所有 `/v1` 请求都必须携带 `Authorization: Bearer <token>`，唯一例外是三条无健康数据
+的存活/协商端点：`GET /v1/health`、`GET /v1/handshake`、`GET /v1/runtime-status`（即使
+服务端配置了 `RAI_PUBLIC_HOSTS` 也只放开这三条；Web SPA 退役后不再有匿名业务读）。
+
 页面缓存的命名空间同时包含服务 URL、`serverId`、`athleteId` 和 `datasetEpoch`。服务端数据库恢复或替换数据集时，改变 `datasetEpoch`，旧缓存和游标不得继续作为当前结果使用。
 
 ## 读接口

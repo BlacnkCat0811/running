@@ -85,6 +85,36 @@ export function endPublicationGuard(database: DatabaseSync): void {
 }
 
 /**
+ * Clears a marker a previous process left behind, when this process opens the
+ * control database (review P3-14).
+ *
+ * A publication commits its `pending_since` marker *before* the business
+ * transaction and clears it afterwards. A process killed in between (SIGKILL,
+ * power loss) therefore leaves a marker that no live publisher owns, and the
+ * lease alone keeps every guarded read closed for up to
+ * `PUBLICATION_GUARD_STALE_MS` (120 s) after a quick restart — even though a
+ * publication from a dead process can never still be in flight.
+ *
+ * The epoch is preserved: it is how guarded readers detect a publication that
+ * committed on only one of the two databases, and it must stay comparable with
+ * the epochs those readers observed before the restart.
+ *
+ * The API holds `acquireDatabasePublicationLock` for its whole lifetime, and the
+ * control database is a single-writer store, so at startup no *other* live
+ * publisher can exist. Running this from a CLI or a second process is out of
+ * scope for the same reason the lock exists.
+ *
+ * Returns whether a marker was cleared (diagnostics/tests).
+ */
+export function clearPublicationMarkerOnStartup(database: DatabaseSync): boolean {
+  const row = database.prepare("SELECT pending_since FROM mobile_publication_guard WHERE id = 1")
+    .get() as { pending_since: string | null } | undefined;
+  if (row?.pending_since == null) return false;
+  endPublicationGuard(database);
+  return true;
+}
+
+/**
  * True when a publication marker is present and still inside its lease.
  *
  * A malformed timestamp is treated as pending (fail closed) rather than as

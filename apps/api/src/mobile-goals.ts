@@ -35,6 +35,7 @@ import { digest } from "./plan-digest.js";
 import { PlanOperationError } from "./plan-publication.js";
 import {
   beginPublicationGuard,
+  clearPublicationMarkerOnStartup,
   endPublicationGuard,
   ensurePublicationGuardSchema,
   readPublicationGuard,
@@ -343,16 +344,13 @@ export class MobileGoalsStore {
   }
 
   /**
-   * True while this store is inside its own plan publication transaction (see
-   * {@link withPublicationTransaction}).
+   * True while this store is inside its own plan publication transaction.
    *
-   * Read paths that verify the cross-store guard need this flag: a publication
-   * commits its `pending_since` marker *before* the business transaction, so a
-   * guarded read called from inside that transaction would otherwise mistake its
-   * own marker for a foreign publication in flight and fail closed. Reader
-   * modules must use this accessor rather than reaching into the private flag,
-   * which is free to be renamed; {@link publicationGuardState} already hides the
-   * own marker, so the skip is defence in depth rather than the only check.
+   * Kept as a public accessor for diagnostics and tests. Guarded readers no
+   * longer disable themselves because of it: `publicationGuardState` already
+   * hides the store's own `pending_since` marker while preserving the epoch, so
+   * a read inside the transaction neither fails closed on itself nor loses the
+   * ability to detect a foreign publication (review P3-03).
    */
   publicationInFlight(): boolean { return this.publicationTransaction; }
 
@@ -1006,6 +1004,12 @@ export class MobileGoalsStore {
     // existing database keeps its receipts instead of being recreated.
     this.ensureControlSchema(database);
     ensurePublicationGuardSchema(database);
+    // A marker left by a crashed/killed publisher is not a live publication: no
+    // publication can be in flight before this process opened the database (the
+    // API holds the publication lock for its lifetime). Clear it so a quick
+    // restart does not answer guarded plan reads with 503 for the full lease;
+    // the epoch is preserved for post-restart comparisons (review P3-14).
+    clearPublicationMarkerOnStartup(database);
     const existing = database.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get();
     if (!existing) {
       let initial = emptyGoals();

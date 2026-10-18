@@ -985,14 +985,57 @@ export function assertWorkoutFeatureVector(feature: WorkoutFeatureVector): void 
   if (feature.durationSeconds < 0 || !Number.isFinite(feature.durationSeconds)) {
     throw new Error("WorkoutFeatureVector durationSeconds must be a non-negative finite value");
   }
-  if (feature.heartRateCoverage !== null && (feature.heartRateCoverage < 0 || feature.heartRateCoverage > 1)) {
-    throw new Error("WorkoutFeatureVector heartRateCoverage must be between 0 and 1");
+  // §2/§3: a missing observation is `null`, and a present one must be finite. The
+  // optional numbers used to go unchecked, so `NaN`/`Infinity` travelled from the
+  // parser into scoring, where the first symptom was a `Math.min/max` propagating
+  // NaN into an unrelated assert or an unstable sort key.
+  for (const name of [
+    "distanceKm",
+    "averageSpeedMetersPerSecond",
+    "averageHeartRateBpm",
+    "routeQuality"
+  ] as const) {
+    assertFiniteOrNull(`WorkoutFeatureVector ${name}`, feature[name]);
   }
-  if (feature.sourceConfidence < 0 || feature.sourceConfidence > 1) {
-    throw new Error("WorkoutFeatureVector sourceConfidence must be between 0 and 1");
+  for (const [name, value] of [
+    ["heartRateCoverage", feature.heartRateCoverage],
+    ["sourceConfidence", feature.sourceConfidence],
+    ["qualityScore", feature.qualityScore]
+  ] as const) {
+    // `!(x >= 0 && x <= 1)` rather than `x < 0 || x > 1`: NaN fails both old
+    // comparisons and slipped through as a valid score.
+    if (value !== null && !(Number.isFinite(value) && value >= 0 && value <= 1)) {
+      throw new Error(`WorkoutFeatureVector ${name} must be null or a finite number within [0, 1]`);
+    }
   }
-  if (feature.qualityScore < 0 || feature.qualityScore > 1) {
-    throw new Error("WorkoutFeatureVector qualityScore must be between 0 and 1");
+  for (const [name, value] of [
+    ["heartRateSampleCount", feature.heartRateSampleCount],
+    ["routePointCount", feature.routePointCount]
+  ] as const) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`WorkoutFeatureVector ${name} must be a non-negative integer`);
+    }
+  }
+  for (const name of ["workoutStartAt", "computedAt"] as const) {
+    if (typeof feature[name] !== "string" || !Number.isFinite(Date.parse(feature[name]))) {
+      throw new Error(`WorkoutFeatureVector ${name} must be a parseable instant`);
+    }
+  }
+  if (!(sessionTypes as readonly string[]).includes(feature.sessionType)) {
+    throw new Error(`WorkoutFeatureVector sessionType is not a known session type: ${String(feature.sessionType)}`);
+  }
+  if (feature.sessionTypeSource !== "auto" && feature.sessionTypeSource !== "override") {
+    throw new Error(`WorkoutFeatureVector sessionTypeSource is invalid: ${String(feature.sessionTypeSource)}`);
+  }
+  if (feature.eligibilityStatus !== "eligible" && feature.eligibilityStatus !== "trial" &&
+      feature.eligibilityStatus !== "excluded") {
+    throw new Error(`WorkoutFeatureVector eligibilityStatus is invalid: ${String(feature.eligibilityStatus)}`);
+  }
+  // Deliberately not enumerated: stored rows may carry codes retired since they were
+  // written, and the read path must not fail on a value it cannot re-derive.
+  if (!Array.isArray(feature.missingReasons) ||
+      feature.missingReasons.some((reason) => typeof reason !== "string" || reason.length === 0)) {
+    throw new Error("WorkoutFeatureVector missingReasons must be an array of non-empty strings");
   }
   for (const [name, value] of Object.entries(feature.signals)) {
     assertFiniteOrNull(name, value);
@@ -1530,6 +1573,19 @@ export function assertPhysiologyPredictionSnapshot(
     if (prediction.readiness !== null &&
         (!Number.isFinite(prediction.readiness) || prediction.readiness < 0 || prediction.readiness > 1)) {
       throw new Error("Race prediction readiness must be between 0 and 1");
+    }
+    // docs/ALGORITHM.md §11: a missing preparation score must read as *unmodeled*,
+    // never as a number that was applied. These two invariants are what makes the
+    // trace honest instead of merely present:
+    //   · readiness === null  => there is no readiness adjustment;
+    //   · method says readiness_v2 => a real readiness value produced it.
+    if (prediction.readiness === null && prediction.readinessAdjustmentSeconds !== null) {
+      throw new Error(
+        "Race prediction without readiness evidence must not report a readiness adjustment"
+      );
+    }
+    if (prediction.method === "daniels_vdot_readiness_v2" && prediction.readiness === null) {
+      throw new Error("Race prediction method claims modelled readiness but carries no readiness value");
     }
   }
 

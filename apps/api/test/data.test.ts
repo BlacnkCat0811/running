@@ -300,6 +300,45 @@ test("maps active SQLite results into Web API DTOs", async () => {
   }
 });
 
+test("diagnostics aggregates tombstone and supersede counts from import batch summaries", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-api-import-ledger-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  store.close();
+  const writer = new DatabaseSync(databasePath);
+  try {
+    const insertBatch = writer.prepare(
+      "INSERT INTO import_batches (id, xml_sha256, status, import_mode, summary_json) VALUES (?, ?, ?, ?, ?)"
+    );
+    insertBatch.run("batch_a", "a".repeat(64), "succeeded", "incremental",
+      JSON.stringify({ xml: { tombstonedCount: 3, supersededRecordCount: 2 } }));
+    insertBatch.run("batch_b", "b".repeat(64), "succeeded", "incremental",
+      JSON.stringify({ xml: { tombstonedCount: 1 } }));
+    // A malformed historical summary must not turn the diagnostics export into a 500:
+    // it contributes 0 to every aggregate.
+    insertBatch.run("batch_bad", "c".repeat(64), "succeeded", "incremental", "{not json");
+    // Failed batches are not part of the committed ledger.
+    insertBatch.run("batch_failed", "d".repeat(64), "failed", "incremental",
+      JSON.stringify({ xml: { tombstonedCount: 9 } }));
+  } finally {
+    writer.close();
+  }
+  const read = new RaiReadStore(databasePath);
+  try {
+    const diagnostics = read.diagnostics();
+    assert.deepEqual(diagnostics.imports, {
+      batches: 3,
+      tombstonedRecords: 4,
+      supersededRecords: 2
+    });
+    // The internal export still strips source names (same rule as the rest of diagnostics).
+    assert.equal(JSON.stringify(diagnostics).includes("Fixture Apple Watch"), false);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("uses stored Shanghai local dates for trend windows and context", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-api-trend-local-date-"));
   const databasePath = join(root, "rai.sqlite");

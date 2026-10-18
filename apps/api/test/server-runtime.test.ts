@@ -21,6 +21,7 @@ import { mobileLocalDate } from "../src/data.js";
 import { weeklyPlanDates } from "../src/weekly-plan-service.js";
 import { seedRecentRunningWeeks } from "./weekly-training-fixture.js";
 import { prescriptionDigest } from "../src/plan-digest.js";
+import { openapiDocument } from "../src/schemas.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 
@@ -2052,6 +2053,16 @@ test("every mounted write route is classified, whatever the source looks like", 
         `GET ${url} 已挂载，却没有登记在 publicReadRoutes 或 tokenRequiredReadRoutes 里：新增读路由必须显式分类`
       );
     }
+
+    // P3-17: openapi.json is the integration contract; a mounted read route that
+    // is missing from it cannot be discovered by a client that generates from the
+    // document. Compare with the router's own table (not a source scan), so an
+    // alias/plugin/route-module spelling cannot hide a route from this gate.
+    const documentedPaths = new Set(Object.keys(openapiDocument.paths));
+    const toOpenApiPath = (url: string): string => url.replace(/:(\w+)/g, "{$1}");
+    const undocumentedReads = mountedReads.filter((url) => !documentedPaths.has(toOpenApiPath(url)));
+    assert.deepEqual(undocumentedReads, [],
+      "已挂载的 /v1/ GET 路由必须出现在 openapiDocument.paths 里（新增读路由请同时补文档）");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
@@ -2253,6 +2264,76 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
   } finally { await stopApi(server.child).catch(() => server.child.kill("SIGKILL")); await removeRuntimeRoot(runtimeRoot); }
 });
 
+/**
+ * P3-01：`/v1/mobile/today` 与 `/v1/mobile/workout-plan` 走稳定快照（control + facts）
+ *
+ * 两个判据：
+ *   ① 响应形状不变：同一实例连续两次 GET 的顶层键与取值完全一致；
+ *   ② 控制库有发布在飞时**不再返回混合快照**：`pending_since` 是读侧唯一能看到的
+ *      "跨库发布进行中"信号（`publication-guard.ts`），此时必须 fail-closed 成
+ *      可重试 503 + `Retry-After: 1`，而不是照旧读一遍控制库再拼主库事实。
+ */
+test("P3-01: plan reads fail closed on an in-flight control publication and keep their shape", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-stable-plan-read-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  const controlPath = join(runtimeRoot, "var/rai-control.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  (await RaiDatabase.open(databasePath)).close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const read = async (path: string) => fetch(url + path);
+    const firstToday = await read("/v1/mobile/today");
+    assert.equal(firstToday.status, 200, await firstToday.clone().text());
+    const todayBody = await firstToday.json() as Record<string, unknown>;
+    const stablePayload = (body: Record<string, unknown>): Record<string, unknown> => {
+      // `generatedAt` is a request-clock stamp by contract; compare everything else.
+      const { generatedAt: _generatedAt, ...rest } = body;
+      return rest;
+    };
+    assert.equal(typeof todayBody.generatedAt, "string");
+    assert.deepEqual(stablePayload(await (await read("/v1/mobile/today")).json() as Record<string, unknown>),
+      stablePayload(todayBody), "没有控制写入时两次读取除时间戳外必须逐字段一致（形状不变）");
+    const planBody = await (await read("/v1/mobile/workout-plan")).json() as Record<string, unknown>;
+    assert.ok("days" in planBody && "windowStart" in planBody, "workout-plan 的既有形状不变");
+
+    // Publish a live guard marker the way `MobileGoalsStore.withPublicationTransaction`
+    // does before its business transaction. With no build able to prove stability,
+    // both reads must fail closed instead of returning a mixed snapshot.
+    const marker = new DatabaseSync(controlPath);
+    try {
+      marker.exec("PRAGMA busy_timeout = 2000");
+      marker.prepare("UPDATE mobile_publication_guard SET epoch = epoch + 1, pending_since = ? WHERE id = 1")
+        .run(new Date().toISOString());
+    } finally { marker.close(); }
+    for (const path of ["/v1/mobile/today", "/v1/mobile/workout-plan"]) {
+      const blocked = await read(path);
+      assert.equal(blocked.status, 503, path + " 必须 fail closed：" + await blocked.clone().text());
+      assert.equal(blocked.headers.get("retry-after"), "1", "可重试 503 必须带一秒钟的重试提示");
+      assert.equal((await blocked.json() as { code: string }).code, "plan_snapshot_changed");
+    }
+
+    // Clearing the marker makes the same instance readable again (no sticky 503).
+    const clear = new DatabaseSync(controlPath);
+    try {
+      clear.exec("PRAGMA busy_timeout = 2000");
+      clear.prepare("UPDATE mobile_publication_guard SET pending_since = NULL WHERE id = 1").run();
+    } finally { clear.close(); }
+    assert.equal((await read("/v1/mobile/today")).status, 200);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
 test("summary export requires token even on a public host and validates its range before reading", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-export-auth-"));
   const databasePath = join(runtimeRoot, "var/rai.sqlite");
@@ -2270,6 +2351,16 @@ test("summary export requires token even on a public host and validates its rang
     const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     const path = "/v1/exports/workout-summary?from=2026-09-01&through=2026-09-28";
     assert.equal((await fetch(`${url}/v1/health`)).status, 200);
+    // P3-13: after the Web SPA retirement the anonymous read set is liveness and
+    // capability only. Even with `RAI_PUBLIC_HOSTS` set and a valid token
+    // configured, every aggregate (and every server internal) must answer 401.
+    for (const openPath of ["/v1/health", "/v1/handshake", "/v1/runtime-status"]) {
+      assert.equal((await fetch(url + openPath)).status, 200, openPath + " 应保持匿名可读（无健康数据）");
+    }
+    for (const closedPath of ["/v1/dashboard", "/v1/workouts", "/v1/trends",
+      "/v1/mobile/today", "/v1/mobile/goals", "/v1/openapi.json", "/v1/diagnostics", "/v1/backups"]) {
+      assert.equal((await fetch(url + closedPath)).status, 401, closedPath + " 不得匿名可读（P3-13）");
+    }
     assert.equal((await fetch(url + path)).status, 401);
     const response = await fetch(url + path, { headers: { authorization: "Bearer export-test-token" } });
     assert.equal(response.status, 200, await response.clone().text());
@@ -2400,12 +2491,23 @@ for (const config of [
     assert.deepEqual(privateDetail.route.map(point => [point.latitude, point.longitude]),
       config.token || config.publicRoute ? coordinates : []);
     const anonymous = await fetch(path);
-    assert.equal(anonymous.status, 200);
-    assert.equal(anonymous.headers.get("cache-control"), "no-store");
-    const summary = await anonymous.json() as import("@rai/api-contracts").WorkoutDetailResponse;
-    assert.deepEqual(summary.route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
-    assert.equal(summary.workout.distanceKm, privateDetail.workout.distanceKm);
-    assert.equal(summary.workout.hasRoute, true);
+    if (config.token) {
+      // P3-13: with a token configured, no workout read opens anonymously any
+      // more. The retired Web SPA's public read surface is gone; only
+      // `/v1/health`, `/v1/handshake` and `/v1/runtime-status` stay in
+      // `publicReadRoutes`.
+      assert.equal(anonymous.status, 401, "配置 Token 后 /v1/workouts/:id 不得匿名可读");
+    } else {
+      // No token configured: this is local mode, where the security hook trusts a
+      // loopback Host and `RAI_ALLOW_ANONYMOUS_ROUTES` is the only switch left for
+      // whether the detail view includes raw route geometry.
+      assert.equal(anonymous.status, 200);
+      assert.equal(anonymous.headers.get("cache-control"), "no-store");
+      const summary = await anonymous.json() as import("@rai/api-contracts").WorkoutDetailResponse;
+      assert.deepEqual(summary.route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
+      assert.equal(summary.workout.distanceKm, privateDetail.workout.distanceKm);
+      assert.equal(summary.workout.hasRoute, true);
+    }
     for (const protectedPath of [path + "/share-card", `${url}/v1/privacy-zones`]) {
       assert.equal((await fetch(protectedPath)).status, 401);
       assert.equal((await fetch(protectedPath, { headers: { authorization: "Bearer incorrect" } })).status, 401);
@@ -2466,9 +2568,18 @@ for (const config of [
       assert.equal(current.zones[0]?.centerLatitude, 32);
       assert.notEqual(current.stateToken, baseline.stateToken);
     }
-    assert.equal((await fetch(path, { headers: { authorization: "Bearer incorrect" } })).status, 200);
+    // P3-13: with a token configured a wrong token is just an unauthenticated
+    // request — it must not fall through to an anonymous read of the detail view
+    // just because the Host is in `RAI_PUBLIC_HOSTS`. Without a token this is
+    // local mode, where the Authorization header is not consulted at all.
     const incorrect = await fetch(path, { headers: { authorization: "Bearer incorrect" } });
-    assert.deepEqual((await incorrect.json() as import("@rai/api-contracts").WorkoutDetailResponse).route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
+    assert.equal(incorrect.status, config.token ? 401 : 200, config.token
+      ? "错误令牌不得退化为匿名读（P3-13）"
+      : "无 Token 的本地模式不校验 Authorization 头");
+    if (!config.token) {
+      assert.deepEqual((await incorrect.json() as import("@rai/api-contracts").WorkoutDetailResponse)
+        .route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
+    }
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
@@ -2551,6 +2662,58 @@ test("retired backup endpoints create and delete nothing while the recovery path
       createHash("sha256").update(Buffer.from(await download.arrayBuffer())).digest("hex"),
       before.find(entry => entry.name === recoverable.name)?.sha256,
       "下载到的必须与磁盘上的既有备份逐字节相同");
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+/**
+ * P3-18 / P3-20：无库时退役备份路由仍给出设计的 410；整库下载禁止缓存且头部安全。
+ *
+ * 这两件事必须在**没有数据库**的实例上验证：`POST /v1/backups` 原先被登记进
+ * `databaseRequiredMutationRoutes`，preHandler 会先回 `409 database_not_ready`，
+ * 于是刚装好 / 刚删库的机器上永远看不到"备份责任已移交运维"这段提示。备份文件本身
+ * 不需要数据库，`backupStream` 只打开 `var/backups/` 下的文件，所以这个夹具不建库。
+ */
+test("retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-backup-nodb-"));
+  const backupDirectory = join(runtimeRoot, "var/backups");
+  mkdirSync(backupDirectory, { recursive: true });
+  // The name schema allows quotes and semicolons; the Content-Disposition value
+  // must not be built by pasting them through.
+  const hostileName = 'operator"archive;v1.sqlite';
+  writeFileSync(join(backupDirectory, hostileName), "pretend-this-is-a-backup\n");
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot,
+      RAI_DATABASE: join(runtimeRoot, "var/rai.sqlite"),
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    assert.equal((await fetch(`${url}/v1/health`).then(response => response.json() as Promise<{ databaseReady: boolean }>)).databaseReady, false);
+
+    const created = await fetch(`${url}/v1/backups`, { method: "POST" });
+    assert.equal(created.status, 410, "无库时也必须返回退役提示，而不是 409 database_not_ready");
+    assert.equal((await created.json() as { code: string }).code, "backup_creation_retired");
+
+    const removed = await fetch(`${url}/v1/backups/operator-snapshot.sqlite`, { method: "DELETE" });
+    assert.equal(removed.status, 410, await removed.clone().text());
+    assert.equal((await removed.json() as { code: string }).code, "backup_deletion_retired");
+
+    const download = await fetch(`${url}/v1/backups/${encodeURIComponent(hostileName)}`);
+    assert.equal(download.status, 200, await download.clone().text());
+    assert.equal(download.headers.get("cache-control"), "no-store",
+      "整库下载不得被中间层缓存（P3-20）");
+    assert.equal(download.headers.get("content-disposition"),
+      'attachment; filename="operator_archive_v1.sqlite"',
+      "content-disposition 的文件名必须来自已校验的 name 并做头部安全编码");
+    assert.equal(await download.text(), "pretend-this-is-a-backup\n");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

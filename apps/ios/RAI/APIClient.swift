@@ -111,18 +111,37 @@ enum RaiAPIClientError: LocalizedError {
 ///
 /// RFC 7231 允许 HTTP-date，但本客户端只消费**整数秒**形式：HTTP-date 需要与
 /// 本机时钟对齐，而计划快照重试的语义是"一秒后重读"，日期形式的收益为零、风险
-/// （时钟偏差）更大，因此一律忽略。解析成功也夹取 `0...5`：服务端给出的更长等待
-/// 不应让一次前台刷新卡住，对应服务端当前只会发 `1`（`api-error.ts` 的
-/// `retryAfterSeconds`）。
+/// （时钟偏差）更大，因此一律忽略。
+///
+/// 2026-10-18（深度审查 P3-28）：**解析**与**调度夹取**必须分开。
+/// 旧实现把 `0...5` 的夹取做在解析里，于是两件不同的事共用一个值：
+/// - **展示**：429 的文案是"（建议 N 秒后重试）"，它复述的是**服务端的建议**。
+///   夹取后仍以服务端口吻展示 ⇒ 服务端说 60 秒，界面会说"建议 5 秒"（用户不可知地
+///   被改写）。展示只做"非负 + 上限 600 秒"的理性保护，不改写服务端的意思。
+/// - **调度**：`retryableServer(retryAfterSeconds:)` 驱动一次**前台**快照重读，长等待会
+///   卡住界面 ⇒ 这里继续夹取 `0...5`（服务端当前只发 `1`，见 `apps/api/src/api-error.ts`）。
 nonisolated enum RaiRetryAfter {
-    static let allowedRange: ClosedRange<TimeInterval> = 0...5
+    /// **调度**用夹取区间（前台重试不应被服务端的长等待卡住）。
+    static let schedulingRange: ClosedRange<TimeInterval> = 0...5
+    /// **展示**用上限：只防荒谬值撑爆文案，不替服务端做决定。
+    static let displayMaximum: TimeInterval = 600
 
+    /// 原始秒数（**展示**用）：`nil` = 缺头、非整数秒或 HTTP-date。
+    ///
+    /// `Int` 严格整数：`"1.5"`、`"Wed, 21 Oct 2015 07:28:00 GMT"` 等都返回 nil。
+    /// 负数按 0（"立即可重试"）。
     static func seconds(from rawValue: String?) -> TimeInterval? {
         guard let rawValue else { return nil }
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        // `Int` 严格整数：`"1.5"`、`"Wed, 21 Oct 2015 07:28:00 GMT"` 等都返回 nil。
         guard let parsed = Int(trimmed) else { return nil }
-        return min(max(TimeInterval(parsed), allowedRange.lowerBound), allowedRange.upperBound)
+        return min(max(TimeInterval(parsed), 0), displayMaximum)
+    }
+
+    /// 夹取后的秒数（**调度**用）：在 `seconds(from:)` 之上再夹到 `schedulingRange`。
+    static func schedulingSeconds(from rawValue: String?) -> TimeInterval? {
+        seconds(from: rawValue).map {
+            min(max($0, schedulingRange.lowerBound), schedulingRange.upperBound)
+        }
     }
 }
 
@@ -430,11 +449,13 @@ struct RaiAPIClient {
             // 2026-10-15（审查 C-🔡3）：429 的 `Retry-After` 是服务端给出的**建议等待秒数**
             // （`apps/api/src/server.ts` 对 429 恒带该头）。折叠进文案，让"容量瞬时满"
             // 与"确定性拒绝"在提示层可分（此前两者文案完全一样，重试节奏只能靠猜）。
-            let headerRetryAfter = RaiRetryAfter.seconds(from: (response as? HTTPURLResponse)?
+            // 展示用（429 文案复述服务端建议）与调度用（503 退避）**分开解析**（P3-28）：
+            // 展示保留服务端原意（只防荒谬值），调度夹取 `0...5` 以免前台刷新被卡住。
+            let displayRetryAfter = RaiRetryAfter.seconds(from: (response as? HTTPURLResponse)?
                 .value(forHTTPHeaderField: "Retry-After"))
             let retryHint: String
-            if status == 429, let headerRetryAfter {
-                retryHint = "（建议 \(Int(headerRetryAfter)) 秒后重试）"
+            if status == 429, let displayRetryAfter {
+                retryHint = "（建议 \(Int(displayRetryAfter)) 秒后重试）"
             } else {
                 retryHint = ""
             }
@@ -443,9 +464,11 @@ struct RaiAPIClient {
             // 2026-10-18（审查 P2-6 收尾）：只有 503 + 可解析的 Retry-After 才升级成
             // "可重试的错误"，供新快照契约按服务端提示退避；其余响应保持旧 `.server`，
             // 既有模式匹配点不受影响。
-            if status == 503, let headerRetryAfter {
+            if status == 503,
+               let schedulingRetryAfter = RaiRetryAfter.schedulingSeconds(
+                   from: (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After")) {
                 throw RaiAPIClientError.retryableServer(code: code, message: message,
-                    status: status, retryAfterSeconds: headerRetryAfter)
+                    status: status, retryAfterSeconds: schedulingRetryAfter)
             }
             throw RaiAPIClientError.server(code: code, message: message, status: status)
         }

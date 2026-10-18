@@ -14,21 +14,55 @@ export interface ApiErrorPayload {
   };
 }
 
+/**
+ * 5xx domain codes whose code and message are safe to return verbatim.
+ *
+ * Everything else at ≥500 is redacted to `internal_error` /
+ * "本地服务处理请求失败": an unexpected exception's message may contain SQL,
+ * file paths, schema details or a stack. The codes below are deliberately
+ * authored outcomes whose message is written for a human (`error.message` is
+ * the designed text, not an internal diagnostic):
+ *
+ * - transient outcomes the client is told to retry — `plan_snapshot_changed`,
+ *   `coach_snapshot_changed`, `database_busy`, `plan_operations_unavailable`
+ *   (`retryAfterSeconds` gives the retry hint for the first three);
+ * - `restore_recovery_required` (503): a restore/delete failed in a way that
+ *   needs a restart; the message is the operator's only actionable hint, and
+ *   without this entry it was replaced by the generic line;
+ * - `plan_operation_status_unknown` (500): a broken server invariant, but the
+ *   message names the row/status that failed — exactly what a support report
+ *   needs, and it contains no user data or server internals.
+ *
+ * Review P3-16. Add a code here only when both conditions hold: the message is
+ * authored text (never interpolated internals) and exposing it is useful to the
+ * caller/operator.
+ */
+const EXPOSED_SERVER_ERROR_CODES: ReadonlySet<string> = new Set([
+  "plan_snapshot_changed",
+  "plan_operations_unavailable",
+  "coach_snapshot_changed",
+  "database_busy",
+  "restore_recovery_required",
+  "plan_operation_status_unknown"
+]);
+
 export function apiErrorPayload(error: unknown): ApiErrorPayload {
   const message = error instanceof Error ? error.message : String(error);
   const providedStatus = (error as { statusCode?: unknown } | null)?.statusCode;
   const providedCode = (error as { code?: unknown } | null)?.code;
   const status = typeof providedStatus === "number" && Number.isInteger(providedStatus) &&
     providedStatus >= 400 && providedStatus <= 599 ? providedStatus : 500;
+  const namedCode = typeof providedCode === "string" && providedCode.length > 0 ? providedCode : null;
+  // 4xx are client-visible by construction; 5xx only when the code is a
+  // deliberately exposed domain outcome (see above).
+  const exposeDetail = status < 500 || (namedCode !== null && EXPOSED_SERVER_ERROR_CODES.has(namedCode));
   return {
     status,
     body: {
-      code: status >= 500 && !["plan_snapshot_changed", "plan_operations_unavailable", "coach_snapshot_changed", "database_busy"].includes(String(providedCode))
-        ? "internal_error"
-        : typeof providedCode === "string" && providedCode.length > 0
-          ? providedCode
-          : "request_error",
-      message: status >= 500 && !["plan_snapshot_changed", "plan_operations_unavailable", "coach_snapshot_changed", "database_busy"].includes(String(providedCode)) ? "本地服务处理请求失败" : message
+      code: exposeDetail
+        ? namedCode ?? "request_error"
+        : "internal_error",
+      message: exposeDetail ? message : "本地服务处理请求失败"
     }
   };
 }

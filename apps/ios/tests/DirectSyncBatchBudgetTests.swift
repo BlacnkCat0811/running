@@ -75,6 +75,141 @@ struct DirectSyncBatchBudgetTests {
         check(!probe.accepts(xmlBytes: 100, records: 10, pageBytes: 1, pageRecords: 1),
               "a full budget rejects any further page")
 
+        // ── P2-06（2026-10-18 深度审查）：子通道**独立份额**，anchor 流保底 ──
+        // 缺陷形态：迟到样本补读只受全量 `accepts` 约束，而它排在窗口 pass 与 anchor 循环
+        // **之前** ⇒ 4 类型 × 1500 条足以吃光整批预算，让心率/睡眠/步数零进展。失效方向是
+        // "同步变慢且无从归因"，不在任何既有判据里。
+        let conservativeBudget = DirectSyncBatchBudget.conservative
+        let windowSubShare = DirectSyncBatchBudget.recentWindowShare(of: conservativeBudget)
+        let backfillShare = DirectSyncBatchBudget.lateBackfillShare(of: conservativeBudget)
+        check(windowSubShare.maxRecords == 900 && windowSubShare.maxBytes == 377_487,
+              "the recent-window share stays at 20% of the batch (900 records / 377,487 B)")
+        check(backfillShare.maxRecords == 642 && backfillShare.maxBytes == 269_633,
+              "the late-backfill share is 1/7 (≈14.3%) — strictly below the 15% ceiling")
+        check(windowSubShare.maxRecords + backfillShare.maxRecords <= conservativeBudget.maxRecords * 35 / 100,
+              "window + backfill leave at least 65% of the RECORD budget to the anchored stream")
+        check(windowSubShare.maxBytes + backfillShare.maxBytes <= conservativeBudget.maxXmlBytes * 35 / 100,
+              "window + backfill leave at least 65% of the BYTE budget to the anchored stream")
+
+        // 份额裁决：页必须**同时**满足份额与全量预算（任一条不满足都拒绝）。
+        check(DirectSyncBatchBudget.acceptsWithin(
+                budget: conservativeBudget, share: backfillShare,
+                shareBytesUsed: 0, shareRecordsUsed: 0,
+                xmlBytes: 0, records: 0,
+                pageBytes: 269_633, pageRecords: 642),
+              "a page that exactly fills the backfill share is accepted")
+        check(!DirectSyncBatchBudget.acceptsWithin(
+                budget: conservativeBudget, share: backfillShare,
+                shareBytesUsed: 0, shareRecordsUsed: 0,
+                xmlBytes: 0, records: 0,
+                pageBytes: 269_634, pageRecords: 642),
+              "one byte over the share is rejected while the full budget still has room")
+        check(!DirectSyncBatchBudget.acceptsWithin(
+                budget: conservativeBudget, share: backfillShare,
+                shareBytesUsed: 269_633 - 10, shareRecordsUsed: 0,
+                xmlBytes: 0, records: 0,
+                pageBytes: 11, pageRecords: 1),
+              "bytes already written by the same sub-channel count against its share (per batch, not per page)")
+        check(!DirectSyncBatchBudget.acceptsWithin(
+                budget: conservativeBudget, share: (maxBytes: conservativeBudget.maxXmlBytes,
+                                                   maxRecords: conservativeBudget.maxRecords),
+                shareBytesUsed: 0, shareRecordsUsed: 0,
+                xmlBytes: UInt64(conservativeBudget.maxXmlBytes - 5), records: 0,
+                pageBytes: 10, pageRecords: 1),
+              "the share never overrides the full-batch budget either — both gates must pass")
+
+        // 份额必须能**装下一整页**，否则补读会被自己的闸门锁死（满页 1500 条 > 642 条份额）。
+        check(DirectSyncBatchBudget.shareLimitedPageSize(
+                pageLimit: 1500, shareBytesLeft: 269_633, shareRecordsLeft: 642, estimatePerRecord: 512) == 526,
+              "the page limit shrinks to the share's byte room (269,633 / 512 B per record)")
+        check(DirectSyncBatchBudget.shareLimitedPageSize(
+                pageLimit: 1500, shareBytesLeft: 10_000_000, shareRecordsLeft: 116, estimatePerRecord: 250) == 116,
+              "the page limit also shrinks to the share's remaining record count")
+        check(DirectSyncBatchBudget.shareLimitedPageSize(
+                pageLimit: 1500, shareBytesLeft: 0, shareRecordsLeft: 642, estimatePerRecord: 512) == 0,
+              "an exhausted share reports 0 (the caller defers the whole channel to the next batch)")
+        check(DirectSyncBatchBudget.shareLimitedPageSize(
+                pageLimit: 1500, shareBytesLeft: 50, shareRecordsLeft: 642, estimatePerRecord: 512) == 1,
+              "a nearly exhausted share still admits one record (progress is never zero while room remains)")
+
+        // 高密度场景（审查 §I1 的量化）：4 个跑步动态类型、各 1500 条 / 每条 250 B。
+        // 用生产同款纯函数模拟两批补读 ⇒ (a) 首批绝不越过份额；(b) 首批确实有进展（不冻结）；
+        // (c) 每批之后 anchor 流都还剩 ≥65% 的行/字节额度。
+        func simulateBackfillBatch() -> (records: Int, bytes: Int) {
+            var usedBytes = 0
+            var usedRecords = 0
+            var committedBytes = 0
+            var committedRecords = 0
+            for _ in 0..<4 {
+                let estimate = usedRecords > 0 ? max(1, usedBytes / usedRecords) : 512
+                let pageLimit = DirectSyncBatchBudget.shareLimitedPageSize(
+                    pageLimit: 1500,
+                    shareBytesLeft: backfillShare.maxBytes - usedBytes,
+                    shareRecordsLeft: backfillShare.maxRecords - usedRecords,
+                    estimatePerRecord: estimate)
+                guard pageLimit > 0 else { continue }
+                let pageBytes = pageLimit * 250
+                guard DirectSyncBatchBudget.acceptsWithin(
+                    budget: conservativeBudget, share: backfillShare,
+                    shareBytesUsed: usedBytes, shareRecordsUsed: usedRecords,
+                    xmlBytes: UInt64(committedBytes), records: committedRecords,
+                    pageBytes: pageBytes, pageRecords: pageLimit) else { continue }
+                usedBytes += pageBytes; usedRecords += pageLimit
+                committedBytes += pageBytes; committedRecords += pageLimit
+            }
+            return (committedRecords, committedBytes)
+        }
+        let firstBackfillBatch = simulateBackfillBatch()
+        check(firstBackfillBatch.records > 0,
+              "the share-limited backfill still makes progress in the first batch (it must not freeze)")
+        check(firstBackfillBatch.records <= backfillShare.maxRecords
+                && firstBackfillBatch.bytes <= backfillShare.maxBytes,
+              "a 4-type × 1500-record backfill never exceeds its share (before P2-06 it took the whole budget)")
+        check(conservativeBudget.maxRecords - firstBackfillBatch.records >= conservativeBudget.maxRecords * 65 / 100,
+              "the anchored stream still gets at least 65% of the record budget after the backfill")
+        check(conservativeBudget.maxXmlBytes - firstBackfillBatch.bytes >= conservativeBudget.maxXmlBytes * 65 / 100,
+              "the anchored stream still gets at least 65% of the byte budget after the backfill")
+        let secondBackfillBatch = simulateBackfillBatch()
+        check(secondBackfillBatch.records > 0,
+              "the next batch refreshes the share, so multi-batch paging keeps moving (no starvation)")
+
+        // 第二趟（top-up）语义（P2-06 的收敛半边）：anchor 流跑完后把**剩余全量预算**当作
+        // 这一趟的额度 ⇒ 同一份 4 类型 / 1500 条/类 的载荷一次能用满整批。没有它，15% 份额
+        // 会把 14 天窗口拉成上百批（642 条/批 vs 4500 条/批）。
+        func simulateTopUpPass() -> Int {
+            let limitBytes = conservativeBudget.maxXmlBytes
+            let limitRecords = conservativeBudget.maxRecords
+            var usedBytes = 0
+            var usedRecords = 0
+            var committedRecords = 0
+            for _ in 0..<4 {
+                let estimate = usedRecords > 0 ? max(1, usedBytes / usedRecords) : 512
+                let pageLimit = DirectSyncBatchBudget.shareLimitedPageSize(
+                    pageLimit: 1500,
+                    shareBytesLeft: limitBytes - usedBytes,
+                    shareRecordsLeft: limitRecords - usedRecords,
+                    estimatePerRecord: estimate)
+                guard pageLimit > 0 else { continue }
+                let pageBytes = pageLimit * 250
+                guard DirectSyncBatchBudget.acceptsWithin(
+                    budget: conservativeBudget,
+                    share: (maxBytes: limitBytes, maxRecords: limitRecords),
+                    shareBytesUsed: usedBytes, shareRecordsUsed: usedRecords,
+                    xmlBytes: UInt64(usedBytes), records: usedRecords,
+                    pageBytes: pageBytes, pageRecords: pageLimit) else { continue }
+                usedBytes += pageBytes; usedRecords += pageLimit; committedRecords += pageLimit
+            }
+            return committedRecords
+        }
+        let topUpRecords = simulateTopUpPass()
+        check(topUpRecords == conservativeBudget.maxRecords,
+              "the top-up pass fills the whole remaining budget (3 × 1500 = 4500 records), so a dense "
+              + "14-day window converges in a handful of batches instead of ~100 at the 15% share alone")
+        check(topUpRecords > firstBackfillBatch.records * 5,
+              "the top-up pass is more than five times the share-limited pass (measured: 4500 vs 642)")
+        check(topUpRecords <= conservativeBudget.maxRecords,
+              "even the top-up pass never exceeds the batch budget")
+
         // 收缩估算：用本页实测的每记录字节推"还能取几条"，且**永远 ≥1**（否则退化成死循环）。
         check(probe.shrinkLimit(pageBytes: 1000, pageRecords: 10, usedXmlBytes: 0, usedRecords: 0) == 1,
               "0.1 B per record estimate still floors at one record, never zero")

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -93,6 +93,67 @@ test("G06: main read view stays pinned and a control revision change discards th
     store.planHistory = () => { other.write({ qualitySessionCap: 1 }); return originalHistory(); };
     assert.throws(() => read.trainingPlanState(store, identity), { code: "plan_snapshot_changed", statusCode: 503 });
   } finally { read.close(); other.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("P2-02: a WAL checkpoint moving the file mtime does not fail the plan snapshot", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-09T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-state-mtime-"));
+  const path = join(root, "facts.sqlite");
+  const database = await RaiDatabase.open(path);
+  const store = new MobileGoalsStore(root, join(root, "control.sqlite"));
+  const read = new RaiReadStore(path);
+  try {
+    // A WAL checkpoint (import/recompute writer) writes pages back into the main
+    // database file and moves its mtime *without* replacing it. That used to be
+    // read as "published": `fileIdentity.mtimeMs !== currentFile.mtimeMs` threw
+    // `plan_snapshot_changed` 503 even though the snapshot was consistent
+    // (review P2-02). `planHistory` runs inside the snapshot build, i.e. between
+    // the two stat calls, so bumping mtime here reproduces the checkpoint in the
+    // middle of the read deterministically.
+    const originalHistory = store.planHistory.bind(store);
+    let bumped = 0;
+    store.planHistory = (limit?: number) => {
+      const value = originalHistory(limit);
+      if (bumped++ === 0) {
+        const at = new Date();
+        utimesSync(path, at, new Date(at.getTime() + 5_000));
+      }
+      return value;
+    };
+    const state = read.trainingPlanState(store, identity);
+    // Two control reads per successful attempt (build + post-build verification);
+    // the mtime bump landed after the first one, i.e. between the two stat calls.
+    assert.equal(bumped, 2, "the mtime change happened inside the snapshot read, after the opening stat");
+    assert.equal(state.metadata.goalsRevision, 0);
+  } finally { read.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-09T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-state-replace-"));
+  const path = join(root, "facts.sqlite");
+  const database = await RaiDatabase.open(path);
+  const store = new MobileGoalsStore(root, join(root, "control.sqlite"));
+  const read = new RaiReadStore(path);
+  try {
+    // A real import publication replaces the file (new inode). The snapshot built
+    // from the old file must not be returned; the read retries and, when the
+    // replacement keeps landing inside the read, answers the retryable 503
+    // instead of an immediate throw (review P2-02).
+    const originalHistory = store.planHistory.bind(store);
+    let replacements = 0;
+    store.planHistory = (limit?: number) => {
+      const value = originalHistory(limit);
+      replacements += 1;
+      const staged = `${path}.replacement-${replacements}`;
+      copyFileSync(path, staged);
+      renameSync(staged, path);
+      return value;
+    };
+    assert.throws(() => read.trainingPlanState(store, identity),
+      { code: "plan_snapshot_changed", statusCode: 503 });
+    assert.equal(replacements, 3, "one replaced file per attempt, then fail closed instead of returning a mixed snapshot");
+  } finally { read.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("P3-2: a history-only change changes coherenceToken without moving goalsRevision", async context => {

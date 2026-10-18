@@ -292,7 +292,12 @@ export function assessDatedReadiness(input: {
     const date = new Date(Date.parse(`${input.localDate}T00:00:00Z`) - offset * 86_400_000)
       .toISOString().slice(0, 10);
     const night = nights.get(date);
-    if (!night || !available(night) || night.value! / night.baseline! >= 0.8) break;
+    // "差的一夜" must mean the *same* thing as the single-night rule: below
+    // `READINESS_SLEEP_RATIO_THRESHOLD`. A night at 0.78 is not a low night by the
+    // rule above, so it cannot be one third of a "three consecutive low nights"
+    // either — the old 0.8 literal here made the assessment contradict its own
+    // `signals.sleep.low`. One threshold, one source.
+    if (!night || !available(night) || night.value! / night.baseline! >= READINESS_SLEEP_RATIO_THRESHOLD) break;
     streak++;
   }
   const result = assessReadiness({

@@ -850,3 +850,28 @@ test("coherence rejects a config it cannot use", () => {
   assert.throws(() => assessZoneCoherence({ durationSeconds: 600, ...segments, config: { minimumPairedCoverage: 0.5, minimumSustainedSeconds: -1, effortTolerance: 1 } }));
   assert.throws(() => assessZoneCoherence({ durationSeconds: 600, ...segments, config: { minimumPairedCoverage: 0.5, minimumSustainedSeconds: 90, effortTolerance: -1 } }));
 });
+
+test("P3-08: a non-positive heart-rate sample is broken data, not the recovery zone", () => {
+  // Mutation that turns this red: restore the pre-fix `heartRateZoneFor` (no
+  // `<= 0` guard) — a 0 bpm sample then becomes `recovery` with its full duration.
+  const profile = buildDailyZoneProfile(baseInput);
+  for (const bad of [0, -1, -40, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(heartRateZoneFor(bad, profile), null, String(bad));
+  }
+  const corrupt = analyzeWorkoutZones({
+    trainingSessionId: "corrupt", durationSeconds: 2400, distanceMeters: 6000, sourceConfidence: 1, profile,
+    heartRateSamples: [
+      { value: 0, durationSeconds: 1200, startOffsetSeconds: 0 },
+      { value: 150, durationSeconds: 1200, startOffsetSeconds: 1200 }
+    ],
+    speedSamples: [{ value: 1000 / 420, durationSeconds: 2400 }]
+  });
+  // Only the valid half covers the run; without the filter the corrupted sample
+  // would have bought the other 1 200 s as "recovery".
+  assert.equal(corrupt.heartRateCoverage, 0.5);
+  const recovery = corrupt.heartRateExposure.find((zone) => zone.zone === "recovery");
+  assert.ok(recovery);
+  assert.equal(recovery.durationSeconds, 0);
+  const total = corrupt.heartRateExposure.reduce((sum, zone) => sum + zone.durationSeconds, 0);
+  assert.equal(total, 1200);
+});

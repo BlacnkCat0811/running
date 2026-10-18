@@ -62,6 +62,17 @@ export interface ModelTransitionMetricsV2 {
   eligibleSessionDelta: number;
   assessmentStatusChangeRate: number;
   invalidValueCount: number;
+  /**
+   * Matched sessions whose base / candidate assessment actually carries a CA.
+   *
+   * A distribution comparison only exists when there is something to compare. Before
+   * these two counts, a cold start (every assessment still `calibrating`, so CA is
+   * NULL on **both** sides) looked identical to "the candidate lost all of its CA" —
+   * the gate could not tell an empty cohort from a destroyed one and refused to
+   * activate a perfectly valid first recalculation.
+   */
+  baseScoredSessions: number;
+  candidateScoredSessions: number;
   currentAbilityMeanAbsoluteDelta: number | null;
   currentAbilityP95AbsoluteDelta: number | null;
   finalTrueAbilityDelta: number | null;
@@ -259,6 +270,59 @@ export function evaluateModelTransitionGateV2(
     }
 
     if (transition === "same_scale") {
+      // A same-scale release is policed by distribution metrics — but only when a
+      // distribution exists. `null` covers two very different situations, and
+      // treating them alike is what broke the cold-start recalculation:
+      //
+      //   · no scored cohort at all (every assessment still calibrating): there is
+      //     nothing to compare, so the protection is an empty set for this release;
+      //   · a scored cohort that disappeared, or a metric that cannot be computed
+      //     although both sides are scored: the release is not evaluable, or worse.
+      //
+      // The verified-empty cohort is the explicit dataset-level proof of the first
+      // case; the counts below are the run-level evidence for it.
+      if (!verifiedEmpty) {
+        if (!Number.isInteger(metrics.baseScoredSessions) ||
+            !Number.isInteger(metrics.candidateScoredSessions) ||
+            metrics.baseScoredSessions < 0 || metrics.candidateScoredSessions < 0) {
+          failureReasons.push("invalid_scored_session_counts");
+        } else if (metrics.baseScoredSessions > 0 && metrics.candidateScoredSessions === 0) {
+          // The incumbent had CA and the candidate has none: user-visible ability
+          // disappeared, which is a hard failure, not "not evaluable".
+          failureReasons.push("scored_cohort_lost");
+        } else if (metrics.baseScoredSessions === 0 && metrics.candidateScoredSessions > 0) {
+          // A previously-unscored history became scoreable. That is the direction the
+          // gate exists to allow (e.g. the calibration window finally completed).
+          migrationReport.push("scored_cohort_appeared");
+        } else if (metrics.baseScoredSessions === 0 && metrics.candidateScoredSessions === 0) {
+          migrationReport.push("no_scored_cohort");
+          if (metrics.finalTrueAbilityDelta === null) {
+            migrationReport.push("final_true_ability_unavailable");
+          }
+        } else {
+          // Both sides are scored, so the CA distribution must have been computable.
+          if (metrics.currentAbilityMeanAbsoluteDelta === null) {
+            notEvaluableReasons.push("metric_unavailable:currentAbilityMeanAbsoluteDelta");
+          }
+          if (metrics.currentAbilityP95AbsoluteDelta === null) {
+            notEvaluableReasons.push("metric_unavailable:currentAbilityP95AbsoluteDelta");
+          }
+          // TA is only written after calibration; an uncalibrated run legitimately has
+          // no final TA, so a null there is recorded rather than gating.
+          if (metrics.finalTrueAbilityDelta === null) {
+            migrationReport.push("final_true_ability_unavailable");
+          }
+        }
+        // Recovery continuity should always be computable when sessions matched at all.
+        if (metrics.matchedSessions > 0) {
+          if (metrics.recoveryNullRateDelta === null) {
+            notEvaluableReasons.push("metric_unavailable:recoveryNullRateDelta");
+          }
+          if (metrics.recoverySaturationRate === null) {
+            notEvaluableReasons.push("metric_unavailable:recoverySaturationRate");
+          }
+        }
+      }
       if (exceeds(metrics.currentAbilityMeanAbsoluteDelta, thresholds.maxCurrentAbilityMeanAbsoluteDelta)) {
         failureReasons.push("current_ability_mean_absolute_delta");
       }

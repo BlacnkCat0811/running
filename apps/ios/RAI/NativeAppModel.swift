@@ -25,6 +25,39 @@ final class NativeAppModel {
     /// 通过了协议形状但安全字段不可信（2026-10-18 审查 P2-8，绝不能提示升级 App），
     /// `failure` = 其余（网络/服务端）。
     enum ReadPanelOutcome: Equatable { case ok, decoding, validation, failure }
+
+    /// 读取面板失败类别的**纯**归并（2026-10-18 深度审查 P3-26）。
+    ///
+    /// 为什么抽出来：`isOffline` / "提示升级应用" / "安全校验失败" 这三个结论此前是
+    /// `refresh()` 里三个内联布尔，而 P3-26 的缺陷正是"`decodingOnly` 没排除 `.validation`"
+    /// —— 内联布尔没有任何可执行判据盯着（`ModelRegression` 也测不到）。归并规则集中在这里，
+    /// 行为由回归逐组合钉住。
+    ///
+    /// 语义（与旧行为逐条对齐，除 P3-26 修正的那一条）：
+    /// - `anySucceeded`：至少一项成功；
+    /// - `serverAnswered`：没有任何 `.failure` ⇒ 服务端答复过（内容不可用也不算离线；
+    ///   全部成功时**真空为真**，与"离线"判据 `!anySucceeded && !serverAnswered` 自洽）；
+    /// - `decodingOnly`：**只有**解码失败（`.validation` 不计入 —— 那是"数据不可信"而非
+    ///   "格式不认识"，提示用户升级 App 既不解决问题也会误导排查）；
+    /// - `validationOnly`：含 `.validation` 且其余失败项也都是 `.validation`。
+    struct ReadPanelTally: Equatable {
+        let failed: Int
+        let anySucceeded: Bool
+        let serverAnswered: Bool
+        let decodingOnly: Bool
+        let validationOnly: Bool
+
+        static func of(_ outcomes: [ReadPanelOutcome]) -> ReadPanelTally {
+            let failed = outcomes.filter { $0 != .ok }
+            return ReadPanelTally(
+                failed: failed.count,
+                anySucceeded: outcomes.contains { $0 == .ok },
+                serverAnswered: outcomes.allSatisfy { $0 != .failure },
+                decodingOnly: !failed.isEmpty && outcomes.allSatisfy { $0 == .ok || $0 == .decoding },
+                validationOnly: failed.contains(.validation) && outcomes.allSatisfy { $0 == .ok || $0 == .validation }
+            )
+        }
+    }
     var isCoachLoopManaged: Bool { coachLoop?.settings != nil }
     /// 2026-10-18（审查 P2-9）：能力协商**单源**。
     ///
@@ -340,27 +373,28 @@ final class NativeAppModel {
         let workoutsSucceeded = await refreshWorkouts()
         guard isCurrent() else { return }
         panelOutcomes.append(workoutsSucceeded ? .ok : workoutReadOutcome)
-        let failedPanels = panelOutcomes.filter { $0 != .ok }.count
-        // 全部失败且全部是解码失败 ⇒ 契约漂移：服务端**可达**，但不该点亮"离线"横幅。
-        let decodingOnly = failedPanels > 0 && panelOutcomes.allSatisfy { $0 != .failure }
-        // 2026-10-18（审查 P2-8）：安全校验失败既不是契约漂移（不要提示升级 App），
-        // 也不是离线。单独成类，给"这一份快照不可信，已拒绝使用"的文案。
-        let validationOnly = failedPanels > 0 && panelOutcomes.contains(.validation) &&
-            panelOutcomes.allSatisfy { $0 == .ok || $0 == .validation }
-        let anySucceeded = panelOutcomes.contains { $0 == .ok }
-        isOffline = !anySucceeded && !decodingOnly && !validationOnly
-        session.isReachable = anySucceeded || decodingOnly || validationOnly
+        // 归并规则集中在纯函数里（`ReadPanelTally.of`，有回归逐组合钉住）：
+        // 2026-10-18（深度审查 P3-26）修正了"`decodingOnly` 把 `.validation` 也算成契约漂移"
+        // —— 混合失败时会误导用户去升级 App，而真实原因是这一份计划快照的安全字段不可信。
+        let tally = Self.ReadPanelTally.of(panelOutcomes)
+        let failedPanels = tally.failed
+        isOffline = !tally.anySucceeded && !tally.serverAnswered
+        session.isReachable = tally.anySucceeded || tally.serverAnswered
         if failedPanels > 0 {
             // 刻意不在这里 `loadCachedData()`：那会把刚刚成功的那几项也推回旧值，
             // 等于用一次部分失败抹掉一次部分成功。首启的空态由 `bootstrap()`
             // 的 `loadCachedData()` 兜底。
-            if validationOnly {
+            if tally.validationOnly {
                 errorMessage = "计划快照未通过安全校验（身份、日期、窗口或摘要不一致），已拒绝作为当前安排；其余数据已刷新。请稍后重试或检查服务端状态。"
-            } else if failedPanels == 4 && decodingOnly {
+            } else if failedPanels == 4 && tally.decodingOnly {
                 errorMessage = "数据格式与当前版本不兼容（4 项均未能解析），请升级应用或检查服务端版本。"
+            } else if failedPanels == 4 && tally.serverAnswered {
+                // 混合形态（部分安全校验失败 + 部分解码失败）：既不能说"升级应用"，也不能说
+                // "连不上"。如实说明"服务端有答复但内容不可用"。
+                errorMessage = "有数据未能通过校验或解析，已保留上次结果；请稍后重试，若持续出现请导出计划诊断。"
             } else if failedPanels == 4 {
                 errorMessage = "核心数据均未能更新，当前显示的是上次结果。"
-            } else if decodingOnly {
+            } else if tally.decodingOnly {
                 errorMessage = "有 \(failedPanels) 项数据未能更新（数据格式与当前版本不兼容），其余已刷新。"
             } else {
                 errorMessage = "有 \(failedPanels) 项数据未能更新，其余已刷新。"
@@ -1622,11 +1656,16 @@ final class NativeAppModel {
 
     func enrichPlanReceipts(_ receipts: [PlanSyncReceipt], snapshot: PlanSyncSnapshot, operationID: UUID) -> [PlanSyncReceipt] {
         guard let coherence = snapshot.coherenceToken, let identity = snapshot.serverIdentity else { return receipts }
-        return receipts.map { receipt in
+        // 2026-10-18（深度审查 P3-27）：摘要算不出来时保留 legacy 形状是**故意**的降级
+        // （服务端按旧信息级登记，不会 422），但它此前**零痕迹** —— 线上只会表现为"这天的
+        // 执行证据缺失"，没人知道是降级。这里按批次记一条计划诊断（导出诊断可见）。
+        var downgraded = 0
+        let enriched = receipts.map { receipt -> PlanSyncReceipt in
             // 2026-10-18（审查 P2-13）：实际导出结构若含不可量化数值，摘要无法计算。
             // 不猜测目标：保留 legacy 形状（服务端按旧信息级登记），而不是发一条
             // 摘要为 nil 的 v2 回执被 422 终局拒绝。
             guard let digest = try? PlanFingerprint.prescriptionDigest(kind: receipt.kind, structure: receipt.structure) else {
+                downgraded += 1
                 return receipt
             }
             var value = receipt
@@ -1637,6 +1676,14 @@ final class NativeAppModel {
             value.coachLoop = snapshot.coachLoop
             return value
         }
+        if downgraded > 0 {
+            cache.recordPlanDiagnostic(.init(
+                at: now(), name: "receipt_summary_unavailable", scopeDigest: snapshot.scope,
+                operationId: operationID.uuidString, revision: snapshot.revision,
+                owed: receipts.count, confirmed: receipts.count - downgraded,
+                errorCode: "plan_receipt_summary_unavailable"))
+        }
+        return enriched
     }
 
     private func lifecycleReceipts(_ ledger: PlanWatchLedger?, event: String) -> [PlanSyncReceipt] {

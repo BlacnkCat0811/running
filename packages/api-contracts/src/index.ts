@@ -1898,6 +1898,20 @@ export interface DiagnosticExportResponse {
   jobs: RecomputeJobDto[];
   issues: Array<{ severity: string; code: string; count: number }>;
   exclusionReasons: Array<{ reason: string; count: number }>;
+  /**
+   * Import-batch ledger aggregates (direct-sync / data-only lanes write `xml` into
+   * `import_batches.summary_json`). Added 2026-10-18 so a superseded-value or
+   * tombstoned payload record is observable outside server logs: `tombstonedRecords`
+   * counts payload records refused by a tombstone (including the delete-persistent
+   * supersede path), `supersededRecords` counts legacy values replaced by a later
+   * correction. Batches whose summary predates these fields (or is not valid JSON)
+   * contribute 0.
+   */
+  imports: {
+    batches: number;
+    tombstonedRecords: number;
+    supersededRecords: number;
+  };
 }
 
 /** Explicit allowlist: no coordinates, health samples, notes, identifiers or model internals. */

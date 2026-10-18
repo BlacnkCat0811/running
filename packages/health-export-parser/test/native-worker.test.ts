@@ -96,14 +96,38 @@ test("Rust decoded data preserves TS stable IDs, metadata, routes, updates, and 
       stores[1]!.database.prepare("SELECT batch_id,entity_kind,entity_id,change_type,effective_at,content_hash FROM import_entity_changes ORDER BY entity_kind,entity_id").all(),
       stores[0]!.database.prepare("SELECT batch_id,entity_kind,entity_id,change_type,effective_at,content_hash FROM import_entity_changes ORDER BY entity_kind,entity_id").all()
     );
+    // 🔴 P3-04（2026-10-18 审查）：第三次解析是 **unchanged** 态，此前不传 batchId ⇒
+    // 两个引擎都按 `if (batchId && …)` 跳过账本写入，"未变更不得误报 updated / 不得多写
+    // 账本"这件事没有任何断言能看见（三态里的 inserted/updated 已被上面的 digest 覆盖）。
+    // 现在显式给批次：账本必须为空，且 generation 的内容哈希不得被改写。
+    const repeatBatchId = "repeat-batch";
+    const repeatRecordId = (stores[0]!.database.prepare(
+      "SELECT id FROM health_records WHERE type='HKQuantityTypeIdentifierHeartRate'"
+    ).get() as { id: string }).id;
+    const recordHash = (store: RaiDatabase): unknown => store.database.prepare(
+      "SELECT content_hash AS hash FROM import_entity_generations WHERE entity_kind='record' AND entity_id = ?"
+    ).get(repeatRecordId);
+    const hashesBeforeRepeat = stores.map((store) => recordHash(store));
     for (const [index, engine] of (["typescript", "rust"] as const).entries()) {
+      stores[index]!.database.exec(`INSERT INTO import_batches (id,xml_sha256,status,import_mode,summary_json)
+        VALUES ('${repeatBatchId}','pending','running','incremental','{}')`);
       await parseAppleHealthXml(path, stores[index]!, {
         fileSize: statSync(path).size, atomic: false, native: { engine, spoolRoot: root, stagingDatabase: databasePath(engine) },
-        incremental: { generation: "repeat", preserveAbsent: true }
+        incremental: { generation: "repeat", batchId: repeatBatchId, preserveAbsent: true }
       });
       stores[index]!.flush();
     }
     digest();
+    for (const [index, store] of stores.entries()) {
+      assert.deepEqual(
+        store.database.prepare(`SELECT entity_kind, entity_id, change_type FROM import_entity_changes
+          WHERE batch_id = ? ORDER BY entity_kind, entity_id`).all(repeatBatchId),
+        [],
+        "未变更的重复载荷不得写账本（尤其不得把 unchanged 报成 updated）"
+      );
+      assert.deepEqual(recordHash(store), hashesBeforeRepeat[index],
+        "未变更态不得改写 generation 的内容哈希");
+    }
   } finally { stores.forEach((store) => store.close()); rmSync(root, { recursive: true, force: true }); }
 });
 

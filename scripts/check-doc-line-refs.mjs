@@ -19,20 +19,31 @@
  *   node scripts/check-doc-line-refs.mjs                      # 核对默认基线文档
  *   node scripts/check-doc-line-refs.mjs --problems-only      # 只列问题（默认也会列漂移）
  *   node scripts/check-doc-line-refs.mjs --write-baseline     # 重新生成基线快照
+ *   node scripts/check-doc-line-refs.mjs --require-baseline   # 缺基线就失败（发布/CI 显式使用）
  *   node scripts/check-doc-line-refs.mjs <markdown 路径…>
+ *
+ * `--require-baseline` 也可以写成 `RAI_DOC_REFS_REQUIRE_BASELINE=1`（env 形式便于 CI 全局打开）。
  *
  * 基线快照落在文档旁边：`<doc>.md` → `<doc>.linerefs.json`（每处引用记 path/line/当时的行内容）。
  * 改了源文件之后重跑，就会指出"文档当初引的那行，现在写的是别的东西"。
  *
- * ## 判据（两道硬 + 一道告警）
+ * ## 判据（两道硬 + 一道告警 + 一道可选硬）
  *
  * 1. **越界 / 路径解析不到** —— 确定的漂移，退出码 1。
  * 2. **内容与基线不符** —— 退出码 2。可能是源文件漂移，也可能是你有意改了文档；
  *    两种情况都要人看一眼，所以它**不**当硬失败、但**必须**非零，否则会被忽略。
+ *    ⚠️ **这一条只在有基线时成立**：日常提交**不要求**提交 `.linerefs.json`
+ *    （内容基线会在任何无关源码行移动时把 pre-commit 打红，属工具设计边界）。
+ *    没有基线时内容判据**从未执行**，所以汇总行会显式打印
+ *    `内容漂移 未核对（无基线）`，而不是 `内容漂移 0 处` —— 后者会被读成"已核对且无漂移"。
+ *    发布前要对某份快照做内容级核对时，先 `--write-baseline` 生成基线，再判定/归档该快照；
+ *    要让"必须带基线"成为硬条件，用 `--require-baseline`。
  * 3. **锚在空行** —— 只打印告警，不影响退出码。基线里记不到文字 ⇒ 那行将来变成内容、
  *    或整段挪走，都发现不了。实测踩过：`deploy/n100/README.md` 的某处引用锚在空行上。
- * 均无问题时退出码 0。行号不越界、也没基线时，脚本判不了内容对不对（它不懂上下文），
- * 产物是"候选清单 + 当前行内容"，不是"通过/失败"。
+ * 4. **`--require-baseline`** —— 被核对的文档任一缺基线 ⇒ 退出码 1（发布/CI 用）。
+ * 均无问题时退出码 0（无基线时也退出 0，但输出明确写"未核对"，不会被读成"已核对 0 漂移"）。
+ * 行号不越界、也没基线时，脚本判不了内容对不对（它不懂上下文），产物是"候选清单 + 当前行内容"，
+ * 不是"通过/失败"。
  *
  * ## 五个已知的判读陷阱
  *
@@ -72,9 +83,12 @@ import { fileURLToPath } from "node:url";
  *   （`deliverables/*_2026-10-11.md`）、`docs/TODAY_PLAN_CARDS_REVIEW.md` 也是带日期的
  *   时点快照（"本轮只诊断，未改任何代码"）—— 按本文件的第 3 条判读陷阱，**时点快照不该进
  *   默认范围**（回写等于伪造历史），应显式传入并自行判读。
- * - `deploy/README-UBUNTU.md`（1 处）是**现行文档**，属于漏登记，待补。
+ * - `deploy/README-UBUNTU.md`（1 处）是**现行文档**，当时属于漏登记。
  *
- * 所以这里加进来的是**唯一一份"现行 + 有引用"**的文档。加它之前，这道门禁是真空的。
+ * 2026-10-18（深度审查 P3-40）把当时漏登记的现行文档补进默认范围：
+ * `deploy/README-UBUNTU.md`、`docs/DECISIONS.md`、`docs/HEALTHKIT_RECORD_SYNC_V2.md`、
+ * `docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md`。补入时实测这 5 处引用全部可解析
+ * （0 越界 / 0 漂移），所以它们不是"真空但已显式可见"，而是真的被核对。
  */
 const DEFAULT_DOCS = [
   "docs/ARCHITECTURE.md",
@@ -102,7 +116,17 @@ const DEFAULT_DOCS = [
   // 需要时显式传入并自行判读。
   "docs/IOS_TRAINING_PLAN_STATE_V1.md",
   "docs/IOS_TRAINING_PLAN_IMPLEMENTATION.md",
-  "docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md"
+  "docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md",
+  // 2026-10-18 深度审查（P3-40）：以下 4 份同为**现行**文档，当时在默认范围之外，
+  // 它们的 `文件:行号` 没有任何门禁。补入时显式跑过，5 处引用全部可解析（0 越界）。
+  // `docs/DECISIONS.md` 的 2 处引用是现行决策依据；`deploy/README-UBUNTU.md` 的 1 处
+  // 是部署核对点；`HEALTHKIT_RECORD_SYNC_V2` 与 `IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN`
+  // 各 1 处。历史时点快照（`deliverables/`、`.archify/`、`TODAY_PLAN_CARDS_REVIEW.md`）
+  // 仍**不进**默认范围——回写等于伪造历史。
+  "deploy/README-UBUNTU.md",
+  "docs/DECISIONS.md",
+  "docs/HEALTHKIT_RECORD_SYNC_V2.md",
+  "docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md"
 ];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */
@@ -126,6 +150,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
 const problemsOnly = argv.includes("--problems-only");
 const writeBaseline = argv.includes("--write-baseline");
+const requireBaseline = argv.includes("--require-baseline") || process.env.RAI_DOC_REFS_REQUIRE_BASELINE === "1";
 const docs = argv.filter((a) => !a.startsWith("--"));
 if (docs.length === 0) docs.push(...DEFAULT_DOCS);
 
@@ -179,6 +204,9 @@ let hard = 0;
 let drifted = 0;
 let blank = 0;
 let written = 0;
+/** 有基线、内容判据真正执行过的文档数 / 缺基线（内容判据未执行）的文档。 */
+let driftChecked = 0;
+const missingBaselineDocs = [];
 
 for (const doc of docs) {
   // 🔴 `resolve` 而不是 `join`：调用方给的可能是**绝对路径**。
@@ -207,6 +235,12 @@ for (const doc of docs) {
     } catch {
       baseline = null;
     }
+  }
+  // 🔴 只有真读到基线时，内容判据才执行过。缺基线时下面**必须**打印"未核对"，
+  // 不能静默跳过——"0 处漂移"与"没比对过"是两件事（2026-10-18 P2-07 的根因）。
+  if (!writeBaseline) {
+    if (baseline) driftChecked += 1;
+    else missingBaselineDocs.push(doc);
   }
 
   const docProblems = [];
@@ -260,7 +294,9 @@ for (const doc of docs) {
   for (const key of blankAnchors) console.log(`🟠 锚在空行       ${key}`);
 
   const parts = [`${rows.length} 处引用`, `${docProblems.length} 处越界/无法解析`];
-  if (baseline) parts.push(`${docDrift.length} 处内容漂移（对基线）`);
+  if (writeBaseline) parts.push("内容漂移（本次写基线，未比对）");
+  else if (baseline) parts.push(`${docDrift.length} 处内容漂移（对基线）`);
+  else parts.push("内容漂移 未核对（无基线）");
   if (blankAnchors.length > 0) parts.push(`${blankAnchors.length} 处锚在空行（告警）`);
   console.log(`${doc}: ${parts.join("，")}${problemsOnly ? "（--problems-only）" : ""}`);
 
@@ -280,11 +316,30 @@ for (const doc of docs) {
   }
 }
 
+const driftSummary = writeBaseline
+  ? "内容漂移（本次写基线，未比对）"
+  : driftChecked === 0
+    ? `内容漂移 未核对（无基线；${docs.length} 份文档均无 .linerefs.json）`
+    : `内容漂移 ${drifted} 处${
+        missingBaselineDocs.length > 0
+          ? `（另有 ${missingBaselineDocs.length} 份文档无基线，未核对）`
+          : ""
+      }`;
 console.log(
   `\n合计 ${total} 处（去重后）；越界/无法解析 ${hard} 处；` +
-    `内容漂移 ${drifted} 处；锚在空行 ${blank} 处（告警）` +
+    `${driftSummary}；锚在空行 ${blank} 处（告警）` +
     `${written > 0 ? `；写入基线 ${written} 份` : ""}`,
 );
+
+if (requireBaseline && missingBaselineDocs.length > 0) {
+  console.error(
+    "\n--require-baseline：以下文档缺 `.linerefs.json` 基线，内容判据无法执行：" +
+      `\n  ${missingBaselineDocs.join("\n  ")}` +
+      "\n先 `node scripts/check-doc-line-refs.mjs --write-baseline`" +
+      "（只对需要做内容判定的快照执行，日常提交不要求基线）。",
+  );
+  process.exit(1);
+}
 if (hard > 0) process.exit(1);
 if (drifted > 0) process.exit(2);
 if (total === 0) {

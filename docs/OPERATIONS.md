@@ -19,10 +19,43 @@ npm run check:package-boundaries
 ```
 
 `npm test`通过[Node入口](../scripts/run-tests.mjs)显式枚举用例并启动Node套件，不依赖POSIX shell；退出码即最终结果。
+`npm test` 的默认并发 = 本机可用并行度；多核/高负载机器上重文件会互相挤占，测试内 5 s / 30 s 墙钟预算可能被压红（**假红**，原理见脚本头注释）。要一份可复现的独占结果用 `RAI_TEST_CONCURRENCY=2 npm test`（非法值会响亮报错，不会静默回落）；发布记录必须写明所用并发。
+`.githooks/pre-commit` 另外每次都跑**仓库体积闸门**（单文件 1.5 MB 上限）与文档/包边界检查；`packages/storage-sqlite/` 有改动时跑迁移冻结门禁，触发面含表分类清单一致性（见钩子注释）。
 
-本地hooks在[pre-commit](../.githooks/pre-commit)；[CI配置](../.github/workflows/ci.yml)存在不证明当前远端已触发它。
+本地hooks在[pre-commit](../.githooks/pre-commit)；[CI配置](../.github/workflows/ci.yml)存在不证明当前远端已触发它。`.workflow/master-ci.yml` 是**未启用的 Gitee Go 草案**。
 完整审查另跑`npm run ml:test`、`npm run test:ios`、按需要`npm run rust:verify`；缺工具/SDK应报跳过或阻塞，不自动安装大型依赖。
 390px/responsive不属于默认gate。不要在排障时删除真实健康库、凭证或旧可用工件。
+
+## 发布检查清单
+
+发布前在能跑全量的机器上逐条执行（`npm test` 是分钟级，不在提交钩子内）：
+
+```bash
+npm run typecheck
+RAI_TEST_CONCURRENCY=2 npm test
+npm run check:docs
+npm run check:doc-refs
+npm run check:scripts
+npm run check:acceptance-matrix
+npm run check:package-boundaries
+npm run check:package-boundaries -- --self-test
+node scripts/check-blob-size.mjs
+npm run review:model-boundaries
+npm run smoke:api
+```
+
+- **CI 现实**：本仓库远端是 gitee，GitHub Actions **不会**被 gitee 的 push 触发；`.workflow/master-ci.yml` 是**未启用的草案**。因此发布记录必须写明「gitee 侧 CI 未启用、判据来自本机实跑」，以及 `RAI_TEST_CONCURRENCY` 取值与被跳过的检查（缺 Xcode / 缺平台导致的跳过不得合并进"通过"）。
+- **文档行号引用的内容漂移**：`npm run check:doc-refs` 默认只做"越界/无法解析"硬校验；**内容漂移**需要 `.linerefs.json` 基线，日常提交**不要求**基线（缺基线时输出写"未核对（无基线）"）。要对本次发布快照做内容级核对时：先 `node scripts/check-doc-line-refs.mjs --write-baseline` 生成基线并随快照归档，再用 `node scripts/check-doc-line-refs.mjs --require-baseline`（或 `RAI_DOC_REFS_REQUIRE_BASELINE=1`）判定；基线文件不要无条件提交（无关源码行移动会把它变成噪音）。
+- **`.mts` 脚本**（如 `review:model-boundaries`、`verify-v2-release`）是 TypeScript：必须走 `npm run` / `tsx`，裸 `node scripts/xxx.mts` 会 `ERR_MODULE_NOT_FOUND`。
+- **模型边界对抗探针**（`npm run review:model-boundaries`，R1–R3）只读、用合成库并在 finally 清理；`violationCount > 0` 时 exit 1，不得用"这次没改"跳过它。
+
+## 已知依赖风险
+
+`npm audit --omit=dev`（2026-10-18）报告 **4 个 moderate**，链路为 `onnxruntime-node → global-agent → roarr → sprintf-js`（GHSA-hp3w-g68c-fv3c：`sprintf-js` 在格式串精度无界时可被 DoS）。处置边界：
+
+- 可达性低：DoS 需要攻击者控制传入 `sprintf` 的格式串；本项目没有把用户输入当格式串用的路径（依赖链在 ML/ONNX 侧）。
+- **本轮不做** `npm audit fix --force`：它会把 `onnxruntime-node` 升到声明依赖区间之外（`1.30.0`），需独立评估模型推理兼容性与工件尺寸。
+- 若后续升级，优先在 `overrides` 里固定 `sprintf-js`/`roarr`（项目已有 `adm-zip`、`tsx.esbuild` 的 overrides 先例），再跑 `rust:verify` 与 ONNX 相关回归；升级前保留本记录。
 
 ## 迁移：先检查，备份后才apply
 
@@ -110,12 +143,6 @@ curl -fsS -H "Authorization: Bearer $RAI_API_TOKEN" https://<domain>/v1/health
 ### 外部一致性备份的责任边界
 
 见[SQLite直接增量同步](SQLITE_DIRECT_SYNC_DESIGN.md)第11节：普通同步**不做**项目级整库备份、全库完整性扫描、整库候选复制或换库，也**不等待**外部备份完成；**升级脚本同样不再代做备份**，只打印责任提示且不校验运维是否已完成。备份由服务器运维独立负责。以下约束现在就成立，不随该改造改变：
-
-- 活跃的WAL库**不能**只`cp rai.sqlite`当一致备份；也**不得**为“提速”删掉`-wal`/`-shm`侧车。正确做法是SQLite一致性备份API、与存储协调的快照，或暂停全部写者后完整备份相关文件。
-- 要整个项目状态一致，主库、runtime/control、上传与工件、配置/身份必须落在**同一个恢复边界**内。多个库各自在线备份**不**自动等于跨库一致。
-- 备份凭证与数据由运维保护；健康原文、精确轨迹与Token不进入仓库。
-- 恢复或替换数据集必须显式处理schema兼容与`datasetEpoch`。旧备份还原后**不得**让客户端继续复用新游标——那会把“接收状态已丢失”伪装成没丢。
-- 项目自己创建的备份/rollback文件**不**由应用删除或扫描清理；是否保留、归档、删除由运维决定。
 
 - 活跃的WAL库**不能**只`cp rai.sqlite`当一致备份；也**不得**为“提速”删掉`-wal`/`-shm`侧车。正确做法是SQLite一致性备份API、与存储协调的快照，或暂停全部写者后完整备份相关文件。
 - 要整个项目状态一致，主库、runtime/control、上传与工件、配置/身份必须落在**同一个恢复边界**内。多个库各自在线备份**不**自动等于跨库一致。

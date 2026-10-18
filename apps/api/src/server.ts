@@ -113,6 +113,7 @@ import { registerCoachLoopRoutes } from "./coach-loop-routes.js";
 import { PlanPublicationService, PlanOperationError } from "./plan-publication.js";
 import { prescriptionDigest } from "./plan-digest.js";
 import { normalizePlanReceiptV2 } from "./plan-receipt.js";
+import { planReadGuard, readStableSnapshot } from "./plan-read-consistency.js";
 import type { MobilePlanReceiptInput } from "@rai/api-contracts";
 import type { MobilePlanOperationScope } from "@rai/api-contracts";
 import { planOperationScopeSchema } from "./schemas.js";
@@ -232,39 +233,61 @@ await app.register(multipart, {
 // 准入守卫与鉴权 hook 必须对"什么算写"保持同一口径，两处各写一份迟早分叉）。
 /**
  * Read routes an unauthenticated client may call, once the request arrives on
- * a host named in `RAI_PUBLIC_HOSTS`.
+ * a host named in `RAI_PUBLIC_HOSTS` (empty by default, in code and in the
+ * deployment template alike).
  *
- * Introduced for the retired Web SPA, which opened without a token and rendered
- * every view; the API keeps the write surface shut regardless. Two entries here
- * are load-bearing rather than incidental: `/v1/health` decides whether a
- * client renders at all, and `/v1/runtime-status` was polled from every page —
- * leave it out and the client falls back to a "reconnecting" banner.
+ * This set used to be much wider: the retired browser SPA opened without a token
+ * and rendered every view, so dashboard, workouts, trends, training statistics,
+ * prediction/model and the iOS-only `/v1/mobile/*` aggregates were all readable
+ * anonymously once an operator opted in. The Web SPA was retired on 2026-10-17
+ * (DECISIONS D17) and no client reads those routes without a Bearer token any
+ * more, so keeping them here only preserved a privacy surface nobody needed
+ * (review P3-13): an operator following the deployment template would have
+ * published health, location and plan aggregates to the internet, while the
+ * same data on sibling routes (`/v1/mobile/training-plan-state`,
+ * `/v1/mobile/run-coach`, `/v1/workouts/:id/share-card`, `/v1/privacy-zones`)
+ * stayed token-gated.
  *
- * Deliberately absent, and each for a reason that would not survive a review
- * that only asked "is it a GET?":
- *   GET /v1/backups/:name        streams the raw SQLite file — the entire dataset
- *   GET /v1/import-sources/*     returns ImportSource.inputPath / .originalPath,
- *                                which is a map of the server's filesystem
- *   GET /v1/diagnostics          server-side job, model and issue internals
- *   GET /v1/openapi.json         the full route table
- *   GET /v1/backups              backup inventory — names, sizes and timestamps
- *   GET /v1/import-jobs/*        import pipeline state
- *   GET /v1/jobs, /v1/jobs/:id   recompute job events
+ * What stays: liveness and capability negotiation, with no health samples,
+ * coordinates, plans or files —
+ *   GET /v1/health          whether the service and its database are ready
+ *   GET /v1/handshake       server/dataset identity plus contract versions
+ *   GET /v1/runtime-status  busy flags the client polls before a write
  *
- * Read routes that stay token-gated are named in `tokenRequiredReadRoutes`
- * below; `server-runtime.test.ts` fails if a mounted `/v1/` GET appears in
- * neither set, so a new read route has to be classified on purpose instead of
- * inheriting whichever default the author did not think about.
+ * Everything else — including every `/v1/mobile/*` aggregate — is listed in
+ * `tokenRequiredReadRoutes` below. `server-runtime.test.ts` fails if a mounted
+ * `/v1/` GET appears in neither set, so a new read route has to be classified on
+ * purpose instead of inheriting whichever default the author did not think about.
  */
 const publicReadRoutes = new Set([
-  "/v1/mobile/coach-loop",
-  "/v1/mobile/coach-execution",
   "/v1/health",
   "/v1/handshake",
+  "/v1/runtime-status"
+]);
+/**
+ * Read routes that require the Bearer token. See the comment above.
+ *
+ * Every route that used to be anonymously readable for the retired Web SPA is
+ * here now; the entries are grouped by surface only for readability. Anything
+ * that answers with health samples, route geometry, plan state, account
+ * identity, filesystem paths or the route table itself must stay in this set.
+ */
+const tokenRequiredReadRoutes = new Set([
+  // Plans, goals and coach surfaces (incl. the iOS-only aggregates).
+  "/v1/mobile/today",
+  "/v1/mobile/workout-plan",
+  "/v1/mobile/training-plan-state",
+  "/v1/mobile/goals",
+  "/v1/mobile/statistics",
+  "/v1/mobile/trends",
+  "/v1/mobile/run-coach",
+  "/v1/mobile/plan-operations/:id",
+  "/v1/mobile/coach-loop",
+  "/v1/mobile/coach-execution",
+  // Workouts and training facts (route geometry, zone history, exports).
   "/v1/dashboard",
   "/v1/data-summary",
   "/v1/data-audit",
-  "/v1/runtime-status",
   "/v1/workouts",
   "/v1/workouts/:id",
   "/v1/workouts/:id/series",
@@ -275,43 +298,32 @@ const publicReadRoutes = new Set([
   "/v1/training-statistics/load",
   "/v1/training-zones/current",
   "/v1/training-zones/history",
-  "/v1/predictions",
-  "/v1/prediction-models",
-  "/v1/prediction-models/:id",
-  "/v1/model-runs",
-  "/v1/model-snapshots",
-  "/v1/model-runs/compare",
-  "/v1/mobile/today",
-  "/v1/mobile/workout-plan",
-  "/v1/mobile/statistics",
-  "/v1/mobile/trends",
-  "/v1/mobile/goals"
-]);
-/**
- * Read routes that keep requiring the token. See the comment above.
- */
-const tokenRequiredReadRoutes = new Set([
-  "/v1/mobile/training-plan-state",
-  "/v1/mobile/plan-operations/:id",
-  "/v1/mobile/run-coach",
   "/v1/exports/workout-summary",
   // 分享卡带轨迹几何（哪怕已在服务端裁剪），隐私区本身更是家/公司坐标：两者都不进匿名读。
   "/v1/workouts/:id/share-card",
   "/v1/privacy-zones",
   "/v1/performance-entries",
   "/v1/label-funnel",
-  "/v1/performance",
+  // Models, predictions and job/import administration.
+  "/v1/predictions",
+  "/v1/prediction-models",
+  "/v1/prediction-models/:id",
+  "/v1/model-runs",
+  "/v1/model-snapshots",
+  "/v1/model-runs/compare",
+  "/v1/jobs",
+  "/v1/jobs/:id",
   "/v1/commands/:id",
-  "/v1/openapi.json",
-  "/v1/diagnostics",
-  "/v1/backups",
-  "/v1/backups/:name",
   "/v1/import-sources/recent",
   "/v1/import-jobs/active",
   "/v1/import-jobs/latest",
   "/v1/import-jobs/:id",
-  "/v1/jobs",
-  "/v1/jobs/:id"
+  // Server internals: raw database, backup inventory, diagnostics, route table.
+  "/v1/backups",
+  "/v1/backups/:name",
+  "/v1/diagnostics",
+  "/v1/openapi.json",
+  "/v1/performance"
 ]);
 // Upload streams and discover are long/IO-only; they must not hold the mutation lock.
 // Submission only persists intent; executors acquire the shared writer lease.
@@ -348,7 +360,6 @@ const databaseRequiredMutationRoutes = new Set([
   "/v1/model-runs",
   "/v1/model-runs/:id/activate",
   "/v1/jobs/:id/cancel",
-  "/v1/backups",
   "/v1/database"
 ]);
 /**
@@ -362,11 +373,19 @@ const databaseRequiredMutationRoutes = new Set([
  * one; naming them is what lets `schemas.test.ts` require **every** write route
  * to be classified in exactly one of the three sets.
  *
+ * `POST /v1/backups` is here for the same reason even though it writes nothing
+ * any more: it only answers the retired-capability 410, and classifying it as
+ * database-required made the readiness gate answer `409 database_not_ready`
+ * first on a fresh install / after `DELETE /v1/database`, hiding the designed
+ * maintenance message from exactly the operator who needs it (review P3-18).
+ * `DELETE /v1/backups/:name` (same retired family) was already here.
+ *
  * Declarative: the default branch of the `preHandler` hook below already takes
  * the lock and skips the readiness gate, so this set does not change behaviour.
  */
 export const lockOnlyMutationRoutes = new Set([
   "/v1/import-sources/:id",
+  "/v1/backups",
   "/v1/backups/:name",
   "/v1/backups/:name/restore"
 ]);
@@ -1226,6 +1245,22 @@ app.put<{ Body: PrivacyZonesBody }>(
   }
 );
 
+/**
+ * Device-side plan receipt registration.
+ *
+ * `matchesCurrent` and the receipt row are computed/written inside one control
+ * write transaction, so a publication cannot commit in between and leave the
+ * receipt claiming membership of a revision that had already been replaced
+ * (review P2-2). Computing that snapshot (`trainingPlanState`) costs a full plan
+ * read inside the transaction; that is deliberate and bounded (P3-15): measured
+ * p50 ≈ 15.7 ms / p95 ≈ 26.4 ms on a ~42.6k-row synthetic library, and the store
+ * hides its own `pending_since` while this transaction is open
+ * (`publicationGuardState`), so the guarded reads of *other* requests are what
+ * pay the cost — they retry three times and then answer a retryable 503 with
+ * `Retry-After: 1`, which is the client's documented semantic. Sleeping between
+ * those retries was considered and rejected: it would extend this write-lock
+ * hold instead of shortening the read path (see `plan-read-consistency.ts`).
+ */
 app.post<{ Body: MobilePlanReceiptInput }>(
   "/v1/mobile/workout-plan/synced",
   { schema: { body: mobilePlanSyncedBodySchema } },
@@ -1378,13 +1413,44 @@ app.get("/v1/training-zones/current", async (_request, reply) => {
   return current;
 });
 
-app.get("/v1/mobile/today", async () => {
-  // Goals live in a plain file and do not depend on database readiness.
-  const goals = mobileGoalsStore.read();
+/**
+ * A plan read that combines the control store (goals/history) with the facts
+ * store (recovery, workouts, views).
+ *
+ * `/v1/mobile/today` and `/v1/mobile/workout-plan` used to read goals/history
+ * once and then build the response from the main database in a separate
+ * transaction. A control write landing in between (another device's goals
+ * update, a coach publication) produced a mixed plan — old goals measured
+ * against new facts — with no signal to the client. Going through
+ * `readStableSnapshot` discards such an attempt and retries, and exhaustion is a
+ * retryable 503 (`Retry-After: 1`) instead of a mixed snapshot (review P3-01).
+ * The response body is unchanged; only the consistency guarantee is new.
+ */
+const stablePlanRead = <Control, Result>(
+  readControl: () => Control,
+  build: (control: Control) => Result
+): Result => {
+  // Reads inside the store's own publication transaction see a hidden
+  // `pending_since` but the live epoch (`publicationGuardState`), so this cannot
+  // fail closed on itself and still detects a foreign publication (P3-03).
+  const readGuard = planReadGuard(mobileGoalsStore);
+  // `exactOptionalPropertyTypes`: omit the key (rather than pass `undefined`)
+  // when the store has no guard, which is the documented digest-only fallback.
+  return readStableSnapshot({
+    readControl,
+    build,
+    changedError: () => new PlanOperationError("plan_snapshot_changed",
+      "训练计划在读取期间更新，请重读完整快照。", 503),
+    ...(readGuard ? { readGuard } : {})
+  });
+};
+
+app.get("/v1/mobile/today", async () => stablePlanRead(
+  () => ({ goals: mobileGoalsStore.read(), history: mobileGoalsStore.planHistory(200) }),
   // `mobileTodayWithViews` 而不是 `mobileToday`：两块视图（PR5 S4）必须与今天/周的数字
   // 落在**同一个**读事务里（C1）。旧字段的取值由 `mobileToday` 原样返回，一个字都不动。
-  return withReadStore((store) => store.mobileTodayWithViews(goals, mobileGoalsStore.planHistory(200)));
-});
+  (control) => withReadStore((store) => store.mobileTodayWithViews(control.goals, control.history))
+));
 
 app.get("/v1/mobile/training-plan-state", async (_request, reply) => {
   reply.header("Cache-Control", "no-store");
@@ -1405,10 +1471,13 @@ registerCoachLoopRoutes({ app, runtime: coachLoopRuntime, identity: () => ({ ser
 
 // Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
 // goals, so it is deliberately absent from the mutation route registries below.
-app.get("/v1/mobile/workout-plan", async () => {
-  const goals = mobileGoalsStore.read();
-  return withReadStore((store) => store.mobileWorkoutPlan(goals));
-});
+// It takes the same stable-snapshot path as `/v1/mobile/today`: the week is
+// measured from goals/history while the facts come from the main database, and a
+// control write in between must not produce a mixed week (review P3-01).
+app.get("/v1/mobile/workout-plan", async () => stablePlanRead(
+  () => ({ goals: mobileGoalsStore.read() }),
+  (control) => withReadStore((store) => store.mobileWorkoutPlan(control.goals))
+));
 
 /** Legacy and Monday-only deterministic generation, without bypassing migration confirmation. */
 async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<MobileWeeklyPlanGenerationResponse> {
@@ -2057,10 +2126,25 @@ app.post("/v1/backups", async (_request, _reply) => {
     + "见 docs/SQLITE_DIRECT_SYNC_DESIGN.md §11.1", 410);
 });
 
+/**
+ * Download one existing backup (the recovery capability half; the app itself no
+ * longer creates or deletes backups).
+ *
+ * `Cache-Control: no-store`: this is the entire health database, so no
+ * intermediary may keep a copy even though the route is token-gated. The
+ * `filename` is built from the validated parameter (`backupParamsSchema` only
+ * admits `<basename>.sqlite`) and additionally reduced to characters that are
+ * legal and unambiguous inside a quoted header value (review P3-20) — the schema
+ * allows quotes and semicolons, which would otherwise break `Content-Disposition`.
+ */
+const backupDownloadFileName = (name: string): string =>
+  name.replace(/[^A-Za-z0-9._@+-]/g, "_");
+
 app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
   const stream = await maintenance.backupStream(request.params.name);
+  reply.header("Cache-Control", "no-store");
   reply.header("content-type", "application/x-sqlite3");
-  reply.header("content-disposition", `attachment; filename="${request.params.name}"`);
+  reply.header("content-disposition", `attachment; filename="${backupDownloadFileName(request.params.name)}"`);
   return reply.send(stream);
 });
 

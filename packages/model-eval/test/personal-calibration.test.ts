@@ -144,3 +144,22 @@ test("M06: non-finite residuals cannot enter the band", () => {
   assert.equal(evidence.evaluated, 7, "but a non-finite residual is not evaluated");
   assertPersonalIntervalPresentation(evidence);
 });
+
+test("M05/M06: the fitted band always passes the presentation gate it is shown under", () => {
+  // Mutation that turns this red: remove the `assertPersonalIntervalPresentation`
+  // call from `fitPersonalInterval`, so the only thing checking a displayable personal
+  // band is a caller that may forget (production returns the fit result directly).
+  for (const count of [8, 9, 12]) {
+    const evidence = fitPersonalInterval({ samples: series((index) => index * 3, count) });
+    assert.ok(evidence, `${count} labels must produce a band`);
+    assertPersonalIntervalPresentation(evidence);
+  }
+  // Leave-one-out means at most one unusable pair; with two of them the fit returns
+  // null instead of a band the gate would refuse.
+  const twoBroken = [
+    ...series((index) => index * 3, 8),
+    sample({ actualSeconds: Number.NaN }),
+    sample({ pointSeconds: Number.NaN })
+  ];
+  assert.equal(fitPersonalInterval({ samples: twoBroken }), null);
+});

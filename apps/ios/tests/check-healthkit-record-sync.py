@@ -282,6 +282,52 @@ check("windowReturnedEmpty.insert(" in export,
       "the '该有却没有' warning must key off queried-and-empty types, not on every eligible one "
       "(otherwise a 20%-share budget skip is misreported as a permission problem)")
 
+# 2026-10-18（深度审查 P2-06 / P3-22 / P3-24）：补读通道的**份额**、**固定窗口**、**稳态诊断**。
+# 🔴 为什么仍要钉到调用与传参：这三条都属于"删掉一半也能编译、类型检查也全绿"的接线 ——
+# 份额漏一个 `&&`、窗口起点少透传一个字段、稳态诊断少一行接线，行为都是静默的
+# （前者饿死 anchor 流，后者让补读回到前缘漂移，最后一条让稳态缺口重新变成零痕迹）。
+check("DirectSyncBatchBudget.lateBackfillShare(of: budget)" in export
+      and "enforceShare: true" in export
+      and "enforceShare: false" in export
+      and "limitBytes = lateBackfillShare.maxBytes" in export,
+      "the late backfill must be bounded by its OWN share in the FIRST pass (P2-06): with only the "
+      "full-batch accepts() it can consume the whole budget before the anchored stream runs")
+check("try await runLateBackfill(enforceShare: true)" in export
+      and "if budgetStopReason == nil {\n            try await runLateBackfill(enforceShare: false)"
+      in export.replace("\r\n", "\n"),
+      "the backfill must run TWICE: a share-limited pass BEFORE the window/anchor work (so it can "
+      "never starve them) and a top-up pass AFTER it (so the 14-day window converges in a few "
+      "batches instead of ~100 at 15% per batch)")
+check(export.count("DirectSyncBatchBudget.acceptsWithin(") >= 2
+      and "share: windowShare" in export
+      and "share: (maxBytes: limitBytes, maxRecords: limitRecords)" in export,
+      "both sub-channels (recent window + late backfill) must decide through the SAME "
+      "share+budget judgement — the inline copies are how the backfill lost its share cap")
+check("DirectSyncBatchBudget.shareLimitedPageSize(" in export
+      and "truncated: late.count >= pageLimit" in export
+      and "limit: pageLimit" in export,
+      "the backfill page size must be shrunk into the remaining share (P2-06): a full 1500-record "
+      "page can never fit the 642-record share, so the share gate ALONE would freeze the backfill "
+      "at zero progress forever — the page limit and the truncation judgement must follow it")
+check("LateDynamicsBackfill.windowStart(cursor: before, now: now)" in export
+      and "lateBackfillWindowStart: windowStart" in export
+      and "lateBackfillWindowStart: previousWindow.lateBackfillWindowStart" in export
+      and "lateBackfillWindowStart: previous?.lateBackfillWindowStart" in export,
+      "the backfill window start must be persisted and passed through BOTH cursor rebuilds "
+      "(P3-22: a rebuild that drops it re-derives now-14d and the leading edge drifts)")
+check("now.addingTimeInterval(-LateDynamicsBackfill.lookback)" not in export,
+      "the drifting per-batch window start is back — every batch would move the leading edge "
+      "forward and the oldest slice would never be read (P3-22)")
+check("空结果同样记账" not in export,
+      "the contradictory comment is back (P3-23): the code deliberately does NOT book an empty "
+      "page, and that is the 2026-10-14 defence")
+check("LateDynamicsBackfill.steadyStateGapDiagnostics(writtenTypes: writtenTypes)" in export
+      and "NSLog" in export,
+      "the steady-state 'should be there but is not' signal must stay wired as a NON-user-visible "
+      "diagnostic (P3-24: the user warning only reaches the replay/first-install state)")
+check("lateBackfillWindowStart" in cursor,
+      "the cursor must carry the fixed backfill window start (P3-22), else paging re-derives it")
+
 # O02/WP-11：待办路线队列的落盘与接线判据。
 check("CREATE TABLE IF NOT EXISTS sync_pending_routes" in store
       and "func upsertPendingRoutes(" in store and "func loadPendingRoutes(" in store
@@ -312,23 +358,31 @@ check("settlePendingRouteCommit()" in sync
       "flush fails or the payload is never accepted (R03). B01: the removal set is derived from "
       "the persisted candidate (observation + uuid), never from a bare uuid")
 
-# --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
-# 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
-# `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
-# （或把它挪进走不到的分支）都会让它变红。
-# 2026-10-16（R3b）：新增删除暂存/截断判据后实测打印 52 ⇒ 按同一纪律重设为 51。
-# 2026-10-16（B1）：新增窗口 pass 三条判据后实测打印 55 ⇒ 重设为 54。
-# 2026-10-16（WP-12/O03）：新增删除守恒四条判据后实测打印 59 ⇒ 重设为 58。
-# 2026-10-16（WP-10/O01）：新增页循环三条判据后实测打印 62 ⇒ 重设为 61。
-# 2026-10-16（WP-13/O05）：新增窗口三条判据后实测打印 65 ⇒ 重设为 64。
-# 2026-10-16（WP-11/O02）：新增待办队列四条判据后实测打印 70 ⇒ 重设为 69。
-# 2026-10-16（R03/R04/R07）：R03 原子结算改写一条 + R07 调度接线新增一条后实测打印 71 ⇒ 重设为 70。
-# 2026-10-17（迟到样本补读）：新增补读/水位接线五条判据后实测打印 78 ⇒ 重设为 77。
-MIN_CHECKS = 77
+# --- 判据注册表：自报常数 ⇒ **行为断言**（2026-10-18 深度审查 P3-29） -----------
+# 旧写法是文件末尾一个常量 `MIN_CHECKS = 77`，历史上每加一条判据就要手工重设一次。
+# 它只能证明"有人改过这个数字"，**不能**证明"注册的判据真的被执行"：把一条判据挪进走不到
+# 的分支、或用 `return` 提前退出，地板照样绿。这里改成从**本文件源码**数出顶层 `check(`
+# 调用点，要求"实际执行次数"与"注册数"**严格相等** —— 少跑一条、多注册一条都会红，而新增
+# 判据时**不需要再改任何常数**（这是本项要消掉的自报值）。
+#
+# 两条判据在最后，`check()` 的参数先求值，所以此刻 `checks` 尚未包含它们自己：
+# 第一条（注册数地板）执行后 `checks + 1 == registered` 才成立，故相等判据必须放在最后。
+# `REGISTERED_FLOOR` 只防"成批删除判据（连结构数一起变小）"这一种形态，新增判据时不用动它。
+registered = sum(
+    1 for line in Path(__file__).read_text(encoding="utf-8").splitlines()
+    if line.startswith("check(")
+)
+REGISTERED_FLOOR = 80
 check(
-    checks >= MIN_CHECKS,
-    "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"
-    % (checks, MIN_CHECKS),
+    registered >= REGISTERED_FLOOR,
+    "only %d judgements are REGISTERED in this file, floor is %d — judgements were deleted in "
+    "bulk (raise the floor only together with a real new judgement)" % (registered, REGISTERED_FLOOR),
+)
+check(
+    checks + 1 == registered,
+    "executed %d of %d registered judgements — a judgement was skipped, commented out or moved "
+    "into an unreachable branch (this is the check that replaces the old self-reported MIN_CHECKS)"
+    % (checks + 1, registered),
 )
 
 if failures:

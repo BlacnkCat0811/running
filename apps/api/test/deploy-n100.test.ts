@@ -177,6 +177,15 @@ test("home deployment templates keep private bind addresses and safe defaults", 
   assert.doesNotMatch(read("rai.env.example"), /RAI_IMPORT_VALIDATION_MODE/);
   assert.match(read("nginx-rai.conf"), /proxy_set_header Authorization \$http_authorization/);
   assert.match(read("nginx-rai.conf"), /proxy_request_buffering off/);
+  // 2026-10-18（深度审查 P3-34）：n100 模板与主模板 deploy/nginx-rai.conf 对齐——
+  // 只有 /v1（含 uploads 特例）反代到 API；站点根路径与任何静态资源一律 404；
+  // robots.txt 由 nginx 直接回答。此前 `location /` 是 catch-all 透传，任何未来新增的
+  // 非 /v1 路由都会被意外暴露到公网。
+  const nginx = read("nginx-rai.conf");
+  assert.match(nginx, /location = \/robots\.txt \{/);
+  assert.match(nginx, /location \/ \{ return 404; \}/);
+  assert.equal((nginx.match(/proxy_pass /g) ?? []).length, 2, "只允许 uploads 与 /v1/ 两处反代");
+  assert.doesNotMatch(nginx, /location \/ \{\s*\n\s*proxy_pass/);
   assert.match(read("rai-api.service"), /ExecStart=\/usr\/bin\/node --import tsx/);
   assert.ok(existsSync(script));
 });

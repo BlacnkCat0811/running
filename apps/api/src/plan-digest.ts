@@ -54,6 +54,24 @@ export function prescriptionNumber(value: number): string {
   return `${sign}${whole}.${String(fraction).padStart(6, "0")}`;
 }
 
+/**
+ * Deterministic JSON used **only for server-local equality comparisons** (plan
+ * read consistency, operation-result fingerprints, idempotency keys).
+ *
+ * Requirement: stable within one runtime. It sorts object keys with
+ * `String.prototype.localeCompare(..., "en")`, which is implementation- and
+ * ICU-dependent; it must therefore **never** be the serialization whose bytes
+ * cross a system boundary. Any digest that another implementation has to
+ * reproduce (Swift, the coach-loop replays, fixtures under `apps/ios/tests/`,
+ * Rust) goes through the shared contract helpers in `@rai/contracts`, which
+ * order code units (`<`/`>` on UTF-16 code units) instead of locale collation —
+ * see `prescriptionDigest` below, whose identity IS cross-language.
+ *
+ * No behaviour change here (review P3-12): this is the documented boundary, not
+ * a rewrite. (A locale reorder of keys only re-orders keys within the same
+ * comparison, so two digests produced by this function still agree with each
+ * other on the same host.)
+ */
 export function stableJson(value: unknown): string {
   if (value === undefined || value === null) return "null";
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;

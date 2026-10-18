@@ -362,7 +362,12 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
 }
 
 export function heartRateZoneFor(heartRateBpm: number, profile: DailyZoneProfile): HeartRateZone | null {
-  if (!finite(heartRateBpm) || profile.maximumHeartRateBpm <= profile.restingHeartRateBpm) return null;
+  // A heart rate of 0 or below is a broken sample, not "very easy". Without this,
+  // `reserve < 0.6` classified it as `recovery`, which then counted towards both
+  // heart-rate coverage and recovery exposure (§10: zones are evidence, not a bucket
+  // for anything numeric that parses).
+  if (!finite(heartRateBpm) || heartRateBpm <= 0 ||
+      profile.maximumHeartRateBpm <= profile.restingHeartRateBpm) return null;
   const reserve = (heartRateBpm - profile.restingHeartRateBpm) /
     (profile.maximumHeartRateBpm - profile.restingHeartRateBpm);
   if (reserve < 0.6) return "recovery";
@@ -697,7 +702,9 @@ export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZon
   let heartCovered = 0;
   let paceCovered = 0;
   const heartSamples = limitTimelineCoverage(
-    normalizedTimeline(input.heartRateSamples, timelineDuration),
+    // Symmetric with the speed filter below: a non-positive reading is a broken
+    // sample, not a very easy one, and must not buy coverage or recovery exposure.
+    normalizedTimeline(input.heartRateSamples, timelineDuration).filter((sample) => sample.value > 0),
     duration
   );
   const speedSamples = limitTimelineCoverage(

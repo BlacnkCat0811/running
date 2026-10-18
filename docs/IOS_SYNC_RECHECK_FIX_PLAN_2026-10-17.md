@@ -373,8 +373,11 @@ npm test
 
 - 定向补跑 input-pinning、coverage-merge、job-merge、domain-reuse、pruning、
   direct-sync-ingest 以及 Swift 路线持久化／后台恢复回归。
-- 共享契约影响 Web 消费时补 `npm run build`；确有桌面交互变化才跑 `npm run test:e2e:web`。
-  不运行冻结的响应式／移动 Web E2E。
+- ~~共享契约影响 Web 消费时补 `npm run build`；确有桌面交互变化才跑 `npm run test:e2e:web`。
+  不运行冻结的响应式／移动 Web E2E。~~
+  > **2026-10-18 更正（D17）**：Web 与 macOS 已于 2026-10-17 退役删除，`npm run build` 与
+  > `test:e2e:web` 随之**删除、不可复跑**；保留原句仅为历史可追溯，不要照做
+  > （[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)）。
 - 新 npm 脚本使用跨平台 Node 实现；新增 Swift、脚本和工程文件验证 LF。
 - 基准与参考计算使用程序生成的合成库，不复制生产健康库。
 - 保留已有不通过项的准确记录，未定位问题不凭“这次没改”就宣称无关。

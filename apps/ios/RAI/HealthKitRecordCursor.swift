@@ -50,6 +50,14 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     ///   样本迟到都还有通道。
     /// - `lateBackfillBefore` = 分页上界：还有 `[windowStart, before)` 这一段没读；
     ///   nil = 没有未读段（补读被单类型上限截断时才会出现）。
+    /// - `lateBackfillWindowStart` = 本次补读的**窗口下界**（2026-10-18 深度审查 P3-22）。
+    ///   第一页把 `now − lookback` 固定下来，**后续页复用同一个值**。
+    ///   🔴 为什么必须固定：旧实现每批用**当时的** `now` 重算 `now − 14d`，而补读可能跨多批
+    ///   （单类型上限 1500 条很容易被一次长跑撑满）⇒ 窗口下界随批次间隔前移，读完最后一页时
+    ///   左下沿已越过最初那段时间；`pageOutcome` 又按 `oldestSample <= windowStart` 判"整窗
+    ///   已完成"⇒ 那一小段**从未被读过却被记成已覆盖**，只能等 30 天后再补。
+    ///   固定下界后 `[lateBackfillWindowStart, now]` 的覆盖是自洽的：读完 = 真读完。
+    ///   nil = 还没开始分页（第一页）。
     ///
     /// 🔴 **空页不记账**（`PageOutcome.retry`）：HealthKit 对未授权读、或样本尚未从手表同步到
     /// 手机时都只返回空、不报错。若把一次空查询当成"补过了"，这条唯一的恢复通道就被自己关死
@@ -58,6 +66,7 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     /// `var` + 默认值：老 payload 缺键 ⇒ nil ⇒ 升级后的第一批补读一次，这正是恢复路径。
     var lateBackfillAt: Date? = nil
     var lateBackfillBefore: Date? = nil
+    var lateBackfillWindowStart: Date? = nil
 
     /// 下一次 drain 是否要先做**全量重放**。
     ///
@@ -212,6 +221,24 @@ nonisolated enum RecordReplayPlan {
 ///
 /// 空窗只能说明**此刻**没有数据，不能当成已覆盖：保持水位不动，下批用同一个窗口再查一次
 /// （空查询没有写入、没有字节，成本仅为一次 `HKSampleQuery`）。
+///
+/// ## 代价（2026-10-18 深度审查 P3-21，量化后接受）
+///
+/// "空窗不推进"意味着 `recentWindowReadAt` 可以**无限期停在 nil**，而窗口下界随之恒为
+/// `now − 48h`。窗口 pass 只在 `previousWindow == nil || previousWindow.needsHistoryRead()`
+/// 时启用（`HealthKitExport.writeGlobalRecords`）⇒ **历史重放持续多久，这些空类型就被重查
+/// 多久**：每批每个"近 48h 无样本"的类型各 1 次 `HKSampleQuery(limit: 1500)`，`descriptors`
+/// 目前 18 个 ⇒ 最坏每批 18 次查询、重放可达数天。
+///
+/// 接受它的理由（与"加有界重查/降频"对比）：
+/// - 这是 2026-10-14「样本迟到 ⇒ 永久缺失」的**唯一**防复发通道；任何降频（例如空窗 N 批后
+///   跳查）都会把"最后一批查询之后才到达的样本"重新暴露在同一个缺口里，只是把概率乘上 N；
+/// - 空查询**不写字节、不占预算、不改任何游标**，成本只在上层查询次数与耗电；
+/// - 窗口 pass 本身在稳态（`needsHistoryRead == false`）就整体停用 ⇒ 这不是长期成本，
+///   只在首装/游标修复后的重放窗口期内存在。
+///
+/// 因此本项**不改行为**，只把代价写清。若将来确实观察到耗电/时长问题，正确方向是"减少重放
+/// 持续时长"（例如提高单批预算或让窗口类型轮转更公平），而不是给这条唯一通道加跳过。
 nonisolated enum RecentWindowAccounting {
     /// 返回 `nil` = **不要推进水位**（空窗）；有数据才推进到 `now`。
     ///
@@ -283,5 +310,41 @@ nonisolated enum LateDynamicsBackfill {
         // 分页到底（或本来就没被截断）⇒ 整窗已覆盖；首次查询就空 ⇒ 当作"还不能下结论"。
         if returned == 0, !paging { return .retry }
         return .completed
+    }
+
+    /// 本次补读的**窗口下界**（P3-22）：分页中复用持久化的固定起点，否则开场取 `now − lookback`。
+    ///
+    /// 调用方必须把返回值在 `.nextPage` 时**持久化**（`lateBackfillWindowStart`），否则下一个
+    /// 批次又会拿新的 `now` 重算 —— 那正是前缘漂移的成因（见该字段的注释）。
+    static func windowStart(cursor: HealthKitRecordCursor?, now: Date) -> Date {
+        cursor?.lateBackfillWindowStart ?? now.addingTimeInterval(-lookback)
+    }
+
+    /// 稳态下"该有却没有"的**非用户可见**诊断（2026-10-18 深度审查 P3-24）。
+    ///
+    /// 为什么需要它：为 2026-10-14 事故新增的用户警告（`HealthKitExport` 里
+    /// "本次同步没有跑步功率/触地时间样本…"）只在**窗口 pass 真的查过**时才可能触发，而窗口
+    /// pass 只在重放/首装期启用 —— 事故当时与之后的**稳态增量**（游标已建立、无重放）根本走不到
+    /// 那条判据，于是"又缺了"依旧零痕迹。这里给稳态补一条只进 `NSLog` 的观察通道：判据相同
+    /// （功率/触地时间本批**一条都没写**，但同一家族的其它跑步动态写了），只是不弹用户警告，
+    /// 避免把"权限问题"与"预算/时序问题"混成同一条噪音。
+    ///
+    /// - Parameter writtenTypes: 本批**真正写进 export.xml** 的类型（三个通道的并集）。
+    /// - Returns: 每条缺口一段可直接打印的诊断文本（空数组 = 本批无可报告的缺口）。
+    static func steadyStateGapDiagnostics(writtenTypes: Set<String>) -> [String] {
+        let power = "HKQuantityTypeIdentifierRunningPower"
+        let groundContact = "HKQuantityTypeIdentifierRunningGroundContactTime"
+        let siblings = [
+            "HKQuantityTypeIdentifierRunningSpeed",
+            "HKQuantityTypeIdentifierRunningStrideLength",
+            "HKQuantityTypeIdentifierRunningVerticalOscillation"
+        ]
+        guard siblings.contains(where: { writtenTypes.contains($0) }) else { return [] }
+        let silent = [power, groundContact].filter { !writtenTypes.contains($0) }
+        guard !silent.isEmpty else { return [] }
+        return silent.map { type in
+            "[RAI] 稳态同步缺口：本批写入了其它跑步动态但没有 \(type)"
+                + "（检查读取权限；若是预算/时序问题，下一次补读通道会再覆盖近 14 天）"
+        }
     }
 }
