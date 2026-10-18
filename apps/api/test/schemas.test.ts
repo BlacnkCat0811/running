@@ -4,7 +4,11 @@ import test from "node:test";
 
 import Fastify from "fastify";
 
-import { IMPORT_STAGES } from "@rai/api-contracts";
+import {
+  IMPORT_STAGES,
+  MOBILE_PLAN_OPERATION_QUERY_STATUSES,
+  type MobilePlanOperationQueryStatus
+} from "@rai/api-contracts";
 
 import {
   importJobBodySchema,
@@ -24,6 +28,8 @@ import {
   trainingStatisticsHistoryQuerySchema,
   workoutListQuerySchema
 } from "../src/schemas.js";
+import { narrowPlanOperationResult, PlanOperationError, PlanPublicationService } from "../src/plan-publication.js";
+import type { MobileGoalsStore } from "../src/mobile-goals.js";
 import {
   balancedBlock,
   propertyBody,
@@ -659,4 +665,94 @@ test("native session and race pickers exactly match their API contracts", () => 
   assert.ok(sessionPickers >= 1, "必须保留训练类型选择器");
   assert.ok(racePickers >= 1, "必须保留比赛距离选择器");
   assert.equal(coachPickers, 3, "教练目标、比赛距离和强度目标必须分别扫描，不能因跳过新页面而空转");
+});
+
+/**
+ * 审查 P2-14：`GET /v1/mobile/plan-operations/:id` 的响应曾**没有任何共享类型**——
+ * 服务端 `result()` 返回 `unknown`，OpenAPI summary 手抄成三种状态（漏 `scopeMismatch`），
+ * iOS 则自建 `PlanPublicationResult`，未知状态只能落到客户端的"未知的发布操作状态"。
+ *
+ * 这条测试把三件事钉在一起：
+ * 1. 状态集合来自 `@rai/api-contracts` 的**运行期单一来源**，不多不少四种；
+ * 2. OpenAPI summary 是**派生**的（手抄会漏，2026-10-18 实测漏过 `scopeMismatch`）；
+ * 3. 服务端出口 `narrowPlanOperationResult()` 只放行这四种，且 `committed` 必须带原结果。
+ */
+test("plan-operations query contract: four shared statuses, derived summary, strict narrowing", () => {
+  assert.deepEqual([...MOBILE_PLAN_OPERATION_QUERY_STATUSES],
+    ["committed", "notFound", "scopeMismatch", "expired"],
+    "状态集合与顺序是契约的一部分；改这里就必须同时改 iOS 与文档");
+
+  const summary = (openapiDocument.paths as unknown as Record<string, { get: { summary: string } }>)
+    ["/v1/mobile/plan-operations/{id}"]!.get.summary;
+  for (const status of MOBILE_PLAN_OPERATION_QUERY_STATUSES) {
+    assert.ok(summary.includes(status), `OpenAPI summary 必须逐个列出 ${status}：${summary}`);
+  }
+
+  // 四种合法响应原样通过。
+  const committed = { status: "committed" as const, operationId: "op", result: { revision: 7 } };
+  for (const value of [
+    committed,
+    { status: "notFound" as const, operationId: "op" },
+    { status: "scopeMismatch" as const, operationId: "op" },
+    { status: "expired" as const, operationId: "op" }
+  ]) {
+    assert.deepEqual(narrowPlanOperationResult(value), value);
+  }
+
+  // 未知状态 / 缺 operationId / committed 缺 result 都是服务端不变量被破坏 ⇒ 500，不是 4xx。
+  for (const [label, value] of [
+    ["未知状态", { status: "quarantined", operationId: "op" }],
+    ["缺 operationId", { status: "notFound" }],
+    ["committed 缺 result", { status: "committed", operationId: "op" }],
+    ["非对象", null]
+  ] as const) {
+    assert.throws(() => narrowPlanOperationResult(value), (error: unknown) => {
+      assert.ok(error instanceof PlanOperationError, label);
+      assert.equal(error.code, "plan_operation_status_unknown", label);
+      assert.equal(error.statusCode, 500, label);
+      return true;
+    }, label);
+  }
+
+  // 编译期穷尽性：新增第五种状态时下面这行会编译失败（而不是运行时静默）。
+  const exhaustive = (status: MobilePlanOperationQueryStatus): string => {
+    switch (status) {
+      case "committed": case "notFound": case "scopeMismatch": case "expired": return status;
+      default: { const never: never = status; return never; }
+    }
+  };
+  assert.equal(exhaustive("committed"), "committed");
+});
+
+/**
+ * 审查 P3-9：`PlanPublicationService` 的 `identity` 曾是**可选**构造参数，于是
+ * "忘记传"在类型上合法，而 `publish()` 里的跨数据域校验整段被跳过 —— 一个属于旧
+ * datasetEpoch 的 operationId 会被当前数据集直接执行（STATE_V1 §发布操作 明令禁止）。
+ *
+ * 现在 identity 必填。这条测试钉住两个后果：
+ * 1. 带 `operationId` 却不声明 `operationScope` ⇒ 422 `plan_operation_contract_mismatch`
+ *    （以前这条路径在"没传 identity"的构造下会直接落库）；
+ * 2. 不带 `operationId` 的普通发布仍然直通 `action()`，不被新校验误伤。
+ */
+test("plan publication identity is mandatory: operationId requires a declared scope", () => {
+  const calls: string[] = [];
+  const store = {
+    publicationOperation: (_scope: string, operationId: string | undefined, _route: string,
+      _input: unknown, action: () => unknown) => { calls.push(operationId ?? "none"); return action(); },
+    publicationResult: () => ({ status: "notFound", operationId: "x" })
+  } as unknown as MobileGoalsStore;
+  const service = new PlanPublicationService(store, () => "scope",
+    () => ({ serverId: "s", athleteId: "a", datasetEpoch: "e" }));
+
+  assert.throws(() => service.publish("goals", { operationId: "5f0f6f4e-1111-4111-8111-bc78d3e66666" }, () => 1),
+    (error: unknown) => {
+      assert.ok(error instanceof PlanOperationError);
+      assert.equal(error.code, "plan_operation_contract_mismatch");
+      assert.equal(error.statusCode, 422);
+      return true;
+    }, "带 operationId 必须同时声明 operationScope");
+  assert.deepEqual(calls, [], "校验失败不能落到存储层（否则就是静默执行）");
+
+  assert.equal(service.publish("goals", {}, () => 7), 7);
+  assert.deepEqual(calls, ["none"], "无 operationId 的普通发布保持直通");
 });

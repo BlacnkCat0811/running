@@ -21,9 +21,20 @@ final class NativeAppModel {
     var coachLoop: CoachLoopResponse? { trainingPlanStore.coachLoop }
 
     /// 读取面板的单次结果分类（2026-10-15 审查 🟡-B2/B3）：
-    /// `decoding` = 契约漂移（服务端可达、载荷解不开），`failure` = 其余（网络/服务端）。
-    enum ReadPanelOutcome: Equatable { case ok, decoding, failure }
+    /// `decoding` = 契约漂移（服务端可达、载荷解不开），`validation` = 服务端数据
+    /// 通过了协议形状但安全字段不可信（2026-10-18 审查 P2-8，绝不能提示升级 App），
+    /// `failure` = 其余（网络/服务端）。
+    enum ReadPanelOutcome: Equatable { case ok, decoding, validation, failure }
     var isCoachLoopManaged: Bool { coachLoop?.settings != nil }
+    /// 2026-10-18（审查 P2-9）：能力协商**单源**。
+    ///
+    /// `TrainingPlanStore.refresh` 以 `coachLoopContractVersion` 决定是否走新教练合同
+    /// （与是否宣告快照契约无关）；门面若再按 `planSnapshotContractVersion` 单独分叉，
+    /// "coachLoop=1 且无 snapshot"的错峰组合会在同一次刷新里混读新旧教练合同。
+    /// 因此凡是"是否需要完整计划读取"的判断，统一看 `usesIntegratedPlanContract`。
+    private var usesCoachLoopContract: Bool { handshake?.coachLoopContractVersion != nil }
+    private var usesAggregatePlanSnapshot: Bool { handshake?.planSnapshotContractVersion != nil }
+    var usesIntegratedPlanContract: Bool { usesCoachLoopContract || usesAggregatePlanSnapshot }
     private(set) var isLoadingRunCoach = false
     private(set) var isUpdatingRunCoach = false
     var runCoachError: String?
@@ -151,6 +162,21 @@ final class NativeAppModel {
     /// still owed. Not a view decision — the rule lives here, not in a skin.
     var completedWeekDates: Set<String> {
         Set((today?.weekPlan ?? []).compactMap { $0.completedWorkoutId != nil ? $0.localDate : nil })
+    }
+
+    /// 2026-10-18（审查 P2-10）：训练提醒的唯一输入。旧实现直接传
+    /// `currentWorkoutPlan` + `canConfirmToday`，而教练闭环下 `today == nil`
+    /// ⇒ 永远不排程。这里显式区分两种合同，并由纯函数决定权威计划与可用性。
+    var reminderContext: TrainingReminderContext {
+        TrainingReminderPolicy.context(
+            isCurrent: trainingPlanStore.isCurrent,
+            persistenceFailed: planPersistenceFailed,
+            legacyToday: today,
+            legacyPlan: currentWorkoutPlan,
+            completedDates: completedWeekDates,
+            coachLoop: coachLoop,
+            now: now()
+        )
     }
 
     private var configurationID = UUID()
@@ -317,14 +343,20 @@ final class NativeAppModel {
         let failedPanels = panelOutcomes.filter { $0 != .ok }.count
         // 全部失败且全部是解码失败 ⇒ 契约漂移：服务端**可达**，但不该点亮"离线"横幅。
         let decodingOnly = failedPanels > 0 && panelOutcomes.allSatisfy { $0 != .failure }
+        // 2026-10-18（审查 P2-8）：安全校验失败既不是契约漂移（不要提示升级 App），
+        // 也不是离线。单独成类，给"这一份快照不可信，已拒绝使用"的文案。
+        let validationOnly = failedPanels > 0 && panelOutcomes.contains(.validation) &&
+            panelOutcomes.allSatisfy { $0 == .ok || $0 == .validation }
         let anySucceeded = panelOutcomes.contains { $0 == .ok }
-        isOffline = !anySucceeded && !decodingOnly
-        session.isReachable = anySucceeded || decodingOnly
+        isOffline = !anySucceeded && !decodingOnly && !validationOnly
+        session.isReachable = anySucceeded || decodingOnly || validationOnly
         if failedPanels > 0 {
             // 刻意不在这里 `loadCachedData()`：那会把刚刚成功的那几项也推回旧值，
             // 等于用一次部分失败抹掉一次部分成功。首启的空态由 `bootstrap()`
             // 的 `loadCachedData()` 兜底。
-            if failedPanels == 4 && decodingOnly {
+            if validationOnly {
+                errorMessage = "计划快照未通过安全校验（身份、日期、窗口或摘要不一致），已拒绝作为当前安排；其余数据已刷新。请稍后重试或检查服务端状态。"
+            } else if failedPanels == 4 && decodingOnly {
                 errorMessage = "数据格式与当前版本不兼容（4 项均未能解析），请升级应用或检查服务端版本。"
             } else if failedPanels == 4 {
                 errorMessage = "核心数据均未能更新，当前显示的是上次结果。"
@@ -334,12 +366,18 @@ final class NativeAppModel {
                 errorMessage = "有 \(failedPanels) 项数据未能更新，其余已刷新。"
             }
         }
-        if goals?.runCoach != nil { await refreshRunCoach() }
+        // 2026-10-18（审查 P2-9）：整合合同（snapshot 或 coachLoop）的教练摘要已经
+        // 在 refreshPlanState 内读取；再调用 refreshRunCoach 会重复一次完整计划读取。
+        // 旧合同才需要独立的 run-coach 刷新。
+        if goals?.runCoach != nil, !usesIntegratedPlanContract { await refreshRunCoach() }
     }
 
     @discardableResult
     func refreshRunCoach() async -> Bool {
-        if handshake?.planSnapshotContractVersion != nil { return await refreshPlanState() }
+        // 2026-10-18（审查 P2-9）：能力判定单源。新教练合同（coachLoop）与聚合快照
+        // 都意味着"完整计划读取"由 `TrainingPlanStore.refresh` 负责；不能再只按
+        // `planSnapshotContractVersion` 分叉，否则混合能力组合会混读旧 run-coach。
+        if usesIntegratedPlanContract { return await refreshPlanState() }
         guard !isLoadingRunCoach, !isPlanBusy, let baseURL = session.serverURL else { return false }
         let configuration = configurationID
         let token = session.apiToken
@@ -368,9 +406,6 @@ final class NativeAppModel {
             guard refreshed else {
                 runCoachError = "教练状态已更新，但训练安排未刷新，请重新连接后刷新。"
                 return false
-            }
-            if value.plan?.status == "active", value.revision == currentPlanRevision {
-                return await changeRunCoach(action: "refresh", expectedRevision: value.revision)
             }
             return true
         } catch {
@@ -542,7 +577,11 @@ final class NativeAppModel {
     }
 
     private static func planPanelOutcome(_ issue: PlanReadIssue?) -> ReadPanelOutcome {
-        issue?.code == .contractMismatch ? .decoding : .failure
+        switch issue?.code {
+        case .contractMismatch: return .decoding
+        case .snapshotValidationFailed: return .validation
+        default: return .failure
+        }
     }
 
     private var workoutReadOutcome: ReadPanelOutcome = .failure
@@ -1281,7 +1320,12 @@ final class NativeAppModel {
         guard isCurrent() else { throw CancellationError() }
         let scope = cacheScope
         let encoded = try JSONEncoder().encode(input)
-        var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        // 2026-10-18（审查 P3-17）：安全解包并给出可诊断错误，编码形状变化不能
+        // 在主线程 `as!` 直接 trap（发布路径是整个计划写的入口）。
+        guard let objectValue = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            throw RaiAPIClientError.decoding("发布请求无法编码为 JSON 对象")
+        }
+        var object = objectValue
         let operationID = UUID().uuidString
         let durable = handshake?.planPublicationContractVersion == 1
         if durable {
@@ -1490,8 +1534,9 @@ final class NativeAppModel {
                 if !cache.savePendingPlanReceipts(pending, scope: scope) { persisted = false }
             } catch {
                 guard current() else { break }
-                let code: String
-                if case RaiAPIClientError.server(let value, _, _) = error { code = value } else { code = "network" }
+                // 2026-10-18（审查 P2-6 收尾）：`503 + Retry-After` 现为
+                // `.retryableServer`，同样携带真实服务端 code；不能退化成 "network"。
+                let code = (error as? RaiAPIClientError)?.serverCode ?? "network"
                 // 🔴 终局拒绝（审查 🟡-C1）：内容级 / 身份级不可通过 —— 同一份字节重放永远失败。
                 // 此前只特判 scope_mismatch 且**只标记账本、不作废回执** ⇒
                 // `hasPendingPlanReceipts` 恒真 ⇒ 教练启用（:421-424）被永久锁死。
@@ -1578,10 +1623,16 @@ final class NativeAppModel {
     func enrichPlanReceipts(_ receipts: [PlanSyncReceipt], snapshot: PlanSyncSnapshot, operationID: UUID) -> [PlanSyncReceipt] {
         guard let coherence = snapshot.coherenceToken, let identity = snapshot.serverIdentity else { return receipts }
         return receipts.map { receipt in
+            // 2026-10-18（审查 P2-13）：实际导出结构若含不可量化数值，摘要无法计算。
+            // 不猜测目标：保留 legacy 形状（服务端按旧信息级登记），而不是发一条
+            // 摘要为 nil 的 v2 回执被 422 终局拒绝。
+            guard let digest = try? PlanFingerprint.prescriptionDigest(kind: receipt.kind, structure: receipt.structure) else {
+                return receipt
+            }
             var value = receipt
             value.contractVersion = 2; value.scope = identity; value.operationId = operationID.uuidString
             value.coherenceToken = coherence; value.verifiedAt = ISO8601DateFormatter().string(from: now())
-            value.timezone = snapshot.timezone; value.prescriptionDigest = PlanFingerprint.prescriptionDigest(kind: value.kind, structure: value.structure)
+            value.timezone = snapshot.timezone; value.prescriptionDigest = digest
             value.lifecycleEvent = "verified"
             value.coachLoop = snapshot.coachLoop
             return value

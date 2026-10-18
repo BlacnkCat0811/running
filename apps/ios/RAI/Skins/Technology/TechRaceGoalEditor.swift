@@ -47,7 +47,11 @@ struct TechRaceGoalEditor: View {
             Form {
                 Section("比赛目标") {
                     DatePicker("比赛日期", selection: $date, displayedComponents: .date)
-                    if NativeRaceGoalDraft.dateFormatter.string(from: date) < (native.today?.today.localDate ?? NativeRaceGoalDraft.dateFormatter.string(from: Date())) {
+                        .environment(\.timeZone, NativeRaceGoalDraft.businessTimeZone)
+                    // 2026-10-18（审查 P2-11）：只在业务时区里比较；today 缺失时用
+                    // 业务时区的今天兜底，不能用设备日期。
+                    if NativeRaceGoalDraft.businessLocalDate(date) <
+                        (native.today?.today.localDate ?? NativeRaceGoalDraft.businessLocalDate(Date())) {
                         Text("所选日期已过。保存只保留历史目标，不代表已经参赛或完赛；如需备赛，请选择未来日期。")
                             .font(.caption).foregroundStyle(TechColor.yellow)
                     }

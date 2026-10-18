@@ -358,7 +358,7 @@ struct StoreRegression {
             workoutID: uuid, scheduledAt: "2026-10-09T00:00:00Z", idempotencyKey: uuid, contractVersion: 2,
             scope: .init(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch"), operationId: UUID().uuidString,
             coherenceToken: String(repeating: "a", count: 64), verifiedAt: "2026-10-09T00:00:00Z", timezone: "Asia/Shanghai",
-            prescriptionDigest: PlanFingerprint.prescriptionDigest(kind: "easy", structure: exported), lifecycleEvent: "verified")
+            prescriptionDigest: try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: exported), lifecycleEvent: "verified")
         let replacementScope = "replacement-recovery"
         let oldEntry = PlanScheduledEntry(workoutID: UUID(uuidString: uuid)!, localDate: verifiedReceipt.localDate,
             scheduledAt: ISO8601DateFormatter().date(from: verifiedReceipt.scheduledAt!)!)

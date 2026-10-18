@@ -357,6 +357,15 @@ struct TechTodayView: View {
                 if let reason = data.recommendation.adjustmentReason {
                     Text(reason).font(.caption).foregroundStyle(TechColor.muted)
                 }
+                // 2026-10-18（审查 P3-18 / TODAY_PLAN_CARDS_REVIEW A4）：把"今日改为休息"
+                // 与本周课表缺口串起来，用户不必自己在两张卡之间对齐两个数。
+                if data.recommendation.effectiveKind == "rest",
+                   let week = data.adherence?.current,
+                   let planned = week.plannedDistanceKm {
+                    Text("今日改为休息后，本周课表还差 \(nativeKilometers(max(0, planned - week.observedDistanceKm)))")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Label("\(data.nextSession.title) \(nativeKilometers(data.nextSession.distanceKm))", systemImage: nativeSessionSymbol(data.nextSession.kind))
                 .techFont(.compactMetric).foregroundStyle(TechColor.ink)
@@ -441,16 +450,20 @@ struct TechTodayView: View {
                             .font(.caption).foregroundStyle(TechColor.muted)
                         Spacer(minLength: 0)
                         if let adherence = data.adherence?.current {
-                            Text(nativeAdherenceName(adherence.status))
+                            // A3（客户端侧）：状态必须带窗口，避免"按计划"被读成本周结论。
+                            Text("本周 \(nativeAdherenceName(adherence.status))")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(adherence.status == "under" ? TechColor.coral : TechColor.muted)
                         }
                     }
-                    Text("本周 \(nativeNumber(week.volumeBandKm.lower, digits: 0))–\(nativeNumber(week.volumeBandKm.upper, digits: 0)) km · 长距离 ≤\(nativeNumber(week.longRunCapKm, digits: 0)) km · 质量课 ≤\(week.qualityDose)")
+                    // A1：显式写明这是"阶段建议量带"（按最近 4 周实测推算），
+                    // 不是今天要补的距离（TODAY_PLAN_CARDS_REVIEW C1/C2）。
+                    Text("阶段建议量带 \(nativeNumber(week.volumeBandKm.lower, digits: 0))–\(nativeNumber(week.volumeBandKm.upper, digits: 0)) km（按最近 4 周实测推算）· 长距离 ≤\(nativeNumber(week.longRunCapKm, digits: 0)) km · 质量课 ≤\(week.qualityDose)")
                         .font(.caption).foregroundStyle(TechColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     if let adherence = data.adherence?.current, adherence.plannedDistanceKm != nil {
-                        Text("已完成 \(nativeKilometers(adherence.observedDistanceKm)) / 计划 \(nativeKilometers(adherence.plannedDistanceKm))，其中 \(adherence.unknownDays) 天没有观测记录（不等于没跑）")
+                        // A2：先"课表计划"后"已完成"，并保留"没有观测 ≠ 没跑"。
+                        Text("课表计划 \(nativeKilometers(adherence.plannedDistanceKm))，已完成 \(nativeKilometers(adherence.observedDistanceKm))，其中 \(adherence.unknownDays) 天没有观测记录（不等于没跑）")
                             .font(.caption2).foregroundStyle(TechColor.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }

@@ -59,8 +59,8 @@
 
 ## 5. 验证与发布边界
 
-自动入口：`npm run test:ios`（新增 scheduler regression 已挂聚合入口）、`npm run typecheck`、`npm test`、`npm run build`。
-涉及的是 iOS/API 契约，未改 Web 显示，不运行 responsive/mobile Web 测试。
+自动入口（**2026-10-18 口径**）：`npm run test:ios`（scheduler regression 已挂聚合入口）、`npm run typecheck`、`npm test`；改文档时另跑 `npm run check:docs`、`npm run check:doc-refs`、`npm run check:acceptance-matrix`、`npm run check:scripts`。
+🔴 **D17 之后不存在 Web 测试面**：`npm run build`、`test:e2e:*`、responsive/mobile Web 套件已随 Web/macOS 退役**删除**（[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)）。不是"本轮不运行"，而是**没有这套东西**；不要按旧句子去找它们，也不要把它们加回 `package.json`。
 模拟器用现有 `run-visual-tests.sh` 的隔离服务/数据库，仅证实其实际执行的 UI 步骤；配对手表清单见 [IOS_NATIVE_RUNBOOK](IOS_NATIVE_RUNBOOK.md)。
 发布前必须分别保存：
 - 系统 scheduledWorkouts 的 UUID/规范化时刻/内容与每日确认集合；
@@ -79,13 +79,17 @@
 验证日期：2026-10-09（Asia/Shanghai），工作区基线 `73d68450f3df6fa4f771a80b710c442baa738560`。
 修改留在工作区，尚未创建提交或远端 PR。
 
+> ⏱ **时点记录（2026-10-09）**：下表数字只对那一天成立，**不代表当前**。
+> 2026-10-18 复跑口径（对齐提交 `09ed8d0`）：`npm run test:ios` = **94 份源码类型检查 + 3 个仅依赖高德 SDK 的文件跳过、106 项 store 回归、200 项展示检查**；Node 测试数以 `npm test` 输出为准。
+> `npm run build` 与 "Web 25 文件 / 182 项" 两行已随 D17 失效，保留仅为历史可追溯；不要再把它们当发布判据。
+
 | 检查 | 结果 | 边界 |
 | --- | --- | --- |
 | `npm run typecheck` | 通过 | TypeScript 全仓类型检查 |
-| `npm test` | Node 1,404 通过、3 跳过、0 失败；Web 25 文件 / 182 测试通过 | 既有显式跳过仍保留，不声称 1,407 全部执行通过 |
+| `npm test` | Node 1,404 通过、3 跳过、0 失败；Web 25 文件 / 182 测试通过 | **历史项**：Web 套件已随 D17 删除，当前 `npm test` 只剩 Node 侧；既有显式跳过仍保留，不声称 1,407 全部执行通过 |
 | 定向 API / schema 五文件 | 45/45 通过 | 完整 phase/phases、CAS/预览确认、回执持久化/幂等、旧新 wire schema |
-| `npm run build` | 通过 | Web 生产构建；未改 Web 显示，不运行冻结的窄屏/响应式 E2E |
-| `npm run test:ios` | 通过；84 份真实 iOS SDK 类型检查；新增排期回归 49 项；生产 store 82 项；展示回归 200 项 | 3 个高德 SDK 依赖文件在该类型检查通道排除；完整 app 另以 workspace 构建验证 |
+| `npm run build` | 通过 | **历史项：D17 后该脚本已删除**，Web 生产构建不再存在；保留仅为记录当日检查 |
+| `npm run test:ios` | 通过；84 份真实 iOS SDK 类型检查；新增排期回归 49 项；生产 store 82 项；展示回归 200 项 | 历史项（当日 84 份）；**当前为 94 份**，见上⏱；3 个高德 SDK 依赖文件在该类型检查通道排除；完整 app 另以 workspace 构建验证 |
 | 最终 `RAI.xcworkspace` Debug Simulator 构建 | `BUILD SUCCEEDED` | 包含 filesystem-synchronized 新文件及原 SDK 文件；不是签名真机构建 |
 | 五类语义反向验证 | 5/5 由指定行为断言拒绝 | 忘记水位、仅 ID 租约、错 UUID、pending 冒充覆盖、清空冒充成功；全部先编译成功 |
 | 专用模拟器 UI | 六个相关用例均取得通过结果 | 手动计划、大字体编辑、教练生命周期、大字体日历、赛事设置、预览/取消、结束或无计划/离线重启撤回；不是全 UI 套件 |

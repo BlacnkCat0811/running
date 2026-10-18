@@ -21,7 +21,7 @@
 - 训练评分、准备度、预算、周期化和处方语义继续由现有 TypeScript 服务端负责，不在 Swift 中复制训练算法。
 - 沿用 SwiftUI 原生路径和现有 Node.js API。不创建独立 Watch 应用，不引入新的原生客户端产品。
 - HealthKit 保持只读。已授权的健康同步后台机制不扩展为计划自动排期或回执后台重试；本方案的恢复和重试默认由前台显式操作触发。
-- Web 仍以桌面为支持范围，不修改冻结的窄屏样式、导航或 390px 测试。
+- ~~Web 仍以桌面为支持范围，不修改冻结的窄屏样式、导航或 390px 测试。~~ **2026-10-18 更正**：Web 与 macOS 已于 2026-10-17 退役删除（[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)），原生 iOS 是唯一客户端；"冻结窄屏/390px 测试"不再存在，也不需要为它保留任何约束。
 - 不因架构调整改变训练剂量常数、预测支持距离或“准备度不是达标概率”的产品语义。[R1、R11]
 
 ### 1.2 建议采用的实施顺序
@@ -321,17 +321,19 @@ verifiedAt 是客户端本次观察时间；recordedAt 是服务端接收时间�
 
 ### 10.2 执行入口
 
-普通 API 与 iOS 改动使用 npm run typecheck、npm test、npm run build 和 npm run test:ios。iOS 聚合门禁必须在有 Xcode 的主机执行，显式 skip 不计通过。完整 workspace 构建另外覆盖高德 SDK 依赖文件。
+普通 API 与 iOS 改动使用 `npm run typecheck`、`npm test`、`npm run test:ios`；改文档时另跑 `npm run check:docs`、`npm run check:doc-refs`、`npm run check:acceptance-matrix`、`npm run check:scripts`。iOS 聚合门禁必须在有 Xcode 的主机执行，显式 skip 不计通过。完整 `RAI.xcworkspace` 构建另外覆盖高德 SDK 依赖文件，且只在本机 macOS 手工执行。
 
-有桌面 Web 流程变化时才运行 npm run test:e2e:web。没有获得响应式范围授权时，不运行 test:e2e:responsive 或包含它的 full test:e2e。模拟器视觉验收走现有手工入口并使用隔离数据库，不修改真实健康数据。[R1、R13]
+🔴 **D17 之后没有 Web 入口**：原文的 `npm run build`、`npm run test:e2e:web`、`test:e2e:responsive`、full `test:e2e` 已随 Web/macOS 退役**删除**（[DECISIONS](DECISIONS.md) D17）。它们不是"本轮不运行"，而是不再存在；本节保留原文的位置是为了记录当时的判断，不要照做、也不要把脚本加回 `package.json`。模拟器视觉验收仍走现有手工入口（`apps/ios/tests/run-visual-tests.sh`）并使用隔离数据库，不修改真实健康数据。[R1、R13]
 
 保留反向验证：删掉水位、只比租约 ID、忽略 UUID、以 pending 为覆盖分母或把清空当成功的代码突变，都必须先编译成功再被指定行为断言拒绝。新增写前日志同样需要“日志未写先产生副作用”的突变测试。
 
 ### 10.3 本次重新执行的检查
 
-本次仅重写方案，没有修改运行代码。定向 API 四文件共 41 项，全部通过，0 失败、0 跳过。npm run test:ios 已通过：84 份 iOS 源码通过真实 SDK 类型检查，排期回归 49 项、生产存储回归 82 项、展示回归 200 项通过，模型与其余纯逻辑门禁也通过。3 个依赖高德 SDK 的文件不在这一类型检查通道内。完整 Web、workspace 构建、Simulator UI 与配对手表验收不在本次重新执行范围内。
+> ⏱ **时点记录（2026-10-09）**：以下数字只对那一天成立。当前口径（2026-10-18，对齐提交 `09ed8d0`）以命令输出为准：`npm run test:ios` = **94 份源码类型检查 + 3 个仅依赖高德 SDK 的文件跳过、106 项 store 回归、200 项展示检查**；Node 侧以 `npm test` 输出为准。
 
-既有实施记录包含完整 TypeScript、Web 构建和 Simulator 检查，属于当前工作区此前的验证证据，不等同于本次重新执行；其 manifest 明确将配对物理手表验收标记为 pending。[R14]
+本次仅重写方案，没有修改运行代码。定向 API 四文件共 41 项，全部通过，0 失败、0 跳过。npm run test:ios 已通过：84 份 iOS 源码通过真实 SDK 类型检查（**历史数字，现为 94 份**），排期回归 49 项、生产存储回归 82 项（**历史**，现为 106 项）、展示回归 200 项通过，模型与其余纯逻辑门禁也通过。3 个依赖高德 SDK 的文件不在这一类型检查通道内。workspace 构建、Simulator UI 与配对手表验收不在本次重新执行范围内；**完整 Web 已随 D17 删除，不再有"未重跑"一说**。
+
+既有实施记录包含完整 TypeScript、Web 构建（**历史项，D17 后该构建不存在**）和 Simulator 检查，属于当时工作区的验证证据，不等同于本次重新执行；其 manifest 明确将配对物理手表验收标记为 pending。[R14]
 
 ### 10.4 真机放行条件
 

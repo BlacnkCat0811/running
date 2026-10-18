@@ -7,7 +7,7 @@ import test from "node:test";
 import Fastify from "fastify";
 import type { CoachLoopDeviceReceipt, CoachLoopRuntimeResponse, MobileLockedSession, MobilePlannedDay } from "@rai/api-contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
-import { COACH_RUNTIME_POLICY_HASH, type CoachRuntimeReceipt } from "../src/coach-loop-runtime.js";
+import { COACH_RUNTIME_POLICY_HASH, CoachLoopRuntime, type CoachRuntimeReceipt } from "../src/coach-loop-runtime.js";
 import { registerCoachLoopRoutes } from "../src/coach-loop-routes.js";
 import { assessSessionDose, buildCompleteEasyStructure } from "../src/coach-session-dose.js";
 import { shiftCoachDate } from "../src/coach-loop-facts.js";
@@ -16,6 +16,7 @@ import { runCoachSessionTargets } from "../src/run-coach-policy.js";
 import { RaiReadStore } from "../src/data.js";
 import { buildSessionStructure } from "../src/mobile-coach.js";
 import { planDayWithLock, type PlanHistoryRevision } from "../src/mobile-goals.js";
+import { PlanOperationError } from "../src/plan-publication.js";
 import { coachQualityExecutionSummary } from "../src/coach-execution-assessment.js";
 import {
   coachRuntimeFixture as fixture, runtimeReplaySettings as settings, runtimeReplayScope as scope
@@ -269,4 +270,24 @@ test("an eligible 30-minute extension replaces an unprotected 40-minute stored c
       assert.equal(f.store.coachLoopState<CoachRuntimeReceipt>(JSON.stringify(scope))!.reservations.length, 1);
     } finally { f.close(); }
   }
+});
+
+test("G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed", () => {
+  const f = fixture();
+  try {
+    let builds = 0;
+    const runtime = new CoachLoopRuntime(f.store, () => scope, () => {
+      // Simulate the Monday generation / a second device's refresh landing while
+      // the facts read is in flight: the control digest pair must discard this
+      // candidate instead of returning "old control state + new facts".
+      builds += 1;
+      f.store.write({ qualitySessionCap: Math.min(5, builds) });
+      return f.facts;
+    });
+    assert.throws(() => runtime.read(), (error: unknown) =>
+      error instanceof PlanOperationError &&
+      error.code === "coach_snapshot_changed" &&
+      error.statusCode === 503);
+    assert.equal(builds, 3, "three attempts, each discarded because control changed during the build");
+  } finally { f.close(); }
 });

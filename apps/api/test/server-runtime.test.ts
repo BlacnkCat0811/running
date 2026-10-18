@@ -56,6 +56,21 @@ test("coach-loop opt-in uses real main/control stores, feedback changes the fact
       acceptedPolicyHash: initial.policyHash, settings: { mode: "daily_adaptive", runningDays: [1,2,3,4,5,6,7],
         longRunDays: [7], targetType: "pace", availabilityMinutesByWeekday: {}, race: null } });
     assert.equal(enabled.status, 200, await enabled.clone().text());
+    // P3-3: once the coach loop owns the dataset, the legacy plan reads answer
+    // 409 by design. The handshake must stop advertising the aggregate snapshot
+    // contract in the same state, otherwise a client is told to call a route
+    // that cannot succeed. The coach-loop capability stays advertised.
+    const managedHandshake = await fetch(url + "/v1/handshake").then(r => r.json()) as import("@rai/api-contracts").HandshakeResponse;
+    assert.equal(managedHandshake.planSnapshotContractVersion, undefined);
+    assert.equal(managedHandshake.coachLoopContractVersion, 1);
+    // A stale expectedRevision is an ordinary concurrency outcome. It used to
+    // reach the client as 500 `internal_error`, which meant a pending
+    // publication was never cleared and replayed the same stale payload
+    // forever (review report P1-2).
+    const staleCommand = await post("/v1/mobile/coach-loop", { contractVersion: 1, operationId: randomUUID(), operationScope,
+      action: "refresh", expectedRevision: initial.revision, expectedFactsHash: initial.factsHash });
+    assert.equal(staleCommand.status, 409, await staleCommand.clone().text());
+    assert.equal((await staleCommand.json() as { code: string }).code, "mobile_goals_revision_conflict");
     const beforeFeedback = await read();
     const feedback = await post("/v1/mobile/coach-feedback", { operationId: randomUUID(), operationScope,
       id: "current-rest", expectedRevision: 0, action: "save", consent: true,
@@ -854,8 +869,19 @@ test("database-backed writes cannot recreate a deleted database", async () => {
     assert.ok(deletionBody.preservation.backup?.name);
     assert.equal(existsSync(databasePath), false);
 
+    // P2-4: `weekPlan` needs the main database for its policy validation
+    // (capacity, injury limits, history freeze), so a no-database write must be
+    // a 409 rather than persisting an unvalidated week. Every other goals field
+    // is still a metadata-only write and must keep working.
+    const goalsBefore = await fetch(`${url}/v1/mobile/goals`).then(r => r.json()) as { revision: number };
+    const metadataEdit = await fetch(`${url}/v1/mobile/goals`, { method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: goalsBefore.revision, qualitySessionCap: 1 }) });
+    assert.equal(metadataEdit.status, 200, await metadataEdit.clone().text());
     const guardedRequests: Array<[string, RequestInit]> = [
       ["/v1/model-runs", { method: "POST" }],
+      ["/v1/mobile/goals", { method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekPlan: [] }) }],
       ["/v1/prediction-models/train", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2049,6 +2075,13 @@ test("plan preview/confirm HTTP flow is non-mutating, idempotent and revision sa
     const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
     const getGoals = async () => await fetch(`${url}/v1/mobile/goals`).then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
+    // P3-1: every plan read is a safety-relevant snapshot, not a cacheable
+    // representation. This covers the routes that used to omit the header.
+    for (const path of ["/v1/mobile/goals", "/v1/mobile/today", "/v1/mobile/workout-plan"]) {
+      const response = await fetch(`${url}${path}`);
+      assert.equal(response.status, 200, `${path}: ${await response.clone().text()}`);
+      assert.equal(response.headers.get("cache-control"), "no-store", `${path} must not be cacheable`);
+    }
     const post = (path: string, body: object, method = "POST") => fetch(`${url}/v1/mobile/${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const initial = await getGoals();
     const missingRevision = await post("workout-plan/preview", {});
@@ -2162,12 +2195,51 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
     assert.equal(registered.status, 200, await registered.clone().text());
     const first = await registered.json() as { recordedAt: string; matchesCurrent: boolean };
     assert.equal(first.matchesCurrent, true);
+    // P2-2: `matchesCurrent` and the receipt write share one guarded control
+    // transaction, so the guard epoch advances and no pending marker is left.
+    const control = new DatabaseSync(join(runtimeRoot, "var/rai-control.sqlite"));
+    try {
+      const guard = control.prepare("SELECT epoch, pending_since FROM mobile_publication_guard WHERE id = 1")
+        .get() as { epoch: number; pending_since: string | null };
+      assert.ok(guard.epoch > 0, "the receipt write must use the guarded publication transaction");
+      assert.equal(guard.pending_since, null);
+    } finally { control.close(); }
     const repeated = await post("/v1/mobile/workout-plan/synced", { ...receipt, verifiedAt: new Date().toISOString() });
     assert.equal(repeated.status, 200, await repeated.clone().text());
     assert.equal((await repeated.json() as { recordedAt: string }).recordedAt, first.recordedAt);
+    // The real iOS client sends Swift's synthesized Codable shape: nil optional
+    // keys are omitted rather than written as null. That shape must be accepted
+    // and canonicalized, not 422'd or crashed (review report P1-1).
+    // Swift's synthesized Codable only omits *nil* optionals. This fixture's
+    // warmup/cooldown are real blocks (300 s each), so a faithful wire shape
+    // keeps them and omits only the null step alerts. Deleting the non-nil
+    // blocks would describe a different prescription — which the provenance
+    // check must reject (P3-7), so this test would no longer be about P1-1.
+    const swiftStructure = JSON.parse(JSON.stringify(day.structure)) as Record<string, unknown>;
+    if (swiftStructure.warmup == null) delete swiftStructure.warmup;
+    if (swiftStructure.cooldown == null) delete swiftStructure.cooldown;
+    for (const block of swiftStructure.blocks as Array<{ steps: Array<Record<string, unknown>> }>) {
+      for (const step of block.steps) if (step.alert == null) delete step.alert;
+    }
+    const swiftReceipt = {
+      ...receipt,
+      workoutID: randomUUID(),
+      structure: swiftStructure,
+      prescriptionDigest: prescriptionDigest(day.kind, swiftStructure as unknown as NonNullable<typeof day.structure>)
+    };
+    const swiftRegistered = await post("/v1/mobile/workout-plan/synced", swiftReceipt);
+    assert.equal(swiftRegistered.status, 200, await swiftRegistered.clone().text());
+    assert.equal((await swiftRegistered.json() as { matchesCurrent: boolean }).matchesCurrent, true,
+      "a nil-omitting v2 receipt is accepted and still matches the current prescription");
     const mismatched = await post("/v1/mobile/workout-plan/synced", { ...receipt, prescriptionDigest: "0".repeat(64) });
     assert.equal(mismatched.status, 422);
     assert.equal((await mismatched.json() as { code: string }).code, "plan_receipt_evidence_mismatch");
+    // P3-7: a `verified` receipt must link to a real published goals revision.
+    // A self-declared revision that never existed is rejected instead of being
+    // recorded as device evidence.
+    const fabricated = await post("/v1/mobile/workout-plan/synced", { ...receipt, revision: current.metadata.goalsRevision + 1 });
+    assert.equal(fabricated.status, 422, await fabricated.clone().text());
+    assert.equal((await fabricated.json() as { code: string }).code, "plan_receipt_unknown_prescription");
     const wrongScope = await post("/v1/mobile/workout-plan/synced", { ...receipt, scope: { ...receipt.scope, datasetEpoch: "other-epoch" } });
     assert.equal(wrongScope.status, 409);
     const withdrawn = await post("/v1/mobile/workout-plan/synced", { ...receipt, lifecycleEvent: "withdrawn" });

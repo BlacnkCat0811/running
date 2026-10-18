@@ -39,7 +39,7 @@ import {
 } from "@rai/readiness";
 
 import { DISTANCE_ROUNDING_KM, MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
-import { raceExecutionProtection } from "./race-plan-policy.js";
+import { PRE_RACE_EXECUTION_PROTECTION_DAYS, raceExecutionProtection } from "./race-plan-policy.js";
 import { assessSessionDose, buildCompleteEasyStructure } from "./coach-session-dose.js";
 
 export const DEFAULT_EASY_DURATION_FLOOR = 0.7;
@@ -1337,7 +1337,14 @@ export function buildRaceCard(input: CoachInput): MobileRaceCard {
     };
   }
   const days = daysUntil(input.today, target.date);
-  const taper = days != null && days >= 0 && days <= 14;
+  // Same window as the execution protection that actually restricts sessions
+  // (`raceExecutionProtection`), not a second literal 14. Order matters: race day
+  // (daysToRace === 0) is not the taper, and the upper bound is the shared
+  // `PRE_RACE_EXECUTION_PROTECTION_DAYS`, so the card and the restriction cannot
+  // describe different windows.
+  const protection = raceExecutionProtection(input.today, target.date);
+  const taper = protection.daysToRace != null && protection.daysToRace > 0 &&
+    protection.daysToRace <= PRE_RACE_EXECUTION_PROTECTION_DAYS;
   const distanceLabel = target.distance === "five_k" ? "5 公里" : target.distance === "ten_k" ? "10 公里" : "半程马拉松";
   let note = days == null || days < 0
     ? `${distanceLabel}目标已过期。`

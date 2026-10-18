@@ -85,13 +85,18 @@
 
 ## 验证与仍需设备证据
 
-自动入口：`npm run typecheck`、`npm test`、`npm run build`、`npm run test:ios`；定向排期/存储/Store 回归及反向突变门禁在 iOS 聚合入口内。完整 workspace 构建另覆盖高德依赖。没有响应式范围授权，本轮不运行 responsive / full E2E。
+自动入口（**2026-10-18 口径**）：`npm run typecheck`、`npm test`、`npm run test:ios`；改文档时另跑 `npm run check:docs`、`npm run check:doc-refs`、`npm run check:acceptance-matrix`、`npm run check:scripts`。定向排期/存储/Store 回归与反向突变门禁都在 iOS 聚合入口内（`node scripts/run-ios.mjs gates`）。
+
+🔴 **D17 之后这里不再有 Web 入口**：`npm run build`、`test:e2e:*`、responsive/full E2E 已随 Web/macOS 退役**删除**（[DECISIONS](DECISIONS.md) D17、[ADR-006](adr/ADR-006-retire-web-and-macos.md)）。本文 2026-10-09 的记录里出现的 Web/build 行是**当时**的检查，现在不可复跑、也不再是发布前置；不要按那些行去补跑，也不要把它们加回 `package.json`。完整 `RAI.xcworkspace` 模拟器构建仍要在本机 macOS + Xcode 上手工执行，它覆盖另外 3 个仅依赖高德 SDK 的源文件。
 
 仍必须在配对 iPhone + Apple Watch 验证：UUID/时刻稳定、真实表端可见、读回延迟、授权各状态、运行期部分成功、定向/全部撤回、每个副作用后强杀重启、读回/回执期间改计划/提醒或跨午夜，以及新旧服务组合。fake scheduler、真实 SQLite 和 Simulator 编译均不能替代这些发布证据。
 
 ## 本轮实际验证记录
 
 下表为首次实现记录；审查修复新增回归的结果见文末。
+
+> ⏱ **时点记录（2026-10-09，对齐当时工作区）**：数字与入口都只对那一天成立，**不代表当前**。
+> 2026-10-18 复跑口径：`npm run test:ios` 现为 **94 份源码类型检查 + 跳过 3 个仅依赖高德 SDK 的文件、106 项 store 回归、200 项展示检查**；Node 侧以 `npm test` 输出为准。表中 `npm run build` 与 "Web 25 文件 / 182 项" 两行已随 D17 失效，保留仅为历史可追溯。
 
 全部检查在 2026-10-09 的本地工作区运行，日志保存在 `output/ios-training-plan-state-20261009/`（忽略目录，未纳入 Git）。测试和编译不改真实健康数据库，未提交代码。
 
@@ -106,10 +111,10 @@
 | 状态语义突变 | 删除持久水位、只比较租约 ID：全部先成功编译，再由对应行为断言拒绝 | `state-mutations.log` |
 | 文档链接 / diff whitespace | 225 个本地链接、0 问题；`git diff --check` 通过 | `docs.log` / 本轮终端 |
 
-本轮未运行 `test:e2e:responsive` 或 full E2E，也未执行 Simulator 视觉验收、真实 iPhone 安装/权限流程或配对物理 Watch 验收。上述未执行项不计通过，PR0 的设备发布门槛继续保留。PR5 条件性实体迁移没有被自动触发。
+本轮未运行 `test:e2e:responsive` 或 full E2E（**这两项此后已随 Web 退役删除，不再是"未运行"，而是"不存在"**），也未执行 Simulator 视觉验收、真实 iPhone 安装/权限流程或配对物理 Watch 验收。上述未执行项不计通过，PR0 的设备发布门槛继续保留。PR5 条件性实体迁移没有被自动触发。
 
 ## 审查修复验证（2026-10-09）
 
 - 新增完整清单恢复、历史回执隔离、部分恢复再核验与替换生命周期回归；排期回归增至 74 项，真实 SQLite 存储回归增至 101 项。注入回执写入失败后，旧 ledger、非终态日志与待登记账目均保持原状；重新打开数据库后验证成功事务同时保留新 verified 与旧 replaced。
-- `npm run typecheck`、`npm run build`、`npm run test:ios` 及完整 `npm test` 复跑通过。全仓测试首轮未改动的分享卡测试出现一次超时，单独复跑和随后完整复跑均通过；最终 Node 1414 通过、3 项明示跳过，Web 182 通过。
+- `npm run typecheck`、`npm run build`（**历史项，D17 后已删除，见上**）、`npm run test:ios` 及完整 `npm test` 复跑通过。全仓测试首轮未改动的分享卡测试出现一次超时，单独复跑和随后完整复跑均通过；最终 Node 1414 通过、3 项明示跳过，Web 182 通过（**历史项**）。当前数字一律以命令输出为准，不要引用本段。
 - 原四项排期语义突变均被回归拒绝；另以临时源码恢复“历史回执误伤当前排期”和“恢复漏记 replaced”两个缺陷，均先成功编译，再被对应新增行为断言拒绝。所有复现使用隔离 API/cache 或 fake scheduler，没有新增真机、物理 Watch 或响应式验收证据，未自动提交代码。

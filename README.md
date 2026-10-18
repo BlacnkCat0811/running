@@ -48,6 +48,11 @@ npm run check:package-boundaries
 现有 iOS 用 `npm run test:ios`；Python 用 `npm run ml:test`。缺 Xcode/平台导致跳过必须报告，不能当通过。
 真机 HealthKit、后台唤醒、地图与视觉验收不能由上述自动检查替代。
 
+**本仓库的远端是 gitee，GitHub Actions 不会被 gitee 的提交触发**（`.github/workflows/ci.yml` 只为将来镜像到 GitHub 准备，镜像后可手动 dispatch）。所以不要把"没有 CI 红"读成"提交已验证"：
+- 提交时 `.githooks/pre-commit` 会跑 typecheck、文档链接、**文档行号引用**、npm 脚本跨平台语法、**计划定向回归**（计划相关路径有改动时，约 5 s）、§16.1 验收矩阵、包边界；`apps/ios/` 或 `packages/storage-sqlite/` 有改动时各自再跑对应门禁。
+- 发布前必须在能跑全量的机器上把上面这段清单逐条执行一遍（`npm test` 是分钟级，不在提交钩子里）。
+- 缺 Xcode / 缺平台导致**跳过**的检查要单独列出，不能合并进"通过"。
+
 跨平台写法是硬规则，不是风格建议：npm script 正文只用 `&&`、纯命令、`node xxx.mjs`
 （禁用 `;`、`$?`、`$VAR`、`VAR=x cmd`、`test`、`[ ]`、`uname`、依赖 shell 展开的 `*`）；
 平台判定只在脚本内部（Node 用 `process.platform`，bash 用 `uname -s`）；`.sh` 只用 `bash <path>` 调用。
@@ -59,7 +64,7 @@ npm run check:package-boundaries
 | 主题 | 文档 |
 |---|---|
 | 模块、数据流与依赖 | [架构](docs/ARCHITECTURE.md) |
-| 算法职责、不变量与54项验收合同 | [算法](docs/ALGORITHM.md) |
+| 算法职责、不变量与 §16.1 验收合同矩阵（80 条，以 `npm run check:acceptance-matrix` 输出为准） | [算法](docs/ALGORITHM.md) |
 | 导入、身份、恢复事实、存储与谱系 | [数据管线](docs/DATA_PIPELINE.md) |
 | 开发、迁移、备份、回放、发布操作 | [运维](docs/OPERATIONS.md) |
 | 长期约束与不能随意“优化”的决策 | [决策](docs/DECISIONS.md) |

@@ -30,7 +30,7 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
   apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanWatchSyncCoordinator.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift apps/ios/RAI/TrainingPlanStore.swift \
-  apps/ios/RAI/PlanMutationDisposition.swift \
+  apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/PlanMutationDisposition.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"

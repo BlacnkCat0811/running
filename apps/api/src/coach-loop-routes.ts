@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { CoachLoopCommand, CoachLoopDeviceReceipt, MobilePlanOperationScope, SubjectiveFeedback } from "@rai/api-contracts";
 import { SqliteCoachFactsRepository, type RaiDatabase, workoutPresentConditionSql } from "@rai/storage-sqlite";
-import { buildPredictionReportAsync } from "@rai/application";
 import type { CoachLoopRuntime } from "./coach-loop-runtime.js";
+import { MobileGoalsRevisionConflictError } from "./mobile-goals.js";
 import { buildSubjectiveFeedback, retractSubjectiveFeedback } from "./coach-subjective-feedback.js";
 import { coachPredictionIdentity, publishCoachPredictionCompanion } from "./coach-prediction-companion.js";
 import { PlanOperationError } from "./plan-publication.js";
@@ -25,9 +25,27 @@ export function registerCoachLoopRoutes(args: {
     reply.header("Cache-Control","no-store"); return args.runtime.read();
   });
   args.app.post<{Body:CoachLoopCommand}>("/v1/mobile/coach-loop", {schema:{body:coachLoopCommandSchema}},
-    async request=>args.runtime.command(request.body));
+    async (request, reply) => {
+      // Plan state must never be served from a shared/client cache: the client
+      // compares this response's revision/facts/token against a fresh read.
+      reply.header("Cache-Control", "no-store");
+      try {
+        return await args.runtime.command(request.body);
+      } catch (error) {
+        // Stale expectedRevision is a normal concurrency outcome. Mapping it to
+        // 500 made the client keep the pending publication and replay the same
+        // stale payload forever (report P1-2).
+        if (error instanceof MobileGoalsRevisionConflictError) {
+          return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
+        }
+        throw error;
+      }
+    });
   args.app.post<{ Body: CoachLoopDeviceReceipt }>("/v1/mobile/coach-loop/synced", { schema: { body: coachLoopSyncedBodySchema } },
-    async request => args.runtime.recordDeviceReceipt(request.body));
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      return args.runtime.recordDeviceReceipt(request.body);
+    });
   args.app.get("/v1/mobile/coach-execution",async (_request,reply)=>{
     reply.header("Cache-Control","no-store");
     const state=args.runtime.read();
@@ -37,7 +55,8 @@ export function registerCoachLoopRoutes(args: {
     type:"object",additionalProperties:false,required:["operationId","operationScope","id","expectedRevision","action","consent"],
     properties:{...operation,id,expectedRevision:{type:"integer",minimum:0},action:{enum:["save","retract"]},
       consent:{const:true},fields:coachFeedbackFieldsSchema}
-  }}},async(request)=>{
+  }}},async(request,reply)=>{
+    reply.header("Cache-Control", "no-store");
     if(digest(request.body.operationScope)!==digest(args.identity()))throw new PlanOperationError("coach_scope_mismatch","反馈属于其他数据集。");
     const store=await args.openMainDatabase();
     try{
@@ -72,12 +91,17 @@ export function registerCoachLoopRoutes(args: {
   // report builder once, then extracts a companion without altering its bundle.
   args.app.post<{Body:{operationScope:MobilePlanOperationScope}}>("/v1/mobile/coach-prediction-refresh",{schema:{body:{
     type:"object",additionalProperties:false,required:["operationScope"],properties:{operationScope:planOperationScopeSchema}
-  }}},async(request)=>{
+  }}},async(request,reply)=>{
+    reply.header("Cache-Control", "no-store");
     if(digest(request.body.operationScope)!==digest(args.identity()))throw new PlanOperationError("coach_scope_mismatch","预测请求属于其他数据集。");
     const store=await args.openMainDatabase();
     try{
       const identity=coachPredictionIdentity(store.database,args.identity());
       if(!identity)return {status:"summary_unavailable",reason:"compatible_published_bundle_required"};
+      // Lazy import: this module must stay loadable without the ONNX-backed
+      // prediction chain, so route-level tests can run where the native binding
+      // cannot load (see report P2-15).
+      const { buildPredictionReportAsync } = await import("@rai/application");
       const report=await buildPredictionReportAsync(store.database,{mode:"current_prepared",asOf:new Date().toISOString()});
       const summary=publishCoachPredictionCompanion(store.database,identity,report,new Date().toISOString());
       return {status:"published",summaryId:summary.id};

@@ -7,6 +7,8 @@ enum Keychain {
 
 final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: (URLRequest) -> (Int, String, Double) = { _ in (503, "{}", 0) }
+    /// 2026-10-18（P2-6 收尾）：可附加响应头（如 `Retry-After`），默认 nil 与旧行为一致。
+    nonisolated(unsafe) static var extraHeaders: [String: String]? = nil
     private let lock = NSLock()
     private var stopped = false
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -16,7 +18,7 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             lock.lock(); defer { lock.unlock() }
             guard !stopped else { return }
-            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.extraHeaders)!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
@@ -59,7 +61,7 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
             var plan = object["workoutPlan"] as! [String: Any]
             switch variant {
             case "identity": metadata["athleteId"] = "another-athlete"
-            case "coherence": metadata.removeValue(forKey: "coherenceToken")
+            case "coherence": metadata["coherenceToken"] = "not-a-hash"
             case "windowStart": plan.removeValue(forKey: "windowStart")
             case "windowEnd": metadata["windowEnd"] = "2026-10-16"
             case "duplicate":
@@ -71,7 +73,16 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
             let json = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
             PlanStoreProtocol.handler = { _ in (200, json, 0) }
             let result = await store.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
-            check(!result && store.executablePlan == nil && store.issue?.code == .contractMismatch, "Store rejects unsafe aggregate \(variant) without mixing old execution")
+            // 2026-10-18（审查 P2-8）：安全字段校验失败是 snapshotValidationFailed，
+            // 不再是"协议版本不兼容"的 contractMismatch（那会引导用户升级 App）。
+            check(!result && store.executablePlan == nil && !store.isCurrent &&
+                  store.issue?.code == .snapshotValidationFailed && store.availability == .unavailable,
+                  "Store rejects unsafe aggregate \(variant) as a snapshot validation failure without mixing old execution")
+        }
+        if let diagnosticsURL = cache.exportPlanDiagnostics() {
+            let diagnostics = try String(contentsOf: diagnosticsURL, encoding: .utf8)
+            check(diagnostics.contains("\"snapshot_validation_failed\""),
+                  "security-field rejection records a distinct snapshot_validation_failed diagnostic")
         }
         PlanStoreProtocol.handler = { _ in (200, goodJSON, 0.15) }
         let older = Task { await store.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true }) }
@@ -96,6 +107,204 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
         futureHandshake.planSnapshotContractVersion = 9
         let future = await store.refresh(baseURL: base, token: "", handshake: futureHandshake, isValid: { true })
         check(!future && store.issue?.code == .contractMismatch, "higher snapshot capability fails closed without a legacy downgrade")
+        // 2026-10-18（审查 P2-6）：新快照契约下 503 plan_snapshot_changed 是有界退避重试，
+        // 不是直接 unavailable；重试仍受 requestID/epoch/scope/isValid/取消约束。
+        final class AttemptCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var stored = 0
+            var count: Int { lock.lock(); defer { lock.unlock() }; return stored }
+            func next() -> Int { lock.lock(); defer { lock.unlock() }; stored += 1; return stored }
+        }
+        // 2026-10-18（审查 P2-6 收尾）：延迟选择是纯函数，先钉住三种分支。
+        final class DelayRecorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var stored: [TimeInterval] = []
+            func append(_ value: TimeInterval) { lock.lock(); stored.append(value); lock.unlock() }
+            var values: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return stored }
+        }
+        check(TrainingPlanStore.snapshotRetryDelay(serverHint: 1, defaults: [0.15, 0.3], attempt: 0) == 1,
+              "a server Retry-After hint wins over the local backoff schedule")
+        check(TrainingPlanStore.snapshotRetryDelay(serverHint: 0.01, defaults: [0.15, 0.3], attempt: 0) == 0.1 &&
+              TrainingPlanStore.snapshotRetryDelay(serverHint: 0, defaults: [0.15, 0.3], attempt: 0) == 0.1,
+              "a tiny/zero server hint is floored at 0.1s instead of busy-looping")
+        check(TrainingPlanStore.snapshotRetryDelay(serverHint: 9, defaults: [0.15, 0.3], attempt: 0) == 5,
+              "a long server hint is capped at 5s")
+        check(TrainingPlanStore.snapshotRetryDelay(serverHint: nil, defaults: [0.15, 0.3], attempt: 0) == 0.15 &&
+              TrainingPlanStore.snapshotRetryDelay(serverHint: nil, defaults: [0.15, 0.3], attempt: 1) == 0.3,
+              "without a hint the local 150/300ms schedule is used")
+        check(TrainingPlanStore.snapshotRetryDelay(serverHint: nil, defaults: [0.15, 0.3], attempt: 2) == nil,
+              "the retry schedule is exhausted after its entries")
+
+        let retryStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        retryStore.snapshotRetryDelays = [0.001, 0.001]
+        let retries = AttemptCounter()
+        let retryDelays = DelayRecorder()
+        retryStore.sleepBeforeSnapshotRetry = { retryDelays.append($0); return true }
+        PlanStoreProtocol.handler = { _ in
+            retries.next() <= 2
+                ? (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"changed\"}", 0)
+                : (200, goodJSON, 0)
+        }
+        let retried = await retryStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
+        check(retried && retryStore.isCurrent && retryStore.issue == nil && retries.count == 3 &&
+              retryDelays.values == [0.001, 0.001],
+              "new snapshot contract retries 503 plan_snapshot_changed twice with the local fallback schedule")
+        let exhaustedStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        exhaustedStore.snapshotRetryDelays = [0.001, 0.001]
+        let exhausted = AttemptCounter()
+        let exhaustedDelays = DelayRecorder()
+        exhaustedStore.sleepBeforeSnapshotRetry = { exhaustedDelays.append($0); return true }
+        PlanStoreProtocol.handler = { _ in exhausted.next() <= 3
+            ? (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"still changing\"}", 0)
+            : (200, goodJSON, 0) }
+        let exhaustedRead = await exhaustedStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
+        check(!exhaustedRead && exhausted.count == 3 && exhaustedStore.issue?.code == .serverUnavailable &&
+              exhaustedStore.availability == .unavailable && exhaustedStore.serviceReachable &&
+              exhaustedDelays.values == [0.001, 0.001],
+              "snapshot retry is bounded (initial + 2), then reports a reachable-server failure")
+        let cancellingStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        cancellingStore.snapshotRetryDelays = [0.2]
+        let cancelling = AttemptCounter()
+        PlanStoreProtocol.handler = { _ in
+            _ = cancelling.next()
+            return (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"changed\"}", 0)
+        }
+        let cancelledRetry = Task { await cancellingStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true }) }
+        try await Task.sleep(for: .milliseconds(30))
+        cancellingStore.invalidate()
+        let cancelledResult = await cancelledRetry.value
+        check(!cancelledResult && cancelling.count == 1 && !cancellingStore.isRefreshing,
+              "cancelling during snapshot backoff abandons the retry instead of issuing another read")
+
+        // 2026-10-18（审查 P2-6 收尾）：服务端 Retry-After 优先。
+        let hintStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        hintStore.snapshotRetryDelays = [0.001, 0.001]
+        let hintDelays = DelayRecorder()
+        hintStore.sleepBeforeSnapshotRetry = { hintDelays.append($0); return true }
+        let hintAttempts = AttemptCounter()
+        PlanStoreProtocol.extraHeaders = ["Retry-After": "1"]
+        PlanStoreProtocol.handler = { _ in
+            hintAttempts.next() == 1
+                ? (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"changed\"}", 0)
+                : (200, goodJSON, 0)
+        }
+        let hintedRetry = await hintStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
+        PlanStoreProtocol.extraHeaders = nil
+        check(hintedRetry && hintStore.isCurrent && hintAttempts.count == 2 && hintDelays.values == [1],
+              "503 + Retry-After: 1 is retried after the server hint, not the local schedule")
+
+        // 503 无 Retry-After：直接使用默认 150/300ms 计划（用注入 sleeper 记录，不真睡）。
+        let defaultScheduleStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        let defaultScheduleDelays = DelayRecorder()
+        defaultScheduleStore.sleepBeforeSnapshotRetry = { defaultScheduleDelays.append($0); return true }
+        let defaultScheduleAttempts = AttemptCounter()
+        PlanStoreProtocol.handler = { _ in
+            defaultScheduleAttempts.next() <= 2
+                ? (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"changed\"}", 0)
+                : (200, goodJSON, 0)
+        }
+        let defaultScheduleRetry = await defaultScheduleStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
+        check(defaultScheduleRetry && defaultScheduleAttempts.count == 3 &&
+              defaultScheduleDelays.values == [0.15, 0.3],
+              "503 without Retry-After falls back to the default 150/300ms local schedule")
+
+        // 非法/HTTP-date 头被忽略，回退本地计划。
+        let invalidHeaderStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        invalidHeaderStore.snapshotRetryDelays = [0.001]
+        let invalidDelays = DelayRecorder()
+        invalidHeaderStore.sleepBeforeSnapshotRetry = { invalidDelays.append($0); return true }
+        let invalidAttempts = AttemptCounter()
+        PlanStoreProtocol.extraHeaders = ["Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"]
+        PlanStoreProtocol.handler = { _ in
+            invalidAttempts.next() == 1
+                ? (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"changed\"}", 0)
+                : (200, goodJSON, 0)
+        }
+        let invalidHeaderRetry = await invalidHeaderStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
+        PlanStoreProtocol.extraHeaders = nil
+        check(invalidHeaderRetry && invalidAttempts.count == 2 && invalidDelays.values == [0.001],
+              "an HTTP-date Retry-After is ignored and the local schedule is used")
+
+        // 等待期间取消/放弃：不再发下一次读，也不把取消包装成成功。
+        let abortedStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        abortedStore.snapshotRetryDelays = [0.001, 0.001]
+        let abortedAttempts = AttemptCounter()
+        abortedStore.sleepBeforeSnapshotRetry = { _ in false }
+        PlanStoreProtocol.extraHeaders = ["Retry-After": "1"]
+        PlanStoreProtocol.handler = { _ in
+            _ = abortedAttempts.next()
+            return (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"changed\"}", 0)
+        }
+        let abortedRead = await abortedStore.refresh(baseURL: base, token: "", handshake: handshake, isValid: { true })
+        PlanStoreProtocol.extraHeaders = nil
+        check(!abortedRead && abortedAttempts.count == 1 && !abortedStore.isRefreshing &&
+              abortedStore.availability == .unavailable && abortedStore.serviceReachable,
+              "an aborted retry wait stops the read loop instead of issuing another request")
+
+        // 2026-10-18（审查 P2-7）：legacy 三 GET 路径补本地安全校验。
+        let legacyHandshake = RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+            syncProtocolVersion: 1, apiVersion: "v1")
+        let legacyState = try PlanTestFixtures.state()
+        let legacyGoalsJSON = try PlanTestFixtures.json(legacyState.goals)
+        let legacyTodayJSON = try PlanTestFixtures.json(legacyState.today)
+        let legacyPlan = PlanTestFixtures.plan(revision: 12, dates: ["2026-10-09", "2026-10-10"])
+        let legacyPlanJSON = try PlanTestFixtures.json(legacyPlan)
+        let legacyStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        func serveLegacy(today: String = legacyTodayJSON, plan: String = legacyPlanJSON) {
+            PlanStoreProtocol.handler = { request in
+                switch request.url!.path {
+                case "/v1/mobile/goals": return (200, legacyGoalsJSON, 0)
+                case "/v1/mobile/today": return (200, today, 0)
+                case "/v1/mobile/workout-plan": return (200, plan, 0)
+                default: return (404, "{}", 0)
+                }
+            }
+        }
+        serveLegacy()
+        let legacyLoaded = await legacyStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+        check(legacyLoaded && legacyStore.isCurrent && legacyStore.executablePlan != nil,
+              "legacy three-GET refresh is current only when today/window/timezone are locally coherent")
+        for variant in ["previous-day", "window-length", "duplicate-day", "timezone"] {
+            var todayObject = try JSONSerialization.jsonObject(with: Data(legacyTodayJSON.utf8)) as! [String: Any]
+            var planObject = try JSONSerialization.jsonObject(with: Data(legacyPlanJSON.utf8)) as! [String: Any]
+            switch variant {
+            case "previous-day":
+                var today = todayObject["today"] as! [String: Any]
+                today["localDate"] = "2026-10-08"; todayObject["today"] = today
+            case "window-length":
+                planObject["windowDays"] = 0
+            case "duplicate-day":
+                var days = planObject["days"] as! [[String: Any]]
+                days[1] = days[0]; planObject["days"] = days
+            default:
+                todayObject["timezone"] = "UTC"; planObject["timezone"] = "UTC"
+            }
+            serveLegacy(today: String(decoding: try JSONSerialization.data(withJSONObject: todayObject), as: UTF8.self),
+                        plan: String(decoding: try JSONSerialization.data(withJSONObject: planObject), as: UTF8.self))
+            let rejected = await legacyStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+            check(!rejected && !legacyStore.isCurrent && legacyStore.executablePlan == nil &&
+                  legacyStore.issue?.code == .snapshotValidationFailed,
+                  "legacy snapshot rejects \(variant) instead of marking an unverified window current")
+        }
+        serveLegacy()
+        _ = await legacyStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+        // 2026-10-18（审查 P3-15）：单条缓存路径必须保留缓存时间。
+        let cachedLegacy = TrainingPlanStore(cache: cache, api: api, scope: legacyStore.scope,
+            now: { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! })
+        cachedLegacy.loadCache()
+        check(cachedLegacy.cachedAt != nil && cachedLegacy.availability == .cached(asOf: cachedLegacy.cachedAt),
+              "legacy per-key cache paths keep their cachedAt instead of losing the cache time")
+        check(cachedLegacy.availability.message.contains("缓存于"),
+              "offline cache wording states when the snapshot was cached")
+
         let loopData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
         let loop = try JSONDecoder().decode(CoachLoopResponse.self, from: loopData)
         let loopJSON = String(decoding: loopData, as: UTF8.self)

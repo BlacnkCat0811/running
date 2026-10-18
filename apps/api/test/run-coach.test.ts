@@ -42,7 +42,12 @@ test("AC3-01/02 partial route: changed evidence with unchanged execution does no
       verdict: { ...current.today.verdict, reason: explanationOnly ? `${current.today.verdict.reason} 补充解释。` : current.today.verdict.reason }
     } };
   };
-  registerRunCoachRoutes({ app, store, scope: () => "synthetic-no-change-scope", inputs });
+  const scopeIdentity = { serverId: "local", athleteId: "athlete_1", datasetEpoch: "default" };
+  // Production registration always passes `identity`; the publication contract
+  // now requires it, so the test must declare the same scope and send it with
+  // each operationId (review P3-9).
+  registerRunCoachRoutes({ app, store, scope: () => "synthetic-no-change-scope",
+    identity: () => scopeIdentity, inputs });
   try {
     const started = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
       payload: { expectedRevision: store.read().revision, action: "start", config } });
@@ -57,21 +62,21 @@ test("AC3-01/02 partial route: changed evidence with unchanged execution does no
     explanationOnly = true;
     assert.notEqual(runCoachAdaptationKey(before.runCoach, inputs(before)), originalKey);
     const refreshed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId } });
+      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId, operationScope: scopeIdentity } });
     assert.equal(refreshed.statusCode, 200, refreshed.body);
     assert.equal(refreshed.json().revision, before.revision);
     assert.deepEqual(store.read(), before);
     assert.deepEqual(store.planHistory(), beforeHistory);
     assert.equal((store.publicationResult("synthetic-no-change-scope", noChangeOperationId) as { status: string }).status, "committed");
     const repeated = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId } });
+      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId, operationScope: scopeIdentity } });
     assert.deepEqual(repeated.json(), refreshed.json());
     assert.equal(store.read().revision, before.revision);
     assert.equal((await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision - 1, action: "refresh", operationId: staleOperationId } })).statusCode, 409);
+      payload: { expectedRevision: before.revision - 1, action: "refresh", operationId: staleOperationId, operationScope: scopeIdentity } })).statusCode, 409);
     observedWeekKm = 5;
     const changed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision, action: "refresh", operationId: changedOperationId } });
+      payload: { expectedRevision: before.revision, action: "refresh", operationId: changedOperationId, operationScope: scopeIdentity } });
     assert.equal(changed.statusCode, 200, changed.body);
     assert.ok(store.read().revision > before.revision, "real constraint changes must still publish a revision");
     assert.ok(store.read().weekPlan.filter(day => day.localDate >= "2026-10-07" && day.localDate <= "2026-10-11")

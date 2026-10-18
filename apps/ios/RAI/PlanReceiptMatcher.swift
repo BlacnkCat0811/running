@@ -38,6 +38,23 @@ enum PlanReceiptMatcher {
         return true
     }
 
+    /// 2026-10-18（审查 P3-16）：撤回核验的"残留"判据必须与 `WorkoutKitBridge`
+    /// 删除条目时的身份一致 —— UUID **且** 精确 scheduledAt，而不是只看 UUID。
+    /// 只看 UUID 会把"同 UUID 不同时刻"的条目也算成己方残留；只看时刻又会丢身份。
+    static func hasResidualEntries(_ entries: [PlanScheduledEntry], in listed: [PlanSchedulingReadback], timeZone: TimeZone) -> Bool {
+        listed.contains { item in
+            entries.contains { entry in
+                entry.workoutID == item.workoutID &&
+                    instant(item.at, fallbackTimeZone: timeZone) == entry.scheduledAt
+            }
+        }
+    }
+
+    /// 计划业务时区的解析入口：调用方只允许在已验证的 timezone 字符串上使用。
+    static func planTimeZone(_ identifier: String) -> TimeZone {
+        TimeZone(identifier: identifier) ?? TimeZone(secondsFromGMT: 8 * 3600)!
+    }
+
     static func confirm(requests: [PlanSchedulingRequest], listed: [PlanSchedulingReadback], timeZone: TimeZone) -> Set<UUID> {
         var remaining = listed
         var confirmed = Set<UUID>()

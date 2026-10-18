@@ -63,7 +63,7 @@ test("complete snapshot is stable across request clocks, captures recovery and p
   } finally { read.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("main read view stays pinned and a control revision change discards the complete mixed candidate", async context => {
+test("G06: main read view stays pinned and a control revision change discards the complete mixed candidate", async context => {
   context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-09T04:00:00Z") });
   const root = mkdtempSync(join(tmpdir(), "rai-state-race-"));
   const path = join(root, "facts.sqlite");
@@ -72,23 +72,55 @@ test("main read view stays pinned and a control revision change discards the com
   const other = new MobileGoalsStore(root, join(root, "control.sqlite"));
   const read = new RaiReadStore(path);
   try {
-    const original = read.mobilePlanPrescription.bind(read);
+    // Inject the concurrent publication right after the attempt's control pair is
+    // read (goals then history) and before its post-commit re-read: the mixed
+    // candidate must be discarded, not returned or patched in place.
+    const originalHistory = store.planHistory.bind(store);
     let changes = 0;
-    read.mobilePlanPrescription = () => {
+    store.planHistory = (limit?: number) => {
+      const value = originalHistory(limit);
       if (changes++ === 0) {
         database.database.prepare("INSERT INTO import_manifest(key,value) VALUES ('dataset_version','new-facts')").run();
         other.write({ expectedRevision: 0, qualitySessionCap: 1 });
       }
-      return original();
+      return value;
     };
     const result = read.trainingPlanState(store, identity);
     assert.equal(result.metadata.goalsRevision, 1);
     assert.equal(result.today.recommendation.planRevision, 1);
     assert.equal(result.workoutPlan.planRevision, 1);
     assert.ok(changes >= 2, "the candidate was rebuilt, not patched in place");
-    read.mobilePlanPrescription = () => { other.write({ qualitySessionCap: 1 }); return original(); };
+    store.planHistory = () => { other.write({ qualitySessionCap: 1 }); return originalHistory(); };
     assert.throws(() => read.trainingPlanState(store, identity), { code: "plan_snapshot_changed", statusCode: 503 });
   } finally { read.close(); other.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("P3-2: a history-only change changes coherenceToken without moving goalsRevision", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-09T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-state-history-token-"));
+  const path = join(root, "facts.sqlite");
+  const database = await RaiDatabase.open(path);
+  const controlPath = join(root, "control.sqlite");
+  const store = new MobileGoalsStore(root, controlPath);
+  const read = new RaiReadStore(path);
+  try {
+    const before = read.trainingPlanState(store, identity);
+    // An external writer/migration can append a plan-history revision without
+    // touching mobile_goals (the normal write path always bumps both). Today's
+    // adherence/recentPlanExecution are derived from history, so the token has
+    // to cover it as well (review P3-2).
+    const writer = new DatabaseSync(controlPath);
+    try {
+      writer.prepare("INSERT INTO mobile_goals_history (revision, payload_json, changed_at) VALUES (?,?,?)")
+        .run(before.metadata.goalsRevision,
+          JSON.stringify({ weekPlan: [], lockedSession: null }), "2026-10-09T03:00:00.000Z");
+    } finally { writer.close(); }
+    const after = read.trainingPlanState(store, identity);
+    assert.equal(after.metadata.goalsRevision, before.metadata.goalsRevision,
+      "a history-only change must not move the goals revision");
+    assert.notEqual(after.metadata.coherenceToken, before.metadata.coherenceToken,
+      "history is an input of the aggregate (adherence/recentPlanExecution) and must invalidate the token");
+  } finally { read.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("a stopped programme has a complete empty execution window, not a read failure", async context => {
@@ -110,22 +142,23 @@ test("a stopped programme has a complete empty execution window, not a read fail
   } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("publication response, history and CAS survive restart and reject changed request, scope or expired keys", () => {
+test("G07: publication response, history and CAS survive restart and reject changed request, scope or expired keys", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-publication-"));
   const path = join(root, "control.sqlite");
   let store = new MobileGoalsStore(root, path);
   const operationId = randomUUID();
-  const input = { operationId, expectedRevision: 0, qualitySessionCap: 1 };
+  const input = { operationId, operationScope: identity(), expectedRevision: 0, qualitySessionCap: 1 };
   try {
-    const first = new PlanPublicationService(store, () => "scope").publish("goals", input, () => store.write(input));
+    const first = new PlanPublicationService(store, () => "scope", identity).publish("goals", input, () => store.write(input));
     store.close(); store = new MobileGoalsStore(root, path);
-    const publication = new PlanPublicationService(store, () => "scope");
+    const publication = new PlanPublicationService(store, () => "scope", identity);
     assert.deepEqual(publication.publish("goals", input, () => { throw new Error("must not replay"); }), first);
     assert.equal(store.read().revision, 1);
     assert.equal(store.planHistory().filter(item => item.revision === 1).length, 1);
     assert.equal((publication.result(operationId) as { status: string }).status, "committed");
     assert.throws(() => publication.publish("goals", { ...input, qualitySessionCap: 2 }, () => store.write(input)), { code: "plan_operation_key_conflict" });
-    assert.throws(() => new PlanPublicationService(store, () => "other-epoch").publish("goals", input, () => store.write(input)), { code: "plan_operation_scope_mismatch" });
+    assert.throws(() => new PlanPublicationService(store, () => "other-epoch",
+      () => ({ ...identity(), datasetEpoch: "other" })).publish("goals", input, () => store.write(input)), { code: "plan_operation_scope_mismatch" });
     const database = new DatabaseSync(path);
     database.prepare("UPDATE mobile_plan_operations SET expires_at='2000-01-01T00:00:00Z'").run();
     database.close();
@@ -142,7 +175,8 @@ test("operation-result persistence failure rolls back both goals and history", (
   const database = new DatabaseSync(path);
   try {
     database.exec("CREATE TRIGGER fail_operation BEFORE INSERT ON mobile_plan_operations BEGIN SELECT RAISE(ABORT,'injected'); END");
-    assert.throws(() => new PlanPublicationService(store, () => "scope").publish("goals", { operationId: randomUUID() }, () => store.write({ qualitySessionCap: 1 })), /injected/);
+    assert.throws(() => new PlanPublicationService(store, () => "scope", identity)
+      .publish("goals", { operationId: randomUUID(), operationScope: identity() }, () => store.write({ qualitySessionCap: 1 })), /injected/);
     assert.equal(store.read().revision, 0);
     assert.equal(store.planHistory().length, 1);
   } finally { database.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
@@ -172,11 +206,11 @@ test("coach command same-key retry after server reconstruction returns its origi
   let app = Fastify();
   const setup = () => {
     app.setErrorHandler((error, _request, reply) => { const result = apiErrorPayload(error); reply.code(result.status).send(result.body); });
-    registerRunCoachRoutes({ app, store, scope: () => "scope", inputs: goals => read.mobileWeeklyPlanInputs(goals) });
+    registerRunCoachRoutes({ app, store, scope: () => "scope", identity, inputs: goals => read.mobileWeeklyPlanInputs(goals) });
   };
   try {
     setup();
-    const payload = { operationId: randomUUID(), expectedRevision: 0, action: "start", config };
+    const payload = { operationId: randomUUID(), operationScope: identity(), expectedRevision: 0, action: "start", config };
     const first = await app.inject({ method: "POST", url: "/v1/mobile/run-coach", payload });
     assert.equal(first.statusCode, 200);
     await app.close(); store.close();
@@ -190,7 +224,7 @@ test("coach command same-key retry after server reconstruction returns its origi
   } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("receipt lifecycle preserves immutable history and bounds execution associations to validity time", () => {
+test("G08: receipt lifecycle preserves immutable history and bounds execution associations to validity time", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-receipt-events-"));
   const store = new MobileGoalsStore(root, join(root, "control.sqlite"));
   const workoutID = randomUUID();

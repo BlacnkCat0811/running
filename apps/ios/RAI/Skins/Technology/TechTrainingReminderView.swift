@@ -8,7 +8,7 @@ struct TechTrainingReminderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("训练提醒").font(.headline.weight(.bold))
-            Text("默认关闭。只为已读取的未来七天有效计划安排本地提醒，不催促漏课，不推送同步故障。22:00–07:00 不安排提醒。")
+            Text("默认关闭。只为已读取的计划安排本地提醒，不催促漏课，不推送同步故障。22:00–07:00 不安排提醒。新版教练模式只提醒今天已发布的完整课；未来日是展望，不安排提醒。")
             Text("提醒时间使用课表时区；下一次同步到 Apple Watch 时也会使用这个开始时间。开启后离线期间的计划变化无法立即撤回通知，重新打开 App 会核对。")
                 .font(.caption).foregroundStyle(TechColor.muted)
             Picker("提醒时间", selection: $hour) {
@@ -31,7 +31,10 @@ struct TechTrainingReminderView: View {
         let scope = native.feedbackScope
         await reminders.configure(enabled: value, hour: hour, scope: scope)
         guard scope == native.feedbackScope else { return }
-        await reminders.reconcile(scope: scope, plan: native.currentWorkoutPlan, completed: native.completedWeekDates, available: native.canConfirmToday)
+        // 2026-10-18（审查 P2-10）：可用性由合同显式决定，不再拿 canConfirmToday
+        // （教练闭环下恒 false）当提醒开关。
+        let context = native.reminderContext
+        await reminders.reconcile(scope: scope, plan: context.plan, completed: context.completedDates, available: context.available)
     }
 }
 #endif

@@ -473,11 +473,22 @@ enum NativeRaceGoalDraft {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || paceSeconds(text) != nil
     }
 
+    /// 2026-10-18（审查 P2-11）：赛程日期是**业务日期**（服务端固定 Asia/Shanghai），
+    /// 不是设备本地日期。用设备时区格式化/比较会让跨时区用户在业务日边界保存出
+    /// 差一天的 raceTarget，并与倒计时/准备度的服务端口径错位。
+    static let businessTimeZone = TimeZone(identifier: "Asia/Shanghai") ?? TimeZone(secondsFromGMT: 8 * 3600)!
+
     static var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = businessTimeZone
+        formatter.calendar = calendar
+        formatter.timeZone = businessTimeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }
+
+    /// 业务时区的 YYYY-MM-DD；today 缺失时也用它兜底，绝不回落到设备时区。
+    static func businessLocalDate(_ date: Date) -> String { dateFormatter.string(from: date) }
 }

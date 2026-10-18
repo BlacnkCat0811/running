@@ -612,6 +612,31 @@ test("race card explains default distance and refreshes countdown and taper from
   assert.match(expired.note, /已过期/);
 });
 
+test("race card taper uses the shared 14-day protection window and excludes race day", () => {
+  const target = (date: string) => ({ date, distance: "ten_k" as const, targetPaceSecondsPerKm: null });
+  // 2026-09-03 is the base() "today".
+  const dayBefore = buildRaceCard({ ...base(), raceTarget: target("2026-09-04") });
+  assert.equal(dayBefore.daysUntil, 1);
+  assert.equal(dayBefore.taper, true);
+  assert.match(dayBefore.note, /进入减量/);
+
+  const fourteen = buildRaceCard({ ...base(), raceTarget: target("2026-09-17") });
+  assert.equal(fourteen.daysUntil, 14);
+  assert.equal(fourteen.taper, true, "the last day of the shared protection window still counts");
+  assert.match(fourteen.note, /进入减量/);
+
+  const fifteen = buildRaceCard({ ...base(), raceTarget: target("2026-09-18") });
+  assert.equal(fifteen.daysUntil, 15);
+  assert.equal(fifteen.taper, false, "one day past the shared window is not the taper");
+  assert.doesNotMatch(fifteen.note, /进入减量/);
+
+  const raceDay = buildRaceCard({ ...base(), raceTarget: target("2026-09-03") });
+  assert.equal(raceDay.daysUntil, 0);
+  assert.equal(raceDay.taper, false, "race day is not the taper");
+  assert.match(raceDay.note, /还有 0 天/);
+  assert.doesNotMatch(raceDay.note, /进入减量/);
+});
+
 // ── 恢复覆盖与评估 ─────────────────────────────────────────────
 // The published assessment and the verdict gates read one function, so these
 // assertions cover both what the app explains and what the coach decided.

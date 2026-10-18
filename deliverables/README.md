@@ -6,6 +6,11 @@
 
 ## 当轮审查（未提交改动）
 
+- [TRAINING_PLAN_REVIEW_2026-10-18.md](TRAINING_PLAN_REVIEW_2026-10-18.md)：
+  **训练计划功能详细审查（2026-10-18）** —— 服务端读取/发布/回执、iOS 状态机与 WorkoutKit 排期、周期化/依从性/摘要协议、文档契约与门禁；结论 **3 项 P1（回执 v2 线格式、revision 冲突 500、coach-loop 读取无跨库回验）+ 18 项 P2**，附本机验证（typecheck / iOS 门禁 / 207 例计划测试）与未验证边界。分 lane 证据见 [training-plan-review-2026-10-18/](training-plan-review-2026-10-18/README.md)。
+  **批次 A（3 个 P1）已修复并落地回归**：[FIXES_BATCH_A_2026-10-18](training-plan-review-2026-10-18/FIXES_BATCH_A_2026-10-18.md)。
+  **批次 B/C（3 项残留风险 + P2×18 + P3×21）已修复**：[FIXES_BATCH_BC_2026-10-18](training-plan-review-2026-10-18/FIXES_BATCH_BC_2026-10-18.md)（含 `server-runtime` 31/31、全量 Node 套件与 iOS 门禁结果、未验证边界）。
+
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
 - [RUNNING_POWER_GCT_MISSING_2026-10-17.md](RUNNING_POWER_GCT_MISSING_2026-10-17.md)：

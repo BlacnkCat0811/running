@@ -34,7 +34,7 @@ struct TechRunCoachView: View {
                 if native.isCoachLoopManaged {
                     TechCoachLoopSection()
                 } else if let plan {
-                    if plan.status == "active", native.handshake?.planSnapshotContractVersion != nil {
+                    if plan.status == "active", native.usesIntegratedPlanContract {
                         Button("按最新训练事实调整计划") { Task { await native.changeRunCoach(action: "refresh") } }
                             .disabled(controlsUnavailable)
                     }

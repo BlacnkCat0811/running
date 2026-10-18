@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { InferenceSession, Tensor } from "onnxruntime-node";
+import type { InferenceSession } from "onnxruntime-node";
 import {
   CATBOOST_PREDICTION_MODEL_VERSION,
   PREDICTION_CORRECTION_CAP_FRACTION,
@@ -51,6 +51,25 @@ export interface CatBoostPredictionResult {
 
 const sha256 = (value: Uint8Array): string =>
   createHash("sha256").update(value).digest("hex");
+
+/**
+ * 🔴 `onnxruntime-node` **只能惰性加载**：它是带原生绑定的可选依赖，模块加载期就
+ * `dlopen` 一个平台相关的 `.node`。此前的顶层 `import { InferenceSession, Tensor }`
+ * 让**任何**导入闭包触及本包的文件（`@rai/application` barrel → `prediction-report` /
+ * `prediction-training-data` → 本包）在加载期就尝试加载原生库，于"签名/Team ID 与
+ * 宿主不匹配"的机器上直接 `ERR_DLOPEN_FAILED` —— 实测 2026-10-18：15 个 `apps/api/test`
+ * 文件（含 `training-plan-state.test.ts` 与 `server-runtime.test.ts`）一个断言都没跑就整批红，
+ * 而它们与 ONNX 毫无关系。纯函数（manifest 断言、残差换算）必须能在没有原生绑定的
+ * 环境里被导入与测试。
+ *
+ * 代价与边界：动态 import 只在**真正推理**时发生（`load()` / `predict()`），失败仍是
+ * 明确的抛错，不会退化成"静默不校准"；Node 会缓存该模块，重复调用不重复加载。
+ */
+let onnxRuntime: Promise<typeof import("onnxruntime-node")> | null = null;
+function loadOnnxRuntime(): Promise<typeof import("onnxruntime-node")> {
+  onnxRuntime ??= import("onnxruntime-node");
+  return onnxRuntime;
+}
 
 const clamp = (value: number, minimum: number, maximum: number): number =>
   Math.min(maximum, Math.max(minimum, value));
@@ -152,7 +171,8 @@ export class OnnxCatBoostResidualModel {
     if (sha256(modelBytes) !== parsed.modelSha256) {
       throw new Error("CatBoost ONNX artifact hash mismatch");
     }
-    const session = await InferenceSession.create(modelBytes, {
+    const { InferenceSession: OnnxInferenceSession } = await loadOnnxRuntime();
+    const session = await OnnxInferenceSession.create(modelBytes, {
       executionProviders: ["cpu"],
       graphOptimizationLevel: "all"
     });
@@ -194,7 +214,8 @@ export class OnnxCatBoostResidualModel {
       if (!Number.isFinite(value)) throw new Error(`CatBoost feature must be finite: ${name}`);
       return value;
     });
-    const tensor = new Tensor("float32", Float32Array.from(values), [1, values.length]);
+    const { Tensor: OnnxTensor } = await loadOnnxRuntime();
+    const tensor = new OnnxTensor("float32", Float32Array.from(values), [1, values.length]);
     const outputs = await this.session.run({ [this.manifest.inputName]: tensor });
     const output = outputs[this.manifest.outputName];
     if (!output || output.data.length !== 1) {

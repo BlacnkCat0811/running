@@ -56,6 +56,12 @@ struct TrainingPlanRepository {
 
 extension PlanReadIssue {
     static func network(_ error: Error) -> Self {
+        // 2026-10-18（审查 P2-8）：安全字段校验失败不是"协议形状不兼容"。
+        // 若误归成 contractMismatch，面板会提示"升级 App/服务端版本"，
+        // 而真实原因是这一份快照不可信。保持不可重试、单独分类。
+        if let validation = error as? PlanSnapshotValidationError {
+            return .init(code: .snapshotValidationFailed, message: validation.message)
+        }
         let code: Code
         switch error {
         case RaiAPIClientError.unavailable: code = .offline
@@ -63,6 +69,10 @@ extension PlanReadIssue {
         case RaiAPIClientError.unauthorized: code = .unauthorized
         case RaiAPIClientError.decoding: code = .contractMismatch
         case RaiAPIClientError.server(_, _, let status): code = status == 409 ? .revisionConflict : status == 404 ? .contractMismatch : .serverUnavailable
+        // 2026-10-18（审查 P2-6 收尾）：503 + Retry-After 仍只是"服务端暂时不可用"，
+        // 不能因为携带重试提示就归成 contractMismatch；保留可重试分类。
+        case RaiAPIClientError.retryableServer(_, _, let status, _):
+            code = status == 409 ? .revisionConflict : status == 404 ? .contractMismatch : .serverUnavailable
         default: code = .serverUnavailable
         }
         return .init(code: code, message: error.localizedDescription)

@@ -43,6 +43,75 @@ import Foundation
         precondition(encoded["expectedRevision"] as? Int == 4)
         precondition(encoded["performanceProtocol"] as? String == "five_k_time_trial")
         precondition(encoded["statisticsParticipation"] as? String == "include")
+
+        // 2026-10-18（审查 P2-10）：提醒上下文必须显式区分合同。旧实现把
+        // `canConfirmToday` 当"提醒可用性"，而教练闭环下 today == nil ⇒ 提醒静默失效。
+        let contextNow = ISO8601DateFormatter().date(from: "2026-09-29T00:00:00Z")!
+        let todayJSON = """
+        {"generatedAt":"2026-09-29T00:00:00Z","timezone":"Asia/Shanghai","latestDataDate":null,"lastSyncedAt":null,
+         "sync":{"status":"never","lastAttemptAt":null,"lastSuccessAt":null,"error":null},
+         "coverage":{"latestTrainingDate":null,"latestHealthSampleAt":null,
+          "sleep":{"state":"none","latestDate":null},"hrv":{"state":"none","latestDate":null},
+          "restingHeartRate":{"state":"none","latestDate":null}},
+         "recoveryAssessment":{"targetDate":"2026-09-29","coverage":"none","assessment":"not_assessed","reasonCodes":[],"lastObservationDate":null},
+         "recommendation":{"planRevision":1,"basis":"training_load_and_plan","recoveryAdjustment":"none","uncertaintyReasons":[],"reasonCodes":[]},
+         "freshness":{"state":"unknown","checkedAt":null,"latestTrainingDate":null,"recoveryDate":null},
+         "recommendationRevision":"fixture",
+         "today":{"localDate":"2026-09-29","distanceKm":0,"durationSeconds":0,"paceSecondsPerKm":null,"energyKcal":null,"workoutCount":0},
+         "week":{"periodStart":"2026-09-28","periodEnd":"2026-10-04","distanceKm":0,"durationSeconds":0,"workoutCount":0},
+         "weekDaily":[],"recentWorkouts":[],
+         "ability":{"trueAbility":null,"currentAbility":null,"changeFrom7DaysAgo":null,"growthVelocityPerWeek":null,"decayPoints":0,"snapshotDate":null,"explanation":""},
+         "calibration":{"status":"not_started","eligibleSessions":0,"eligibleDurationMinutes":0,"spanDays":0,"highCoverageSessions":0,"requirements":{"sessions":12,"durationMinutes":360,"spanDays":28,"highCoverageSessions":6},"message":""},
+         "verdict":{"tone":"yellow","title":"","reason":"","triggers":[],"stale":false,"reasonCodes":[]},
+         "nextSession":{"kind":"rest","title":"","reason":"","distanceKm":null,"durationMinutes":null,"paceSecondsPerKmLower":null,"paceSecondsPerKmUpper":null,"heartRateBpmLower":null,"heartRateBpmUpper":null,"structure":null},
+         "recovery":{"score":null,"lastNightSleepMinutes":null,"sleepBaselineMinutes":null,"morningHrvMs":null,"hrvBaselineMs":null,"restingHeartRateBpm":null,"restingHeartRateBaselineBpm":null,"state":"unknown","hrvSampleCount":0,"note":""},
+         "weekStructure":{"easyDurationFraction":null,"easyDurationFloorFraction":0.7,"qualitySessionCount":0,"qualitySessionCap":2,"easyHonesty":{"intendedEasyCount":0,"easyEnoughCount":0,"honestyFraction":null,"note":""}},
+         "race":{"target":null,"daysUntil":null,"taper":false,"shapeScore":null,"volumeFraction":null,"longRunFraction":null,"note":""},
+         "injuryFlags":[],"weekPlan":[],"phase":"morning_open","lock":{"present":false,"relockSuggested":false,"lockedAt":null}}
+        """
+        let legacyToday = try JSONDecoder().decode(MobileTodayResponse.self, from: Data(todayJSON.utf8))
+        let legacyContext = TrainingReminderPolicy.context(isCurrent: true, persistenceFailed: false,
+            legacyToday: legacyToday, legacyPlan: plan, completedDates: [], coachLoop: nil, now: contextNow)
+        precondition(legacyContext.available && legacyContext.plan?.days.count == plan.days.count,
+                     "a current legacy plan yields a schedulable reminder context")
+        precondition(!TrainingReminderPolicy.context(isCurrent: false, persistenceFailed: false,
+            legacyToday: legacyToday, legacyPlan: plan, completedDates: [], coachLoop: nil, now: contextNow).available,
+            "an unconfirmed plan cannot schedule reminders")
+        precondition(!TrainingReminderPolicy.context(isCurrent: true, persistenceFailed: true,
+            legacyToday: legacyToday, legacyPlan: plan, completedDates: [], coachLoop: nil, now: contextNow).available,
+            "unpersisted safety state cannot schedule reminders")
+        let nextBusinessDay = ISO8601DateFormatter().date(from: "2026-09-30T00:00:00Z")!
+        precondition(!TrainingReminderPolicy.context(isCurrent: true, persistenceFailed: false,
+            legacyToday: legacyToday, legacyPlan: plan, completedDates: [], coachLoop: nil, now: nextBusinessDay).available,
+            "a yesterday plan cannot schedule reminders after the business day ends")
+
+        // 教练闭环：只提醒今天已发布的完整课；refreshRequired 时仅作参照。
+        let loopData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
+        let loop = try JSONDecoder().decode(CoachLoopResponse.self, from: loopData)
+        let loopNow = ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")!
+        let loopContext = TrainingReminderPolicy.context(isCurrent: true, persistenceFailed: false,
+            legacyToday: nil, legacyPlan: nil, completedDates: [], coachLoop: loop, now: loopNow)
+        precondition(loopContext.available && loopContext.plan?.windowDays == 1,
+                     "coach-loop reminders target today's published course only")
+        precondition(TrainingReminderPolicy.slots(plan: loopContext.plan, completedDates: [], hour: 8, now: loopNow).count <= 1,
+                     "coach-loop reminder slots never invent future days")
+        var loopObject = try JSONSerialization.jsonObject(with: loopData) as! [String: Any]
+        loopObject["refreshRequired"] = true
+        let refreshRequiredLoop = try JSONDecoder().decode(CoachLoopResponse.self,
+            from: try JSONSerialization.data(withJSONObject: loopObject))
+        precondition(!TrainingReminderPolicy.context(isCurrent: true, persistenceFailed: false,
+            legacyToday: nil, legacyPlan: nil, completedDates: [], coachLoop: refreshRequiredLoop, now: loopNow).available,
+            "a refresh-required coach-loop snapshot is reference-only for reminders")
+
+        // 2026-10-18（审查 P2-11）：比赛日期固定在业务时区（本测试开头已把设备默认时区设为 UTC）。
+        precondition(NativeRaceGoalDraft.dateFormatter.timeZone.identifier == "Asia/Shanghai",
+                     "race target dates must use the business timezone, not the device timezone")
+        let shanghaiMidnight = ISO8601DateFormatter().date(from: "2026-10-08T16:30:00Z")!
+        precondition(NativeRaceGoalDraft.businessLocalDate(shanghaiMidnight) == "2026-10-09",
+                     "16:30Z is already the next business day in Shanghai")
+        let lateEvening = ISO8601DateFormatter().date(from: "2026-10-08T15:30:00Z")!
+        precondition(NativeRaceGoalDraft.businessLocalDate(lateEvening) == "2026-10-08",
+                     "23:30 Shanghai stays on the same business day")
         print("User experience policy, reminders and feedback round-trip checks passed")
     }
 }

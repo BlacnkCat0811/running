@@ -1,7 +1,8 @@
 import { workoutExportQuerySchema } from "./workout-summary-export.js";
 import { DATABASE_TIMEZONE, MOBILE_SESSION_KINDS } from "@rai/contracts";
 // `stagesMs` 的键枚举从契约的**运行期单一来源**生成（审查 A1：手抄列表漏过 directSyncApply）。
-import { IMPORT_STAGES } from "@rai/api-contracts";
+// `plan-operations` 的四种状态同理：summary 不许手抄（审查 P2-14 实测漏了 scopeMismatch）。
+import { IMPORT_STAGES, MOBILE_PLAN_OPERATION_QUERY_STATUSES } from "@rai/api-contracts";
 
 import {
   MAX_ALERT_HEART_RATE_BPM,
@@ -802,6 +803,17 @@ const operation = (
   summary: string,
   extras: Record<string, unknown> = {}
 ) => ({ tags, summary, responses: responses(summary), ...extras });
+/**
+ * `GET /v1/mobile/plan-operations/:id` 的 summary **由共享状态表生成**。
+ *
+ * 2026-10-18 审查（P2-14）实测：手写的 summary 是
+ * "committed、notFound 或 expired"，而实现与 iOS 都按**四种**状态处理，
+ * 少了 `scopeMismatch`（它是终局状态，iOS 会因此作废本地账目）。手抄的枚举
+ * 与实现之间没有任何门禁，所以这里改成派生，状态表加一个词 summary 自动跟随。
+ */
+const planOperationQuerySummary =
+  `查询原发布操作：${MOBILE_PLAN_OPERATION_QUERY_STATUSES.join("、")}（四种终局状态；只有 notFound 可按原键重放，expired 返回 410）`;
+
 const pathId = [{
   name: "id", in: "path", required: true,
   schema: identifier,
@@ -929,7 +941,7 @@ export const openapiDocument = {
     "/v1/training-zones/current": { get: operation(["Read"], "今日心率与配速分区") },
     "/v1/mobile/today": { get: operation(["Read"], "iOS 首页聚合：能力主卡、今日裁决、下一堂课、恢复拆解、跑后结论与周结构") },
     "/v1/mobile/training-plan-state": { get: operation(["Read"], "同一冻结事实视图中的目标、今日、滚动执行窗口与教练摘要") },
-    "/v1/mobile/plan-operations/{id}": { get: operation(["Read"], "查询原发布操作：committed、notFound 或 expired", { parameters: pathId }) },
+    "/v1/mobile/plan-operations/{id}": { get: operation(["Read"], planOperationQuerySummary, { parameters: pathId }) },
     "/v1/mobile/statistics": { get: operation(["Read"], "iOS 统计页聚合：近 3 月分运动类型里程、滚动汇总与心率区间分布") },
     "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：能力曲线、12 周跑量、四周增幅、个人纪录与洞察") },
     "/v1/mobile/goals": {

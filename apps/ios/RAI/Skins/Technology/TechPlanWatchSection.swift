@@ -75,7 +75,7 @@ struct TechPlanWatchSection: View {
                 if let issue = native.planPresentation.issue {
                     Text("\(issue.code.rawValue)：\(issue.message)").font(.caption).foregroundStyle(TechColor.yellow)
                 }
-                if native.handshake?.planSnapshotContractVersion == nil {
+                if !native.usesIntegratedPlanContract {
                     Text("旧服务只校验共享版本，不提供完整事实快照保证；升级服务后可启用强一致读取。")
                         .font(.caption2).foregroundStyle(TechColor.muted)
                 }

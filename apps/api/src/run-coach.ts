@@ -9,7 +9,7 @@ import { constrainUpcomingPlan, mergePlanWindow, weeklyPlanDates } from "./weekl
 import { RunCoachInputError, runCoachDaysBetween, runCoachEndDate, runCoachIsTraining, runCoachPhase, runCoachRaceTarget, runCoachShiftDate, runCoachWeekday, validateRunCoachConfig } from "./run-coach-policy.js";
 import { weeklyCapacity } from "./weekly-capacity.js";
 import { runCoachCommandSchema } from "./schemas.js";
-import { PlanPublicationService } from "./plan-publication.js";
+import { PlanOperationError, PlanPublicationService } from "./plan-publication.js";
 import { SESSION_DOSE_POLICY_VERSION } from "./coach-session-dose.js";
 import { EXECUTION_PROTECTION_POLICY_VERSION, UNSUPPORTED_RACE_PROTECTION_POLICY_VERSION, unsupportedRaceExecutionProtection } from "./race-plan-policy.js";
 import { digest, prescriptionDigest } from "./plan-digest.js";
@@ -332,7 +332,13 @@ export function runCoachResponse(goals: MobileGoalsResponse, inputs: Inputs): Mo
 }
 
 export function registerRunCoachRoutes(args: { app: FastifyInstance; store: MobileGoalsStore; scope?: () => string; identity?: () => MobilePlanOperationScope; inputs: (goals: MobileGoalsResponse) => Inputs }) {
-  const publication = new PlanPublicationService(args.store, args.scope ?? (() => "legacy"), args.identity);
+  // `identity` is required by the publication service so a missing scope
+  // cannot silently disable cross-dataset replay rejection (review P3-9). The
+  // optional route-argument is kept for existing test registrations, but its
+  // absence now fails loudly instead of skipping the check.
+  const publication = new PlanPublicationService(args.store, args.scope ?? (() => "legacy"),
+    args.identity ?? (() => { throw new PlanOperationError("plan_publication_identity_missing",
+      "run-coach 路由必须声明服务/用户/数据集身份。", 500); }));
   args.app.get("/v1/mobile/run-coach", async () => {
     const goals = args.store.read();
     return runCoachResponse(goals, args.inputs(goals));

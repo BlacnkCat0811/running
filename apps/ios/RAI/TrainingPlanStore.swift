@@ -25,6 +25,24 @@ final class TrainingPlanStore {
     private let now: () -> Date
     private(set) var scope: String
     var legacyRetryCount = 2
+    /// 2026-10-18（审查 P2-6）：新快照契约下 `503 plan_snapshot_changed` 是
+    /// "读期间事实变化，请重读"的瞬态信号。旧实现只对旧服务重试，新契约直接
+    /// unavailable。这里做有界退避重试（默认 2 次、150/300ms），测试可注入空数组
+    /// 或毫秒级延迟；重试仍走同一个 requestID/epoch/scope/isValid，取消即放弃，
+    /// 且只重试**读**，从不重放写请求。
+    var snapshotRetryDelays: [TimeInterval] = [0.15, 0.3]
+    /// 2026-10-18（审查 P2-6 收尾）：测试可替换的等待实现；生产用 `Task.sleep`。
+    /// 返回 false 表示被取消/放弃。服务端 `Retry-After` 常是 1 秒，注入 sleeper 后
+    /// 测试可直接断言"按 1 秒重试"，不必真睡 1 秒。
+    var sleepBeforeSnapshotRetry: (TimeInterval) async -> Bool = { seconds in
+        guard seconds > 0 else { return true }
+        do {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            return true
+        } catch {
+            return false
+        }
+    }
 
     init(cache: CacheStore, api: RaiAPIClient, scope: String, now: @escaping () -> Date) {
         self.repository = TrainingPlanRepository(api: api, cache: cache)
@@ -116,6 +134,10 @@ final class TrainingPlanStore {
     }
 
     func acceptCoach(_ value: MobileRunCoachResponse) {
+        // 2026-10-18（审查 P2-9）：教练闭环生效时旧 run-coach 响应不得写回。
+        // 否则"coachLoop=1 且无 snapshot"的错峰组合会在同一次前台刷新里出现两套
+        // 教练状态（`refreshRunCoach` 旧路径与教练闭环路径），破坏状态所有权单源。
+        guard coachLoop == nil else { return }
         guard value.revision >= revision else { return }
         if value.revision != revision { invalidate() }
         minimumRevision = max(minimumRevision, value.revision); coach = value
@@ -157,15 +179,39 @@ final class TrainingPlanStore {
             issue = .init(code: aggregateResult.failureCode ?? .corruptPayload, message: "上次展示快照无法读取，需要联网重建；安全记录仍保留。")
             diagnostic("cache_decode_failed", code: "cache_envelope_invalid")
         }
-        let cachedGoals = aggregate?.value.goals ?? repository.cached(MobileGoalsResponse.self, scope: scope, key: "goals").value?.value
-        let cachedCoach = aggregate?.value.coachSummary ?? repository.cached(MobileRunCoachResponse.self, scope: scope, key: "run-coach").value?.value
+        // 2026-10-18（审查 P3-15）：旧服务/单条缓存路径此前只取聚合的 cachedAt，
+        // 聚合缺失时缓存时间直接丢失，离线文案只能说"上次缓存"。
+        // 这里把实际用到的每条缓存的时间合并成"最近一次缓存时间"。
+        var latestCacheAt = aggregate?.cachedAt
+        func mergeCacheAt(_ value: Date?) {
+            guard let value else { return }
+            if latestCacheAt == nil || value > latestCacheAt! { latestCacheAt = value }
+        }
+        let cachedGoalsValue = aggregate == nil
+            ? repository.cached(MobileGoalsResponse.self, scope: scope, key: "goals").value
+            : nil
+        let cachedCoachValue = aggregate == nil
+            ? repository.cached(MobileRunCoachResponse.self, scope: scope, key: "run-coach").value
+            : nil
+        let cachedTodayValue = aggregate == nil
+            ? repository.cached(MobileTodayResponse.self, scope: scope, key: "today").value
+            : nil
+        let cachedPlanValue = aggregate == nil
+            ? repository.cached(MobileWorkoutPlanResponse.self, scope: scope, key: "workout-plan").value
+            : nil
+        let cachedGoals = aggregate?.value.goals ?? cachedGoalsValue?.value
+        let cachedCoach = aggregate?.value.coachSummary ?? cachedCoachValue?.value
         if let value = cachedGoals, value.revision >= revision { minimumRevision = value.revision; goals = value }
         if let value = cachedCoach, value.revision >= revision { minimumRevision = value.revision; coach = value }
-        let cachedToday = aggregate?.value.today ?? repository.cached(MobileTodayResponse.self, scope: scope, key: "today").value?.value
+        let cachedToday = aggregate?.value.today ?? cachedTodayValue?.value
         if cachedToday?.recommendation.planRevision == revision { today = cachedToday }
-        let cachedPlan = aggregate?.value.workoutPlan ?? repository.cached(MobileWorkoutPlanResponse.self, scope: scope, key: "workout-plan").value?.value
+        let cachedPlan = aggregate?.value.workoutPlan ?? cachedPlanValue?.value
         if cachedPlan?.planRevision == revision { workoutPlan = cachedPlan }
-        cachedAt = aggregate?.cachedAt
+        mergeCacheAt(cachedGoalsValue?.cachedAt)
+        mergeCacheAt(cachedCoachValue?.cachedAt)
+        mergeCacheAt(cachedTodayValue?.cachedAt)
+        mergeCacheAt(cachedPlanValue?.cachedAt)
+        cachedAt = latestCacheAt
         availability = persistenceFailed ? .savedAwaitingRefresh : .cached(asOf: cachedAt)
         isCurrent = false
     }
@@ -182,8 +228,15 @@ final class TrainingPlanStore {
                 if availability == .refreshing { availability = acknowledgement == nil ? .unavailable : .savedAwaitingRefresh }
             }
         }
-        let retries = max(0, min(2, handshake?.planSnapshotContractVersion == nil ? legacyRetryCount : 0))
-        for attempt in 0...retries {
+        let aggregateContract = handshake?.planSnapshotContractVersion != nil
+        let legacyRetries = aggregateContract ? 0 : max(0, min(2, legacyRetryCount))
+        // 新契约的 503 表示"读期间事实变化，可安全重读"；退避重试次数由
+        // `snapshotRetryDelays` 决定，旧契约沿用 `legacyRetryCount`。
+        // `coach_snapshot_changed` 是教练闭环读取的同族信号（批次 A 服务端加入）。
+        let retryableSnapshotCodes: Set<String> = ["plan_snapshot_changed", "coach_snapshot_changed"]
+        let maxAttempts = 1 + (aggregateContract ? snapshotRetryDelays.count : legacyRetries)
+        var snapshotRetriesUsed = 0
+        for attempt in 0..<maxAttempts {
             do {
                 if let version = handshake?.coachLoopContractVersion {
                     guard version == 1 else { throw RaiAPIClientError.decoding("不支持的教练闭环契约，不能回退旧执行协议") }
@@ -245,6 +298,7 @@ final class TrainingPlanStore {
             } catch {
                 guard valid() else { return false }
                 let partial = error as? TrainingPlanPartialReadError
+                // 部分读取的目标/执行数据只作编辑上下文参照，从不单独置 current。
                 if let goals = partial?.goals, goals.revision >= revision {
                     minimumRevision = goals.revision; self.goals = goals
                     serviceReachable = true
@@ -254,17 +308,65 @@ final class TrainingPlanStore {
                     workoutPlan = plan
                     _ = repository.persist(plan, scope: scope, key: "workout-plan")
                 }
-                let reason = PlanReadIssue.network(partial?.cause ?? error)
+                let cause = partial?.cause ?? error
+                var serverCode: String?
+                var retryAfterHint: TimeInterval?
+                if let apiError = cause as? RaiAPIClientError {
+                    // 2026-10-18（审查 P2-6 收尾）：`503 + Retry-After` 现在抛
+                    // `.retryableServer`；它与 `.server` 共用 code/status 语义。
+                    serverCode = apiError.serverCode
+                    if case let .retryableServer(_, _, _, hint) = apiError { retryAfterHint = hint }
+                    if apiError.httpStatus != nil {
+                        // 能收到服务端错误码说明服务可达；否则一次 503/422 会被误报成离线。
+                        serviceReachable = true
+                    }
+                }
+                let reason = PlanReadIssue.network(cause)
                 issue = reason
-                if case RaiAPIClientError.server(let code, _, _) = partial?.cause ?? error, code == "plan_snapshot_changed" {
-                    diagnostic("snapshot_changed", code: code)
-                } else { diagnostic(reason.code == .revisionConflict ? "revision_mismatch" : "snapshot_rejected", code: reason.code.rawValue) }
-                if attempt < retries && reason.retryable { continue }
+                if let serverCode, retryableSnapshotCodes.contains(serverCode) {
+                    diagnostic("snapshot_changed", code: serverCode)
+                } else if reason.code == .revisionConflict {
+                    diagnostic("revision_mismatch", code: reason.code.rawValue)
+                } else if reason.code == .snapshotValidationFailed {
+                    // 2026-10-18（审查 P2-8）：安全字段校验失败单独记码，不与 contract mismatch 混淆。
+                    diagnostic("snapshot_validation_failed", code: reason.code.rawValue)
+                } else {
+                    diagnostic("snapshot_rejected", code: reason.code.rawValue)
+                }
+                // 新契约：只对"事实快照变化"的 503 做有界退避重读；同一 requestID/epoch/scope，
+                // 取消或失效即放弃。写请求从不经过此路径，因此不存在重放写的可能。
+                // 2026-10-18（审查 P2-6 收尾）：延迟优先采用服务端 `Retry-After`
+                // （夹取 0.1...5 秒），没有提示时回退到本地 `snapshotRetryDelays`。
+                if aggregateContract, let serverCode, retryableSnapshotCodes.contains(serverCode),
+                   let delay = Self.snapshotRetryDelay(serverHint: retryAfterHint,
+                       defaults: snapshotRetryDelays, attempt: snapshotRetriesUsed) {
+                    snapshotRetriesUsed += 1
+                    guard await sleepBeforeSnapshotRetry(delay) else {
+                        // 取消不是网络失败：保持"未确认"，不写 issue、不继续重读。
+                        return false
+                    }
+                    guard valid() else { return false }
+                    continue
+                }
+                if !aggregateContract, attempt < legacyRetries, reason.retryable { continue }
                 availability = acknowledgement != nil ? .savedAwaitingRefresh : reason.code == .revisionConflict ? .revisionMismatch : .unavailable
                 return false
             }
         }
         return false
+    }
+
+    /// 2026-10-18（审查 P2-6 收尾）：纯函数选择下一次重试延迟。
+    ///
+    /// - 服务端 `Retry-After` 优先，夹取 `0.1...5` 秒（`RaiRetryAfter` 已把
+    ///   原始值夹到 `0...5`，这里再兜住 0 附近的"立即重试"）；
+    /// - 提示缺失时回退到本地退避计划 `defaults[attempt]`；
+    /// - 计划用尽返回 nil（不再重试）。
+    /// 无 sleep、无状态，测试可直接断言。
+    static func snapshotRetryDelay(serverHint: TimeInterval?, defaults: [TimeInterval], attempt: Int) -> TimeInterval? {
+        if let serverHint { return min(max(serverHint, 0.1), 5) }
+        guard defaults.indices.contains(attempt) else { return nil }
+        return defaults[attempt]
     }
 
     func acceptCoachLoopWrite(_ value: CoachLoopResponse) {
@@ -292,7 +394,7 @@ final class TrainingPlanStore {
               value.days.first?.decisionRef == value.today.decisionRef,
               value.volumePolicy.suggestedWeeklyKm.isFinite, value.volumePolicy.suggestedWeeklyKm >= 0,
               value.volumePolicy.weeklyProtectionKm.isFinite, value.volumePolicy.weeklyProtectionKm >= 0 else {
-            throw RaiAPIClientError.decoding("教练闭环的身份、事实版本或当前日期无效")
+            throw PlanSnapshotValidationError("教练闭环的身份、事实版本或当前日期无效")
         }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: value.timezone)!
         let formatter = DateFormatter(); formatter.calendar = calendar; formatter.timeZone = calendar.timeZone
@@ -304,13 +406,13 @@ final class TrainingPlanStore {
               value.settings?.status == "active" || !value.days.contains(where: \.executable),
               !value.today.executable || value.today.decisionRef == value.volumePolicy.extension.authorizedDecisionRef,
               !value.today.executable || value.volumePolicy.extension.status != "eligible" || value.today.decisionRef != nil else {
-            throw RaiAPIClientError.decoding("教练窗口、生命周期或追加授权不一致")
+            throw PlanSnapshotValidationError("教练窗口、生命周期或追加授权不一致")
         }
         if value.today.executable {
             guard WorkoutPlanMapper.executionMapping(from: value.devicePlan.days[0], hour: 7).status == .exact else {
                 // A refresh-required snapshot is reference-only, not executable.
                 if value.refreshRequired { return }
-                throw RaiAPIClientError.decoding("今日新课型无法无损映射，禁止执行")
+                throw PlanSnapshotValidationError("今日新课型无法无损映射，禁止执行")
             }
         }
     }
@@ -328,18 +430,24 @@ final class TrainingPlanStore {
     private func validate(_ value: TrainingPlanRead, handshake: RaiHandshake?) throws {
         guard value.today.recommendation.planRevision != nil,
               [value.goals.runCoach, value.coach?.plan].compactMap({ $0 }).allSatisfy({ ["active", "paused", "ended"].contains($0.status) }) else {
-            throw RaiAPIClientError.decoding("缺少建议安全版本或教练状态不受支持")
+            throw PlanSnapshotValidationError("缺少建议安全版本或教练状态不受支持")
         }
         guard value.goals.revision >= revision, value.today.recommendation.planRevision == value.goals.revision,
               value.workoutPlan.planRevision == value.goals.revision else {
             throw RaiAPIClientError.server(code: "revision_mismatch", message: "计划版本不一致，请重读完整快照。", status: 409)
         }
         guard value.today.timezone == value.workoutPlan.timezone else {
-            throw RaiAPIClientError.decoding("计划日期或业务时区不一致")
+            throw PlanSnapshotValidationError("计划日期或业务时区不一致")
         }
-        guard let aggregate = value.aggregate else { return }
+        guard let aggregate = value.aggregate else {
+            // 2026-10-18（审查 P2-7）：旧服务三 GET 不能证明"同一事实快照"，
+            // 但当前业务日/时区/窗口/逐日连续性都可以在本地判定；校验失败时
+            // 调用方保持 isCurrent == false，绝不把旧响应标成 current。
+            try validateLegacySnapshot(value)
+            return
+        }
         guard UserDataNoticePolicy.isCurrentDay(value.today.today.localDate, timezone: value.today.timezone, now: now()) else {
-            throw RaiAPIClientError.decoding("完整快照不属于当前业务日期")
+            throw PlanSnapshotValidationError("完整快照不属于当前业务日期")
         }
         let metadata = aggregate.metadata
         guard metadata.contractVersion == 1, metadata.serverId == handshake?.serverId,
@@ -352,17 +460,43 @@ final class TrainingPlanStore {
               metadata.publicationDigest.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
               aggregate.coachSummary.revision == value.goals.revision, ["ready", "empty"].contains(aggregate.availability),
               (1...14).contains(value.workoutPlan.windowDays), value.workoutPlan.days.count == value.workoutPlan.windowDays,
-              let zone = TimeZone(identifier: metadata.timezone) else { throw RaiAPIClientError.decoding("完整快照的安全身份或窗口字段无效") }
+              let zone = TimeZone(identifier: metadata.timezone) else { throw PlanSnapshotValidationError("完整快照的安全身份或窗口字段无效") }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = calendar; formatter.timeZone = zone; formatter.dateFormat = "yyyy-MM-dd"; formatter.isLenient = false
         guard let start = formatter.date(from: metadata.windowStart), formatter.string(from: start) == metadata.windowStart else {
-            throw RaiAPIClientError.decoding("窗口起始日不是真实日期")
+            throw PlanSnapshotValidationError("窗口起始日不是真实日期")
         }
         let dates = (0..<value.workoutPlan.windowDays).map { formatter.string(from: calendar.date(byAdding: .day, value: $0, to: start)!) }
         guard dates == value.workoutPlan.days.map(\.localDate), dates.last == metadata.windowEnd,
               (aggregate.availability == "empty") == !value.workoutPlan.days.contains(where: { $0.executable && $0.kind != "rest" }) else {
-            throw RaiAPIClientError.decoding("逐日身份必须连续、唯一且覆盖闭区间")
+            throw PlanSnapshotValidationError("逐日身份必须连续、唯一且覆盖闭区间")
+        }
+    }
+
+    private func validateLegacySnapshot(_ value: TrainingPlanRead) throws {
+        guard value.today.timezone == "Asia/Shanghai",
+              let zone = TimeZone(identifier: value.today.timezone),
+              UserDataNoticePolicy.isCurrentDay(value.today.today.localDate, timezone: value.today.timezone, now: now()) else {
+            throw PlanSnapshotValidationError("旧服务计划快照不属于当前业务日期或时区不受支持")
+        }
+        let plan = value.workoutPlan
+        guard (1...14).contains(plan.windowDays), !plan.days.isEmpty, plan.days.count <= plan.windowDays,
+              plan.days.first?.localDate == value.today.today.localDate,
+              plan.windowStart == nil || plan.windowStart == plan.days.first?.localDate else {
+            throw PlanSnapshotValidationError("旧服务计划窗口长度或起始日无效")
+        }
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar; formatter.timeZone = zone; formatter.dateFormat = "yyyy-MM-dd"; formatter.isLenient = false
+        guard let start = formatter.date(from: value.today.today.localDate),
+              formatter.string(from: start) == value.today.today.localDate else {
+            throw PlanSnapshotValidationError("旧服务计划起始日不是真实日期")
+        }
+        let dates = (0..<plan.days.count).map { formatter.string(from: calendar.date(byAdding: .day, value: $0, to: start)!) }
+        guard dates == plan.days.map(\.localDate),
+              plan.windowEnd == nil || plan.windowEnd == plan.days.last?.localDate else {
+            throw PlanSnapshotValidationError("旧服务计划逐日身份必须连续、唯一且覆盖闭区间")
         }
     }
 }

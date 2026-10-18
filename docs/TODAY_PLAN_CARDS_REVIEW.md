@@ -73,12 +73,19 @@
 
 ### 🟢 C6 文档口径滞后（✅ 2026-10-11 已订正）
 
-原 `docs/WEB.md:12` 写「今日页显示所处阶段、本周量带与依从性」，与实现不符（实测见下）。
-该行已于 2026-10-11 订正为：**桌面 Web 无该页**；周计划详情/周目标/锁课落在 **web 的 iOS 移动壳**
-（`apps/web/src/ios/`）；而**所处阶段/本周量带/依从性/重排**属服务端 §20 契约
+原 `docs/WEB.md` 第 12 行写「今日页显示所处阶段、本周量带与依从性」，与实现不符（实测见下）。
+该行已于 2026-10-11 订正为：**桌面 Web 无该页**；周计划详情/周目标/锁课落在 web 的 iOS 移动壳；
+而**所处阶段/本周量带/依从性/重排**属服务端 §20 契约
 （`MobileTodayResponse` 的 `periodization`/`adherence`/`replan`）**仅由原生 iOS 呈现**，Web 两侧都不渲染。
 
-实测依据（订正前后一致）：`apps/web/src` 对 `periodization` / `adherence` / `replan` 的引用数为
+> 🔴 **2026-10-18 更新（D17）**：上面这段是 2026-10-11 的时点记录，其中提到的
+> `docs/WEB.md`、`apps/web/src/ios/`（web 的 iOS 移动壳）**已随 Web/macOS 退役一并删除**。
+> 该行文字本身不再存在——不需要"订正它"，需要的是**不要在文档里继续引用它**。
+> 当前口径见 [DECISIONS](DECISIONS.md) D17 与 [ADR-006](adr/ADR-006-retire-web-and-macos.md)：
+> 原生 iOS 是唯一客户端，周计划/锁课/撤销入口全在 `apps/ios/RAI/Skins/Technology/`。
+> 本节保留为历史，是为了记录"两张计划卡口径冲突"的原始诊断，不代表 Web 还有对应页面。
+
+实测依据（订正前后一致）：当时的 `apps/web/src` 对 `periodization` / `adherence` / `replan` 的引用数为
 **0**（实测 grep 为空，`volumeBandKm`/`weeksToRace`/`observedDistanceKm` 同样为 0）
 ⇒ 这两张卡只在**原生 iOS**（`apps/ios/RAI/Skins/Technology/TechCoachWeekSection.swift`）呈现。
 

@@ -97,6 +97,13 @@ import { planDayWithLock, type MobileGoalsStore, type PlanHistoryRevision } from
 import { digest, executionContent } from "./plan-digest.js";
 import { runCoachResponse } from "./run-coach.js";
 import { PlanOperationError } from "./plan-publication.js";
+import {
+  planReadGuard,
+  readSnapshotFileIdentity,
+  readSnapshotGuardSafe,
+  type PublicationGuardCapableStore
+} from "./plan-read-consistency.js";
+import { isPublicationGuardPending, publicationGuardChanged } from "./publication-guard.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { constrainUpcomingPlan } from "./weekly-plan-service.js";
 import { weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
@@ -195,6 +202,20 @@ const missingSegmentsNote = (eventCount: number, plan: MatchedPlanDay | null): s
 interface ZoneExposureRow {
   zone: string;
   durationSeconds: number;
+}
+
+/**
+ * One successfully built candidate of `trainingPlanState`, kept together with
+ * the control snapshot it was built from so the post-commit verification can
+ * re-measure goals with the same prescription (and compare digests) without
+ * re-reading the control store a third time.
+ */
+interface TrainingPlanStateBuilt {
+  result: TrainingPlanStateResponse;
+  prescription: ReturnType<typeof zonePrescription>;
+  measuredGoals: MobileGoalsResponse;
+  history: PlanHistoryRevision[];
+  controlDigest: string;
 }
 
 export class RaiReadStore {
@@ -513,13 +534,29 @@ export class RaiReadStore {
   }
 
   trainingPlanState(store: MobileGoalsStore, identity: () => { serverId: string; athleteId: string; datasetEpoch: string }): TrainingPlanStateResponse {
+    // The control-store owner may not expose the publication guard on every code
+    // path yet (and a test double may not implement it). Without a guard reader
+    // the per-attempt digest verification below stays the only cross-store check
+    // — exactly the pre-guard behaviour (review batch-B guard contract).
+    const readGuard = planReadGuard(store as unknown as PublicationGuardCapableStore);
     for (let attempt = 0; attempt < 3; attempt++) {
-      const fileIdentity = statSync(this.path);
+      // P2-5: a publisher swapping the database file (import publication/restore)
+      // or a transient mount error used to make `statSync` throw ENOENT/EACCES/EIO
+      // straight into the generic 500 handler. Treat it as "the snapshot may have
+      // changed", retry, then report the same retryable 503 as the other checks.
+      const fileIdentity = readSnapshotFileIdentity(this.path);
+      if (fileIdentity === null) {
+        this.cache.clear();
+        continue;
+      }
+      const guardBefore = readSnapshotGuardSafe(readGuard);
+      if (guardBefore !== null && isPublicationGuardPending(guardBefore)) {
+        this.cache.clear();
+        continue;
+      }
       const scope = identity();
-      const goals = store.read();
-      const controlDigest = digest({ goals, history: store.planHistory(200) });
       const version = this.database.prepare("PRAGMA data_version").get()!.data_version;
-      let result: TrainingPlanStateResponse;
+      let built: TrainingPlanStateBuilt | null = null;
       this.database.exec("BEGIN DEFERRED");
       try {
         const localDate = mobileLocalDate();
@@ -536,30 +573,44 @@ export class RaiReadStore {
           restingHeartRate: this.database.prepare(`SELECT id, start_at, source_category, value_numeric FROM health_records
             WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate' AND start_at >= ? ORDER BY start_at, id`).all(`${shiftMobileDate(localDate, -70)}T00:00:00Z`)
         };
-        const measuredGoals = store.read({ prescription: this.mobilePlanPrescription() });
-        const computed = this.mobileTodayWithExecutablePlan(measuredGoals, store.planHistory(200));
+        // Review batch C (read amplification): each control table is read exactly
+        // once per attempt — the same goals/history pair feeds the before-digest
+        // and the build. The post-commit verification below reads one more pair
+        // (the minimum a stable-snapshot check needs).
+        const prescription = this.mobilePlanPrescription();
+        const measuredGoals = store.read({ prescription });
+        const history = store.planHistory(200);
+        const controlDigest = digest({ goals: measuredGoals, history });
+        const computed = this.mobileTodayWithExecutablePlan(measuredGoals, history);
         const { today, effective } = computed;
         const inputs = this.mobileWeeklyPlanInputs(measuredGoals, undefined, computed);
         const ruleVersion = "rai-effective-plan-v1";
         const publicationDigest = digest(publications);
         const windowStart = today.today.localDate;
         const windowEnd = shiftMobileDate(windowStart, effective.windowDays - 1);
+        // P3-2: `today` also carries plan-history-derived display facts
+        // (adherence/replan/recentPlanExecution). Ordinary writes always bump
+        // `goalsRevision`, but a migration or an external writer can change only
+        // the history table. Including its digest changes `coherenceToken` once
+        // for already-saved tokens — an accepted rebuild signal (same equality-only
+        // use on the client), and the token now covers every input of the payload.
+        const historyDigest = digest(history);
         const coherenceToken = digest({
-          scope, goalsRevision: goals.revision, ruleVersion, publicationDigest,
+          scope, goalsRevision: measuredGoals.revision, ruleVersion, publicationDigest,
           timezone: DATABASE_TIMEZONE, localDate: windowStart, windowStart, windowEnd,
           calibration: today.calibration.status, injury: today.injuryFlags.map(flag => flag.code),
           training: today.today, week: today.week, capacity: inputs.weeklyVolumeBaselineKm,
           previous: inputs.previousWeekDistanceKm, recent: inputs.recentWeeklyKm,
           completed: today.weekPlan.filter(day => day.completedWorkoutId !== null).map(day => day.localDate),
-          prescription: inputs.prescription, content: executionContent(effective.days)
+          prescription: inputs.prescription, content: executionContent(effective.days), historyDigest
         });
         // 两块视图在**同一个**读事务里取（`factAnalysisBlocks` 会再开一个 `BEGIN DEFERRED`，
         // 所以这里必须用它的**事务内**形态，而不是 `factAnalysisBlocks` 自己）。
         const planView = readFactReadViewInTransaction(this.database, {
           factRows: 100, analysisRows: 200
         });
-        result = {
-          metadata: { contractVersion: 1, ...scope, goalsRevision: goals.revision, coherenceToken,
+        const result: TrainingPlanStateResponse = {
+          metadata: { contractVersion: 1, ...scope, goalsRevision: measuredGoals.revision, coherenceToken,
             timezone: DATABASE_TIMEZONE, localDate: windowStart, windowStart, windowEnd, ruleVersion, publicationDigest },
           availability: effective.days.some(day => day.executable && day.kind !== "rest") ? "ready" : "empty",
           goals: measuredGoals, today, workoutPlan: { ...effective, windowStart, windowEnd },
@@ -576,19 +627,42 @@ export class RaiReadStore {
           publishedAnalysis: planView.analysis
         };
         result.metadata = { ...result.metadata, versions: planView.versions, freshness: planView.freshness };
+        built = { result, prescription, measuredGoals, history, controlDigest };
         this.database.exec("COMMIT");
       } catch (error) {
         this.database.exec("ROLLBACK");
         throw error;
       }
-      const unchanged = version === this.database.prepare("PRAGMA data_version").get()!.data_version &&
-        controlDigest === digest({ goals: store.read(), history: store.planHistory(200) }) &&
-        digest(scope) === digest(identity()) && result.metadata.localDate === mobileLocalDate();
-      const currentFile = statSync(this.path);
+      if (built === null) {
+        // Unreachable: the try block either assigns `built` or rethrows.
+        throw new PlanOperationError("plan_snapshot_changed", "训练事实在读取期间变化，请重试完整快照。", 503);
+      }
+      const guardAfter = readSnapshotGuardSafe(readGuard);
+      const currentFile = readSnapshotFileIdentity(this.path);
+      if (currentFile === null) {
+        this.cache.clear();
+        continue;
+      }
       if (fileIdentity.ino !== currentFile.ino || fileIdentity.mtimeMs !== currentFile.mtimeMs) {
         throw new PlanOperationError("plan_snapshot_changed", "训练数据库在读取期间发布，请重读完整快照。", 503);
       }
-      if (unchanged) return result;
+      if (guardBefore !== null && guardAfter !== null &&
+          publicationGuardChanged(guardBefore, guardAfter) !== null) {
+        this.cache.clear();
+        continue;
+      }
+      // Second (and last) control read pair per attempt. Re-measuring with the
+      // prescription captured from the frozen snapshot keeps the digest
+      // comparable without touching the main database again.
+      const currentGoals = store.read({ prescription: built.prescription });
+      const currentHistory = store.planHistory(200);
+      const currentIdentity = identity();
+      const identityChanged = scope.serverId !== currentIdentity.serverId ||
+        scope.athleteId !== currentIdentity.athleteId || scope.datasetEpoch !== currentIdentity.datasetEpoch;
+      const unchanged = version === this.database.prepare("PRAGMA data_version").get()!.data_version &&
+        built.controlDigest === digest({ goals: currentGoals, history: currentHistory }) &&
+        !identityChanged && built.result.metadata.localDate === mobileLocalDate();
+      if (unchanged) return built.result;
       this.cache.clear();
     }
     throw new PlanOperationError("plan_snapshot_changed", "训练事实在读取期间变化，请重试完整快照。", 503);

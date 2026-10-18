@@ -64,7 +64,28 @@ enum RaiAPIClientError: LocalizedError {
     case unavailable
     case timedOut
     case server(code: String, message: String, status: Int)
+    /// 2026-10-18（审查 P2-6 收尾）：可重试的临时服务端错误，携带服务端
+    /// `Retry-After` 建议。**只有** `503` + 可解析的整数秒头才使用它：
+    /// 通用的 5xx/网络中断没有得到"一秒后就一定好"的证据，仍走 `.server`。
+    /// 独立 case 是为了不破坏既有 19 处 `case .server(code, _, _)` 三元模式。
+    case retryableServer(code: String, message: String, status: Int, retryAfterSeconds: TimeInterval?)
     case decoding(String)
+
+    /// 服务端错误码（`.server` 与 `.retryableServer` 共用；其它错误为 nil）。
+    var serverCode: String? {
+        switch self {
+        case let .server(code, _, _), let .retryableServer(code, _, _, _): return code
+        default: return nil
+        }
+    }
+
+    /// 服务端 HTTP 状态码（`.server` 与 `.retryableServer` 共用；其它错误为 nil）。
+    var httpStatus: Int? {
+        switch self {
+        case let .server(_, _, status), let .retryableServer(_, _, status, _): return status
+        default: return nil
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -78,9 +99,30 @@ enum RaiAPIClientError: LocalizedError {
             return "连接 RAI 服务超时，请确认服务正在运行且网络通畅。"
         case let .server(_, message, _):
             return message
+        case let .retryableServer(_, message, _, _):
+            return message
         case let .decoding(message):
             return "服务返回的数据版本不兼容：\(message)"
         }
+    }
+}
+
+/// 2026-10-18（审查 P2-6 收尾）：`Retry-After` 的解析规则。
+///
+/// RFC 7231 允许 HTTP-date，但本客户端只消费**整数秒**形式：HTTP-date 需要与
+/// 本机时钟对齐，而计划快照重试的语义是"一秒后重读"，日期形式的收益为零、风险
+/// （时钟偏差）更大，因此一律忽略。解析成功也夹取 `0...5`：服务端给出的更长等待
+/// 不应让一次前台刷新卡住，对应服务端当前只会发 `1`（`api-error.ts` 的
+/// `retryAfterSeconds`）。
+nonisolated enum RaiRetryAfter {
+    static let allowedRange: ClosedRange<TimeInterval> = 0...5
+
+    static func seconds(from rawValue: String?) -> TimeInterval? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // `Int` 严格整数：`"1.5"`、`"Wed, 21 Oct 2015 07:28:00 GMT"` 等都返回 nil。
+        guard let parsed = Int(trimmed) else { return nil }
+        return min(max(TimeInterval(parsed), allowedRange.lowerBound), allowedRange.upperBound)
     }
 }
 
@@ -173,41 +215,29 @@ struct RaiAPIClient {
     /// paired-Watch visibility is a separate manual acceptance step.
     /// Registration failure does not revoke SDK readback; the coordinator keeps
     /// the exact exported receipt for an explicit foreground retry.
+    ///
+    /// 2026-10-18（审查 P1-1）：v2 回执的规范线格式是**显式 null**——
+    /// `warmup` / `cooldown` / 每个 step 的 `alert` / `alert.lower` / `alert.upper`
+    /// 缺省时必须写 `null`，而不是像合成 Codable 那样省略键。此前只有教练闭环
+    /// 分支手工补 null，普通手动计划直接发送合成 Codable ⇒ 合法回执被 422 终局拒绝
+    /// （`plan_receipt_evidence_mismatch`）或 500（`step()` 读到 `undefined`）。
+    /// 服务端已同时接受两种形状（P1-1 修复：先规范化再比较/落库），客户端仍统一写
+    /// 规范形状，既保持跨客户端身份一致，也能让尚未升级的服务端接受。
+    /// 现在**所有** v2 回执统一走 `planSyncWireBody`；legacy 手动计划回执仍保持
+    /// 合成 Codable 的省略语义（`PlanSyncReceipt.useLegacyContract`）。
     func recordPlanSync(
         _ receipt: PlanSyncReceipt,
         baseURL: URL,
         token: String
     ) async throws -> PlanSyncReceiptResponse {
-        if receipt.coachLoop != nil {
-            // Synthesized Codable omits nil optionals. The new contract needs
-            // an explicit null decisionRef for regular courses and canonical
-            // null alerts/bounds for cold-start steps, not invented targets.
-            var object = try JSONSerialization.jsonObject(with: encoder.encode(receipt)) as! [String: Any]
-            var context = object["coachLoop"] as! [String: Any]
-            if let decisionRef = receipt.coachLoop?.decisionRef { context["decisionRef"] = decisionRef }
-            else { context["decisionRef"] = NSNull() }
-            object["coachLoop"] = context
-            if var structure = object["structure"] as? [String: Any] {
-                func step(_ value: Any?) -> Any {
-                    guard var result = value as? [String: Any] else { return NSNull() }
-                    if var alert = result["alert"] as? [String: Any] {
-                        alert["lower"] = alert["lower"] ?? NSNull()
-                        alert["upper"] = alert["upper"] ?? NSNull()
-                        result["alert"] = alert
-                    } else { result["alert"] = NSNull() }
-                    return result
-                }
-                structure["warmup"] = step(structure["warmup"])
-                structure["cooldown"] = step(structure["cooldown"])
-                structure["blocks"] = (structure["blocks"] as? [[String: Any]] ?? []).map { block in
-                    var value = block
-                    value["steps"] = (block["steps"] as? [Any] ?? []).map { step($0) }
-                    return value
-                }
-                object["structure"] = structure
-            }
-            return try await request(path: "/v1/mobile/coach-loop/synced", query: [], method: "POST",
-                body: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), baseURL: baseURL, token: token)
+        // Legacy coach-loop receipts already went through the explicit-null
+        // encoding before v2 existed, so they keep the exact same bytes.
+        if receipt.contractVersion == 2 || receipt.coachLoop != nil {
+            let path = receipt.coachLoop == nil
+                ? "/v1/mobile/workout-plan/synced"
+                : "/v1/mobile/coach-loop/synced"
+            return try await request(path: path, query: [], method: "POST",
+                body: try planSyncWireBody(receipt), baseURL: baseURL, token: token)
         }
         return try await send(
             path: "/v1/mobile/workout-plan/synced",
@@ -216,6 +246,50 @@ struct RaiAPIClient {
             baseURL: baseURL,
             token: token
         )
+    }
+
+    /// v2 回执的规范 wire 形状：缺失的可选键写成显式 `null`。
+    ///
+    /// 服务端把结构规范化后再计算摘要与落库，并接受省略 nil 的旧形状；但规范
+    /// wire 形状仍要求显式 null（`warmup`/`cooldown`/`alert`/`lower`/`upper`
+    /// 缺省即 `null`），这样同一条处方在两端得到同一个身份，未升级的服务端也能
+    /// 通过它自己的规范化校验。教练闭环的 `decisionRef` 同样必须显式 null：
+    /// 常规课没有决策引用，但键不能消失。
+    ///
+    /// 放在客户端而不是给 DTO 写 `encode(to:)`：legacy v1 与本地缓存解码必须继续
+    /// 保持"省略 nil"的旧语义（`PlanSyncReceipt.useLegacyContract`）。
+    private func planSyncWireBody(_ receipt: PlanSyncReceipt) throws -> Data {
+        // 2026-10-18（审查 P3-17）：编码形状变化时安全失败，不能在主线程 `as!` trap。
+        guard let objectValue = try JSONSerialization.jsonObject(with: encoder.encode(receipt)) as? [String: Any] else {
+            throw RaiAPIClientError.decoding("回执无法编码为 JSON 对象")
+        }
+        var object = objectValue
+        if let coachLoop = receipt.coachLoop {
+            var context = object["coachLoop"] as? [String: Any] ?? [:]
+            if let decisionRef = coachLoop.decisionRef { context["decisionRef"] = decisionRef }
+            else { context["decisionRef"] = NSNull() }
+            object["coachLoop"] = context
+        }
+        if var structure = object["structure"] as? [String: Any] {
+            func step(_ value: Any?) -> Any {
+                guard var result = value as? [String: Any] else { return NSNull() }
+                if var alert = result["alert"] as? [String: Any] {
+                    alert["lower"] = alert["lower"] ?? NSNull()
+                    alert["upper"] = alert["upper"] ?? NSNull()
+                    result["alert"] = alert
+                } else { result["alert"] = NSNull() }
+                return result
+            }
+            structure["warmup"] = step(structure["warmup"])
+            structure["cooldown"] = step(structure["cooldown"])
+            structure["blocks"] = (structure["blocks"] as? [[String: Any]] ?? []).map { block in
+                var value = block
+                value["steps"] = (block["steps"] as? [Any] ?? []).map { step($0) }
+                return value
+            }
+            object["structure"] = structure
+        }
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
     func predictions(baseURL: URL, token: String) async throws -> NativePredictionResponse {
@@ -356,18 +430,24 @@ struct RaiAPIClient {
             // 2026-10-15（审查 C-🔡3）：429 的 `Retry-After` 是服务端给出的**建议等待秒数**
             // （`apps/api/src/server.ts` 对 429 恒带该头）。折叠进文案，让"容量瞬时满"
             // 与"确定性拒绝"在提示层可分（此前两者文案完全一样，重试节奏只能靠猜）。
+            let headerRetryAfter = RaiRetryAfter.seconds(from: (response as? HTTPURLResponse)?
+                .value(forHTTPHeaderField: "Retry-After"))
             let retryHint: String
-            if status == 429,
-               let seconds = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap({ Int($0) }) {
-                retryHint = "（建议 \(seconds) 秒后重试）"
+            if status == 429, let headerRetryAfter {
+                retryHint = "（建议 \(Int(headerRetryAfter)) 秒后重试）"
             } else {
                 retryHint = ""
             }
-            throw RaiAPIClientError.server(
-                code: apiError?.code ?? "http_\(status)",
-                message: (apiError?.message ?? "服务器返回 HTTP \(status)") + retryHint,
-                status: status
-            )
+            let code = apiError?.code ?? "http_\(status)"
+            let message = (apiError?.message ?? "服务器返回 HTTP \(status)") + retryHint
+            // 2026-10-18（审查 P2-6 收尾）：只有 503 + 可解析的 Retry-After 才升级成
+            // "可重试的错误"，供新快照契约按服务端提示退避；其余响应保持旧 `.server`，
+            // 既有模式匹配点不受影响。
+            if status == 503, let headerRetryAfter {
+                throw RaiAPIClientError.retryableServer(code: code, message: message,
+                    status: status, retryAfterSeconds: headerRetryAfter)
+            }
+            throw RaiAPIClientError.server(code: code, message: message, status: status)
         }
         do {
             return try decoder.decode(T.self, from: data)

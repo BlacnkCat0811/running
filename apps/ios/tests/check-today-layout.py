@@ -30,6 +30,15 @@ assert ".disabled(lockDisabled(data))" in recommendation
 assert ".foregroundStyle(lockDisabled(data) ? TechColor.muted : TechColor.actionInk)" in recommendation
 assert ".background(lockDisabled(data) ? TechColor.grid : TechColor.action, in: TechSurfaceShape())" in recommendation, \
     "Unavailable lock actions must be neutral, not a live Volt CTA"
+# 2026-10-18（审查 P3-18 / docs/TODAY_PLAN_CARDS_REVIEW A1/A2/A3/A4）：
+# 今日页有两张"计划"卡（今日推荐训练 + 阶段量带），此前口径互相冲突。
+# 这里钉住 2026-10-18 的文案分层：删掉「量带」或「课表」任一字样都必须变红。
+phase = views[views.index("private func planPhaseLine"):views.index("private func recoveryPanel")]
+assert "阶段建议量带" in phase, "A1: 量带行必须显式写「阶段建议量带」（不是今天要补的距离）"
+assert "按最近 4 周实测推算" in phase, "A1: 阶段量带必须说明推算口径"
+assert "课表计划" in phase, "A2: 完成度行必须写「课表计划」，不是裸的已完成/计划"
+assert "本周 \\(nativeAdherenceName(adherence.status))" in phase, "A3: 卡头状态必须带「本周」窗口"
+assert "今日改为休息后，本周课表还差" in recommendation, "A4: 今日改为休息时必须串起本周课表缺口"
 assert "TechTodayHealthTiles" not in views
 assert "TechTodayHealthTiles" not in (root / "TechIllustrations.swift").read_text(encoding="utf-8")
 assert "TechSyncStatus(" not in body, "Background sync must not add a home status card"

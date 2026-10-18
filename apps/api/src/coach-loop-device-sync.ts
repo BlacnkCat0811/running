@@ -1,5 +1,5 @@
 import type { CoachLoopDeviceReceipt, CoachLoopRuntimeResponse, MobilePlanOperationScope } from "@rai/api-contracts";
-import { planDayWithLock, type MobileGoalsStore } from "./mobile-goals.js";
+import { canonicalPlanPushIdentity, planDayWithLock, type MobileGoalsStore } from "./mobile-goals.js";
 import { PlanOperationError } from "./plan-publication.js";
 import { digest, prescriptionDigest } from "./plan-digest.js";
 import { normalizeSessionStructure } from "./session-structure.js";
@@ -18,16 +18,27 @@ export function recordCoachLoopDeviceReceipt(
     body.revision == null || !body.idempotencyKey)
     fail("coach_receipt_contract_mismatch", "新版排期回执缺少核验字段。", 422);
   if (digest(body.scope) !== digest(scope)) fail("plan_receipt_scope_mismatch", "回执属于其他服务或数据集。");
+  // Normalize before comparing or persisting. The client's synthesized Codable
+  // omits nil optional keys while the canonical form writes explicit nulls;
+  // both describe the same export, and the stored identity must be canonical.
+  const structure = normalizeSessionStructure(body.structure);
+  if (!structure) fail("coach_receipt_evidence_mismatch", "实际导出结构无法规范化。", 422);
   if (!Number.isFinite(Date.parse(body.verifiedAt!)) || Date.parse(body.verifiedAt!) > Date.now() + 300_000 ||
     coachLocalDate(body.scheduledAt!) !== body.localDate ||
-    prescriptionDigest(body.kind, body.structure!) !== body.prescriptionDigest ||
-    digest(normalizeSessionStructure(body.structure)) !== digest(body.structure))
+    prescriptionDigest(body.kind, structure) !== body.prescriptionDigest)
     fail("coach_receipt_evidence_mismatch", "实际导出结构、日期或核验时刻不一致。", 422);
   const matchesCurrent = (current: CoachLoopRuntimeResponse) => {
-    const duplicateActive = store.activePlanPushes().some(push =>
-      push.localDate === body.localDate && push.workoutID && push.scheduledAt &&
-      (push.workoutID !== body.workoutID || push.scheduledAt !== body.scheduledAt) &&
-      store.planPushIsActive(push.workoutID, push.scheduledAt));
+    // Stored receipts carry the canonical identity (uppercase UUID, UTC ISO)
+    // while `body` still has the wire spelling; comparing raw strings would
+    // report a retry of the same entry as a different active schedule and turn
+    // `matchesCurrent` false (review P2-1).
+    const requested = canonicalPlanPushIdentity({ workoutID: body.workoutID, scheduledAt: body.scheduledAt });
+    const duplicateActive = store.activePlanPushes().some(push => {
+      const stored = canonicalPlanPushIdentity(push);
+      return push.localDate === body.localDate && stored.workoutID && stored.scheduledAt &&
+        (stored.workoutID !== requested.workoutID || stored.scheduledAt !== requested.scheduledAt) &&
+        store.planPushIsActive(stored.workoutID, stored.scheduledAt);
+    });
     return body.lifecycleEvent === "verified" && publicationReady() &&
       !duplicateActive && current.settings?.status === "active" && !current.refreshRequired &&
       body.revision === current.revision && body.coherenceToken === current.executionToken &&
@@ -57,7 +68,7 @@ export function recordCoachLoopDeviceReceipt(
     // Stale verified schedules are retained as historical device evidence and
     // occupancy, but explicitly never certified as the current executable plan.
     const recordedAt = store.recordPlanPush({ ...body, revision: body.revision!,
-      structure: body.structure!, pushedAt: new Date().toISOString(), matchesCurrent: matchesCurrent(current) });
+      structure, pushedAt: new Date().toISOString(), matchesCurrent: matchesCurrent(current) });
     return { recordedAt, informationLevel: "verifiedClient" };
   });
   // Operation idempotency preserves the original immutable receipt, not an

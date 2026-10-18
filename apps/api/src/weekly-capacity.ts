@@ -8,7 +8,7 @@ import { digest } from "./plan-digest.js";
 import { periodizationWeekStart } from "./plan-periodization.js";
 import { CAPACITY_ENVELOPE_CANDIDATE_VERSION } from "./coach-loop-policy.js";
 import { coachLocalDate, runEvidenceRef, shiftCoachDate, visibleCoachRuns, type CoachRunFact } from "./coach-loop-facts.js";
-import { isValidLocalDate } from "./local-date.js";
+import { isStrictLocalDate, isValidLocalDate } from "./local-date.js";
 
 /**
  * Weekly plan capacity, **derived from training facts instead of configured**.
@@ -65,8 +65,6 @@ export interface WeeklyCapacity {
   reasonCodes: string[];
 }
 
-const isLocalDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
-
 export function weeklyCapacity(input: {
   today: string;
   raceTarget?: Pick<MobileRaceTarget, "date" | "distance"> | null;
@@ -118,7 +116,7 @@ export function weeklyCapacity(input: {
       // target and a goals-level one are the same question with a different target, so only
       // the target is selected below — the query itself stays singular, and stays windowed
       // so the volume cut agrees with the band the today page prints.
-      : raceTargetForPhase != null && isLocalDate(input.today)
+      : raceTargetForPhase != null && isStrictLocalDate(input.today)
         ? currentPeriodizationWeek({ today: input.today, raceTarget: raceTargetForPhase, recentWeeklyKm: recent })?.phase ?? null
         : null;
 

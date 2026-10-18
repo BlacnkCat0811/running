@@ -286,8 +286,9 @@ enum PlanWatchScheduling {
         }
         await scheduler.removeEntries(outcome.submittedEntries)
         let left = await scheduler.readBack()
-        let ids = Set(outcome.submittedEntries.map(\.workoutID))
-        outcome.cleanupVerified = !left.contains { ids.contains($0.workoutID) }
+        // UUID + 精确时刻的身份匹配；与 WorkoutKitBridge.removeEntries 一致。
+        outcome.cleanupVerified = !PlanReceiptMatcher.hasResidualEntries(outcome.submittedEntries, in: left,
+            timeZone: PlanReceiptMatcher.planTimeZone(journal.operation.timezone))
         outcome.clearVerified = left.isEmpty && outcome.didAttemptClear
         outcome.verified = false
         outcome.receipts = []
@@ -319,8 +320,10 @@ enum PlanWatchScheduling {
             if journal.operation.clearAll { await scheduler.removeAll() }
             else { await scheduler.removeEntries(entries) }
             let remaining = await scheduler.readBack()
-            let ids = Set(entries.map(\.workoutID))
-            outcome.cleanupVerified = journal.operation.clearAll ? remaining.isEmpty : !remaining.contains { ids.contains($0.workoutID) }
+            // 同 withdrawSuperseded：UUID + 精确 scheduledAt 才是本操作的条目身份。
+            outcome.cleanupVerified = journal.operation.clearAll ? remaining.isEmpty
+                : !PlanReceiptMatcher.hasResidualEntries(entries, in: remaining,
+                    timeZone: PlanReceiptMatcher.planTimeZone(journal.operation.timezone))
             outcome.clearVerified = remaining.isEmpty
             outcome.verified = outcome.cleanupVerified && isCurrent()
             if !journal.persist(outcome.verified ? .verifying : .withdrawalRequired) {

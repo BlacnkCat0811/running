@@ -53,7 +53,7 @@ final class TrainingReminders {
         self.hour = min(21, max(7, hour))
         UserDefaults.standard.set(value, forKey: prefix + scope + ".enabled")
         UserDefaults.standard.set(self.hour, forKey: prefix + scope + ".hour")
-        message = value ? "仅提醒已读取的未来训练；系统可能延后通知。" : "训练提醒已关闭。"
+        message = value ? "提醒已开启；只为当前已读取的计划安排通知（新版教练只提醒今天），系统可能延后。" : "训练提醒已关闭。"
         if !value { await reconcile(scope: scope, plan: nil, completed: [], available: false) }
     }
 

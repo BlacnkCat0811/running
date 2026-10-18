@@ -1,5 +1,7 @@
 import type { MobileRaceDistance, MobileRaceTarget } from "@rai/api-contracts";
 
+import { isStrictLocalDate } from "./local-date.js";
+
 /**
  * Race-driven multi-week periodisation (docs/ALGORITHM.md §20).
  *
@@ -23,6 +25,15 @@ import type { MobileRaceDistance, MobileRaceTarget } from "@rai/api-contracts";
  */
 
 export const PERIODIZATION_POLICY_VERSION = "rai-periodization-v2" as const;
+/**
+ * Maximum supported **weeksToRace** (whole natural weeks between the current
+ * week and the race week).
+ *
+ * `weeksToRace <= 24` is a supported skeleton **that includes the current week**,
+ * so the 24-week case has 25 rows (weeks 24…0) and `current` is populated. Only
+ * beyond that does the skeleton become forward-only and report
+ * `race_beyond_maximum_horizon`.
+ */
 export const PERIODIZATION_MAXIMUM_WEEKS = 24;
 
 export type PeriodizationPhase = "base" | "build" | "peak" | "taper" | "race_week" | "past";
@@ -117,8 +128,6 @@ const PHASE_NOTES: Record<PeriodizationPhase, string> = {
 export const MINIMUM_BAND_KM = 5;
 const MAXIMUM_WEEKLY_KM = 200;
 
-const isLocalDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
-
 /** Monday of the ISO week containing `date`. */
 export function periodizationWeekStart(date: string): string {
   const value = new Date(`${date}T00:00:00Z`);
@@ -161,16 +170,18 @@ export function periodizationWeeksToRace(today: string, raceDate: string): numbe
 /**
  * Phase of the natural week `today` falls in, for **any** horizon.
  *
- * `buildPeriodization` deliberately stops at `PERIODIZATION_MAXIMUM_WEEKS` and produces no
- * `current` week past it, because that skeleton is what the today page renders. A *phase* is
- * still defined out there, and `past` — a race already run — has to stay reachable, so
- * callers that ask "which phase is this week" rather than "which row of the skeleton" come
- * here. Same boundary table, same alignment, no window.
+ * Within `PERIODIZATION_MAXIMUM_WEEKS` the answer is the row `buildPeriodization`
+ * produced; beyond it the skeleton is forward-only while the phase is still
+ * defined, and `past` — a race already run — has to stay reachable, so callers
+ * that ask "which phase is this week" rather than "which row of the skeleton"
+ * come here. Same boundary table, same alignment, no window.
  *
- * Throws on an unparseable date rather than guessing: every caller holds a validated plan.
+ * Throws on an invalid calendar date rather than guessing: every caller holds a
+ * validated plan, and a date such as `2026-02-30` (which `Date.parse` would
+ * silently roll into March) must not become a week.
  */
 export function periodizationPhaseFor(today: string, raceTarget: Pick<MobileRaceTarget, "date" | "distance">): PeriodizationPhase {
-  if (!isLocalDate(today) || !isLocalDate(raceTarget.date)) {
+  if (!isStrictLocalDate(today) || !isStrictLocalDate(raceTarget.date)) {
     throw new Error("periodizationPhaseFor requires local dates for today and the race");
   }
   return phaseFor(periodizationWeeksToRace(today, raceTarget.date), raceTarget.distance);
@@ -223,13 +234,13 @@ export function buildPeriodization(input: {
   recentWeeklyKm: number;
 }): Periodization {
   const reasonCodes: string[] = [];
-  if (!isLocalDate(input.today)) throw new Error("buildPeriodization requires a local date for today");
+  if (!isStrictLocalDate(input.today)) throw new Error("buildPeriodization requires a local date for today");
   const race = input.raceTarget;
   const weekly = Number.isFinite(input.recentWeeklyKm)
     ? Math.min(MAXIMUM_WEEKLY_KM, Math.max(0, input.recentWeeklyKm))
     : 0;
   if (weekly <= 0) reasonCodes.push("no_recent_weekly_volume");
-  if (!race || !isLocalDate(race.date)) {
+  if (!race || !isStrictLocalDate(race.date)) {
     return {
       policyVersion: PERIODIZATION_POLICY_VERSION,
       generatedFor: input.today,
@@ -250,10 +261,16 @@ export function buildPeriodization(input: {
   if (weeksToRace < 0) reasonCodes.push("race_in_the_past");
 
   const baseline = weekly > 0 ? weekly : PHASE_VOLUME.base.lower * MINIMUM_BAND_KM;
-  // The skeleton is forward-looking: weeks already behind us are not part of it, and
-  // a race in the past produces no skeleton at all (the loop does not run).
-  // The horizon counts the race week itself: 24 weeks means 24 rows, not 25.
-  const firstOffset = Math.max(0, weeksToRace - (PERIODIZATION_MAXIMUM_WEEKS - 1));
+  // The skeleton starts at the current week when the horizon supports it, and only
+  // becomes forward-only past the maximum. A race in the past produces no skeleton
+  // at all (the loop does not run).
+  //
+  // Within the supported horizon the horizon itself is the cap: weeksToRace = 24
+  // yields 25 rows (weeks 24…0), current = base. Beyond it the horizon keeps the
+  // last PERIODIZATION_MAXIMUM_WEEKS rows counting down to the race week (24 rows),
+  // current is null and `race_beyond_maximum_horizon` explains why.
+  const beyondHorizon = weeksToRace > PERIODIZATION_MAXIMUM_WEEKS;
+  const firstOffset = beyondHorizon ? weeksToRace - (PERIODIZATION_MAXIMUM_WEEKS - 1) : 0;
 
   const weeks: PeriodizationWeek[] = [];
   for (let offset = firstOffset; offset <= weeksToRace; offset += 1) {

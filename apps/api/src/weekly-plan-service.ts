@@ -96,6 +96,12 @@ export function overwriteWarning(previous: MobilePlannedDay[], next: MobilePlann
   return `已覆盖 ${dates.length} 天既有课表（${shown}${suffix}）：原有分段与说明不再保留`;
 }
 
+/** Validation outcomes reported back to the caller (and audit), not just warnings. */
+export interface WeeklyPlanConstraintCounters {
+  rejectedCount: number;
+  clampedCount: number;
+}
+
 /** Produces a deterministic coach plan, measured and constrained before review. */
 export async function generateWeeklyPlan(args: {
   today: MobileTodayResponse;
@@ -110,14 +116,21 @@ export async function generateWeeklyPlan(args: {
   prescription: CoachZonePrescription | null;
   previousWeekDistanceKm?: number | null;
   now?: Date;
-  /** Automatic generation only; manual/legacy validation keeps its stored text. */
+  /**
+   * Automatic generation defaults to the complete-dose policy. `false` keeps the
+   * legacy validator-only path (used by offline/legacy comparisons); it is no
+   * longer silently overridden to `true`.
+   */
   automaticDosePolicy?: boolean;
 }): Promise<WeeklyPlanGenerationResult> {
   const generatedAt = (args.now ?? new Date()).toISOString();
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const warnings: string[] = [];
   const injuryFlagCodes = args.today.injuryFlags.map((flag) => flag.code);
-  const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(proposed, { ...args, automaticDosePolicy: true }, warnings);
+  const automaticDosePolicy = args.automaticDosePolicy ?? true;
+  const counters: WeeklyPlanConstraintCounters = { rejectedCount: 0, clampedCount: 0 };
+  const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(
+    proposed, { ...args, automaticDosePolicy }, warnings, counters);
 
   if (allowedDates.length === 0) {
     return {
@@ -142,14 +155,15 @@ export async function generateWeeklyPlan(args: {
     days: finish(days),
     audit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt },
     warnings,
-    rejectedCount: 0,
-    clampedCount: 0
+    rejectedCount: counters.rejectedCount,
+    clampedCount: counters.clampedCount
   };
 }
 
 export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
   args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm" | "automaticDosePolicy">,
-  warnings: string[] = []): MobilePlannedDay[] {
+  warnings: string[] = [],
+  counters?: WeeklyPlanConstraintCounters): MobilePlannedDay[] {
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
 
@@ -190,6 +204,10 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
     const candidates = args.automaticDosePolicy
       ? fitCompleteSessionsToBudget(adjustable, args.prescription, remainingKm, warnings) : adjustable;
     const result = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: candidates }) });
+    if (counters) {
+      counters.rejectedCount += result.rejected.length;
+      counters.clampedCount += result.clamped.length;
+    }
     warnings.push(...result.rejected, ...result.clamped.map(message => phase ? `${phase.note} 阶段上限 ${ceilingKm.toFixed(1)} km：${message}` : message));
     if (args.automaticDosePolicy) {
       let current = result.days;
@@ -200,6 +218,10 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
           current.map(day => enforceAutomaticSessionDose(day, args.prescription, warnings)),
           args.prescription, remainingKm, warnings);
         const checked = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: complete }) });
+        if (counters) {
+          counters.rejectedCount += checked.rejected.length;
+          counters.clampedCount += checked.clamped.length;
+        }
         warnings.push(...checked.rejected, ...checked.clamped);
         if (JSON.stringify(current) === JSON.stringify(checked.days)) return checked.days;
         current = checked.days;

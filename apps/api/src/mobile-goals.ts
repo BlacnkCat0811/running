@@ -33,6 +33,13 @@ import { isValidLocalDate } from "./local-date.js";
 import { normalizeRunCoachPlan } from "./run-coach-policy.js";
 import { digest } from "./plan-digest.js";
 import { PlanOperationError } from "./plan-publication.js";
+import {
+  beginPublicationGuard,
+  endPublicationGuard,
+  ensurePublicationGuardSchema,
+  readPublicationGuard,
+  type PublicationGuardState
+} from "./publication-guard.js";
 
 const GOALS_FILE = "mobile-goals.json";
 /** Derived from the shared list so this set cannot drift from the API's enum. */
@@ -76,6 +83,67 @@ const cappedReadLimit = (limit: number): number => Math.min(MAX_READ_ROWS, Math.
 const clampFraction = (value: number): number => Math.min(0.95, Math.max(0.4, value));
 const clampCap = (value: number): number => Math.min(4, Math.max(0, Math.round(value)));
 const normalizePreservedDate = (value: unknown): string | null => typeof value === "string" && isValidLocalDate(value) ? value : null;
+
+/** Canonical spelling of one local system-schedule entry's identity. */
+export interface PlanPushIdentity {
+  workoutID: string | null;
+  scheduledAt: string | null;
+}
+
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Uppercase form of a UUID, or null when the value is not one. */
+export function canonicalPlanWorkoutID(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return UUID_TEXT.test(trimmed) ? trimmed.toUpperCase() : null;
+}
+
+/** UTC ISO-8601 form of a parseable instant, or null when it is not one. */
+export function canonicalPlanScheduledAt(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
+}
+
+/**
+ * Lookup identity for a system-schedule entry: canonical when the bytes are
+ * parseable, byte-identical otherwise (legacy rows and legacy callers).
+ *
+ * The canonical form is what `recordPlanPush` persists for contract-v2 receipts
+ * and what every identity predicate compares against. A client that spells the
+ * same UUID/instant differently ("uuid" vs "UUID", "+08:00" vs "Z") therefore
+ * addresses the same entry, which is the promise documented in
+ * `docs/IOS_TRAINING_PLAN_STATE_V1.md` §回执版本与生命周期. Legacy receipts are
+ * left byte-identical on purpose: their payload comparison is the old
+ * contract and rewriting it would change what a legacy client is deduplicated
+ * against.
+ */
+export function canonicalPlanPushIdentity(value: { workoutID?: string | null | undefined; scheduledAt?: string | null | undefined }): PlanPushIdentity {
+  const workoutID = value.workoutID ?? null;
+  const scheduledAt = value.scheduledAt ?? null;
+  return {
+    workoutID: workoutID === null ? null : (canonicalPlanWorkoutID(workoutID) ?? workoutID),
+    scheduledAt: scheduledAt === null ? null : (canonicalPlanScheduledAt(scheduledAt) ?? scheduledAt)
+  };
+}
+
+/**
+ * Scope partition of the receipt idempotency key. A v2 receipt always carries
+ * its dataset identity, so the same key may be reused by another dataset (a
+ * restored/emptied control database is a different dataset, not a retry).
+ * Legacy receipts never carried a scope; they keep the historical global
+ * behaviour among themselves (`scope_key IS NULL`).
+ */
+const planPushScopeKey = (scope: PlanPushRecord["scope"]): string | null => scope ? digest(scope) : null;
+
+const isDatabaseBusyMessage = (message: string): boolean =>
+  /database is locked|database table is locked|SQLITE_BUSY/i.test(message);
+
+const isDatabaseBusyError = (error: unknown): boolean =>
+  error instanceof Error && isDatabaseBusyMessage(error.message);
+
+const mapDatabaseBusy = (error: unknown): unknown => isDatabaseBusyError(error) ? new MobileGoalsDatabaseBusyError() : error;
 
 const emptyGoals = (): StoredGoals => ({
   revision: 0,
@@ -247,6 +315,123 @@ export class MobileGoalsStore {
       .run(scope, operationId, JSON.stringify(state));
   }
 
+  /**
+   * Cross-store publication state (see `publication-guard.ts`).
+   *
+   * Readers call this before and after building a snapshot: a moved epoch or a
+   * non-stale `pendingSince` means a publication may have committed one store
+   * but not the other. Without a control database there is nothing to guard.
+   */
+  publicationGuardState(): PublicationGuardState {
+    if (!this.controlDatabase) return { epoch: 0, pendingSince: null };
+    const state = readPublicationGuard(this.controlDatabase);
+    // Invariant: while this store holds its control write transaction, the
+    // pending marker in the table is this store's own publication, not a foreign
+    // one. `withPublicationTransaction` commits the marker *before* it takes the
+    // write transaction, and the whole span is synchronous, so no foreign
+    // publisher can start and no in-process code can observe a half-applied
+    // publication from inside it: another writer is either blocked on
+    // `BEGIN IMMEDIATE`, or it marked pending before this transaction and cannot
+    // write the main database while this control write lock is held. Reporting
+    // the marker would make every write path that reads the plan inside its own
+    // transaction (e.g. `/synced` computing `matchesCurrent` and the coach device
+    // receipt validating the snapshot it is about to record) fail closed with
+    // `plan_snapshot_changed`. `epoch` is preserved so a foreign publication that
+    // started before this transaction is still detectable by the before/after
+    // epoch comparison of the guarded readers.
+    return this.publicationTransaction ? { epoch: state.epoch, pendingSince: null } : state;
+  }
+
+  /**
+   * True while this store is inside its own plan publication transaction (see
+   * {@link withPublicationTransaction}).
+   *
+   * Read paths that verify the cross-store guard need this flag: a publication
+   * commits its `pending_since` marker *before* the business transaction, so a
+   * guarded read called from inside that transaction would otherwise mistake its
+   * own marker for a foreign publication in flight and fail closed. Reader
+   * modules must use this accessor rather than reaching into the private flag,
+   * which is free to be renamed; {@link publicationGuardState} already hides the
+   * own marker, so the skip is defence in depth rather than the only check.
+   */
+  publicationInFlight(): boolean { return this.publicationTransaction; }
+
+  /**
+   * Runs `fn` inside one control write transaction that is preceded by a
+   * committed guard marker and followed by clearing it.
+   *
+   * Ordering matters: the marker is committed *before* the business transaction
+   * so a reader that observed the old state cannot also have seen a main-store
+   * write that belongs to this publication. Clearing happens in its own
+   * transaction after the business transaction committed (or rolled back), so a
+   * failed business transaction never leaves a live lock — only the lease.
+   *
+   * Nested calls (a function that already runs inside the transaction, e.g.
+   * `recordPlanPush` invoked from a publication action) execute immediately.
+   */
+  withPublicationTransaction<T>(fn: () => T): T {
+    if (this.publicationTransaction) return fn();
+    if (!this.controlDatabase) return fn();
+    this.beginPublicationMarker();
+    try {
+      const result = this.inWriteTransaction(fn);
+      this.invalidateReadCaches();
+      return result;
+    } finally {
+      // Never let a marker-clearing failure mask the business result/error.
+      this.endPublicationMarker();
+    }
+  }
+
+  /** Commits the guard marker before the guarded business transaction starts. */
+  private beginPublicationMarker(): void {
+    const database = this.controlDatabase!;
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      beginPublicationGuard(database);
+      database.exec("COMMIT");
+    } catch (error) {
+      try { database.exec("ROLLBACK"); } catch { /* no transaction to roll back */ }
+      throw mapDatabaseBusy(error);
+    }
+  }
+
+  /** Clears the marker in its own transaction; best effort by design (lease). */
+  private endPublicationMarker(): void {
+    const database = this.controlDatabase;
+    if (!database) return;
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      endPublicationGuard(database);
+      database.exec("COMMIT");
+    } catch {
+      try { database.exec("ROLLBACK"); } catch { /* no transaction to roll back */ }
+    }
+  }
+
+  /** `BEGIN IMMEDIATE` + fn + `COMMIT`, with the flag nested writers observe. */
+  private inWriteTransaction<T>(fn: () => T): T {
+    const database = this.controlDatabase!;
+    try {
+      database.exec("BEGIN IMMEDIATE");
+    } catch (error) {
+      throw mapDatabaseBusy(error);
+    }
+    this.publicationTransaction = true;
+    try {
+      const result = fn();
+      database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { database.exec("ROLLBACK"); } catch { /* SQLite may have rolled back already */ }
+      this.cached = null;
+      this.invalidateReadCaches();
+      throw mapDatabaseBusy(error);
+    } finally {
+      this.publicationTransaction = false;
+    }
+  }
+
   publicationResult(scope: string, operationId: string): unknown {
     const row = this.controlDatabase?.prepare("SELECT result_json, expires_at FROM mobile_plan_operations WHERE scope = ? AND operation_id = ?")
       .get(scope, operationId) as { result_json: string | null; expires_at: string } | undefined;
@@ -262,40 +447,58 @@ export class MobileGoalsStore {
     return { status: "committed", operationId, result: JSON.parse(row.result_json) };
   }
 
+  /** One committed publication result, or null when the key has no live row. */
+  private replayPublicationResult<Result>(
+    scope: string,
+    operationId: string,
+    requestDigest: string
+  ): { result: Result } | null {
+    this.assertPublicationOperationScope(scope, operationId);
+    const previous = this.controlDatabase!.prepare(
+      "SELECT request_digest, result_json, expires_at FROM mobile_plan_operations WHERE scope = ? AND operation_id = ?"
+    ).get(scope, operationId) as { request_digest: string; result_json: string | null; expires_at: string } | undefined;
+    if (!previous) return null;
+    if (previous.request_digest !== requestDigest) {
+      throw new PlanOperationError("plan_operation_key_conflict", "操作键已用于不同请求，原操作未重放。");
+    }
+    if (Date.parse(previous.expires_at) <= Date.now() || previous.result_json === null) {
+      throw new PlanOperationError("plan_operation_expired", "原操作结果已过保留期，不能重新执行；请核对历史。", 410);
+    }
+    return { result: JSON.parse(previous.result_json) as Result };
+  }
+
+  private assertPublicationOperationScope(scope: string, operationId: string): void {
+    if (this.controlDatabase!.prepare("SELECT 1 FROM mobile_plan_operations WHERE operation_id = ? AND scope != ?").get(operationId, scope)) {
+      throw new PlanOperationError("plan_operation_scope_mismatch", "原操作属于其他服务或数据集，不能跨域重放。");
+    }
+  }
+
   publicationOperation<Result>(scope: string, operationId: string | undefined, route: string, input: unknown, action: () => Result): Result {
-    if (!operationId) return action();
+    if (!operationId) {
+      // Legacy clients have no durable key, but their write still participates in
+      // the cross-store guard so a reader can never observe a torn publication.
+      if (!this.controlDatabase || this.publicationTransaction) return action();
+      return this.withPublicationTransaction(() => action());
+    }
     if (!this.controlDatabase) throw new PlanOperationError("plan_operations_unavailable", "当前存储不支持持久操作，请升级服务。", 503);
     if (this.publicationTransaction) throw new Error("Nested plan publication");
     const requestDigest = digest({ route, input });
-    this.controlDatabase.exec("BEGIN IMMEDIATE");
-    this.publicationTransaction = true;
-    try {
-      if (this.controlDatabase.prepare("SELECT 1 FROM mobile_plan_operations WHERE operation_id = ? AND scope != ?").get(operationId, scope)) {
-        throw new PlanOperationError("plan_operation_scope_mismatch", "原操作属于其他服务或数据集，不能跨域重放。");
-      }
-      const previous = this.controlDatabase.prepare("SELECT request_digest, result_json, expires_at FROM mobile_plan_operations WHERE scope = ? AND operation_id = ?")
-        .get(scope, operationId) as { request_digest: string; result_json: string | null; expires_at: string } | undefined;
-      if (previous) {
-        if (previous.request_digest !== requestDigest) throw new PlanOperationError("plan_operation_key_conflict", "操作键已用于不同请求，原操作未重放。");
-        if (Date.parse(previous.expires_at) <= Date.now() || previous.result_json === null) throw new PlanOperationError("plan_operation_expired", "原操作结果已过保留期，不能重新执行；请核对历史。", 410);
-        const result = JSON.parse(previous.result_json) as Result;
-        this.controlDatabase.exec("COMMIT");
-        return result;
-      }
+    // Replay needs no write lock and must not bump the guard: the stored result is
+    // immutable, so answering it is a read. The check is repeated inside the
+    // transaction below to cover a foreign process committing the same key
+    // between this read and the write lock.
+    const replayed = this.replayPublicationResult<Result>(scope, operationId, requestDigest);
+    if (replayed) return replayed.result;
+    return this.withPublicationTransaction(() => {
+      const concurrent = this.replayPublicationResult<Result>(scope, operationId, requestDigest);
+      if (concurrent) return concurrent.result;
       const result = action();
       const expiresAt = new Date(Date.now() + 90 * 86_400_000).toISOString();
-      this.controlDatabase.prepare("INSERT INTO mobile_plan_operations(scope, operation_id, request_digest, result_json, expires_at) VALUES (?,?,?,?,?)")
+      this.controlDatabase!.prepare("INSERT INTO mobile_plan_operations(scope, operation_id, request_digest, result_json, expires_at) VALUES (?,?,?,?,?)")
         .run(scope, operationId, requestDigest, JSON.stringify(result), expiresAt);
-      this.controlDatabase.prepare("UPDATE mobile_plan_operations SET result_json = NULL WHERE expires_at <= ?").run(new Date().toISOString());
-      this.controlDatabase.exec("COMMIT");
-      this.invalidateReadCaches();
+      this.controlDatabase!.prepare("UPDATE mobile_plan_operations SET result_json = NULL WHERE expires_at <= ?").run(new Date().toISOString());
       return result;
-    } catch (error) {
-      this.controlDatabase.exec("ROLLBACK");
-      this.cached = null;
-      this.invalidateReadCaches();
-      throw error;
-    } finally { this.publicationTransaction = false; }
+    });
   }
 
   /** Retire tomorrow and later from legacy model weeks, without rewriting today's prescription. */
@@ -473,40 +676,83 @@ export class MobileGoalsStore {
       throw new MobileGoalsInputError("localDate must be YYYY-MM-DD");
     }
     if (!SESSION_KINDS.has(input.kind)) throw new MobileGoalsInputError("kind is not a session kind");
-    const { localDate: _date, revision: _revision, kind: _kind, pushedAt: _at, ...payload } = input;
-    const revision = Number.isFinite(input.revision) ? Math.max(0, Math.round(input.revision)) : 0;
+    const isV2 = input.contractVersion === 2;
+    // Identity is the system entry (UUID + instant), not its spelling. A v2
+    // receipt is stored canonically and every predicate below compares canonically
+    // — see `canonicalPlanPushIdentity` for why the two spellings must be one row.
+    const canonicalWorkoutID = canonicalPlanWorkoutID(input.workoutID);
+    const canonicalScheduledAt = canonicalPlanScheduledAt(input.scheduledAt);
+    if (isV2 && canonicalWorkoutID === null) {
+      throw new PlanOperationError("plan_receipt_contract_mismatch", "新版回执的系统条目 ID 不是合法 UUID。", 422);
+    }
+    if (isV2 && canonicalScheduledAt === null) {
+      throw new PlanOperationError("plan_receipt_date_invalid", "新版回执的计划时刻不是可解析的 ISO 时间。", 422);
+    }
+    if (isV2 && !input.lifecycleEvent) {
+      throw new PlanOperationError("plan_receipt_contract_mismatch", "新版回执缺少生命周期事件。", 422);
+    }
+    if (isV2 && !input.scope) {
+      // Without a dataset identity a v2 key would fall into the legacy global
+      // partition, where two datasets would silently share one receipt.
+      throw new PlanOperationError("plan_receipt_contract_mismatch", "新版回执缺少数据集身份。", 422);
+    }
+    const normalizedStructure = isV2 ? normalizeSessionStructure(input.structure) : input.structure;
+    if (isV2 && normalizedStructure === null) {
+      throw new PlanOperationError("plan_receipt_evidence_mismatch", "新版回执缺少可规范化的实际导出结构。", 422);
+    }
+    const stored: PlanPushRecord = isV2
+      ? { ...input, workoutID: canonicalWorkoutID!, scheduledAt: canonicalScheduledAt!, structure: normalizedStructure }
+      : input;
+    const identity = canonicalPlanPushIdentity({ workoutID: stored.workoutID, scheduledAt: stored.scheduledAt });
+    const scopeKey = planPushScopeKey(stored.scope);
+    const { localDate: _date, revision: _revision, kind: _kind, pushedAt: _at, ...payload } = stored;
+    const revision = Number.isFinite(stored.revision) ? Math.max(0, Math.round(stored.revision)) : 0;
     // Serialise lookup + insert even if another process owns the same control
     // database. A unique index alone would turn a concurrent retry into a 500.
     const ownsTransaction = !this.publicationTransaction;
-    if (ownsTransaction) this.controlDatabase.exec("BEGIN IMMEDIATE");
+    if (ownsTransaction) {
+      try {
+        this.controlDatabase.exec("BEGIN IMMEDIATE");
+      } catch (error) {
+        throw mapDatabaseBusy(error);
+      }
+    }
     try {
-      if (input.contractVersion === 2) {
+      if (isV2) {
         const previous = this.controlDatabase.prepare(`
-          SELECT kind, revision, payload_json FROM mobile_plan_pushes
-          WHERE json_valid(payload_json) AND json_extract(payload_json, '$.workoutID') = ?
-            AND json_extract(payload_json, '$.scheduledAt') = ? LIMIT 1
-        `).get(input.workoutID!, input.scheduledAt!) as { kind: string; revision: number; payload_json: string } | undefined;
+          SELECT local_date, kind, revision, payload_json FROM mobile_plan_pushes
+          WHERE workout_id = ? AND scheduled_at = ? LIMIT 1
+        `).get(identity.workoutID!, identity.scheduledAt!) as
+          { local_date: string; kind: string; revision: number; payload_json: string } | undefined;
         if (previous) {
           const actual = JSON.parse(previous.payload_json) as PlanPushRecord;
-          if (previous.kind !== input.kind || previous.revision !== revision || digest(actual.scope) !== digest(input.scope) ||
-              actual.prescriptionDigest !== input.prescriptionDigest || !isDeepStrictEqual(actual.structure, input.structure) ||
+          if (previous.local_date !== input.localDate || previous.kind !== input.kind || previous.revision !== revision ||
+              digest(actual.scope) !== digest(input.scope) ||
+              actual.prescriptionDigest !== input.prescriptionDigest ||
+              !isDeepStrictEqual(normalizeSessionStructure(actual.structure), normalizedStructure) ||
               !isDeepStrictEqual(actual.coachLoop, input.coachLoop)) {
             throw new PlanOperationError("plan_receipt_key_conflict", "相同系统条目不能登记不同的实际导出内容。");
           }
         }
       }
       if (input.idempotencyKey) {
+        // The key is unique per scope: a restored/emptied control database is a
+        // different dataset, so the same client key is not a retry there. Legacy
+        // receipts never carried a scope and keep the historical global behaviour
+        // among themselves (`scope_key IS NULL`).
         const previous = this.controlDatabase.prepare(`
           SELECT local_date, revision, kind, payload_json, pushed_at FROM mobile_plan_pushes
-          WHERE json_valid(payload_json) AND json_extract(payload_json, '$.idempotencyKey') = ?
-        `).get(input.idempotencyKey) as { local_date: string; revision: number; kind: string; payload_json: string; pushed_at: string } | undefined;
+          WHERE idempotency_key = ? AND scope_key IS ? LIMIT 1
+        `).get(input.idempotencyKey, scopeKey) as
+          { local_date: string; revision: number; kind: string; payload_json: string; pushed_at: string } | undefined;
         if (previous) {
-          if (input.contractVersion === 2) {
+          if (isV2) {
             const original = JSON.parse(previous.payload_json) as PlanPushRecord;
+            const originalIdentity = canonicalPlanPushIdentity(original);
             if (previous.local_date !== input.localDate || previous.revision !== revision || previous.kind !== input.kind ||
-                original.workoutID !== input.workoutID || original.scheduledAt !== input.scheduledAt ||
+                originalIdentity.workoutID !== identity.workoutID || originalIdentity.scheduledAt !== identity.scheduledAt ||
                 original.lifecycleEvent !== input.lifecycleEvent || original.prescriptionDigest !== input.prescriptionDigest ||
-                !isDeepStrictEqual(original.structure, input.structure)) {
+                !isDeepStrictEqual(normalizeSessionStructure(original.structure), normalizedStructure)) {
               throw new PlanOperationError("plan_receipt_key_conflict", "同一回执键不能改变实际导出内容或生命周期事件。");
             }
             if (ownsTransaction) this.controlDatabase.exec("COMMIT");
@@ -523,43 +769,59 @@ export class MobileGoalsStore {
           return previous.pushed_at;
         }
       }
-      if (input.contractVersion === 2) {
+      if (isV2) {
+        // Same entry, same event, same day, same dataset: a lost reply is a retry.
+        // Both the date and the scope belong to the identity; the old query only
+        // compared UUID + instant + event, so a receipt for another day (or the
+        // same UUID in a replaced dataset) was silently treated as this one.
         const repeated = this.controlDatabase.prepare(`
-          SELECT pushed_at FROM mobile_plan_pushes WHERE json_valid(payload_json)
-            AND json_extract(payload_json, '$.workoutID') = ?
-            AND json_extract(payload_json, '$.scheduledAt') = ?
-            AND json_extract(payload_json, '$.lifecycleEvent') = ? LIMIT 1
-        `).get(input.workoutID!, input.scheduledAt!, input.lifecycleEvent!) as { pushed_at: string } | undefined;
+          SELECT pushed_at FROM mobile_plan_pushes
+          WHERE workout_id = ? AND scheduled_at = ? AND local_date = ? AND scope_key IS ?
+            AND json_valid(payload_json) AND json_extract(payload_json, '$.lifecycleEvent') = ? LIMIT 1
+        `).get(identity.workoutID!, identity.scheduledAt!, input.localDate, scopeKey, input.lifecycleEvent ?? null) as
+          { pushed_at: string } | undefined;
         if (repeated) { if (ownsTransaction) this.controlDatabase.exec("COMMIT"); return repeated.pushed_at; }
       }
       this.controlDatabase
         .prepare(`
-          INSERT INTO mobile_plan_pushes (local_date, revision, kind, payload_json, pushed_at)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO mobile_plan_pushes
+            (local_date, revision, kind, payload_json, pushed_at, scope_key, idempotency_key, workout_id, scheduled_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           input.localDate,
           revision,
           input.kind,
           JSON.stringify(payload),
-          input.pushedAt
+          input.pushedAt,
+          scopeKey,
+          typeof payload.idempotencyKey === "string" ? payload.idempotencyKey : null,
+          identity.workoutID,
+          identity.scheduledAt
         );
       if (ownsTransaction) this.controlDatabase.exec("COMMIT");
       this.invalidateReadCaches();
       return input.pushedAt;
     } catch (error) {
-      if (ownsTransaction) this.controlDatabase.exec("ROLLBACK");
-      throw error;
+      if (ownsTransaction) { try { this.controlDatabase.exec("ROLLBACK"); } catch { /* already rolled back */ } }
+      // A foreign process can win the (scope, idempotencyKey) race between the
+      // lookup above and this insert; that is the same conflict, not a 500.
+      if (!isDatabaseBusyError(error) && error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) {
+        throw new PlanOperationError("plan_receipt_key_conflict", "同一回执键已用于不同内容。");
+      }
+      throw mapDatabaseBusy(error);
     }
   }
 
   planPushIsActive(workoutID: string, scheduledAt: string): boolean {
-    return !this.controlDatabase?.prepare(`
-      SELECT 1 FROM mobile_plan_pushes WHERE json_valid(payload_json)
-        AND json_extract(payload_json, '$.workoutID') = ?
-        AND json_extract(payload_json, '$.scheduledAt') = ?
-        AND json_extract(payload_json, '$.lifecycleEvent') IN ('withdrawn','replaced') LIMIT 1
-    `).get(workoutID, scheduledAt);
+    if (!this.controlDatabase) return true;
+    const identity = canonicalPlanPushIdentity({ workoutID, scheduledAt });
+    if (identity.workoutID === null || identity.scheduledAt === null) return true;
+    return !this.controlDatabase.prepare(`
+      SELECT 1 FROM mobile_plan_pushes
+      WHERE workout_id = ? AND scheduled_at = ?
+        AND json_valid(payload_json) AND json_extract(payload_json, '$.lifecycleEvent') IN ('withdrawn','replaced') LIMIT 1
+    `).get(identity.workoutID, identity.scheduledAt);
   }
 
   /** Push receipts at or after `sinceIso`, newest first. */
@@ -576,8 +838,13 @@ export class MobileGoalsStore {
   }
 
   planPushForSystemEntry(workoutID: string, scheduledAt: string): PlanPushRecord | null {
-    return this.allPlanPushes().find(push => push.workoutID === workoutID && push.scheduledAt === scheduledAt &&
-      (push.lifecycleEvent == null || push.lifecycleEvent === "verified")) ?? null;
+    const target = canonicalPlanPushIdentity({ workoutID, scheduledAt });
+    if (target.workoutID === null || target.scheduledAt === null) return null;
+    return this.allPlanPushes().find(push => {
+      if (push.lifecycleEvent != null && push.lifecycleEvent !== "verified") return false;
+      const identity = canonicalPlanPushIdentity(push);
+      return identity.workoutID === target.workoutID && identity.scheduledAt === target.scheduledAt;
+    }) ?? null;
   }
 
   private allPlanPushes(): PlanPushRecord[] {
@@ -697,7 +964,11 @@ export class MobileGoalsStore {
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
-      PRAGMA busy_timeout = 5000;
+      -- The control database is a single-writer store: every write is a short
+      -- synchronous transaction on this process's event loop, and the only other
+      -- writers are tests, a CLI or a second API process. A shorter timeout keeps
+      -- that contention bounded instead of stalling the whole server for 5 s.
+      PRAGMA busy_timeout = 2000;
       CREATE TABLE IF NOT EXISTS mobile_goals (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         revision INTEGER NOT NULL,
@@ -729,10 +1000,12 @@ export class MobileGoalsStore {
       );
       CREATE INDEX IF NOT EXISTS idx_mobile_plan_pushes_pushed_at
         ON mobile_plan_pushes(pushed_at);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_plan_pushes_idempotency
-        ON mobile_plan_pushes(json_extract(payload_json, '$.idempotencyKey'))
-        WHERE json_valid(payload_json) AND json_extract(payload_json, '$.idempotencyKey') IS NOT NULL;
     `);
+    // Versioned control-schema migrations. The old global receipt-idempotency
+    // index and the derived identity columns are created/backfilled there, so an
+    // existing database keeps its receipts instead of being recreated.
+    this.ensureControlSchema(database);
+    ensurePublicationGuardSchema(database);
     const existing = database.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get();
     if (!existing) {
       let initial = emptyGoals();
@@ -801,6 +1074,105 @@ export class MobileGoalsStore {
     return database;
   }
 
+  /**
+   * Applies versioned control-schema migrations in order.
+   *
+   * The control database is created by whichever build opened it first, so a
+   * new column or index has to be added in place: deleting/recreating the table
+   * would lose the publication results, plan history and receipts that are the
+   * whole point of the store. Each step runs in its own write transaction and is
+   * recorded, and every step is written so that re-running it (e.g. a database
+   * restored from a backup taken mid-migration) is a no-op.
+   */
+  private ensureControlSchema(database: DatabaseSync): void {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS mobile_control_schema (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `);
+    const row = database.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM mobile_control_schema").get() as
+      { version: number } | undefined;
+    const applied = Number(row?.version ?? 0);
+    const migrations: Array<{ version: number; apply: () => void }> = [
+      { version: 1, apply: () => this.migratePlanPushIdentity(database) }
+    ];
+    for (const migration of migrations) {
+      if (migration.version <= applied) continue;
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        migration.apply();
+        database.prepare("INSERT INTO mobile_control_schema(version, applied_at) VALUES (?, ?)")
+          .run(migration.version, new Date().toISOString());
+        database.exec("COMMIT");
+      } catch (error) {
+        try { database.exec("ROLLBACK"); } catch { /* nothing to roll back */ }
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Migration 1: canonical receipt identity columns and per-scope idempotency.
+   *
+   * Before this, lookups used `json_extract(payload_json, '$.workoutID')`, so
+   * two spellings of the same UUID/instant were two different system entries,
+   * and the receipt idempotency key was globally unique, so the same key could
+   * not be reused by a different dataset. The derived columns become the query
+   * surface; the old payload remains the record, except for contract-v2 rows
+   * whose identity is rewritten to the canonical spelling (v1 rows keep their
+   * bytes because their deduplication is a byte comparison by contract).
+   */
+  private migratePlanPushIdentity(database: DatabaseSync): void {
+    const columns = new Set((database.prepare("PRAGMA table_info(mobile_plan_pushes)").all() as Array<{ name: string }>)
+      .map(column => column.name));
+    for (const [name, type] of [["scope_key", "TEXT"], ["idempotency_key", "TEXT"], ["workout_id", "TEXT"], ["scheduled_at", "TEXT"]] as const) {
+      if (!columns.has(name)) database.exec(`ALTER TABLE mobile_plan_pushes ADD COLUMN ${name} ${type}`);
+    }
+    database.exec("DROP INDEX IF EXISTS idx_mobile_plan_pushes_idempotency");
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_plan_pushes_scope_idempotency
+        ON mobile_plan_pushes(scope_key, idempotency_key)
+        WHERE scope_key IS NOT NULL AND idempotency_key IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_plan_pushes_unscoped_idempotency
+        ON mobile_plan_pushes(idempotency_key)
+        WHERE scope_key IS NULL AND idempotency_key IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_mobile_plan_pushes_workout
+        ON mobile_plan_pushes(workout_id, scheduled_at);
+    `);
+    const rows = database.prepare("SELECT id, payload_json FROM mobile_plan_pushes").all() as
+      Array<{ id: number; payload_json: string }>;
+    const update = database.prepare(`
+      UPDATE mobile_plan_pushes
+      SET payload_json = ?, scope_key = ?, idempotency_key = ?, workout_id = ?, scheduled_at = ?
+      WHERE id = ?
+    `);
+    for (const row of rows) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(row.payload_json) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const contractVersion = parsed.contractVersion;
+      const canonicalWorkoutID = canonicalPlanWorkoutID(parsed.workoutID);
+      const canonicalScheduledAt = canonicalPlanScheduledAt(parsed.scheduledAt);
+      const workoutID = canonicalWorkoutID ?? (typeof parsed.workoutID === "string" ? parsed.workoutID : null);
+      const scheduledAt = canonicalScheduledAt ?? (typeof parsed.scheduledAt === "string" ? parsed.scheduledAt : null);
+      const scopeKey = planPushScopeKey(parsed.scope as PlanPushRecord["scope"]);
+      const idempotencyKey = typeof parsed.idempotencyKey === "string" ? parsed.idempotencyKey : null;
+      let payload = row.payload_json;
+      if (contractVersion === 2 && (workoutID !== parsed.workoutID || scheduledAt !== parsed.scheduledAt)) {
+        payload = JSON.stringify({
+          ...parsed,
+          ...(workoutID !== null ? { workoutID } : {}),
+          ...(scheduledAt !== null ? { scheduledAt } : {})
+        });
+      }
+      update.run(payload, scopeKey, idempotencyKey, workoutID, scheduledAt, row.id);
+    }
+  }
+
   private readControlGoals(): StoredGoals {
     const row = this.controlDatabase?.prepare("SELECT revision, payload_json, updated_at FROM mobile_goals WHERE singleton = 1").get() as { revision: number; payload_json: string; updated_at: string } | undefined;
     if (!row) return emptyGoals();
@@ -837,7 +1209,13 @@ export class MobileGoalsStore {
       runCoach: stored.runCoach
     });
     const ownsTransaction = !this.publicationTransaction;
-    if (ownsTransaction) this.controlDatabase.exec("BEGIN IMMEDIATE");
+    if (ownsTransaction) {
+      try {
+        this.controlDatabase.exec("BEGIN IMMEDIATE");
+      } catch (error) {
+        throw mapDatabaseBusy(error);
+      }
+    }
     try {
       const result = this.controlDatabase.prepare(`
         UPDATE mobile_goals SET revision = ?, payload_json = ?, updated_at = ?
@@ -854,7 +1232,7 @@ export class MobileGoalsStore {
       this.invalidateReadCaches();
     } catch (error) {
       if (ownsTransaction) { try { this.controlDatabase.exec("ROLLBACK"); } catch { } }
-      throw error;
+      throw mapDatabaseBusy(error);
     }
   }
 }
@@ -870,8 +1248,33 @@ export class WeeklyPlanConfirmationRequiredError extends Error {
 
 export class MobileGoalsRevisionConflictError extends Error {
   readonly code = "mobile_goals_revision_conflict";
+  /**
+   * Without a status this error was mapped to 500 `internal_error` on every
+   * route that did not catch it explicitly. A stale revision is a normal
+   * concurrency outcome, so the class itself carries 409 as the floor; routes
+   * that want to add `currentRevision` still catch it explicitly.
+   */
+  readonly statusCode = 409;
   constructor(readonly currentRevision: number) {
     super("训练目标已在其他页面更新，请重新加载后再保存");
+  }
+}
+
+/**
+ * The control database was locked by another writer for the whole busy timeout.
+ *
+ * This is a transient contention outcome, not a server fault: the publication
+ * either did not start (the write lock could not be taken) or rolled back. It is
+ * deliberately retryable — a 500 here both lied about what happened and gave the
+ * client no code to branch on. The status is 503 because the request can be
+ * retried unchanged; unlike a 409 it must not clear a pending publication.
+ */
+export class MobileGoalsDatabaseBusyError extends Error {
+  readonly statusCode = 503;
+  readonly code = "database_busy";
+  constructor() {
+    super("训练计划存储正忙，请稍后重试；本次写入未提交。");
+    this.name = "MobileGoalsDatabaseBusyError";
   }
 }
 

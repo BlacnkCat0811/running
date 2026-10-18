@@ -38,7 +38,10 @@ struct PlanScheduleOperationJournal: Codable, Equatable {
                 heartRateBpmLower: nil, heartRateBpmUpper: nil, structure: item.structure, source: "manual", executable: true)
             guard let mapped = WorkoutPlanMapper.plannedWorkout(from: day, hour: reminderHour),
                   WorkoutPlanMapper.safeExportedStructure(mapped, original: item.structure) != nil,
-                  PlanFingerprint.prescriptionDigest(kind: item.kind, structure: item.structure) == item.prescriptionDigest else { return nil }
+                  // 摘要在数值不可量化时返回 nil（2026-10-18 审查 P2-13）：
+                  // 无法重建"原操作的真实导出身份"，按 fail-closed 拒绝该条，由调用方
+                  // 提示"只能显式撤回"。
+                  (try? PlanFingerprint.prescriptionDigest(kind: item.kind, structure: item.structure)) == item.prescriptionDigest else { return nil }
             var at = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: item.entry.scheduledAt)
             at.timeZone = zone
             return .init(entry: item.entry, at: at, workout: mapped, exportedStructure: item.structure, exportNotes: [], kind: item.kind)
@@ -74,8 +77,17 @@ final class PlanScheduleJournal {
         self.storage = storage; self.operation = operation
     }
     func prepare(_ requests: [PlanSchedulingRequest]) -> Bool {
-        operation.items = requests.map { .init(entry: $0.entry, kind: $0.kind, title: $0.workout.displayName,
-            structure: $0.exportedStructure, prescriptionDigest: PlanFingerprint.prescriptionDigest(kind: $0.kind, structure: $0.exportedStructure), phase: .prepared) }
+        // 2026-10-18（审查 P2-13）：摘要计算遇到不可量化数值会抛错。这里在持久化
+        // 意图之前 fail-closed（返回 false，不产生 SDK 副作用），不猜测成某个剂量。
+        var prepared: [PlanScheduleOperationJournal.Item] = []
+        for request in requests {
+            guard let digest = try? PlanFingerprint.prescriptionDigest(kind: request.kind, structure: request.exportedStructure) else {
+                return false
+            }
+            prepared.append(.init(entry: request.entry, kind: request.kind, title: request.workout.displayName,
+                structure: request.exportedStructure, prescriptionDigest: digest, phase: .prepared))
+        }
+        operation.items = prepared
         return persist(.prepared)
     }
     func prepareClear() -> Bool {

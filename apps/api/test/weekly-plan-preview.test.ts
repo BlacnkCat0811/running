@@ -27,7 +27,9 @@ test("preview never commits and confirmation is idempotent after a lost acknowle
 
 test("expired, restarted and evicted candidates cannot write", () => {
   let now = 0;
-  const store = new WeeklyPlanPreviews(() => now);
+  // Capacity is a constructor parameter; the production default (64) is far
+  // above real usage, so the eviction path is exercised with an explicit bound.
+  const store = new WeeklyPlanPreviews(() => now, 8);
   const old = store.create(candidate(), "scope");
   now = 16 * 60_000;
   const never = () => { throw new Error("must not write"); };

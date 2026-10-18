@@ -62,8 +62,11 @@ struct NativeRootView: View {
         }
         .task(id: reminderSnapshot) {
             guard scenePhase == .active else { return }
-            await TrainingReminders.shared.reconcile(scope: native.feedbackScope, plan: native.currentWorkoutPlan,
-                completed: native.completedWeekDates, available: native.canConfirmToday)
+            // 2026-10-18（审查 P2-10）：教练闭环也必须有明确的提醒上下文；
+            // 不能再把 `canConfirmToday`（闭环下恒 false）当作提醒可用性。
+            let context = native.reminderContext
+            await TrainingReminders.shared.reconcile(scope: native.feedbackScope, plan: context.plan,
+                completed: context.completedDates, available: context.available)
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
@@ -98,11 +101,12 @@ struct NativeRootView: View {
     }
 
     private var reminderSnapshot: String {
-        let plan = native.currentWorkoutPlan.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
-        return native.feedbackScope + "\(native.currentPlanRevision)" +
-            plan + native.completedWeekDates.sorted().joined() +
+        let context = native.reminderContext
+        let plan = context.plan.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        return native.feedbackScope + "\(native.currentPlanRevision)" + String(native.isCoachLoopManaged) +
+            plan + context.completedDates.sorted().joined() +
             String(TrainingReminders.storedHour(scope: native.feedbackScope)) +
-            String(native.canConfirmToday) + String(describing: scenePhase)
+            String(context.available) + String(describing: scenePhase)
     }
 
     private var navigationContent: some View {

@@ -96,6 +96,9 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: (URLRequest) -> (Int, String, Double) = { _ in (503, "{}", 0) }
+    /// 2026-10-18（P2-6 收尾）：让个别用例附加响应头（如 `Retry-After`），
+    /// 其余用例保持 nil，行为与之前完全一致。
+    nonisolated(unsafe) static var extraHeaders: [String: String]? = nil
     private let lock = NSLock()
     private var stopped = false
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -105,7 +108,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             lock.lock(); defer { lock.unlock() }
             guard !stopped else { return }
-            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.extraHeaders)!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
@@ -595,7 +598,15 @@ final class RequestLog: @unchecked Sendable {
             let path = request.url!.path
             if path.hasSuffix("/goals") { return (200, goalsJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":13"), 0) }
             if path.hasSuffix("/today") { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":13"), 0) }
-            if path.hasSuffix("/workout-plan") { return (200, planJSON.replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":13"), 0) }
+            if path.hasSuffix("/workout-plan") {
+                // 2026-10-18（审查 P2-7）：legacy 读取现在要求窗口首日==today 且逐日连续；
+                // 旧 fixture 的 09-11/09-12 会被拒绝，这里换成当天起的滚动窗口。
+                let coherent = planJSON
+                    .replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":13")
+                    .replacingOccurrences(of: "\"localDate\":\"2026-09-11\"", with: "\"localDate\":\"2026-09-16\"")
+                    .replacingOccurrences(of: "\"localDate\":\"2026-09-12\"", with: "\"localDate\":\"2026-09-17\"")
+                return (200, coherent, 0)
+            }
             return (503, "{}", 0)
         }
         let latestPlanRefreshed = await model.refreshPlanState()
@@ -1069,7 +1080,9 @@ final class RequestLog: @unchecked Sendable {
         check(partiallyRefreshedCoachSaved && partialCoachModel.currentPlanRevision == 2 && partialCoachModel.goals?.revision == 1,
               "the coach acknowledgement establishes the display revision even when every dependent read fails")
         StubProtocol.handler = { _ in (503, "{}", 0) }
-        let restartedCoachModel = NativeAppModel(session: partialCoachSession, api: api)
+        // 2026-10-18（审查 P2-7）：legacy 读取现在要求 today 属于当前业务日；
+        // 该模型随后会做完整的 legacy 三读，必须注入固定时钟，不能用真实时间跑 2026-09-16 的 fixture。
+        let restartedCoachModel = NativeAppModel(session: partialCoachSession, api: api, now: { modelNow })
         await restartedCoachModel.bootstrap()
         check(restartedCoachModel.isOffline && restartedCoachModel.runCoach?.revision == 2 && restartedCoachModel.currentPlanRevision == 2,
               "a saved coach acknowledgement survives an offline restart independently of the old goals cache")
@@ -1079,7 +1092,11 @@ final class RequestLog: @unchecked Sendable {
         let pausedCoachPlanJSON = coachPlanJSON.replacingOccurrences(of: "\"status\":\"active\"", with: "\"status\":\"paused\"")
         let pausedCoachJSON = runCoachJSON.replacingOccurrences(of: coachPlanJSON, with: pausedCoachPlanJSON)
         let pausedGoalsJSON = coachGoals(2).replacingOccurrences(of: coachPlanJSON, with: pausedCoachPlanJSON)
-        let currentCoachPlanJSON = planJSON.replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":2")
+        // 2026-10-18（审查 P2-7）：legacy 执行窗口必须从今天开始且逐日连续。
+        let currentCoachPlanJSON = planJSON
+            .replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":2")
+            .replacingOccurrences(of: "\"localDate\":\"2026-09-11\"", with: "\"localDate\":\"2026-09-16\"")
+            .replacingOccurrences(of: "\"localDate\":\"2026-09-12\"", with: "\"localDate\":\"2026-09-17\"")
         let pausedRetryLog = RequestLog()
         StubProtocol.handler = { request in
             pausedRetryLog.record(request)
@@ -1877,6 +1894,228 @@ final class RequestLog: @unchecked Sendable {
             let republished = await model.changeCoachLoop(action: "refresh")
             check(!republished && sends == 1,
                 "pending new-contract operation prevents issuing a second UUID")
+        }
+
+        // 2026-10-18（审查 P1-1）：v2 回执的显式 null 线格式适用于**所有** v2 回执，
+        // 不只是教练闭环。服务端现会规范化后接受两种形状，但客户端仍应发送规范 wire
+        // （显式 null）：否则旧服务端的规范化校验会把普通手动计划回执 422 终局拒绝，
+        // 也会让同一处方在两端得到不同身份。
+        do {
+            let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubProtocol.self]
+            let wireAPI = RaiAPIClient(session: URLSession(configuration: configuration))
+            let session = ServerSession()
+            let noOptionalTargets = MobileSessionStructure(warmup: nil, blocks: [.init(iterations: 2, steps: [
+                .init(purpose: "work", goal: .time(seconds: 600), alert: nil)])], cooldown: nil)
+            let v2Log = RequestLog()
+            StubProtocol.handler = { request in
+                v2Log.record(request)
+                return (200, "{\"recordedAt\":\"2026-10-18T00:00:00Z\",\"matchesCurrent\":true}", 0)
+            }
+            let v2Receipt = PlanSyncReceipt(localDate: "2026-10-18", kind: "easy", revision: 12,
+                structure: noOptionalTargets, workoutID: UUID().uuidString,
+                scheduledAt: "2026-10-18T00:30:00Z", idempotencyKey: UUID().uuidString,
+                contractVersion: 2,
+                scope: .init(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch"),
+                operationId: UUID().uuidString, coherenceToken: String(repeating: "a", count: 64),
+                verifiedAt: "2026-10-18T00:00:00Z", timezone: "Asia/Shanghai",
+                prescriptionDigest: String(repeating: "b", count: 64), lifecycleEvent: "verified")
+            _ = try await wireAPI.recordPlanSync(v2Receipt, baseURL: session.serverURL!, token: "")
+            check(v2Log.count(method: "POST", path: "/v1/mobile/workout-plan/synced") == 1 &&
+                  v2Log.count(method: "POST", path: "/v1/mobile/coach-loop/synced") == 0,
+                "non-coach v2 receipt stays on the manual-plan receipt route")
+            let v2Body = try JSONSerialization.jsonObject(
+                with: v2Log.lastBody(method: "POST", path: "/v1/mobile/workout-plan/synced")!) as! [String: Any]
+            let v2Structure = v2Body["structure"] as! [String: Any]
+            let v2Work = ((v2Structure["blocks"] as! [[String: Any]])[0]["steps"] as! [[String: Any]])[0]
+            check(v2Structure["warmup"] is NSNull && v2Structure["cooldown"] is NSNull && v2Work["alert"] is NSNull,
+                "non-coach v2 receipt writes explicit null warmup/cooldown/alert for the canonical digest")
+            check(v2Body["contractVersion"] as? Int == 2 && v2Body["scope"] as? [String: Any] != nil &&
+                  v2Body["operationId"] as? String == v2Receipt.operationId &&
+                  v2Body["coherenceToken"] as? String == v2Receipt.coherenceToken &&
+                  v2Body["verifiedAt"] as? String == v2Receipt.verifiedAt &&
+                  v2Body["timezone"] as? String == "Asia/Shanghai" &&
+                  v2Body["prescriptionDigest"] as? String == v2Receipt.prescriptionDigest &&
+                  v2Body["lifecycleEvent"] as? String == "verified",
+                "non-coach v2 receipt keeps every required verification field on the wire")
+            let legacyLog = RequestLog()
+            StubProtocol.handler = { request in
+                legacyLog.record(request)
+                return (200, "{\"recordedAt\":\"2026-10-18T00:00:00Z\"}", 0)
+            }
+            let legacyReceipt = PlanSyncReceipt(localDate: "2026-10-18", kind: "easy", revision: 12,
+                structure: noOptionalTargets)
+            _ = try await wireAPI.recordPlanSync(legacyReceipt, baseURL: session.serverURL!, token: "")
+            check(legacyLog.count(method: "POST", path: "/v1/mobile/workout-plan/synced") == 1,
+                "legacy receipt still uses the manual-plan receipt route")
+            let legacyBody = try JSONSerialization.jsonObject(
+                with: legacyLog.lastBody(method: "POST", path: "/v1/mobile/workout-plan/synced")!) as! [String: Any]
+            let legacyStructure = legacyBody["structure"] as! [String: Any]
+            let legacyWork = ((legacyStructure["blocks"] as! [[String: Any]])[0]["steps"] as! [[String: Any]])[0]
+            check(!legacyStructure.keys.contains("warmup") && !legacyStructure.keys.contains("cooldown") &&
+                  legacyWork["alert"] == nil && legacyBody["contractVersion"] == nil,
+                "legacy receipt keeps synthesized Codable key omission instead of inventing explicit nulls")
+        }
+        do {
+            // 2026-10-18（审查 P2-9）：coachLoop=1 且无 planSnapshotContractVersion 的
+            // 错峰能力组合。所有"完整计划读取"必须走新教练合同，不得回落到旧 run-coach。
+            CacheStore.resetScheduleSafety()
+            let mixedSession = ServerSession()
+            let mixedLoopData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
+            let mixedLoop = try JSONDecoder().decode(CoachLoopResponse.self, from: mixedLoopData)
+            let mixedLoopJSON = String(decoding: mixedLoopData, as: UTF8.self)
+            let mixedHandshake = RaiHandshake(serverId: mixedLoop.scope.serverId, athleteId: mixedLoop.scope.athleteId,
+                datasetEpoch: mixedLoop.scope.datasetEpoch, syncProtocolVersion: 1, apiVersion: "v1",
+                planPublicationContractVersion: 1, planReceiptContractVersion: 2, coachLoopContractVersion: 1)
+            CacheStore.saveHandshake(mixedHandshake, baseURL: mixedSession.serverURL!)
+            let mixedLog = RequestLog()
+            let mixedModel = NativeAppModel(session: mixedSession, api: api,
+                now: { ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! })
+            StubProtocol.handler = { request in
+                mixedLog.record(request)
+                if request.url!.path == "/v1/mobile/coach-loop" { return (200, mixedLoopJSON, 0) }
+                return (503, "{}", 0)
+            }
+            let mixedRefreshed = await mixedModel.refreshRunCoach()
+            check(mixedRefreshed && mixedModel.isCoachLoopManaged && mixedModel.coachLoop != nil,
+                  "mixed capability (coachLoop without snapshot) refreshes through the coach-loop contract")
+            check(mixedLog.count(method: "GET", path: "/v1/mobile/run-coach") == 0 &&
+                  mixedLog.count(method: "GET", path: "/v1/mobile/goals") == 0,
+                  "mixed capability never falls back to the legacy run-coach/goals reads")
+            let staleLegacyCoach = try JSONDecoder().decode(MobileRunCoachResponse.self, from: Data(runCoachJSON.utf8))
+            mixedModel.trainingPlanStore.acceptCoach(staleLegacyCoach)
+            check(mixedModel.runCoach == nil && mixedModel.coachLoop != nil,
+                  "a legacy coach response cannot overwrite an active coach-loop state")
+        }
+
+        do {
+            // 2026-10-18（审查 P2-8）：安全校验失败的面板分类与文案。
+            let validationSession = ServerSession()
+            let validationClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let validationCapabilities = try PlanTestFixtures.json(RaiHandshake(
+                serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1",
+                planSnapshotContractVersion: 1, planReceiptContractVersion: 2))
+            var unsafeObject = try JSONSerialization.jsonObject(
+                with: Data(try PlanTestFixtures.json(PlanTestFixtures.state()).utf8)) as! [String: Any]
+            var unsafePlan = unsafeObject["workoutPlan"] as! [String: Any]
+            var unsafeDays = unsafePlan["days"] as! [[String: Any]]
+            unsafeDays[1] = unsafeDays[0]
+            unsafePlan["days"] = unsafeDays
+            unsafeObject["workoutPlan"] = unsafePlan
+            let unsafeJSON = String(decoding: try JSONSerialization.data(withJSONObject: unsafeObject), as: UTF8.self)
+            let emptyStatisticsJSON = """
+            {"generatedAt":"2026-10-09T00:00:00Z","timezone":"Asia/Shanghai","months":[],
+             "totals":{"distanceKm":0,"durationSeconds":0,"workoutCount":0,
+              "averagePaceSecondsPerKm":null,"distanceChangeFraction":null},"heartRateZones":[]}
+            """
+            let emptyTrendsJSON = """
+            {"generatedAt":"2026-10-09T00:00:00Z","timezone":"Asia/Shanghai","weeks":[],
+             "records":{"fastest5k":null,"fastest10k":null,"longestDistance":null,"biggestMonth":null},
+             "insights":[],"ability":[],"currentAbility":[],"decayPoints":0}
+            """
+            StubProtocol.handler = { request in
+                switch request.url!.path {
+                case "/v1/handshake": return (200, validationCapabilities, 0)
+                case "/v1/mobile/training-plan-state": return (200, unsafeJSON, 0)
+                case "/v1/mobile/statistics": return (200, emptyStatisticsJSON, 0)
+                case "/v1/mobile/trends": return (200, emptyTrendsJSON, 0)
+                case "/v1/workouts": return (200, "{\"items\":[],\"total\":0,\"limit\":30,\"offset\":0}", 0)
+                default: return (503, "{}", 0)
+                }
+            }
+            let validationModel = NativeAppModel(session: validationSession, api: api, now: { validationClock })
+            await validationModel.bootstrap()
+            check(validationModel.trainingPlanStore.issue?.code == .snapshotValidationFailed,
+                  "an unsafe aggregate snapshot is classified as snapshot validation failure")
+            check(validationModel.errorMessage?.contains("未通过安全校验") == true &&
+                  validationModel.errorMessage?.contains("升级") != true,
+                  "validation panel copy explains the rejected snapshot and never suggests upgrading the client")
+            check(!validationModel.isOffline,
+                  "a reachable server returning an untrusted snapshot is not reported as offline")
+        }
+        do {
+            // 2026-10-18（审查 P2-6 收尾）：`Retry-After` 解析规则。
+            check(RaiRetryAfter.seconds(from: "1") == 1, "Retry-After accepts integer seconds")
+            check(RaiRetryAfter.seconds(from: " 2 ") == 2, "Retry-After tolerates surrounding whitespace")
+            check(RaiRetryAfter.seconds(from: "0") == 0, "Retry-After accepts zero seconds")
+            check(RaiRetryAfter.seconds(from: "-3") == 0, "negative Retry-After is clamped to zero, never negative")
+            check(RaiRetryAfter.seconds(from: "9") == 5, "Retry-After above five seconds is clamped")
+            check(RaiRetryAfter.seconds(from: "1.5") == nil, "fractional Retry-After is ignored (integers only)")
+            check(RaiRetryAfter.seconds(from: "Wed, 21 Oct 2015 07:28:00 GMT") == nil,
+                  "HTTP-date Retry-After is ignored instead of being misread as seconds")
+            check(RaiRetryAfter.seconds(from: "abc") == nil && RaiRetryAfter.seconds(from: nil) == nil,
+                  "invalid or missing Retry-After is ignored")
+
+            // 503 + Retry-After -> retryableServer（带提示）；其余 503 仍是 server。
+            let retryAfterBase = URL(string: "https://retry-after.invalid")!
+            func planReadError(headers: [String: String]?) async -> RaiAPIClientError? {
+                StubProtocol.extraHeaders = headers
+                StubProtocol.handler = { _ in
+                    (503, "{\"code\":\"plan_snapshot_changed\",\"message\":\"快照变化，请重读\"}", 0)
+                }
+                defer { StubProtocol.extraHeaders = nil }
+                do {
+                    _ = try await api.trainingPlanState(baseURL: retryAfterBase, token: "")
+                    return nil
+                } catch let error as RaiAPIClientError {
+                    return error
+                } catch {
+                    return nil
+                }
+            }
+            let hinted = await planReadError(headers: ["Retry-After": "1"])
+            if case let .retryableServer(code, message, status, hint)? = hinted {
+                check(code == "plan_snapshot_changed" && status == 503 && hint == 1,
+                      "503 with Retry-After: 1 becomes a retryable server error carrying the hint")
+                check(message.contains("快照变化"), "retryable server error keeps the server message")
+                check(hinted?.serverCode == "plan_snapshot_changed" && hinted?.httpStatus == 503,
+                      "retryable server error exposes code/status for classification")
+                if let hinted {
+                    let issue = PlanReadIssue.network(hinted)
+                    check(issue.code == .serverUnavailable && issue.retryable,
+                          "a retryable 503 is classified as retryable server-unavailable, not contract mismatch")
+                    check(hinted.errorDescription == message, "retryable server error has a localized message")
+                }
+            } else {
+                check(false, "503 with Retry-After: 1 must throw retryableServer")
+            }
+            if case .server(_, _, 503)? = await planReadError(headers: nil) {
+                check(true, "503 without Retry-After keeps the non-retryable server error")
+            } else {
+                check(false, "503 without Retry-After must stay .server")
+            }
+            if case .server(_, _, 503)? = await planReadError(headers: ["Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"]) {
+                check(true, "503 with an HTTP-date Retry-After stays .server")
+            } else {
+                check(false, "HTTP-date Retry-After must be ignored")
+            }
+            if case let .retryableServer(_, _, _, hint)? = await planReadError(headers: ["Retry-After": "0"]) {
+                check(hint == 0, "Retry-After: 0 is preserved as an immediate-retry hint")
+            } else {
+                check(false, "Retry-After: 0 must still be a retryable hint")
+            }
+            if case let .retryableServer(_, _, _, hint)? = await planReadError(headers: ["Retry-After": "9"]) {
+                check(hint == 5, "Retry-After: 9 is clamped to five seconds")
+            } else {
+                check(false, "Retry-After: 9 must be a retryable hint")
+            }
+            // 429 仍走旧路径（文案携带建议），不被升级成可重试 case（重试属于调用方语义）。
+            StubProtocol.extraHeaders = ["Retry-After": "5"]
+            StubProtocol.handler = { _ in (429, "{\"code\":\"rate_limited\",\"message\":\"容量已满\"}", 0) }
+            do {
+                _ = try await api.today(baseURL: retryAfterBase, token: "")
+                check(false, "429 must throw")
+            } catch let error as RaiAPIClientError {
+                if case let .server(code, message, status) = error {
+                    check(code == "rate_limited" && status == 429 && message.contains("建议 5 秒"),
+                          "429 keeps the legacy server error plus its retry hint")
+                } else {
+                    check(false, "429 must remain .server, not retryableServer")
+                }
+            } catch {
+                check(false, "429 must throw RaiAPIClientError")
+            }
+            StubProtocol.extraHeaders = nil
         }
         print("All model regression checks passed.")
     }

@@ -4,6 +4,13 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # 2026-10-18（训练计划审查 P3-20）：本仓库的远端是 **gitee**，GitHub Actions
+  # 在本仓库**不会**被 gitee 的 push 触发（两个平台不互相调用）。保留本 workflow 是
+  # 为"将来把仓库镜像到 GitHub"准备；镜像后由 mirror 的 push 触发，或者在这里手动
+  # dispatch。**不要**把它当成"提交已被 CI 覆盖"的证据 —— 当前真正的执行入口是
+  # `.githooks/pre-commit`（本地：typecheck / 文档 / 行号引用 / npm 脚本 / 计划定向回归
+  # / 验收矩阵 / 包边界 / iOS 门禁），发布前另需按 README §检查 逐条在本机跑一遍。
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -143,7 +150,10 @@ jobs:
         run: npm run typecheck
 
       - name: Validate maintained documentation and acceptance references
-        run: npm run check:docs && npm run check:acceptance-matrix
+        # `check:doc-refs` 自 2026-10-18 起也在默认范围内核对三份现行计划文档的
+        # `文件:行号` 引用（此前它与 pre-commit 都漏了这一步，实测漏掉过一处指向
+        # 已删除 `docs/WEB.md` 的死引用）。
+        run: npm run check:docs && npm run check:doc-refs && npm run check:acceptance-matrix
 
       - name: Run tests
         run: npm test

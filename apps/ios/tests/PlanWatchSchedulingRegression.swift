@@ -18,8 +18,29 @@ import Foundation
         let digests = try JSONDecoder().decode([DigestFixture].self, from: Data(contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("apps/ios/tests/fixtures/prescription-digests.json")))
         for fixture in digests {
-            check(PlanFingerprint.prescriptionDigest(kind: fixture.kind, structure: fixture.structure) == fixture.digest, "cross-language deterministic prescription digest \(fixture.kind)")
+            let digest = try PlanFingerprint.prescriptionDigest(kind: fixture.kind, structure: fixture.structure)
+            check(digest == fixture.digest, "cross-language deterministic prescription digest \(fixture.kind)")
         }
+        check(digests.count >= 9, "shared digest fixture covers half-up micro quantisation, -0, heart_rate, multi-block and the 1e9 bound")
+        // 2026-10-18（审查 P2-13）：规则不允许的值必须抛错，不能悄悄格式化或钳制。
+        func singleStep(meters: Double) -> MobileSessionStructure {
+            .init(warmup: nil, blocks: [.init(iterations: 1, steps: [
+                .init(purpose: "work", goal: .distance(meters: meters), alert: nil)])], cooldown: nil)
+        }
+        check((try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: 1_000_000_001))) == nil,
+              "a value above the agreed 1e9 bound is rejected instead of formatted")
+        check((try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: .infinity))) == nil,
+              "a non-finite prescription value is rejected")
+        check((try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: .nan))) == nil,
+              "NaN is rejected")
+        check((try? PlanFingerprint.prescriptionDigest(kind: "easy|~|0", structure: nil)) == nil,
+              "unknown/injecting session kind is rejected instead of changing the digest identity")
+        let zero = try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: 0))
+        let negativeZero = try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: -0.0))
+        check(zero != nil && zero == negativeZero, "-0 quantises to 0.000000, never -0.000000")
+        let halfUp = try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: 1.0000015))
+        let halfDown = try? PlanFingerprint.prescriptionDigest(kind: "easy", structure: singleStep(meters: 1.0000014))
+        check(halfUp != nil && halfUp != halfDown, "micro quantisation distinguishes 1.0000015 from 1.0000014")
         let brokenStorage = FakePlanScheduleStorage(); brokenStorage.failWrites = true
         let safeJournal = PlanScheduleJournal(storage: brokenStorage, operation: FakePlanScheduleStorage.journal().operation)
         let neverCleared = FakeWorkoutScheduler()
@@ -144,6 +165,24 @@ import Foundation
         cleanupFailure.event = { event in if event == "schedule" { current = false } }
         let risk = await sync(cleanupFailure, current: { current })
         check(risk.superseded && !risk.cleanupVerified && risk.submittedEntries.count == 1 && risk.report.contains("未能确认撤回"), "failed targeted cleanup retains submitted IDs and visible withdrawal risk")
+
+        // 2026-10-18（审查 P3-16）：残留身份 = UUID **且** 精确 scheduledAt，
+        // 与 WorkoutKitBridge.removeEntries 的条目身份一致。只看 UUID 会把系统
+        // 里同 UUID 的其他时刻误判成"我们的条目未撤回"。
+        var currentIdentity = true
+        let identityFake = FakeWorkoutScheduler()
+        identityFake.event = { event in
+            if event == "schedule", let submitted = identityFake.submitted.first {
+                currentIdentity = false
+                var later = submitted.at
+                later.hour = (later.hour ?? 0) + 1
+                identityFake.listed.append(.init(workoutID: submitted.entry.workoutID, at: later,
+                    contentMatches: true, complete: false))
+            }
+        }
+        let identityOutcome = await sync(identityFake, current: { currentIdentity })
+        check(identityOutcome.superseded && identityOutcome.cleanupVerified && !identityOutcome.clearVerified,
+              "targeted cleanup verifies residue by UUID + exact scheduledAt, not UUID alone")
 
         let unsupported = FakeWorkoutScheduler(); unsupported.isSupported = false
         let unsupportedResult = await sync(unsupported)

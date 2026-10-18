@@ -141,7 +141,7 @@
 
 新教练合同在正常base/build/peak以量带指导S，而用历史独立H做追加保护；减量、比赛周、14天附加保护仍禁止超S追加。这一版本化差异仅作用于已选择新合同者，不将旧量带字段改名后继续交给旧客户端。
 
-契约影响：`MobileRunCoachResponse.phase` 对自定义距离由 `"base"` 变为 `null`，界面落到既有的「持续训练」文案，iOS 无需改动。同批**未**处理、留待单独决定：`phases` 区间数组对无骨架计划仍以 `"base"` 填充，与 `phase: null` 的语义不自洽。
+契约影响：`MobileRunCoachResponse.phase` 对自定义距离由 `"base"` 变为 `null`，界面落到既有的「持续训练」文案，iOS 无需改动。原「同批未处理」的 `phases` 不自洽**已解决（2026-10-18）**：`phases` 区间数组对无骨架计划现在是**空数组** —— `apps/api/src/run-coach.ts:303-311` 只对 `runCoachPhase` 非 null 的日期推送区间，而无赛事目标（fitness、全马、自定义不支持距离）时它恒为 null，于是 `phases` 保持 `[]`。这与 `phase: null`、[RUN_COACH](RUN_COACH.md) 的「phase=null 且 phases=[]」以及 `apps/api/test/run-coach.test.ts:588` 对每个无骨架距离的 `phases` 为空断言三方一致；客户端不生成替代阶段。
 
 ## D17. 客户端收敛为原生 iOS + API（Web 与 macOS 退役）
 

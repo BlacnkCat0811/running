@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   buildPeriodization,
   currentPeriodizationWeek,
+  periodizationPhaseFor,
   periodizationVolumeFraction,
   periodizationWeekStart
 } from "../src/plan-periodization.js";
 import { weeklyPlanVolumeCeiling } from "../src/weekly-plan-validate.js";
+import { weeklyCapacity } from "../src/weekly-capacity.js";
 import { buildPlanAdherence, replanAdvice, type PlanDayObservation } from "../src/plan-adherence.js";
 import type { PlanHistoryRevision } from "../src/mobile-goals.js";
 
@@ -110,6 +112,100 @@ test("G01: without a race target the coach says so instead of inventing a phase"
   assert.equal(plan.raceDate, null);
   assert.deepEqual(plan.weeks, []);
   assert.ok(plan.reasonCodes.includes("no_race_target"));
+});
+
+test("G01: weeksToRace 23 and 24 include the current week; 25 is the first forward-only skeleton", () => {
+  const week = (weeksToRace: number) => buildPeriodization({
+    today: TODAY,
+    raceTarget: { date: raceIn(weeksToRace), distance: "half_marathon" },
+    recentWeeklyKm: 40
+  });
+
+  const twentyThree = week(23);
+  assert.equal(twentyThree.weeks.length, 24, "current week + 23 weeks to the race");
+  assert.equal(twentyThree.current?.weekStart, periodizationWeekStart(TODAY));
+  assert.equal(twentyThree.current?.phase, "base");
+  assert.equal(twentyThree.weeks[0]!.weekStart, periodizationWeekStart(TODAY));
+  assert.equal(twentyThree.reasonCodes.includes("race_beyond_maximum_horizon"), false);
+
+  const twentyFour = week(24);
+  assert.equal(twentyFour.weeks.length, 25, "the supported 24-week horizon still contains the current week");
+  assert.equal(twentyFour.current?.weekStart, periodizationWeekStart(TODAY));
+  assert.equal(twentyFour.current?.phase, "base");
+  assert.equal(twentyFour.current?.weeksToRace, 24);
+  assert.equal(twentyFour.weeks[0]!.weekStart, periodizationWeekStart(TODAY));
+  assert.equal(twentyFour.weeks.at(-1)!.phase, "race_week");
+  assert.deepEqual(twentyFour.reasonCodes, [], "a 24-week race is supported, not beyond the horizon");
+  assert.deepEqual(
+    twentyFour.weeks.map((item) => item.weeksToRace),
+    Array.from({ length: 25 }, (_, index) => 24 - index)
+  );
+
+  const twentyFive = week(25);
+  assert.equal(twentyFive.weeks.length, 24, "beyond the horizon only the 24 future rows remain");
+  assert.equal(twentyFive.current, null, "a 25-week race has no current row to render");
+  assert.equal(twentyFive.weeks[0]!.weekStart, addDays(periodizationWeekStart(TODAY), 14), "the forward window starts two weeks ahead");
+  assert.equal(twentyFive.weeks[0]!.weeksToRace, 23);
+  assert.ok(twentyFive.reasonCodes.includes("race_beyond_maximum_horizon"));
+  assert.ok(twentyFive.reasonCodes.includes("current_week_outside_window"));
+  assert.equal(twentyFive.weeks.at(-1)!.phase, "race_week");
+});
+
+test("G01: weeklyCapacity keeps the phase (and its trim) at the supported 24-week boundary", () => {
+  const at = (weeksToRace: number) => weeklyCapacity({
+    today: TODAY,
+    raceTarget: { date: raceIn(weeksToRace), distance: "half_marathon" },
+    recentWeeklyKm: 40,
+    previousWeekDistanceKm: 40
+  });
+
+  const twentyThree = at(23);
+  const twentyFour = at(24);
+  assert.equal(twentyThree.phase, "base");
+  assert.equal(twentyFour.phase, "base", "a supported 24-week race must still have a phase");
+  // 35 km half-marathon race baseline × base upper 1.05, capped by recent × 1.3.
+  assert.equal(twentyThree.baselineKm, 36.75);
+  assert.equal(twentyFour.baselineKm, 36.75, "the phase trim was previously lost at exactly 24 weeks (35)");
+
+  const beyond = at(25);
+  assert.equal(beyond.phase, null, "past the horizon the phase is deliberately not claimed here");
+  assert.equal(beyond.baselineKm, 35);
+});
+
+test("G01: invalid calendar dates are rejected instead of rolled into a neighbouring day", () => {
+  // `Date.parse("2026-02-30T00:00:00Z")` silently becomes 2 March, so a bare
+  // regex-plus-parse check accepted it. Both entry points now share the strict
+  // calendar validator.
+  assert.throws(() => buildPeriodization({
+    today: "2026-02-30",
+    raceTarget: { date: "2026-03-21", distance: "ten_k" },
+    recentWeeklyKm: 30
+  }), /local date/);
+  assert.throws(() => periodizationPhaseFor("2026-02-30", { date: "2026-03-21", distance: "ten_k" }), /local dates/);
+  assert.throws(() => periodizationPhaseFor("2026-02-29", { date: "2026-03-21", distance: "ten_k" }), /local dates/,
+    "2026 is not a leap year");
+  assert.equal(periodizationPhaseFor("2024-02-29", { date: "2024-06-01", distance: "ten_k" }), "base",
+    "2024-02-29 exists and must be accepted");
+  assert.equal(periodizationWeekStart("2028-02-29"), "2028-02-28");
+  assert.equal(periodizationWeekStart("2024-02-29"), "2024-02-26");
+
+  // An invalid race date is not a race target; it must not produce a skeleton.
+  const invalidRace = buildPeriodization({
+    today: TODAY,
+    raceTarget: { date: "2026-02-30", distance: "ten_k" },
+    recentWeeklyKm: 30
+  });
+  assert.equal(invalidRace.raceDate, null);
+  assert.deepEqual(invalidRace.weeks, []);
+  assert.ok(invalidRace.reasonCodes.includes("no_race_target"));
+
+  // weeklyCapacity gates the phase on the same strict validator rather than throwing.
+  const invalidToday = weeklyCapacity({
+    today: "2026-02-30",
+    raceTarget: { date: raceIn(4), distance: "ten_k" },
+    recentWeeklyKm: 30
+  });
+  assert.equal(invalidToday.phase, null);
 });
 
 test("G01: a skeleton never reaches into the past", () => {

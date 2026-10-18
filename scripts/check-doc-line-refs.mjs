@@ -90,7 +90,19 @@ const DEFAULT_DOCS = [
   // 该文档正文用 markdown 链接、**0 处** `文件:行号` 引用 ⇒ 当前是**真空**（它的 27 个链接
   // 由 `check:docs` 覆盖）。挂载意图：实施期为条目补行号证据时门禁自动生效；
   // 且"0 处"会显式出现在输出里，避免把真空读成已保护。文档手改锚点请同步此说明。
-  "docs/IOS_SYNC_PERFORMANCE_REVIEW.md"
+  "docs/IOS_SYNC_PERFORMANCE_REVIEW.md",
+  // 2026-10-18 训练计划审查（R-03/P2-17）：这三份是**现行**计划文档（由
+  // `README.md`、`IOS_NATIVE_API_CONTRACT.md:104/106`、`IMPLEMENTATION.md:3` 链式引用，
+  // 读者会当作当前口径），但当时**全都在默认范围之外** ⇒ 它们的 `文件:行号` 没有任何门禁。
+  // 同一轮实测：把它们显式传给本脚本立刻抓到一处死引用（已修，指向已删除的 `docs/WEB.md`）。
+  // ⚠️ 首跑时三份都打印"0 处引用"：它们当前靠 markdown 链接而非行号引用，
+  // 这是**真空但已显式可见**，不是"已保护"；实施期补行号证据时门禁自动生效。
+  // 反例：`docs/TODAY_PLAN_CARDS_REVIEW.md` 有 23 处行号引用，但它是**带日期的时点快照**
+  // （2026-10-06"本轮只诊断，未改任何代码"）——按上面第 3 条判读陷阱不进默认范围，
+  // 需要时显式传入并自行判读。
+  "docs/IOS_TRAINING_PLAN_STATE_V1.md",
+  "docs/IOS_TRAINING_PLAN_IMPLEMENTATION.md",
+  "docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md"
 ];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */

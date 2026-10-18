@@ -214,7 +214,11 @@ export function replanAdvice(input: {
   if (consecutiveLow >= REPLAN_CONSECUTIVE_LOW_WEEKS) {
     reasons.push({
       code: "consecutive_low_volume_weeks",
-      detail: `连续 ${consecutiveLow} 周完成量低于计划的 ${Math.round(ADHERENCE_LOW_VOLUME_RATIO * 100)}%，当前周量可能已经不现实。`
+      // The heuristic only reads *completed* weeks (`completedWeeks` above), so the
+      // sentence must say so. It used to conclude "当前周量可能已经不现实" while the
+      // current week may have been on track — the same card could show "按计划"
+      // beside it and both numbers were right (TODAY_PLAN_CARDS_REVIEW C3/A3).
+      detail: `连续 ${consecutiveLow} 周（已结束）完成量低于计划的 ${Math.round(ADHERENCE_LOW_VOLUME_RATIO * 100)}%，周量上限可能需要下调。`
     });
   }
 

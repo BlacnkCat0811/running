@@ -43,7 +43,7 @@ import { ModelRunActivationError, PendingMigrationsError, SqliteModelReleaseRepo
 import Fastify from "fastify";
 
 import { RestoreRecoveryRequiredError } from "./restore-journal.js";
-import { apiErrorPayload, ClientRequestError } from "./api-error.js";
+import { apiErrorPayload, ClientRequestError, retryAfterSeconds } from "./api-error.js";
 import { readDatasetEpoch, writeDatasetEpoch, writeDeletedDatasetEpoch } from "./dataset-epoch.js";
 import { CommandQueue, applyMutationCommand } from "./command-queue.js";
 import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
@@ -66,7 +66,7 @@ import {
   PrivacyZoneValidationError,
   type PerformanceEntryDistance
 } from "@rai/storage-sqlite";
-import { MobileGoalsRevisionConflictError, MobileGoalsStore, WeeklyPlanConfirmationRequiredError, type PlanMergeOptions } from "./mobile-goals.js";
+import { MobileGoalsRevisionConflictError, MobileGoalsStore, WeeklyPlanConfirmationRequiredError, planDayWithLock, type PlanMergeOptions } from "./mobile-goals.js";
 import { mobileLockRejection, mobileRefreshOutcome } from "./mobile-sync.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
@@ -111,12 +111,12 @@ import { registerRunCoachRoutes } from "./run-coach.js";
 import { CoachLoopRuntime, type CoachRuntimeReceipt } from "./coach-loop-runtime.js";
 import { registerCoachLoopRoutes } from "./coach-loop-routes.js";
 import { PlanPublicationService, PlanOperationError } from "./plan-publication.js";
-import { digest, prescriptionDigest } from "./plan-digest.js";
+import { prescriptionDigest } from "./plan-digest.js";
+import { normalizePlanReceiptV2 } from "./plan-receipt.js";
 import type { MobilePlanReceiptInput } from "@rai/api-contracts";
 import type { MobilePlanOperationScope } from "@rai/api-contracts";
 import { planOperationScopeSchema } from "./schemas.js";
 import { isValidLocalDate } from "./local-date.js";
-import { normalizeSessionStructure } from "./session-structure.js";
 import { weeklyCapacity } from "./weekly-capacity.js";
 import {
   ImportWorker,
@@ -381,6 +381,19 @@ app.addHook("onResponse", async (request, reply) => {
   if (start !== undefined) telemetry.record(performance.now() - start, reply.statusCode);
 });
 app.addHook("onClose", async () => telemetry.close());
+// Plan and goals reads are safety-relevant snapshots, not cacheable
+// representations: an intermediary that reuses one after a publication would
+// show a plan the client is about to overwrite. `/training-plan-state`,
+// `/coach-loop` and `/coach-execution` already set this header in their
+// handlers; this hook covers the rest of the mobile surface (today,
+// workout-plan, goals, run-coach, lock, plan-operations, ...) in one place
+// (review P3-1).
+app.addHook("onSend", async (request, reply, payload) => {
+  if (request.routeOptions.url?.startsWith("/v1/mobile/")) {
+    reply.header("Cache-Control", "no-store");
+  }
+  return payload;
+});
 const mutationReleases = new WeakMap<object, () => void>();
 const localRequestSecurityOptions = {
   apiPort: port,
@@ -398,7 +411,7 @@ app.addHook("preHandler", async (request, reply) => {
   if (routeUrl?.startsWith("/v1/mobile/") &&
     !["/v1/mobile/coach-loop", "/v1/mobile/coach-loop/synced", "/v1/mobile/coach-execution", "/v1/mobile/coach-feedback",
       "/v1/mobile/coach-prediction-refresh", "/v1/mobile/plan-operations/:id"].includes(routeUrl)) {
-    const managed = mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch }));
+    const managed = coachLoopManaged();
     if (managed &&
       ["/v1/mobile/today","/v1/mobile/run-coach","/v1/mobile/training-plan-state","/v1/mobile/workout-plan",
         "/v1/mobile/goals","/v1/mobile/lock"].some(prefix => routeUrl === prefix || routeUrl.startsWith(`${prefix}/`))) {
@@ -448,6 +461,16 @@ await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedResto
 datasetEpoch = readDatasetEpoch(databasePath, configuredDatasetEpoch);
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
+/**
+ * Single source for "this dataset is managed by the coach-loop contract".
+ *
+ * Both the legacy-route gate and the handshake capability advertisement use it:
+ * when this is true the old plan reads answer 409 by design, so advertising
+ * `planSnapshotContractVersion` at the same time would tell a client to call a
+ * route that cannot succeed (review P3-3).
+ */
+const coachLoopManaged = (): boolean =>
+  mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch })) !== null;
 const planPublication = new PlanPublicationService(mobileGoalsStore, () => JSON.stringify([serverId, athleteId, datasetEpoch]),
   () => ({ serverId, athleteId, datasetEpoch }));
 mobileGoalsStore.retireLegacyModelPlan(mobileLocalDate());
@@ -929,7 +952,11 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   apiVersion: "v1",
   healthKitRecordSyncVersion: 2,
   planReceiptMetadata: true,
-  planSnapshotContractVersion: 1,
+  // A managed dataset answers the legacy plan reads with 409 by design, so the
+  // capability is omitted instead of advertising a route the same handshake
+  // document cannot fulfil (review P3-3). The coach-loop capability below stays
+  // set, which is what a client in this state must use.
+  ...(coachLoopManaged() ? {} : { planSnapshotContractVersion: 1 }),
   coachLoopContractVersion: 1,
   ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),
   planReceiptContractVersion: 2,
@@ -1206,41 +1233,78 @@ app.post<{ Body: MobilePlanReceiptInput }>(
     const pushedAt = new Date().toISOString();
     const body = request.body;
     if (!isValidLocalDate(body.localDate)) throw new PlanOperationError("plan_receipt_date_invalid", "回执日期无效。", 422);
-    let matchesCurrent: boolean | undefined;
+    // The stored identity is always the canonical structure. Accepting both the
+    // normalized wire shape and Swift's nil-omitting shape is deliberate; see
+    // `plan-receipt.ts` for why the old strict canonical check rejected real
+    // receipts (and crashed with a TypeError on a missing warmup).
+    let structure = body.structure ?? null;
     if (body.contractVersion === 2) {
-      const required = [body.scope, body.operationId, body.coherenceToken, body.workoutID, body.scheduledAt,
-        body.verifiedAt, body.timezone, body.prescriptionDigest, body.lifecycleEvent, body.structure];
-      if (required.some(value => value == null) || body.revision == null) throw new PlanOperationError("plan_receipt_contract_mismatch", "新回执缺少必要核验字段。", 422);
-      if (digest(body.scope) !== digest({ serverId, athleteId, datasetEpoch })) throw new PlanOperationError("plan_receipt_scope_mismatch", "回执属于其他服务或数据集。");
-      const date = new Intl.DateTimeFormat("en-CA", { timeZone: body.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(body.scheduledAt!));
-      if (date !== body.localDate || Date.parse(body.verifiedAt!) > Date.now() + 300_000 ||
-          prescriptionDigest(body.kind, body.structure!) !== body.prescriptionDigest ||
-          digest(normalizeSessionStructure(body.structure)) !== digest(body.structure)) {
-        throw new PlanOperationError("plan_receipt_evidence_mismatch", "日期、核验时刻或实际导出摘要不匹配。", 422);
-      }
-      const current = withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })));
-      const expected = current.workoutPlan.days.find(day => day.localDate === body.localDate && day.executable);
-      matchesCurrent = body.lifecycleEvent === "verified" && body.revision === current.metadata.goalsRevision &&
-        body.coherenceToken === current.metadata.coherenceToken && expected?.kind === body.kind &&
-        prescriptionDigest(expected.kind, expected.structure) === body.prescriptionDigest;
+      structure = normalizePlanReceiptV2(body, { serverId, athleteId, datasetEpoch }).structure;
     } else if (body.operationId || body.scope || body.coherenceToken || body.verifiedAt || body.timezone || body.prescriptionDigest || body.lifecycleEvent) {
       throw new PlanOperationError("plan_receipt_contract_mismatch", "新增字段需要回执契约版本 2。", 422);
     }
-    const recordedAt = mobileGoalsStore.recordPlanPush({
-      ...body,
-      ...(body.contractVersion === 2 ? { idempotencyKey: body.idempotencyKey ?? `${body.workoutID}:${body.lifecycleEvent}` } : {}),
-      localDate: request.body.localDate,
-      kind: request.body.kind,
-      revision: request.body.revision ?? 0,
-      structure: request.body.structure ?? null,
-      pushedAt,
-      ...(matchesCurrent === undefined ? {} : { matchesCurrent }),
-      ...(request.body.workoutID !== undefined ? { workoutID: request.body.workoutID } : {}),
-      ...(request.body.scheduledAt !== undefined ? { scheduledAt: request.body.scheduledAt } : {}),
-      ...(request.body.idempotencyKey !== undefined ? { idempotencyKey: request.body.idempotencyKey } : {}),
-      ...(request.body.exportNotes !== undefined ? { exportNotes: request.body.exportNotes } : {})
+    // Compute `matchesCurrent` and write the receipt inside one control-database
+    // write transaction. Previously the snapshot was read outside the write and
+    // a publication could commit in between, so the recorded receipt could claim
+    // membership of a revision that had already been replaced (review P2-2).
+    // Holding the same transaction also makes the `planPushIsActive` answer in
+    // the response describe the state the receipt was registered against.
+    const outcome = mobileGoalsStore.withPublicationTransaction(() => {
+      let matchesCurrent: boolean | undefined;
+      if (body.contractVersion === 2) {
+        const current = withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })));
+        const expected = current.workoutPlan.days.find(day => day.localDate === body.localDate && day.executable);
+        // The generic channel used to accept any self-declared `verified`
+        // receipt (review P3-7). `operationId` is the *client's* schedule
+        // journal id, not a key in `mobile_plan_operations`, so the right
+        // evidence rule is the one the coach channel already applies: the
+        // revision must be a real published prescription whose day carries this
+        // kind and digest. Two representations are legitimate:
+        //  - the stored goals history (what was published), and
+        //  - the current effective day when the receipt cites the current
+        //    revision, because `/v1/mobile/workout-plan` applies the ramp and
+        //    quality caps and the client exports *that* constrained structure.
+        // Comparing canonical digests also absorbs the wire-shape difference
+        // (Swift omits nil keys; `structure` above is already normalized).
+        if (body.lifecycleEvent === "verified") {
+          const canonicalDigest = prescriptionDigest(body.kind, structure);
+          const history = mobileGoalsStore.planHistory(200).find(row => row.revision === body.revision);
+          const historicalDay = history ? planDayWithLock(history, body.localDate) : undefined;
+          const historicalMatch = historicalDay?.kind === body.kind &&
+            prescriptionDigest(historicalDay.kind, historicalDay.structure ?? null) === canonicalDigest;
+          const effectiveMatch = body.revision === current.metadata.goalsRevision && expected?.kind === body.kind &&
+            prescriptionDigest(expected.kind, expected.structure ?? null) === canonicalDigest;
+          if (!historicalMatch && !effectiveMatch) {
+            throw new PlanOperationError("plan_receipt_unknown_prescription",
+              "回执必须关联真实发布过的处方与授权。", 422);
+          }
+        }
+        matchesCurrent = body.lifecycleEvent === "verified" && body.revision === current.metadata.goalsRevision &&
+          body.coherenceToken === current.metadata.coherenceToken && expected?.kind === body.kind &&
+          prescriptionDigest(expected.kind, expected.structure) === body.prescriptionDigest;
+      }
+      const recordedAt = mobileGoalsStore.recordPlanPush({
+        ...body,
+        ...(body.contractVersion === 2 ? { idempotencyKey: body.idempotencyKey ?? `${body.workoutID}:${body.lifecycleEvent}` } : {}),
+        localDate: body.localDate,
+        kind: body.kind,
+        revision: body.revision ?? 0,
+        structure,
+        pushedAt,
+        ...(matchesCurrent === undefined ? {} : { matchesCurrent }),
+        ...(body.workoutID !== undefined ? { workoutID: body.workoutID } : {}),
+        ...(body.scheduledAt !== undefined ? { scheduledAt: body.scheduledAt } : {}),
+        ...(body.idempotencyKey !== undefined ? { idempotencyKey: body.idempotencyKey } : {}),
+        ...(body.exportNotes !== undefined ? { exportNotes: body.exportNotes } : {})
+      });
+      return {
+        recordedAt,
+        matchesCurrent: matchesCurrent === undefined ? undefined
+          : matchesCurrent && mobileGoalsStore.planPushIsActive(body.workoutID!, body.scheduledAt!)
+      };
     });
-    return { recordedAt, ...(matchesCurrent === undefined ? {} : { matchesCurrent: matchesCurrent && mobileGoalsStore.planPushIsActive(body.workoutID!, body.scheduledAt!) }),
+    return { recordedAt: outcome.recordedAt,
+      ...(outcome.matchesCurrent === undefined ? {} : { matchesCurrent: outcome.matchesCurrent }),
       informationLevel: body.contractVersion === 2 ? "verifiedClient" : "legacy" };
   }
 );
@@ -1472,7 +1536,12 @@ app.post<{ Body: { candidateId: string; expectedRevision: number; operationId?: 
         weekPlanAudit: preview.audit }, { prescription: inputs.prescription, confirmCoachPlan: true,
         ...(goals.runCoach?.status === "ended" ? { runCoach: null } : {}) });
       return { generatedAt: preview.generatedAt, revision: written.revision, audit: preview.audit, days: preview.days, warnings: preview.warnings };
-    }, request.body.operationId === undefined);
+    // Always remember the committed result. The previous argument was inverted
+    // (`operationId === undefined`), so a confirm that *did* carry an
+    // operationId forgot its result and a lost acknowledgement was answered
+    // "预览已过期" instead of the frozen revision (review P3-6). This memory is
+    // process-local and expires with the preview window either way.
+    }, true);
     });
   } catch (error) {
     if (error instanceof PlanPreviewError || error instanceof MobileGoalsRevisionConflictError) return reply.code(409).send({ code: error.code, message: error.message });
@@ -1533,6 +1602,18 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
   "/v1/mobile/goals",
   { schema: { body: mobileGoalsBodySchema } },
   async (request, reply) => {
+    // `weekPlan` confirmation is not a metadata-only write: the manual-plan
+    // policy needs the main database (capacity baseline, injury limits, history
+    // freeze). Without it `validateManualPlan` cannot run at all, so accepting
+    // the write would persist an unvalidated week that `planHistory` later
+    // presents as "the plan at that time" (review P2-4). Every other goals
+    // field stays writable without a database.
+    if (request.body.weekPlan !== undefined && !databaseIsReady()) {
+      return reply.code(409).send({
+        code: "database_not_ready",
+        message: "本地 RAI 数据库尚未就绪，周计划无法完成策略校验；请先导入或恢复数据，其余目标仍可保存"
+      });
+    }
     try {
       return planPublication.publish("goals", request.body, () => {
       // Re-measured with the live zone prescription so a distance typed into
@@ -1582,29 +1663,40 @@ app.post<{ Body: LockMobileSessionInput }>(
   "/v1/mobile/lock",
   { schema: { body: mobileLockBodySchema } },
   async (request, reply) => {
-    return planPublication.publish("lock", request.body, () => {
-    const goals = mobileGoalsStore.read();
-    const ignoreLock = request.body.action === "relock";
-    const snapshot = withReadStore((store) => store.mobileToday(goals));
-    const rejection = mobileLockRejection({
-      syncStatus: snapshot.sync.status,
-      recommendationRevision: snapshot.recommendationRevision,
-      expectedRevision: request.body.expectedRevision
-    });
-    if (rejection) throw new PlanOperationError(rejection.code, rejection.message);
-    if (request.body.action === "lock" && snapshot.lock.present) {
-      return mobileGoalsStore.read(planPrescription());
+    try {
+      return planPublication.publish("lock", request.body, () => {
+      const goals = mobileGoalsStore.read();
+      const ignoreLock = request.body.action === "relock";
+      const snapshot = withReadStore((store) => store.mobileToday(goals));
+      const rejection = mobileLockRejection({
+        syncStatus: snapshot.sync.status,
+        recommendationRevision: snapshot.recommendationRevision,
+        expectedRevision: request.body.expectedRevision
+      });
+      if (rejection) throw new PlanOperationError(rejection.code, rejection.message);
+      if (request.body.action === "lock" && snapshot.lock.present) {
+        return mobileGoalsStore.read(planPrescription());
+      }
+      return mobileGoalsStore.lockSession(
+        {
+          localDate: snapshot.today.localDate,
+          session: ignoreLock ? snapshot.lock.candidate ?? snapshot.nextSession : snapshot.nextSession,
+          verdictTone: snapshot.verdict.tone,
+          lockedAt: new Date().toISOString()
+        },
+        planPrescription()
+      );
+      });
+    } catch (error) {
+      // A stale expectedRevision is an ordinary concurrency outcome, not a
+      // server fault. Without this, `MobileGoalsRevisionConflictError` used to
+      // leave `/lock` with a 500 and the client with a pending publication it
+      // could never clear by replaying the same payload.
+      if (error instanceof MobileGoalsRevisionConflictError) {
+        return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
+      }
+      throw error;
     }
-    return mobileGoalsStore.lockSession(
-      {
-        localDate: snapshot.today.localDate,
-        session: ignoreLock ? snapshot.lock.candidate ?? snapshot.nextSession : snapshot.nextSession,
-        verdictTone: snapshot.verdict.tone,
-        lockedAt: new Date().toISOString()
-      },
-      planPrescription()
-    );
-    });
   }
 );
 
@@ -2055,7 +2147,10 @@ app.setErrorHandler((error, _request, reply) => {
     taskAdmission.blockUntilRestart(error.code);
   }
   const payload = apiErrorPayload(error);
-  if (payload.status === 429) reply.header("Retry-After", "5");
+  // Snapshot-changed errors are transient by construction; the helper keeps the
+  // exact code list in one unit-tested place (review P2-6).
+  const retryAfter = retryAfterSeconds(payload);
+  if (retryAfter !== null) reply.header("Retry-After", retryAfter);
   void reply.code(payload.status).send(payload.body);
 });
 

@@ -223,6 +223,48 @@ export interface MobilePlanOperationScope {
   datasetEpoch: string;
 }
 
+/**
+ * `GET /v1/mobile/plan-operations/:id` 的四种终局状态（`handshake.planPublicationContractVersion = 1`）。
+ *
+ * 🔴 这是一份**共享单源**，不是文档抄写：服务端生产者是
+ * `apps/api/src/mobile-goals.ts` 的 `publicationResult()`，消费方是
+ * `apps/api/src/plan-publication.ts` 的 `result()` 与 iOS 的
+ * `PlanPublicationResult`（`apps/ios/RAI/PlanStatePolicy.swift`）。
+ * 四者的语义差别是**重试语义**，不是措辞差别：
+ *
+ * - `committed`：原操作已提交，`result` 是当时的**原结果**；重放必须直接返回它，
+ *   不得再执行一次业务（这正是 `planPublicationContractVersion` 存在的理由）。
+ * - `notFound`：当前 scope 下没有该操作行。**只有**这一种允许按原键、原字节重试；
+ *   客户端随后用持久化的原请求重放。
+ * - `scopeMismatch`：该 operationId 属于**其他** serverId/athleteId/datasetEpoch。
+ *   终局：同一份载荷永远不会在当前身份下成功，客户端应作废本地账目而不是重试。
+ * - `expired`：结果已过 90 天保留期（或已成墓碑），返回 HTTP 410；终局，不得重新执行。
+ *
+ * 老服务端没有本端点（`planPublicationContractVersion` 缺省），客户端不得把
+ * "查不到"当作 `notFound` 去重放 —— 那会把一次网络失败变成第二次发布。
+ */
+export const MOBILE_PLAN_OPERATION_QUERY_STATUSES = [
+  "committed",
+  "notFound",
+  "scopeMismatch",
+  "expired"
+] as const;
+export type MobilePlanOperationQueryStatus = (typeof MOBILE_PLAN_OPERATION_QUERY_STATUSES)[number];
+
+/**
+ * `GET /v1/mobile/plan-operations/:id` 的响应体（可辨识联合，按 `status` 收窄）。
+ *
+ * `committed` 携带原操作的结果（`Result` 由发起该操作的客户端按路由自行决定形状，
+ * 所以这里默认 `unknown`：本契约保证的是**信封**，不是每个发布路由的结果体）。
+ * 其余三种状态**没有** `result` —— 读到 `result: null` 与"没有这个键"在语义上相同，
+ * 消费方不得据 `undefined` 推断业务已成功。
+ */
+export type MobilePlanOperationQueryResponse<Result = unknown> =
+  | { status: "committed"; operationId: string; result: Result }
+  | { status: "notFound"; operationId: string }
+  | { status: "scopeMismatch"; operationId: string }
+  | { status: "expired"; operationId: string };
+
 export interface ModelRunSummary {
   id: string;
   featureRunId: string;

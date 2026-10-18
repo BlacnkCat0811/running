@@ -17,6 +17,7 @@ import { currentPeriodizationWeek, periodizationWeekStart } from "./plan-periodi
 import { executionPolicyContext, raceExecutionProtection } from "./race-plan-policy.js";
 import { runCoachRaceTarget, runCoachSessionTargets, runCoachWeekday, validateRunCoachConfig } from "./run-coach-policy.js";
 import { digest, prescriptionDigest } from "./plan-digest.js";
+import { planReadGuard, readStableSnapshot, type PublicationGuardCapableStore } from "./plan-read-consistency.js";
 import { coachGoalGap } from "./coach-goal-gap.js";
 import { recordCoachLoopDeviceReceipt } from "./coach-loop-device-sync.js";
 import { normalizeSessionStructure } from "./session-structure.js";
@@ -87,10 +88,27 @@ export class CoachLoopRuntime {
   }
 
   read(): CoachLoopRuntimeResponse {
-    const saved = this.saved(), goals = this.store.read();
-    const facts = this.readFacts(this.effectiveGoals(goals, saved?.settings ?? null), this.store.planHistory(200));
-    return this.evaluate(goals, facts, saved, saved?.settings ?? null).response;
+    // Control rows (receipt, goals, history) live in another store than the
+    // training facts read inside `readFacts`. Re-read the control snapshot after
+    // the build so a concurrent control write cannot be returned as "old plan
+    // state + new facts"; iOS schedules this response directly, so a mixed
+    // snapshot must fail closed with a retryable error instead.
+    const readGuard = planReadGuard(this.store as unknown as PublicationGuardCapableStore);
+    return readStableSnapshot({
+      // One control read per table per attempt; the same objects feed the
+      // before-digest and the build (review batch C read amplification).
+      readControl: () => ({ saved: this.saved(), goals: this.store.read(), history: this.store.planHistory(200) }),
+      build: control => this.evaluate(control.goals,
+        this.readFacts(this.effectiveGoals(control.goals, control.saved?.settings ?? null), control.history),
+        control.saved, control.saved?.settings ?? null).response,
+      changedError: () => new PlanOperationError("coach_snapshot_changed",
+        "教练计划状态在读取期间变化，请重新读取。", 503),
+      // Cross-store publication guard when the control store exposes it; without
+      // it the control digest pair remains the only check (pre-guard behaviour).
+      ...(readGuard === undefined ? {} : { readGuard })
+    });
   }
+
 
   recordDeviceReceipt(receipt: CoachLoopDeviceReceipt) {
     return recordCoachLoopDeviceReceipt(this.store, this.identity(), () => this.read(), receipt, this.publicationReady);
