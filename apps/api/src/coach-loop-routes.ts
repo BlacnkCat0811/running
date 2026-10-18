@@ -22,7 +22,10 @@ export function registerCoachLoopRoutes(args: {
   openMainDatabase: () => Promise<RaiDatabase>;
 }) {
   args.app.get("/v1/mobile/coach-loop", async (_request,reply) => {
-    reply.header("Cache-Control","no-store"); return args.runtime.read();
+    reply.header("Cache-Control","no-store");
+    // 只读 memo：只有"控制库 digest + 主库 data_version 指纹 + guard + 本地日期"
+    // 全部未变且 TTL 内才命中（见 coach-loop-memo.ts）；否则与 read() 一致地重算。
+    return args.runtime.readCached();
   });
   args.app.post<{Body:CoachLoopCommand}>("/v1/mobile/coach-loop", {schema:{body:coachLoopCommandSchema}},
     async (request, reply) => {

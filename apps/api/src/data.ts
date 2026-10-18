@@ -273,6 +273,20 @@ export class RaiReadStore {
     this.cacheVersion = -1;
   }
 
+  /**
+   * SQLite 跨连接变更计数器（`PRAGMA data_version`，2026-10-18 事故复盘 P1）。
+   *
+   * 读连接本身不做写，所以这个值只在**其他连接提交**后变化——正是 coach-loop
+   * 只读 memo 需要的"主库是否被导入/直连增量等外部写者改过"的廉价判据
+   * （一次 PRAGMA，不扫表）。它不会检测本连接自己的写（本类只读，不存在），也
+   * 不替代文件替换检测：发布/恢复换文件时由 `ReadStoreManager` 的 inode 指纹负责。
+   */
+  dataVersion(): number {
+    const row = this.database.prepare("PRAGMA data_version").get() as { data_version?: number } | undefined;
+    const value = Number(row?.data_version);
+    return Number.isFinite(value) ? value : -1;
+  }
+
   /** One read transaction for actual training, today's gates and subjective facts.
    * Availability is conservative session materialization time, never event time. */
   coachLoopFacts(goals: MobileGoalsResponse, history: PlanHistoryRevision[],

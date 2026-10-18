@@ -252,3 +252,33 @@ test("latency: cold open vs same-inode mtime path (p50/p95, diagnostic)", t => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-read-fingerprint-"));
+  const path = join(root, "rai.sqlite");
+  const replacement = join(root, "replacement.sqlite");
+  seedMarkerDatabase(path, "first");
+  const manager = new ReadStoreManager(path);
+  try {
+    const before = manager.dataVersionFingerprint();
+    assert.match(before, /^\d+:-?\d+$/, "指纹形如 <inode>:<data_version>");
+    // 另一个连接提交（导入/直连增量/重算发布）→ 同一文件、同一 inode，但
+    // data_version 前进；coach-loop memo 必须因此立即失效。
+    const writer = new DatabaseSync(path);
+    try {
+      writer.prepare("INSERT INTO marker VALUES (?)").run("second");
+    } finally { writer.close(); }
+    const afterCommit = manager.dataVersionFingerprint();
+    assert.notEqual(afterCommit, before, "外部写者提交后指纹必须变化");
+
+    // 发布/恢复换文件：读连接会被重开，inode 变化必须让 memo 失效。
+    seedMarkerDatabase(replacement, "replaced");
+    renameSync(replacement, path);
+    const afterReplace = manager.dataVersionFingerprint();
+    assert.notEqual(afterReplace, afterCommit, "文件替换后指纹必须变化");
+    assert.equal(manager.storeOpenCount, 2, "换文件后读连接被重开");
+  } finally {
+    manager.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -48,6 +48,65 @@ npm run smoke:api
 - **文档行号引用的内容漂移**：`npm run check:doc-refs` 默认只做"越界/无法解析"硬校验；**内容漂移**需要 `.linerefs.json` 基线，日常提交**不要求**基线（缺基线时输出写"未核对（无基线）"）。要对本次发布快照做内容级核对时：先 `node scripts/check-doc-line-refs.mjs --write-baseline` 生成基线并随快照归档，再用 `node scripts/check-doc-line-refs.mjs --require-baseline`（或 `RAI_DOC_REFS_REQUIRE_BASELINE=1`）判定；基线文件不要无条件提交（无关源码行移动会把它变成噪音）。
 - **`.mts` 脚本**（如 `review:model-boundaries`、`verify-v2-release`）是 TypeScript：必须走 `npm run` / `tsx`，裸 `node scripts/xxx.mts` 会 `ERR_MODULE_NOT_FOUND`。
 - **模型边界对抗探针**（`npm run review:model-boundaries`，R1–R3）只读、用合成库并在 finally 清理；`violationCount > 0` 时 exit 1，不得用"这次没改"跳过它。
+- **deploy/ 模板变更**：仓库里改完不等于线上生效。服务器上 `nginx -t` 通过后 `systemctl reload nginx`；unit 复制后用 `systemctl daemon-reload` → `restart` → 核对 `Type`/`NRestarts`/`WatchdogUSec`（见下节「线上可观测性与 hang 守护」）。
+
+## 线上可观测性与 hang 守护（2026-10-18 起）
+
+2026-10-18 生产 `-1001` 事故复盘出的两个运维放大项已修：nginx 的 3600 s 读超时把「后端无响应」变成客户端自己 15 s 超时（-1001），nginx 既不产生 504、日志也没有耗时字段；systemd 只有 `Restart=on-failure`，「进程活着但不响应」永远不会自动恢复。云端模板现在是：
+
+- [Nginx](../deploy/nginx-rai.conf)：自定义 `log_format rai`（含 `$status $request_time $upstream_response_time $upstream_status $upstream_addr $request`），443 站点写 `/var/log/nginx/rai-access.log`；默认 `proxy_read_timeout`/`proxy_send_timeout` **120s**、`proxy_connect_timeout 5s`；已知长读只有两处例外，均为 **600s**：`location = /v1/imports/uploads`（ZIP 上传/导入）与 `location ^~ /v1/backups`（备份下载/恢复——504 不会中止服务器上的恢复，只会让执行方误判失败）。
+- [systemd unit](../deploy/rai-api.service)：`Type=notify` + `NotifyAccess=all` + `WatchdogSec=120`。API 侧契约：listen 后 `READY=1`、每 40 s `WATCHDOG=1`、关闭时 `STOPPING=1`；无 `NOTIFY_SOCKET` 时 no-op。
+
+**为什么默认是 120 s 而不是压到 15 s 以下**：客户端 15 s 先超时的形态已经能靠 `499 + rt≈15` 复盘，而把 nginx 压到 12 s 只是把一次失败从 `-1001` 换成 `504`，并不能减少用户可见失败；反而会误伤合法的长写（导入 inspect、ONNX 预测刷新、备份恢复）。hang 的**恢复**由 systemd watchdog 负责，nginx 侧只负责**可观测**与「不无限占连接」。
+
+### 看 rt=/urt= 与 499/504
+
+自定义格式后，**443 请求不再写入 `/var/log/nginx/access.log`**，排障只看新文件：
+
+```bash
+sudo tail -n 20 /var/log/nginx/rai-access.log
+# 状态码分布（组合格式前 10 个字段未变，$9 仍是 status）
+sudo awk '$9==499||$9==504||$9==502{n[$9]++} END{for(k in n) printf "%s=%d\n", k, n[k]}' /var/log/nginx/rai-access.log
+# 最近挂过的请求：rt= 看得见「挂了多久」，这是本次复盘最缺的东西
+sudo awk '$9==499||$9==504' /var/log/nginx/rai-access.log | tail -20
+```
+
+判读：
+
+- **499 + `rt≈15`** = 客户端自己先超时（iOS 是 15 s）⇒ 就是 `-1001` 在服务端的对应事件；499 + `rt<1` = 用户切页/取消，不是事故。
+- **`urt=-`** = 上游一个字节都没回（hang 的典型形态）；有 `urt=` 说明后端确实回了，只是慢。
+- **504** = nginx 等满默认 120 s 才放弃（不再是 3600 s）：真 hang 和确实超过 2 分钟的慢请求都会被截断。
+- **502** = 进程死了/正在重启（不是 hang）；**429** = 限流（`limit_req`）。
+- 日志轮转沿用发行版默认的 `/etc/logrotate.d/nginx`（glob `/var/log/nginx/*.log`），部署后顺手确认它覆盖到新文件。
+- 首次 `reload` 后若 `error.log` 报新日志文件 `Permission denied`，检查 `/var/log/nginx` 的属主/权限（Ubuntu 默认 `www-data` 可写）；`nginx -t` 只测语法，不测运行期文件权限。
+
+服务端耗时看 API 自己的日志（`RAI_LOG_LEVEL=info` 是默认值，调成 `warn` 会丢掉这条证据）：
+
+```bash
+sudo journalctl -u rai-api --since '-10 min' | grep 'request completed' | tail -20
+# 有 jq 时直接量化 responseTime
+sudo journalctl -u rai-api --since '-20 min' -o cat | jq -R 'fromjson? | select(.msg=="request completed") | .responseTime' \
+  | awk '{n++; if($1>m)m=$1; if($1>1000)a++; if($1>5000)b++} END{printf "n=%d max=%.0fms >1s=%d >5s=%d\n", n, m, a, b}'
+```
+
+有 `incoming request` 但没有 `request completed`（或十几秒后才补上）就是事件循环被占住的直接证据。
+
+### hang 守护：判据、误杀与回滚
+
+- 判据：**事件循环心跳** 120 s 没更新 ⇒ systemd 发 SIGABRT 并按 `Restart=on-failure` 重启；`NRestarts` +1，journal 出现 `Watchdog timeout`。判据不是「请求慢」：慢请求只在 nginx 记 `rt=`，不会杀进程。
+- 误杀边界：**任何 >120 s 的事件循环同步阻塞都会被判 hang** —— 大导入、长事务、全表扫描、同步重算、GC 风暴都在内。可能超 2 分钟的维护/导入/重算要在停服窗口、CLI 或 worker 子进程里跑；不要放大 `WatchdogSec` 来回避（那等于关掉守护）。
+- 核对：`sudo systemctl show rai-api -p Type -p NRestarts -p WatchdogUSec`（期望 `Type=notify`、`WatchdogUSec=2min`；`NRestarts` 只统计自动重启，人工 restart 不 +1）；`sudo journalctl -u rai-api -b | grep -i watchdog`。
+- 回滚：把服务器上 unit 的 `Type=notify` 改回 `Type=simple`，**同时删掉** `NotifyAccess=all` 与 `WatchdogSec=120`，然后 `sudo systemctl daemon-reload && sudo systemctl restart rai-api`，再用 `systemctl show rai-api -p Type -p WatchdogUSec` 确认 `Type=simple` 且 `WatchdogUSec` 不再是 `2min`。只改 `Type` 而留 `WatchdogSec` 会让服务没有心跳源却仍在计时。
+- 安装/更新顺序（Nginx：`nginx -t` → `reload`；unit：安装 → `daemon-reload` → `restart` → 核对）见[Ubuntu部署](../deploy/README-UBUNTU.md)「运维模板更新」。
+
+### coach-loop 只读 memo（陈旧上界 ≤1 s）
+
+`GET /v1/mobile/coach-loop` 是全同步计算（生产实测 ~1.4 s/条，单事件循环内不存在两条在飞，因此**没有**「并发请求合并」意义上的单飞）。现在的做法是可证明失效的短 TTL memo（[实现](../apps/api/src/coach-loop-memo.ts)），命中必须同时满足：identity scope 相同、控制库稳定快照 digest 相同（saved receipt + goals + plan history）、主库 `<inode>:PRAGMA data_version` 指纹相同、本地日期相同、publication guard 未变化且无 pending、TTL ≤1 s。
+
+- 失效是**立即**的：导入/直连增量/重算发布会推进 `data_version`；控制库写会改变 digest；发布/恢复换库文件会改变 inode。
+- 陈旧上界只有 1 s，且只影响响应里的 `asOf`；写路径仍用 `factsHash` 乐观校验（`command()` 拒绝过期 facts），不会让旧快照被当成写依据。
+- 内部控制流（设备回执、命令内的事实重读）**不读缓存**，始终走 `read()`。
+- 排查：memo 命中不会出现在 journal 的耗时里；要看真实计算频率，重启进程后观察 `coach-loop` 的 `responseTime` 分布，或在压测里对比首条与 TTL 内第二条。
 
 ## 已知依赖风险
 

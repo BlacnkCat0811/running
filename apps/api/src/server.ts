@@ -73,6 +73,8 @@ import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js
 import { registerCommandRoutes } from "./routes/command-routes.js";
 import { registerImportRoutes } from "./routes/import-routes.js";
 import { RuntimeTelemetry } from "./runtime-telemetry.js";
+// systemd readiness/watchdog（2026-10-18 事故复盘 P1）：无 NOTIFY_SOCKET 时 no-op。
+import { createSystemdNotifier } from "./systemd-notify.js";
 import { importEngine, nativeFallback, nativeBinary, NATIVE_VERSION } from "@rai/health-export-parser";
 import { installMutationLifetime } from "./request-mutation-lifetime.js";
 import {
@@ -1466,7 +1468,10 @@ registerRunCoachRoutes({ app, store: mobileGoalsStore, scope: () => JSON.stringi
 
 const coachLoopRuntime = new CoachLoopRuntime(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch }),
   (goals, history) => withReadStore(store => store.coachLoopFacts(goals, history, { athleteId, datasetEpoch })),
-  () => !isDatabaseWriteBusy());
+  () => !isDatabaseWriteBusy(),
+  // GET coach-loop 的短 TTL memo（2026-10-18 事故复盘 P1）：主库 data_version 指纹
+  // 让导入/直连增量/换文件立即失效；内部控制流仍走 read()，永不复用缓存。
+  { mainDataVersion: () => readStores.dataVersionFingerprint() });
 registerCoachLoopRoutes({ app, runtime: coachLoopRuntime, identity: () => ({ serverId, athleteId, datasetEpoch }), openMainDatabase });
 
 // Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
@@ -2251,6 +2256,9 @@ if (routeDumpPath) {
   await writeFile(routeDumpPath, JSON.stringify(mountedRoutes, null, 2), "utf8");
 }
 
+// systemd watchdog（2026-10-18 事故复盘 P1）：listen 后发 READY=1，之后每 40s 心跳。
+// 无 NOTIFY_SOCKET（本地/测试）时全部 no-op，因此这里不需要环境判断。
+const systemdNotifier = createSystemdNotifier({ log: app.log });
 await app.listen({ host, port });
 const address = app.server.address();
 if (!address || typeof address === "string") {
@@ -2258,6 +2266,8 @@ if (!address || typeof address === "string") {
 }
 localRequestSecurityOptions.apiPort = address.port;
 if (process.send) process.send({ type: "rai:ready", port: address.port });
+systemdNotifier.ready();
+systemdNotifier.startWatchdog();
 // Logged so "the config is live" is answerable from the journal instead of
 // inferred from a 200: an unset RAI_PUBLIC_HOSTS means every /v1 route still
 // demands the token, which is indistinguishable from a working anonymous read
@@ -2273,12 +2283,16 @@ const shutdown = (signal: NodeJS.Signals | "IPC"): Promise<void> => {
   if (shutdownPromise) return shutdownPromise;
   shutdownPromise = (async () => {
     app.log.info({ signal }, "Shutting down local API");
+    // STOPPING=1 让 systemd 立刻知道是正常关闭（不会按失败重启）；
+    // 心跳定时器也要停，别在关闭窗口里继续发消息。
+    systemdNotifier.stopping();
     try {
       await app.close();
     } catch (error) {
       app.log.error(error, "Local API shutdown failed");
       process.exitCode = 1;
     } finally {
+      systemdNotifier.stop();
       if (process.connected) process.disconnect();
     }
   })();

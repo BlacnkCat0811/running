@@ -43,16 +43,27 @@ sudoedit /etc/rai/rai.env
 # standalone 需要暂时占用 80 端口；已有站点不要重复运行此首次安装步骤。
 sudo systemctl stop nginx
 sudo certbot certonly --standalone -d api.example.com
+
+# 1) 安装 unit。它现在是 Type=notify + WatchdogSec=120 的 hang 守护（见下文），
+#    并且与 API 代码成对生效：install 只是复制文件，必须 daemon-reload 才生效。
 sudo install -m 644 deploy/rai-api.service /etc/systemd/system/rai-api.service
+sudo systemctl daemon-reload
+
+# 2) 安装站点配置：先 nginx -t 校验，通过后才启动 Nginx。
 sudo sed "s#rai.example.com#api.example.com#g" deploy/nginx-rai.conf \
   | sed 's/# ssl_certificate /ssl_certificate /; s/# ssl_certificate_key /ssl_certificate_key /' \
   | sudo tee /etc/nginx/sites-available/rai >/dev/null
 sudo chmod 600 /etc/nginx/sites-available/rai
 sudo ln -sf /etc/nginx/sites-available/rai /etc/nginx/sites-enabled/rai
 sudo rm -f /etc/nginx/sites-enabled/default
-sudo systemctl daemon-reload
-sudo systemctl enable --now rai-api
 sudo nginx -t && sudo systemctl restart nginx
+
+# 3) 启动 API 并核对「真的就绪」：Type=notify 要求 API listen 后发 READY=1，
+#    收不到会在 TimeoutStartSec（默认 90s）后判启动失败 —— 旧代码配新 unit 就是这个症状。
+sudo systemctl enable --now rai-api
+sudo systemctl show rai-api -p Type -p NRestarts -p WatchdogUSec
+#    期望：Type=notify、WatchdogUSec=2min、NRestarts=0
+
 # 改为 Nginx 插件进行后续续期，并测试续期流程。
 # 若系统自带 Certbot 不支持 reconfigure，先按 Certbot 官方方式升级；
 # 不要忽略失败后继续依赖会与运行中 Nginx 抢占 80 端口的 standalone 续期。
@@ -96,7 +107,60 @@ curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: attacker.example' https://api
 # 站点根路径与静态资源已退役：应返回 404
 curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/                 # 期望 404
 curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/assets/app.js    # 期望 404
+# 生效配置核对：必须是新模板（自定义 rai 日志格式 + 120s 默认超时 + rai-access.log）
+sudo nginx -T | grep -E 'log_format rai|proxy_(connect|read|send)_timeout|rai-access'
+# 复盘日志：443 请求只写这个文件；rt=/urt= 的判读见[运维](../docs/OPERATIONS.md)「看 rt=/urt= 与 499/504」
+sudo tail -n 20 /var/log/nginx/rai-access.log
 ```
+
+## hang 守护（systemd watchdog，2026-10-18 起）
+
+2026-10-18 生产 `-1001` 事故的机理：API 的事件循环被同步 SQLite 查询占住 13–27 s，进程「活着但不响应」；
+`Restart=on-failure` 只在进程**退出**时生效，所以这种 hang 永远等不到自动恢复。现在由三部分配合：
+
+- **unit**（[rai-api.service](rai-api.service)）：`Type=notify` + `NotifyAccess=all` + `WatchdogSec=120`；
+- **API 侧契约**（发送端在 `apps/api/src`）：listen 成功后发 `READY=1`，之后每 40 s 发一次
+  `WATCHDOG=1`，关闭时发 `STOPPING=1`；**没有 `NOTIFY_SOCKET`（本地开发、非 systemd 启动）时全部 no-op**；
+- **发送方式**：Node 进程 spawn `/usr/bin/systemd-notify`。`NotifyAccess=all` 就是为子进程发的消息放行
+  （默认 `main` 会丢弃子进程的 sd_notify，表现为「心跳永远收不到」）。
+
+`WatchdogSec=120` 的语义：**120 s 内**没收到 `WATCHDOG=1`，systemd 判定 hang，向服务发 SIGABRT，
+再按 `Restart=on-failure` + `RestartSec=5` 重启；40 s 心跳允许丢 2 次（第 3 次仍未到时判超时）。
+被 watchdog 杀会留证据：`journalctl -u rai-api -b | grep -i watchdog` 出现
+`Watchdog timeout (limit 2min)!`，且 `NRestarts` +1。
+
+核对：
+
+```bash
+sudo systemctl show rai-api -p Type -p NRestarts -p WatchdogUSec
+# 期望 Type=notify / WatchdogUSec=2min；NRestarts 只统计 systemd 自动重启，
+# 人工 `systemctl restart` 不会 +1，所以它涨了基本等于「被 watchdog/OOM/崩溃拉起来过」。
+sudo systemctl status rai-api --no-pager | head -5      # active (running)
+sudo journalctl -u rai-api -b | grep -iE 'watchdog|READY|timed out'
+```
+
+误杀边界（发布/维护前务必看）：
+
+- 判据是**事件循环心跳**，不是「请求慢」。单条慢请求只会让 nginx 记 `rt=`，不杀进程。
+- 反过来说：**任何 >120 s 的事件循环同步阻塞都会被判 hang** —— 大导入、长事务、全表扫描、
+  同步重算、GC 风暴都在列。可能超过 2 分钟的维护动作不要在 API 进程内跑：用停服窗口或 CLI
+  （见「显式数据库迁移」），或放进 worker 子进程。
+- 不要靠放大 `WatchdogSec` 回避误杀——那等于关掉守护；确实有 >2 分钟的合法长任务时，
+  把它移出主进程，而不是改小判据。
+
+回滚（只改服务器上的 unit，仓库模板保持守护）：
+
+```bash
+sudo sed -i 's/^Type=notify$/Type=simple/; /^NotifyAccess=all$/d; /^WatchdogSec=120$/d' \
+  /etc/systemd/system/rai-api.service
+sudo systemctl daemon-reload
+sudo systemctl restart rai-api
+sudo systemctl show rai-api -p Type -p WatchdogUSec    # 期望 Type=simple，且 WatchdogUSec 不再是 2min
+```
+
+⚠️ 三行要一起还原：只把 `Type` 改回 `simple` 而留着 `WatchdogSec=120`，服务没有心跳源，
+仍会被到期判定并反复 SIGABRT/重启。反过来，**新 unit 配旧代码**（旧代码不发 READY=1）会卡到
+启动超时后失败——所以 unit 与 API 代码必须同批部署。完整排障判读见[运维](../docs/OPERATIONS.md)。
 
 ## 数据目录与自动备份
 
@@ -153,6 +217,33 @@ sudo systemctl restart rai-api
 ```
 
 数据（`/var/lib/rai`）不受发布影响；若 `apps/api/package.json` 依赖变化，务必重新 `npm ci`。
+
+### 运维模板更新（deploy/ 下的 unit 与 Nginx 站点）
+
+发布脚本**不会**自动同步 `deploy/` 模板；本次 hang 守护改了 unit 与 nginx 站点，必须在服务器上单独落地。
+顺序是「先校验、再热加载」，Nginx 用 `reload`（不 restart，避免断连接）。
+本机若已有本地定制，先 `diff` 再合并，不要整文件覆盖掉必要配置：
+
+```bash
+cd /opt/rai
+# a) Nginx 站点：写入 sites-available（域名替换与首次部署一致）→ nginx -t → reload
+sudo sed "s#rai.example.com#api.example.com#g" deploy/nginx-rai.conf \
+  | sed 's/# ssl_certificate /ssl_certificate /; s/# ssl_certificate_key /ssl_certificate_key /' \
+  | sudo tee /etc/nginx/sites-available/rai >/dev/null
+sudo chmod 600 /etc/nginx/sites-available/rai
+sudo nginx -t && sudo systemctl reload nginx
+
+# b) systemd unit：复制 → daemon-reload（必须）→ restart → 核对
+sudo install -m 644 deploy/rai-api.service /etc/systemd/system/rai-api.service
+sudo systemctl daemon-reload
+sudo systemctl restart rai-api
+sudo systemctl show rai-api -p Type -p NRestarts -p WatchdogUSec   # 期望 Type=notify / WatchdogUSec=2min
+```
+
+⚠️ 顺序有语义：**先让带 READY/WATCHDOG 发送端的代码上线，再装 `Type=notify` 的 unit**（或同批）。
+反过来（新 unit 配旧代码）服务会在启动超时后失败——旧代码不发 `READY=1`。只改仓库文件不生效：
+unit 必须 `daemon-reload`，Nginx 必须 `reload`，可以用 `sudo nginx -T | grep 'log_format rai'` 核对生效配置。
+回滚与误杀边界见上面的「hang 守护」。
 
 ## 安全与运维备注
 

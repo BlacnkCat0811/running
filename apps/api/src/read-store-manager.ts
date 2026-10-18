@@ -119,6 +119,21 @@ export class ReadStoreManager {
     finally { this.release(); }
   }
 
+  /**
+   * Identifies the cached read snapshot for cheap invalidation (2026-10-18 事故复盘 P1)。
+   *
+   * 形如 `<inode>:<PRAGMA data_version>`：
+   * - `ino` 变化 = 发布/恢复换了库文件，缓存连接会被重开，任何 memo 必须失效；
+   * - `data_version` 只在**其他连接**提交后变化（导入、直连增量、重算发布），
+   *   因此它是"主库事实是否变化"的 O(1) 判据，不需要扫表。
+   *
+   * 只能在读租约内调用（`use` 已持有）；替换期间会抛 `DatabaseReplaceTimeoutError`,
+   * 调用方按"不可证明新鲜"处理即可。
+   */
+  dataVersionFingerprint(): string {
+    return this.use((store) => `${this.openedIdentity?.ino ?? "unknown"}:${store.dataVersion()}`);
+  }
+
   useDatabase<T>(callback: (database: import("node:sqlite").DatabaseSync) => T): T {
     this.acquire();
     try {

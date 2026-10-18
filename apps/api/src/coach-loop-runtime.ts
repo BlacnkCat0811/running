@@ -17,7 +17,8 @@ import { currentPeriodizationWeek, periodizationWeekStart } from "./plan-periodi
 import { executionPolicyContext, raceExecutionProtection } from "./race-plan-policy.js";
 import { runCoachRaceTarget, runCoachSessionTargets, runCoachWeekday, validateRunCoachConfig } from "./run-coach-policy.js";
 import { digest, prescriptionDigest } from "./plan-digest.js";
-import { planReadGuard, readStableSnapshot, type PublicationGuardCapableStore } from "./plan-read-consistency.js";
+import { planReadGuard, readSnapshotGuard, readStableSnapshot, type PublicationGuardCapableStore, type SnapshotGuardRead } from "./plan-read-consistency.js";
+import { COACH_LOOP_MEMO_TTL_MS, CoachLoopMemo, type CoachLoopMemoKey } from "./coach-loop-memo.js";
 import { coachGoalGap } from "./coach-goal-gap.js";
 import { recordCoachLoopDeviceReceipt } from "./coach-loop-device-sync.js";
 import { normalizeSessionStructure } from "./session-structure.js";
@@ -76,10 +77,33 @@ export function validateCoachLoopSettings(settings: Omit<CoachLoopSettings, "sta
   }
 }
 
+/** `readCached()` 的 memo 配置；缺 `mainDataVersion` 时 memo 关闭（退化为每次重算）。 */
+export interface CoachLoopReadMemoOptions {
+  readonly memo?: CoachLoopMemo<CoachLoopRuntimeResponse>;
+  /**
+   * 主库快照指纹（`<inode>:<PRAGMA data_version>`）。生产由
+   * `ReadStoreManager.dataVersionFingerprint()` 提供；测试可注入可变字符串。
+   */
+  readonly mainDataVersion?: () => string;
+  /** 可注入时钟（memo TTL / 本地日期）；生产用 `Date.now`。 */
+  readonly now?: () => number;
+}
+
 export class CoachLoopRuntime {
+  private readonly memo: CoachLoopMemo<CoachLoopRuntimeResponse> | null;
+  private readonly mainDataVersion: (() => string) | null;
+  private readonly now: () => number;
   constructor(private readonly store: MobileGoalsStore, private readonly identity: () => MobilePlanOperationScope,
     private readonly readFacts: (goals: MobileGoalsResponse, history: PlanHistoryRevision[]) => CoachRuntimeFacts,
-    private readonly publicationReady: () => boolean = () => true) {}
+    private readonly publicationReady: () => boolean = () => true,
+    options: CoachLoopReadMemoOptions = {}) {
+    this.now = options.now ?? Date.now;
+    this.mainDataVersion = options.mainDataVersion ?? null;
+    // memo 只有在能证明指纹时才启用；只给 memo 而给不出指纹等于无失效判据。
+    this.memo = this.mainDataVersion === null
+      ? null
+      : (options.memo ?? new CoachLoopMemo<CoachLoopRuntimeResponse>(COACH_LOOP_MEMO_TTL_MS, this.now));
+  }
   private scope() { return JSON.stringify(this.identity()); }
   private saved() { return this.store.coachLoopState<CoachRuntimeReceipt>(this.scope()); }
   private effectiveGoals(goals: MobileGoalsResponse, settings: CoachLoopSettings | null): MobileGoalsResponse {
@@ -87,7 +111,13 @@ export class CoachLoopRuntime {
       raceTarget: settings.race ? runCoachRaceTarget(settings.race) : null } : goals;
   }
 
-  read(): CoachLoopRuntimeResponse {
+  /**
+   * 稳定快照读（内部控制流与 `readCached` 未命中时共用）。
+   *
+   * `onStable` 只在 readStableSnapshot 确证本次 attempt 稳定时被调用；memo 用它拿到
+   * "build 实际使用的 control digest + build 后的 guard"。
+   */
+  private readStable(onStable?: (result: CoachLoopRuntimeResponse, controlDigest: string, guardAfter: SnapshotGuardRead) => void): CoachLoopRuntimeResponse {
     // Control rows (receipt, goals, history) live in another store than the
     // training facts read inside `readFacts`. Re-read the control snapshot after
     // the build so a concurrent control write cannot be returned as "old plan
@@ -105,8 +135,76 @@ export class CoachLoopRuntime {
         "教练计划状态在读取期间变化，请重新读取。", 503),
       // Cross-store publication guard when the control store exposes it; without
       // it the control digest pair remains the only check (pre-guard behaviour).
-      ...(readGuard === undefined ? {} : { readGuard })
+      ...(readGuard === undefined ? {} : { readGuard }),
+      ...(onStable === undefined ? {} : { onStable })
     });
+  }
+
+  read(): CoachLoopRuntimeResponse {
+    return this.readStable();
+  }
+
+  /**
+   * `GET /v1/mobile/coach-loop` 专用：可证明新鲜时复用上一次稳定快照。
+   *
+   * 失效条件与理由见 [coach-loop-memo.ts](./coach-loop-memo.ts) 头注释。内部控制流
+   * （`recordDeviceReceipt`、`command` 内的事实重读）必须走 `read()`：回执匹配不能
+   * 复用一份最多 1 s 旧的快照。
+   */
+  readCached(): CoachLoopRuntimeResponse {
+    const versionProvider = this.mainDataVersion;
+    if (this.memo === null || versionProvider === null) return this.read();
+    // 首次请求没有可复用的条目：跳过控制库 digest 预读，直接走稳定快照读。
+    if (!this.memo.isEmpty()) {
+      const key = this.currentMemoKey();
+      if (key !== null) {
+        const cached = this.memo.get(key);
+        if (cached !== undefined) return cached;
+      }
+    }
+    const versionBefore = this.safeDataVersion(versionProvider);
+    return this.readStable((result, controlDigest, guardAfter) => {
+      // 构建期间主库若有外部提交，这个响应就对应不了某个固定的 data_version：
+      // 宁可这次不缓存，也不要让"响应 A 配指纹 B"留下假命中。
+      if (versionBefore === null) return;
+      const versionAfter = this.safeDataVersion(versionProvider);
+      if (versionAfter === null || versionAfter !== versionBefore) return;
+      this.memo?.set({
+        scope: this.scope(), controlDigest, mainDataVersion: versionAfter,
+        localDate: this.localDate(), guard: guardAfter
+      }, result);
+    });
+  }
+
+  /**
+   * 指纹读取失败（发布替换读连接、库不可用）只表示"这次不能证明新鲜"，不是读失败：
+   * 返回 null 让调用方跳过 memo，而不是把一次成功的读改成 500。
+   */
+  private safeDataVersion(provider: () => string): string | null {
+    try {
+      return provider();
+    } catch {
+      return null;
+    }
+  }
+
+  /** 当前快照的 memo key；读控制库/guard 失败时返回 null（本次不走 memo）。 */
+  private currentMemoKey(): CoachLoopMemoKey | null {
+    if (this.mainDataVersion === null) return null;
+    try {
+      const control = { saved: this.saved(), goals: this.store.read(), history: this.store.planHistory(200) };
+      const guard = readSnapshotGuard(planReadGuard(this.store as unknown as PublicationGuardCapableStore));
+      return {
+        scope: this.scope(), controlDigest: digest(control),
+        mainDataVersion: this.mainDataVersion(), localDate: this.localDate(), guard
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private localDate(): string {
+    return coachLocalDate(new Date(this.now()).toISOString());
   }
 
 

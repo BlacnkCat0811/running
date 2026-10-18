@@ -163,6 +163,15 @@ export function readStableSnapshot<Control, Result>(options: {
   readGuard?: () => PublicationGuardState;
   /** Injectable clock (guard lease tests); production uses `Date.now`. */
   now?: () => number;
+  /**
+   * 只读 memo 的稳定快照钩子（2026-10-18 事故复盘 P1）。
+   *
+   * 只有本次 attempt **确证稳定**（控制快照前后 digest 相同、guard 未变化）时才会
+   * 被调用一次：参数是本次结果、build 实际使用的 control digest、以及 build 之后
+   * 读取的 guard。调用方据此缓存"确实可证明的"快照；不传时行为与改造前完全一致。
+   * 钩子内的异常会向上抛——memo 侧必须自己吞掉不可缓存的路径。
+   */
+  onStable?: (result: Result, controlDigest: string, guardAfter: SnapshotGuardRead) => void;
 }): Result {
   const requested = options.attempts ?? DEFAULT_ATTEMPTS;
   const attempts = Number.isFinite(requested)
@@ -187,7 +196,10 @@ export function readStableSnapshot<Control, Result>(options: {
     if (guardAfter.kind === "failed") continue;
     if (guardBefore.kind === "ready" && guardAfter.kind === "ready" &&
         publicationGuardChanged(guardBefore.state, guardAfter.state, now()) !== null) continue;
-    if (controlUnchanged) return result;
+    if (controlUnchanged) {
+      options.onStable?.(result, controlDigest, guardAfter);
+      return result;
+    }
   }
   throw options.changedError();
 }

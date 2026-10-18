@@ -6,7 +6,21 @@ StartLimitIntervalSec=300
 StartLimitBurst=3
 
 [Service]
-Type=simple
+# 2026-10-18（生产 -1001 复盘 lane C）：Restart=on-failure 只救「进程退出」，救不了
+# 「进程活着但事件循环被占住」——那种 hang 此前只能等人工发现。改为 systemd watchdog：
+# Type=notify 让 systemd 等到 API 真正 listen 后才算启动成功；WatchdogSec 让心跳超时
+# 也能被判失败并按 Restart=on-failure 重启。
+#
+# API 侧契约（发送端在 apps/api/src，本模板只声明期望）：
+#   · listen 成功后发 READY=1（否则 Type=notify 会在 TimeoutStartSec 后判启动失败）
+#   · 之后每 40 s 发一次 WATCHDOG=1（40 s = WatchdogSec 120 s 的三分之一）
+#   · 关闭时发 STOPPING=1
+#   · 没有 NOTIFY_SOCKET（本地开发 / 非 systemd 启动）时以上全部 no-op
+# 发送方式：Node 进程 spawn /usr/bin/systemd-notify（子进程发消息，故 NotifyAccess=all；
+# 默认 NotifyAccess=main 会丢弃子进程的 sd_notify 消息）。
+Type=notify
+NotifyAccess=all
+WatchdogSec=120
 User=rai
 Group=rai
 WorkingDirectory=/opt/rai
