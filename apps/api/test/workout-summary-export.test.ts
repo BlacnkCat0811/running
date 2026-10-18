@@ -34,5 +34,14 @@ test("export route is never in the anonymous read list and explicitly requires a
   const server = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
   const publicRoutes = server.slice(server.indexOf("const publicReadRoutes"), server.indexOf("const tokenRequiredReadRoutes"));
   assert.ok(!publicRoutes.includes("/v1/exports/"));
-  assert.ok(server.includes('!apiToken || request.headers.authorization !== `Bearer ${apiToken}`'));
+  // The route is classified as token-required, and the token gate itself lives in
+  // `local-request-security.ts` (it moved out of `server.ts`; this assertion used
+  // to pin the old inline string and had been red since that refactor).
+  const tokenRequiredStart = server.indexOf("const tokenRequiredReadRoutes");
+  const tokenRequiredRoutes = server.slice(tokenRequiredStart, server.indexOf("]);", tokenRequiredStart));
+  assert.ok(tokenRequiredRoutes.includes('"/v1/exports/workout-summary"'),
+    "the export route must be explicitly classified as token-required");
+  const security = readFileSync(new URL("../src/local-request-security.ts", import.meta.url), "utf8");
+  assert.ok(security.includes("constantTimeTokenEquals(authorization, `Bearer ${options.apiToken}`)"),
+    "the token gate must compare a bearer token in constant time");
 });
