@@ -1,6 +1,6 @@
 # 算法合同与验收
 
-维护日期：2026-10-11。本文是现行工程合同，取代已过期的 V1 PRD、分阶段 V2 方案和各批次状态报告。
+维护日期：2026-10-18。本文是现行工程合同，取代已过期的 V1 PRD、分阶段 V2 方案和各批次状态报告。
 代码已实现、候选政策、数据实证与实际激活必须分开表达。当前核验结果见 [项目审查](PROJECT_REVIEW.md)；运行操作见 [运维](OPERATIONS.md)。
 
 ## 0. 范围与证据边界
@@ -25,7 +25,7 @@
 |---|---|---|
 | CA | 本次可比训练的表现估计 | 当天恢复、跨人绝对能力 |
 | TA | 合格表现证据累积的长期个人能力指数 | VO₂max、生理真值 |
-| Adaptive anomaly | 相对近期同类训练的偏差 | 新的长期能力标尺 |
+| Adaptive anomaly | **未实现**（历史候选）：代码库无同名/同义类型或函数，不得按本文假定它可用；最接近的是 CA 分维度的 z 分（相对个人基线），但它不是独立输出 | 新的长期能力标尺 |
 | Readiness | 当天可得恢复证据对安排的支持 | 医疗诊断、缺监测等于恢复良好 |
 | Preparation | 目标距离的训练暴露 | 当天恢复、精确耐久能力 |
 | Durability | 持续运动后保持表现的证据 | 用周跑量伪造的数值罚分 |
@@ -134,7 +134,7 @@ unknown prehistory/未同步日不能直接当作已观察到的休息日。Load
 - 没有已结束训练、或没有 chronic 背景 ⇒ `insufficient_data` 且 `remainingHours = null`；**"不知道"不等于"已恢复"**，不能渲染成 0 小时；
 - 它是 **负荷代理**，不是睡眠债、不是生理恢复债；UI 文案固定写"按负荷推算，非实测恢复状态"；
 - 状态是**独立类型** `TrainingFormStatus`，不并入 §9.5 的 `TrainingStatusCode`（后者的阈值与验收测试有自己的含义，塞进第二套刻度会让那些测试静默换义）；
-- 两者都**不覆盖** Readiness、计划或训练状态（对齐 L03）。`estimateRecoveryTime` 接受 `physState` 并在 strained 时放大，但**当前没有调用方传入**：physState 目前只有一个生产者（移动端 today 路径），在桌面上另算一份会让同一个早晨在两个界面上给出不同答案。接线的位置在那里，不在读侧。
+- 两者都**不覆盖** Readiness、计划或训练状态（对齐 L03）。`estimateRecoveryTime` 接受 `physState` 并在 strained 时放大，但**当前没有调用方传入**：`physState` 已有三个生产点——移动端 today 路径（`mobile-read.ts` 的 `classifyPhysState`）、重算的每日指标装配（`training-load-data.ts` 调用 `physStateFromReadiness`）、以及 legacy 重算路径（`recompute-pipeline.ts` 的 `loadLegacyDailyPhysEvidence` 内的 `classifyPhysState`）——两处 `estimateRecoveryTime` 调用点都没把它传进来；同一个早晨若在读侧另算一份，会让两个界面给出不同答案。接线位置在生产者一侧，不在读侧。
 
 界面上两者同处一块面板（"状态与恢复"）而不是两张卡：它们来自同一条负荷曲线，分开摆会诱导把恢复时间读成第四个测量值。
 
@@ -277,6 +277,8 @@ P80/P90 只有独立 calibration artifact、独立 test cohort、适用域、样
 
 **v5 模型合同**：`race-residual-catboost-v5` 有意拒绝 v4 run/产物，特征 schema/hash 不变。`currentAbilityBaselineHash` 中的 `modelVersion` 来自能力模型的 `model_runs`，不是 CatBoost 版本；仅升级 CatBoost 不会改变该哈希。能力模型、公式基线或生理模型版本变化仍会使旧基线失配。
 
+**两个版本轴，不要混读**（2026-10-18 补充）：残差**产物家族**是 `race-residual-catboost-v5`（[contracts](../packages/contracts/src/index.ts) 的 `CATBOOST_PREDICTION_MODEL_VERSION`，决定 artifact 是否被接受：旧家族的 run/产物会被拒绝）；特征 schema 与 hash 是**另一组**独立常量（`PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION` / `_HASH`），推理时逐项比对，不由家族版本推导。而预测结果 `method` 里的 `catboost_residual_v6` 是**预测链代际**（完整枚举：daniels_vdot_v1 → daniels_vdot_readiness_v2 → daniels_vdot_conditions_v3 → bias_calibrated_v4 → ridge_ensemble_v5 → catboost_residual_v6，由 [prediction-report](../packages/application/src/prediction-report.ts) 写入）。两者各自演进：家族升版会拒绝旧 artifact，代际只标记这次点估计走了哪条链 —— 看到 `_v6` 不代表模型家族已升到 v6。
+
 ### 12.11 个人自校准层（2026-10-02）
 
 人群门槛要 50 条标签、24/24 校准与留出。对单个跑者这不可达，而**正确结论不是把门槛降下来**：N=8 时人群声明本身就是假的。单个跑者能拥有的是**自校准**区间：[个人层策略](../packages/model-eval/src/index.ts) `PERSONAL_CALIBRATION_POLICY`（标签 ≥8、独立距离 ≥2、跨度 ≥120 天）与 `fitPersonalInterval`（留一法残差的分位区间）。
@@ -311,9 +313,9 @@ P80/P90 只有独立 calibration artifact、独立 test cohort、适用域、样
 
 迁移 28 保留候选确认的 `trainingSessionId` 和服务端复制的真实起止时间。纯日期成绩的特征截止于当天本地午夜，不猜测中午开赛；同日录入时，录入时刻只作为结束上界。训练、个人留一校准按整个事件排除训练包络、阈值、准备度、训练负荷及比赛期间的健康观测，手工/训练记录的重复表示只计一个结果；混合来源按绝对开赛时刻排序，再按 `labelAvailableAt` 做回放可用性过滤。
 
-撤销、更正、训练覆盖修订或已确认源记录失效，会在同一事务内推进 `prediction_label_state.revision` 并清除活跃残差模型指针。规则基线版本升为 `rai-formula-prediction-base-v5`，其哈希包含该版本：旧模型不能重新激活，旧校准区间不能用于新基线，但历史工件保留供审计。失效采用保守的全局策略；新增独立日期成绩不使已有模型失效，关联确认及覆盖修订会失效。迁移 29 将同一本地日期且同距离范围内可对应已有训练事件的普通手工录入也纳入失效，不要求显式提供 `trainingSessionId`；升级时推进标签版本并清除旧指针，需重训及重新发布校准后才恢复 ML 发布。既有迁移及校验和保持不变。
+撤销、更正、训练覆盖修订或已确认源记录失效，会在同一事务内推进 `prediction_label_state.revision` 并清除活跃残差模型指针。规则基线版本升为 `rai-formula-prediction-base-v6`（常量 `FORMULA_PREDICTION_BASE_VERSION`），其哈希包含该版本：旧模型不能重新激活，旧校准区间不能用于新基线，但历史工件保留供审计。失效采用保守的全局策略；新增独立日期成绩不使已有模型失效，关联确认及覆盖修订会失效。迁移 29 将同一本地日期且同距离范围内可对应已有训练事件的普通手工录入也纳入失效，不要求显式提供 `trainingSessionId`；升级时推进标签版本并清除旧指针，需重训及重新发布校准后才恢复 ML 发布。既有迁移及校验和保持不变。
 
-事件排除关系也遵守特征截止时刻 `asOf`：间接关联只能由当时已录入且尚未撤销的成绩扩展，未来补录或已生效撤销不能把同日独立训练连成一个事件。明确指定的留一目标仍保留自身事件身份，即使确认发生在赛后；基线和训练负荷上下文使用同一排除集合。公式基线 v5 通过版本哈希隔离此前逻辑的残差模型与校准区间，无需新增数据库迁移。
+事件排除关系也遵守特征截止时刻 `asOf`：间接关联只能由当时已录入且尚未撤销的成绩扩展，未来补录或已生效撤销不能把同日独立训练连成一个事件。明确指定的留一目标仍保留自身事件身份，即使确认发生在赛后；基线和训练负荷上下文使用同一排除集合。公式基线 v6 通过版本哈希隔离此前逻辑的残差模型与校准区间，无需新增数据库迁移。
 
 其它边界：距离只允许 5K/10K/半马（与预测链一致）；时长与**隐含配速**双向校验（API schema 与仓储同界，两边不许对"什么算成绩"有分歧）；手工条目的 ID 带 `performance_entry_` 前缀，漏斗里 `manualEntryCount` 单独计数，`byDistance` 也把它们算进去 —— 否则 `byDistance` 会与 `usableOutcomeCount` 对不上，而可对账正是 T03 对漏斗的唯一要求。
 

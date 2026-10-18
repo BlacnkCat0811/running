@@ -52,13 +52,15 @@
 
 三档 `low` / `moderate` / `high` 的分界 70 / 40 是 **policy 常数、未拟合**：没有用成绩标签回放校准过，因此只作文案分档，**不进入任何处方或预测**。
 
-三个闸门，任一不满足 ⇒ `status="insufficient_data"` 且 `value=null`：
+没有比赛计划（无计划或体能计划）时整个 `confidence` 为 `null` —— 没有"备赛"这件事，而不是发布一个恒空的壳。
 
-1. 距离在预测链内（5K / 10K / 半马）；自定义距离返回 `reasonCodes=["unsupported_distance"]`。
-2. 有可用训练记录；否则说明缺证据，**不给 0** —— 0 会被读成"准备度为零"这个断言，与 [@rai/durability](../packages/durability/src/index.ts) 对 `durabilityScore` 的红线同形（"`null` 也不是 0"）。
-3. 校准未完成时不允许出现 `high`：没有成绩标签就不能宣称"准备充分"。分数保留，档位降为 `moderate`，并附 `calibration_incomplete_caps_band`。
+有比赛计划时，下列任一条件 ⇒ `status="insufficient_data"` 且 `value=null`：
 
-没有比赛计划（无计划或体能计划）时 `confidence` 为 `null` —— 没有"备赛"这件事，而不是发布一个恒空的壳。
+1. 距离**不在**预测链内（不是 5K / 10K / 半马）⇒ `reasonCodes=["unsupported_distance"]`。
+2. 训练证据已过期：最近记录距当前日期超过 8 周（`COACH_PREPARATION_STALE_AFTER_DAYS`）⇒ `preparation_stale`。旧数据不得当作当前准备度。
+3. 该距离没有任何可用训练记录 ⇒ `preparation_insufficient_evidence`；说明缺的是证据，**不给 0** —— 0 会被读成"准备度为零"这个断言，与 [@rai/durability](../packages/durability/src/index.ts) 对 `durabilityScore` 的红线同形（"`null` 也不是 0"）。
+
+另有一条**降档规则**（不产生 null）：校准未完成时不允许出现 `high` —— 没有成绩标签就不能宣称"准备充分"。分数保留，档位降为 `moderate`，并附 `calibration_incomplete_caps_band`。
 
 未排课的**跑步日**回传 `unplannedDays`（代码 + 可观测计数），不写动机。生成期那条座位此前一律写「恢复日。」，但同一分支也覆盖被爬坡闸门和赛前策略拿掉的天 —— 那是一句代码从未确立的因果。
 

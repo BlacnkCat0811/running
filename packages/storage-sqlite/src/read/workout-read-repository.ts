@@ -3,7 +3,7 @@ import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../s
 
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
-import { nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
+import { HEALTH_RECORD_TIME_SLACK_MS, nullableNumber, paceSeconds, parseJson, shiftedIsoBound } from "./read-utils.js";
 import { SqliteRoutePointReader } from "./route-point-reader.js";
 
 const rawAverageMetricTypes = new Set([
@@ -391,27 +391,34 @@ export class SqliteWorkoutReadRepository {
     if (!Number.isFinite(workoutStartMs) || !Number.isFinite(workoutEndMs) || workoutEndMs <= workoutStartMs) {
       return null;
     }
+    // 2026-10-18（P0-1）：与 `SqliteSeriesReadRepository.metricIntervals` 同一条
+    // "OR 分支让 start_at 失去下界 ⇒ 全来源历史扫描"的谓词（同一类读放大）。
+    // 拆成两个各自可走索引 seek 的 UNION 分支（窗口内 start_at 双端；跨窗口起点
+    // 只有 end_at 下界 + 24 h slack）；精确归属仍由 julianday 残差判断（与改造前逐行等价）。
+    const overlapBound = shiftedIsoBound(workout.start_at, -HEALTH_RECORD_TIME_SLACK_MS);
     const rows = this.database
       .prepare(`
-        SELECT start_at, end_at, value_numeric
-        FROM (
-          SELECT DISTINCT start_at, end_at, value_numeric
+        WITH bounded AS MATERIALIZED (
+          SELECT start_at, end_at, value_numeric
           FROM health_records
-          WHERE source_name = ?
-            AND type = ?
-            AND value_numeric IS NOT NULL
-            AND start_at < ?
-            AND (
-              start_at >= ?
-              OR (
-                julianday(end_at) > julianday(start_at)
-                AND julianday(end_at) > julianday(?)
-              )
-            )
+          WHERE source_name = ? AND type = ? AND value_numeric IS NOT NULL
+            AND start_at >= ? AND start_at < ?
+          UNION
+          SELECT start_at, end_at, value_numeric
+          FROM health_records
+          WHERE source_name = ? AND type = ? AND value_numeric IS NOT NULL
+            AND start_at < ? AND end_at > ?
+            AND julianday(end_at) > julianday(start_at)
+            AND julianday(end_at) > julianday(?)
         )
+        SELECT start_at, end_at, value_numeric
+        FROM bounded
         ORDER BY start_at
       `)
-      .all(workout.source_name, type, workout.end_at, workout.start_at, workout.start_at) as Record<string, unknown>[];
+      .all(
+        workout.source_name, type, workout.start_at, workout.end_at,
+        workout.source_name, type, workout.start_at, overlapBound, workout.start_at
+      ) as Record<string, unknown>[];
     let weightedValue = 0;
     let coveredMs = 0;
     for (const [index, row] of rows.entries()) {

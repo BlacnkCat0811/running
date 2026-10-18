@@ -9,15 +9,27 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: (URLRequest) -> (Int, String, Double) = { _ in (503, "{}", 0) }
     /// 2026-10-18（P2-6 收尾）：可附加响应头（如 `Retry-After`），默认 nil 与旧行为一致。
     nonisolated(unsafe) static var extraHeaders: [String: String]? = nil
+    /// 2026-10-18（事故复盘 P0-3）：可选地让请求以网络错误结束（模拟 `.timeout`/
+    /// `.offline`），用于钉住"旧服务不再重试没拿到任何答复的失败"。
+    nonisolated(unsafe) static var failure: URLError? = nil
     private let lock = NSLock()
     private var stopped = false
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        // handler 先跑（用例用它计数/决定状态），再决定是否以网络错误结束。
         let (status, body, delay) = Self.handler(request)
+        let failure = Self.failure
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
-            lock.lock(); defer { lock.unlock() }
-            guard !stopped else { return }
+            lock.lock()
+            let alreadyStopped = stopped
+            stopped = true
+            lock.unlock()
+            guard !alreadyStopped else { return }
+            if let failure {
+                client?.urlProtocol(self, didFailWithError: failure)
+                return
+            }
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.extraHeaders)!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
@@ -304,6 +316,116 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
               "legacy per-key cache paths keep their cachedAt instead of losing the cache time")
         check(cachedLegacy.availability.message.contains("缓存于"),
               "offline cache wording states when the snapshot was cached")
+
+        // 2026-10-18（事故复盘 P0-3）：旧服务的读重试收窄。
+        //
+        // 事故里服务端被慢查询占住（coach-loop 实测 13.4s/条），客户端 15s/4s 超时
+        // 先到期。旧实现 `.timeout`/`.offline` 也零退避立即重试，等于把 1 条昂贵读
+        // 放大成 3 条。现在只有"服务端已经答复"的瞬态码才重试，且先退避再重读。
+        let legacyReadClock = { ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")! }
+        for (networkError, expectedCode) in [(URLError(.timedOut), PlanReadIssue.Code.timeout),
+                                             (URLError(.notConnectedToInternet), PlanReadIssue.Code.offline)] {
+            let noRetryStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: legacyReadClock)
+            noRetryStore.legacyRetryDelays = [0.001, 0.001]
+            let noRetryDelays = DelayRecorder()
+            noRetryStore.sleepBeforeSnapshotRetry = { noRetryDelays.append($0); return true }
+            let noRetryAttempts = AttemptCounter()
+            PlanStoreProtocol.handler = { _ in _ = noRetryAttempts.next(); return (0, "", 0) }
+            PlanStoreProtocol.failure = networkError
+            let noRetryRead = await noRetryStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+            PlanStoreProtocol.failure = nil
+            check(!noRetryRead && noRetryStore.issue?.code == expectedCode &&
+                  noRetryAttempts.count == 3 && noRetryDelays.values.isEmpty && !noRetryStore.serviceReachable,
+                  "legacy \(expectedCode.rawValue) is not retried: one three-GET attempt, no backoff, not reachable")
+        }
+
+        // 服务端已答复（503）+ Retry-After：按服务端提示退避一次后重读；重读仍走
+        // 同一个 requestID/epoch/scope，取消即放弃。
+        let legacyHintStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: legacyReadClock)
+        legacyHintStore.legacyRetryDelays = [0.001, 0.001]
+        let legacyHintDelays = DelayRecorder()
+        legacyHintStore.sleepBeforeSnapshotRetry = { legacyHintDelays.append($0); return true }
+        let legacyHintGoalCalls = AttemptCounter()
+        PlanStoreProtocol.extraHeaders = ["Retry-After": "1"]
+        PlanStoreProtocol.handler = { request in
+            switch request.url!.path {
+            case "/v1/mobile/goals":
+                return legacyHintGoalCalls.next() == 1
+                    ? (503, "{\"code\":\"database_busy\",\"message\":\"busy\"}", 0)
+                    : (200, legacyGoalsJSON, 0)
+            case "/v1/mobile/today": return (200, legacyTodayJSON, 0)
+            case "/v1/mobile/workout-plan": return (200, legacyPlanJSON, 0)
+            default: return (404, "{}", 0)
+            }
+        }
+        let legacyHinted = await legacyHintStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+        PlanStoreProtocol.extraHeaders = nil
+        check(legacyHinted && legacyHintStore.isCurrent && legacyHintDelays.values == [1] && legacyHintGoalCalls.count == 2,
+              "legacy 503 + Retry-After: 1 backs off by the server hint before the single reread")
+
+        // 无 Retry-After：回退默认 150/300ms 计划（用注入 sleeper 记录，不真睡）。
+        let legacyScheduleStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: legacyReadClock)
+        let legacyScheduleDelays = DelayRecorder()
+        legacyScheduleStore.sleepBeforeSnapshotRetry = { legacyScheduleDelays.append($0); return true }
+        let legacyScheduleGoalCalls = AttemptCounter()
+        PlanStoreProtocol.handler = { request in
+            switch request.url!.path {
+            case "/v1/mobile/goals":
+                return legacyScheduleGoalCalls.next() <= 2
+                    ? (503, "{\"code\":\"database_busy\",\"message\":\"busy\"}", 0)
+                    : (200, legacyGoalsJSON, 0)
+            case "/v1/mobile/today": return (200, legacyTodayJSON, 0)
+            case "/v1/mobile/workout-plan": return (200, legacyPlanJSON, 0)
+            default: return (404, "{}", 0)
+            }
+        }
+        let legacyScheduled = await legacyScheduleStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+        check(legacyScheduled && legacyScheduleStore.isCurrent &&
+              legacyScheduleDelays.values == [0.15, 0.3] && legacyScheduleGoalCalls.count == 3,
+              "legacy 503 without Retry-After backs off on the default 150/300ms schedule")
+
+        // 重试有界：1 + legacyRetryCount 次后停止，并如实报"服务端可达但不可用"。
+        let legacyExhaustedStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: legacyReadClock)
+        legacyExhaustedStore.legacyRetryDelays = [0.001, 0.001]
+        let legacyExhaustedDelays = DelayRecorder()
+        legacyExhaustedStore.sleepBeforeSnapshotRetry = { legacyExhaustedDelays.append($0); return true }
+        let legacyExhaustedGoalCalls = AttemptCounter()
+        PlanStoreProtocol.handler = { request in
+            switch request.url!.path {
+            case "/v1/mobile/goals":
+                _ = legacyExhaustedGoalCalls.next()
+                return (503, "{\"code\":\"database_busy\",\"message\":\"busy\"}", 0)
+            case "/v1/mobile/today": return (200, legacyTodayJSON, 0)
+            case "/v1/mobile/workout-plan": return (200, legacyPlanJSON, 0)
+            default: return (404, "{}", 0)
+            }
+        }
+        let legacyExhaustedRead = await legacyExhaustedStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+        check(!legacyExhaustedRead && legacyExhaustedGoalCalls.count == 3 &&
+              legacyExhaustedDelays.values == [0.001, 0.001] &&
+              legacyExhaustedStore.issue?.code == .serverUnavailable &&
+              legacyExhaustedStore.serviceReachable && legacyExhaustedStore.availability == .unavailable,
+              "legacy retries are bounded (initial + 2), then report a reachable-server failure")
+
+        // 退避等待期间被取消/放弃：不再发下一次读，取消不包装成成功。
+        let legacyAbortStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: legacyReadClock)
+        legacyAbortStore.legacyRetryDelays = [0.001, 0.001]
+        legacyAbortStore.sleepBeforeSnapshotRetry = { _ in false }
+        let legacyAbortGoalCalls = AttemptCounter()
+        PlanStoreProtocol.handler = { request in
+            switch request.url!.path {
+            case "/v1/mobile/goals":
+                _ = legacyAbortGoalCalls.next()
+                return (503, "{\"code\":\"database_busy\",\"message\":\"busy\"}", 0)
+            case "/v1/mobile/today": return (200, legacyTodayJSON, 0)
+            case "/v1/mobile/workout-plan": return (200, legacyPlanJSON, 0)
+            default: return (404, "{}", 0)
+            }
+        }
+        let legacyAbortedRead = await legacyAbortStore.refresh(baseURL: base, token: "", handshake: legacyHandshake, isValid: { true })
+        check(!legacyAbortedRead && legacyAbortGoalCalls.count == 1 && !legacyAbortStore.isRefreshing &&
+              legacyAbortStore.availability == .unavailable && legacyAbortStore.serviceReachable,
+              "an aborted legacy retry wait stops the read loop instead of issuing another request")
 
         let loopData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
         let loop = try JSONDecoder().decode(CoachLoopResponse.self, from: loopData)

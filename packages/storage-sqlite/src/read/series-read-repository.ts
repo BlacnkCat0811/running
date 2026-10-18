@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
-import { nullableNumber } from "./read-utils.js";
+import { HEALTH_RECORD_TIME_SLACK_MS, nullableNumber, shiftedIsoBound } from "./read-utils.js";
 import {
   SqliteRoutePointReader,
   type StoredRoutePoint
@@ -203,25 +203,40 @@ export class SqliteSeriesReadRepository {
   ): MetricInterval[] {
     const workoutStartMs = Date.parse(startedAt);
     const workoutEndMs = Date.parse(endedAt);
+    // 2026-10-18（P0-1）：原谓词的 OR 分支（`start_at >= ? OR julianday(end_at) > …`）
+    // 让 `start_at` 失去下界，计划器只能 `(source_name=? AND start_at<?)` 扫完该来源
+    // 的全部历史：生产 111,430 条 HR ⇒ 148 ms/次；coach-loop 一次读 23 个 assessment
+    // ×多次调用 ⇒ 13.5 s 同步占满 Node 主线程。改成两个互斥、各自可走索引 seek 的分支：
+    // 窗口内按 `start_at` 双端 seek；跨窗口起点的长区间按 `end_at` 下界 seek（该分支
+    // **没有** end_at 上界，代价 = 该类型 end 晚于窗口起点的历史行数，窗口越老行数越多；
+    // 近期窗口是这条读的热路径，老 workout 的详情读仍远低于一次请求预算）。
+    // 第二分支的 `end_at` 文本下界加 24 h slack（`shiftedIsoBound`）：带 ±HH:MM 偏移的
+    // 遗留文本比 UTC 最多早 14 h，slack 保证文本范围是精确 `julianday` 条件的超集，
+    // 最终归属仍由 `julianday` 残差谓词决定（语义与改造前逐行一致）。
+    const overlapBound = shiftedIsoBound(startedAt, -HEALTH_RECORD_TIME_SLACK_MS);
     const rows = this.database
       .prepare(`
-        SELECT start_at, end_at, value_numeric, unit
-        FROM (
-          SELECT DISTINCT start_at, end_at, value_numeric, unit
+        WITH bounded AS MATERIALIZED (
+          SELECT start_at, end_at, value_numeric, unit
           FROM health_records
           WHERE type = ? AND source_name = ? AND value_numeric IS NOT NULL
-            AND start_at < ?
-            AND (
-              start_at >= ?
-              OR (
-                julianday(end_at) > julianday(start_at)
-                AND julianday(end_at) > julianday(?)
-              )
-            )
+            AND start_at >= ? AND start_at < ?
+          UNION
+          SELECT start_at, end_at, value_numeric, unit
+          FROM health_records
+          WHERE type = ? AND source_name = ? AND value_numeric IS NOT NULL
+            AND start_at < ? AND end_at > ?
+            AND julianday(end_at) > julianday(start_at)
+            AND julianday(end_at) > julianday(?)
         )
+        SELECT start_at, end_at, value_numeric, unit
+        FROM bounded
         ORDER BY start_at
       `)
-      .all(type, sourceName, endedAt, startedAt, startedAt) as unknown as Record<string, unknown>[];
+      .all(
+        type, sourceName, startedAt, endedAt,
+        type, sourceName, startedAt, overlapBound, startedAt
+      ) as unknown as Record<string, unknown>[];
     return rows.flatMap((row, index) => {
       const sourceStartMs = Date.parse(String(row.start_at));
       const startMs = Math.max(workoutStartMs, sourceStartMs);

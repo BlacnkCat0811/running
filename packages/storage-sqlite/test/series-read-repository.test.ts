@@ -77,3 +77,47 @@ test("routes with independent sequence counters are read in chronological order"
     assert.equal(sampled.at(-1)?.latitude, 1199, "末条必须保留（终点语义）");
   } finally { db.close(); }
 });
+
+test("metricIntervals keeps overlap semantics while seeking bounded windows", () => {
+  const database = new DatabaseSync(":memory:");
+  const workoutStart = "2026-09-01T00:00:00.000Z";
+  const workoutEnd = "2026-09-01T00:10:00.000Z";
+  try {
+    database.exec(`
+      CREATE TABLE health_records (type TEXT, source_name TEXT, start_at TEXT, end_at TEXT, value_numeric REAL, unit TEXT);
+      CREATE INDEX idx_health_records_source_time ON health_records(source_name, start_at, end_at);
+      CREATE INDEX idx_health_records_type_end ON health_records(type, end_at, start_at);
+      INSERT INTO health_records VALUES
+        ('heartRate','Watch','2026-09-01T00:01:00.000Z','2026-09-01T00:02:00.000Z',120,'bpm'),
+        ('heartRate','Watch','2026-09-01T00:00:30.000Z','2026-09-01T00:00:45.000Z',110,'bpm'),
+        ('heartRate','Watch','2026-09-01T00:00:30.000Z','2026-09-01T00:00:45.000Z',110,'bpm'),
+        ('heartRate','Watch','2026-08-31T23:50:00.000Z','2026-09-01T00:03:00.000Z',150,'bpm'),
+        ('heartRate','Watch','2026-08-31T23:00:00.000Z','2026-08-31T23:30:00.000Z',90,'bpm'),
+        ('heartRate','Watch','2026-09-01T00:10:00.000Z','2026-09-01T00:11:00.000Z',130,'bpm'),
+        ('heartRate','Watch','2026-08-31T19:05:00-05:00','2026-08-31T19:06:00-05:00',200,'bpm'),
+        ('heartRate','Watch','2026-08-31T23:59:30.000Z','2026-09-01T00:00:30.000Z',160,'bpm'),
+        ('heartRate','Watch','2026-08-31T23:40:00.000Z','2026-09-01T00:20:00.000Z',170,'bpm');
+    `);
+    const intervals = new SqliteSeriesReadRepository(database).metricIntervals(
+      "heartRate", "Watch", workoutStart, workoutEnd
+    );
+    assert.deepEqual(intervals.map((interval) => interval.value).sort((a, b) => a - b),
+      [110, 120, 150, 160, 170, 200], "in-window, crossing and offset-formatted rows are kept exactly once");
+    const byValue = (value: number) => intervals.find((interval) => interval.value === value)!;
+    assert.deepEqual([byValue(150).startMs, byValue(150).endMs],
+      [Date.parse(workoutStart), Date.parse("2026-09-01T00:03:00.000Z")],
+      "a long record crossing the workout start is clipped to the window");
+    assert.deepEqual([byValue(160).startMs, byValue(160).endMs],
+      [Date.parse(workoutStart), Date.parse("2026-09-01T00:00:30.000Z")]);
+    assert.deepEqual([byValue(170).startMs, byValue(170).endMs],
+      [Date.parse(workoutStart), Date.parse(workoutEnd)],
+      "a record ending after the workout is clamped to the workout end");
+    assert.deepEqual([byValue(200).startMs, byValue(200).endMs],
+      [Date.parse("2026-09-01T00:05:00.000Z"), Date.parse("2026-09-01T00:06:00.000Z")],
+      "offset-formatted timestamps keep their absolute instant instead of their text order");
+    assert.ok(!intervals.some((interval) => interval.value === 90),
+      "a record that ends before the workout start is not part of the overlap branch");
+    assert.ok(!intervals.some((interval) => interval.value === 130),
+      "a record starting exactly at the workout end is outside the half-open window");
+  } finally { database.close(); }
+});

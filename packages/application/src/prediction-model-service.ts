@@ -22,6 +22,11 @@ import {
   raceResidualFeatureSchemaHash
 } from "./prediction-training-data.js";
 import { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
+import {
+  MAXIMUM_DISTANCE_MAE_REGRESSION,
+  MAXIMUM_INTERVAL_COVERAGE_DROP,
+  MINIMUM_MAE_IMPROVEMENT
+} from "./prediction-gates.js";
 
 export { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
 
@@ -75,9 +80,9 @@ export function predictionScopeFloors(scope: PredictionModelScope): PredictionSc
       };
 }
 
-export const MINIMUM_MAE_IMPROVEMENT = 0.05;
-export const MAXIMUM_DISTANCE_MAE_REGRESSION = 0.05;
-export const MAXIMUM_INTERVAL_COVERAGE_DROP = 0.05;
+// Re-exported at their historical location so existing importers keep working;
+// the definitions live in `./prediction-gates.js` (a leaf module).
+export { MAXIMUM_DISTANCE_MAE_REGRESSION, MAXIMUM_INTERVAL_COVERAGE_DROP, MINIMUM_MAE_IMPROVEMENT };
 export const ONNX_PARITY_TOLERANCE = 1e-6;
 export { PREDICTION_CORRECTION_CAP_FRACTION } from "@rai/contracts";
 export const WALK_FORWARD_INITIAL_TRAINING_SIZE = 12;

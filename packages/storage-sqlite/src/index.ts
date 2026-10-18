@@ -91,6 +91,7 @@ export {
   type StoredCalibrationProgress,
   type StoredEligibilityTotals
 } from "./read/dashboard-read-repository.js";
+export { HEALTH_RECORD_TIME_SLACK_MS, shiftedIsoBound } from "./read/read-utils.js";
 export {
   SqliteWorkoutReadRepository,
   type StoredWorkoutDetailRow,

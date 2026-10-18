@@ -1,4 +1,5 @@
 import { predictionPolicyKey, catBoostCalibrationKey } from "./prediction-policy.js";
+import { MAXIMUM_DISTANCE_MAE_REGRESSION, MINIMUM_MAE_IMPROVEMENT } from "./prediction-gates.js";
 import { SqliteCalibrationRepository } from "@rai/storage-sqlite";
 import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
@@ -419,12 +420,15 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
     );
     return baseline.meanAbsoluteErrorSeconds !== null &&
       candidate.meanAbsoluteErrorSeconds !== null &&
-      candidate.meanAbsoluteErrorSeconds > baseline.meanAbsoluteErrorSeconds * 1.05;
+      candidate.meanAbsoluteErrorSeconds > baseline.meanAbsoluteErrorSeconds * (1 + MAXIMUM_DISTANCE_MAE_REGRESSION);
   });
+  // §12.12: `recommend_activation` has to mean the same thing the activation
+  // service enforces. It used to compare against 0.03 here while the gate required
+  // 0.05, so the report could recommend an artifact activation would reject.
   const recommendMlActivation =
     mlErrors.length >= 6 &&
     mlImprovement !== null &&
-    mlImprovement >= 0.03 &&
+    mlImprovement >= MINIMUM_MAE_IMPROVEMENT &&
     !mlRegressesDistance;
   return {
     baselineCases,
@@ -487,7 +491,7 @@ function buildModelEvaluation(evaluation: HistoricalEvaluation, asOf: string) {
       // A current active model is not a historical out-of-sample challenger.
       // Only a validated training runner may supply those predictions.
       catboost: [], asOf, minimumSamples: 6,
-      minimumImprovement: 0.05, maximumDistanceRegression: 0.05
+      minimumImprovement: MINIMUM_MAE_IMPROVEMENT, maximumDistanceRegression: MAXIMUM_DISTANCE_MAE_REGRESSION
     }),
     calibration
   };
@@ -963,7 +967,7 @@ async function buildPredictionReportAsyncInternal(
   // inference independently require the current Ridge + interval proof.
   const ridge=metrics?.ridgeComparison;
   const ridgeValid=ridge?.status==="passed" && [ridge.walkForwardImprovement,ridge.releaseImprovement,ridge.bootstrapLower]
-    .every(Number.isFinite) && ridge.walkForwardImprovement>=0.05 && ridge.releaseImprovement>=0.05 && ridge.bootstrapLower>0;
+    .every(Number.isFinite) && ridge.walkForwardImprovement>=MINIMUM_MAE_IMPROVEMENT && ridge.releaseImprovement>=MINIMUM_MAE_IMPROVEMENT && ridge.bootstrapLower>0;
   const intervals=new SqliteCalibrationRepository(database);
   const intervalsValid=initialBaselineHash!==null && distances.every(distance=>
     intervals.select(catBoostCalibrationKey(active.artifactSha256),initialBaselineHash!,distance,generatedAt,1)!==null);

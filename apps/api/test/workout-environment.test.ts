@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ENVIRONMENT_VIEW_POLICY_VERSION,
+  GRADE_ADJUSTMENT_POLICY_VERSION as CONTRACT_GRADE_POLICY_VERSION
+} from "@rai/contracts";
+import { GRADE_ADJUSTMENT_POLICY_VERSION as PHYSIOLOGY_GRADE_POLICY_VERSION } from "@rai/physiology";
+
+import {
+  ENVIRONMENT_VIEW_VERSIONS,
   environmentCoverage,
   environmentViewForWorkout,
   splitGradeContexts,
@@ -192,4 +199,18 @@ test("weather is read only from HealthKit metadata, independently of correction 
   for (const metadata of ["{invalid", "null", "[]"]) {
     assert.equal(view(metadata)?.weatherCondition, null);
   }
+});
+
+test("环境视图的版本串只有一个来源，physiology 的再导出不得与 contracts 分叉", () => {
+  // `@rai/physiology` used to declare its own `GRADE_ADJUSTMENT_POLICY_VERSION` literal
+  // next to the contracts one, so "the same policy version" was two strings that could
+  // drift with nothing failing. It now re-exports the contracts binding; this test makes
+  // that structural fact assertable instead of a comment.
+  assert.equal(ENVIRONMENT_VIEW_VERSIONS.view, ENVIRONMENT_VIEW_POLICY_VERSION);
+  assert.equal(ENVIRONMENT_VIEW_VERSIONS.grade, CONTRACT_GRADE_POLICY_VERSION);
+  assert.equal(
+    PHYSIOLOGY_GRADE_POLICY_VERSION,
+    CONTRACT_GRADE_POLICY_VERSION,
+    "@rai/physiology 必须再导出 contracts 的同一个策略版本，不能另写字面量"
+  );
 });

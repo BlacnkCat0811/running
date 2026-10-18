@@ -19,7 +19,10 @@ export {
   type LabelFunnelReport,
   type LabeledRaceOutcome
 } from "./prediction-data.js";
-export { RecomputePipeline } from "./services/recompute-pipeline.js";
+export { RecomputePipeline, TRAINING_METRIC_CHECKPOINT_VERSION } from "./services/recompute-pipeline.js";
+// The formula baseline version enters `currentAbilityBaselineHash`, so it is part of
+// the public identity of a prediction — exported for the doc/version consistency test.
+export { FORMULA_PREDICTION_BASE_VERSION } from "./prediction-ability-baseline.js";
 // O06-A / WP-22：分析输入读取器（只读连接上的**一个读事务**捕获输入绑定与账本覆盖）。
 // 注入点在 worker 线程（`apps/api/src/recompute-thread.ts`）——分析不允许自己去开连接。
 export {

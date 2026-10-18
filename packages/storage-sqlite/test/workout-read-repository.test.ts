@@ -70,3 +70,35 @@ test("running dynamics averages fall back to deduplicated health records", () =>
     database.close();
   }
 });
+
+test("raw running-dynamics average clips a record that overlaps the workout start", () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec(`
+    CREATE TABLE workout_statistics (
+      workout_id TEXT, type TEXT, ordinal INTEGER, sum_value REAL, average_value REAL
+    );
+    CREATE TABLE workouts (
+      id TEXT, source_name TEXT, start_at TEXT, end_at TEXT, deleted_at TEXT
+    );
+    CREATE TABLE health_records (
+      source_name TEXT, type TEXT, value_numeric REAL, start_at TEXT, end_at TEXT
+    );
+    INSERT INTO workouts VALUES (
+      'workout_overlap', 'Apple Watch', '2026-07-16T12:00:00.000Z', '2026-07-16T12:02:00.000Z', NULL
+    );
+    INSERT INTO health_records VALUES
+      ('Apple Watch', 'HKQuantityTypeIdentifierRunningPower', 100, '2026-07-16T11:59:30.000Z', '2026-07-16T12:00:30.000Z'),
+      ('Apple Watch', 'HKQuantityTypeIdentifierRunningPower', 200, '2026-07-16T12:00:30.000Z', '2026-07-16T12:01:30.000Z'),
+      ('Apple Watch', 'HKQuantityTypeIdentifierRunningPower', 300, '2026-07-16T11:58:00.000Z', '2026-07-16T11:58:30.000Z'),
+      ('Apple Watch', 'HKQuantityTypeIdentifierRunningPower', 400, '2026-07-16T12:02:00.000Z', '2026-07-16T12:02:30.000Z');
+  `);
+
+  try {
+    const average = new SqliteWorkoutReadRepository(database)
+      .workoutStatistic("workout_overlap", "HKQuantityTypeIdentifierRunningPower", "average");
+    assert.ok(average !== null && Math.abs(average - 500 / 3) < 1e-9,
+      "the crossing record contributes its clipped 30 s, while wholly-before/after records are excluded");
+  } finally {
+    database.close();
+  }
+});

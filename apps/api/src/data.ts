@@ -1671,10 +1671,10 @@ export class RaiReadStore {
    *
    * Anchored on the newest finished session and scaled by that session's load
    * relative to the athlete's own chronic EWMA. It is deliberately **not** merged
-   * with today's Readiness here: `physState` has exactly one producer (the mobile
-   * today path) and inventing a second one on the desktop surface would let the
-   * two screens disagree about the same morning. `estimateRecoveryTime` already
-   * accepts `physState`; wiring it in belongs where that value exists.
+   * with today's Readiness here: `physState` already has three production sites
+   * (mobile today, recompute daily metrics, legacy recompute) and neither
+   * `estimateRecoveryTime` caller passes one in; a fourth value on this read
+   * surface would let two screens disagree. Wiring belongs at the producer.
    */
   private recoveryEstimate(chronicEwma: number | null): RecoveryTimeEstimate {
     return estimateRecoveryTime({
@@ -1898,9 +1898,9 @@ export class RaiReadStore {
   /**
    * §12.11 how far the runner is from a personal calibration tier.
    *
-   * Reports the funnel (which is the reconciliation view T03 asks for) plus the
-   * floors still unmet. It deliberately does **not** produce an interval: a band is
-   * only fitted from held-out residuals, and this read path has no predictor run.
+   * Reports the funnel (the reconciliation view T03 asks for), the floors still
+   * unmet, and the personal band fitted from held-out residuals through the same
+   * predictor chain — personal self-calibration, never a population interval.
    */
   labelProgress(): {
     funnel: LabelFunnelReport;

@@ -734,3 +734,24 @@ test("builds a reusable scenario prediction report without reading future eviden
     database.close();
   }
 });
+
+test("physiology profile keeps absolute-instant cutoffs with indexable text prefilters", () => {
+  const database = fixtureDatabase();
+  try {
+    const insert = database.prepare(`INSERT INTO health_records
+      (id, type, source_name, source_category, unit, value_numeric, start_at, end_at)
+      VALUES (?, ?, 'Watch', 'apple_watch', ?, ?, ?, ?)`);
+    // 180 天窗口起点（2025-07-14T00:00Z）之前 1 小时，但用 +14:00 书写 ⇒ 文本落在窗口内；
+    // julianday 残差必须把它排除，否则预筛会悄悄放大窗口。
+    insert.run("before-cutoff-offset", "HKQuantityTypeIdentifierHeartRate", "count/min", 250,
+      "2025-07-14T13:00:00+14:00", "2025-07-14T13:01:00+14:00");
+    // 窗口内 1 秒、同样 +14:00 书写（文本比 UTC 早 14 h）⇒ 文本预筛不能漏行。
+    insert.run("inside-cutoff-offset", "HKQuantityTypeIdentifierHeartRate", "count/min", 240,
+      "2025-07-14T14:00:01+14:00", "2025-07-14T14:01:01+14:00");
+    const profile = loadPhysiologyProfile(database, "2026-01-10T00:00:00.000Z");
+    assert.equal(profile.observedMaximumHeartRateBpm, 240,
+      "the text prefilter is a superset; the exact julianday cutoff decides membership");
+  } finally {
+    database.close();
+  }
+});

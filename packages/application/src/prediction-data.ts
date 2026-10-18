@@ -1,7 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  HEALTH_RECORD_TIME_SLACK_MS,
   PERFORMANCE_ENTRY_DISTANCE_METERS,
   loadPerformanceEventSessions,
+  shiftedIsoBound,
   SqlitePerformanceEntryRepository,
   type PerformanceEntryDistance
 } from "@rai/storage-sqlite";
@@ -470,18 +472,29 @@ export function parsePerformanceConditions(metadataJson: string): {
 
 function restingHeartRate(database: DatabaseSync, asOf: string, excluded: ReadonlySet<string>): number | null {
   const cutoff = new Date(Date.parse(asOf) - 28 * 86_400_000).toISOString();
+  // 2026-10-18（P0-2）：`julianday(start_at)` 包住索引列 ⇒ 计划器无法把时间窗当下界，
+  // `/v1/predictions` 每次读都退化成 `type = ?` 的全类型扫描（生产 533,654 行
+  // health_records；剖面里 recordSeries/observedMaximumHeartRate 合计 ~8.2 s）。
+  // 先用 24 h slack 的定宽 UTC 文本范围把候选收窄（可走
+  // `idx_health_records_type_time`），精确的绝对时刻语义仍由 `julianday` 残差保留：
+  // 文本范围对带 ±HH:MM 偏移的遗留行是超集，不会漏行。
+  const lower = shiftedIsoBound(cutoff, -HEALTH_RECORD_TIME_SLACK_MS);
+  const upper = shiftedIsoBound(asOf, HEALTH_RECORD_TIME_SLACK_MS);
   const rows = database
     .prepare(`
       SELECT value_numeric AS value
       FROM health_records
       WHERE type = ?
         AND value_numeric IS NOT NULL
+        AND start_at >= ?
+        AND start_at < ?
+        AND end_at <= ?
         AND julianday(start_at) >= julianday(?)
         AND julianday(start_at) < julianday(?)
         AND julianday(end_at) <= julianday(?)
         ${excludedHealthEventSql(excluded)}
     `)
-    .all(healthTypes.restingHeartRate, cutoff, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as Array<{ value: number }>;
+    .all(healthTypes.restingHeartRate, lower, upper, upper, cutoff, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as Array<{ value: number }>;
   return median(rows.map((row) => row.value));
 }
 
@@ -491,18 +504,24 @@ function observedMaximumHeartRate(
   excluded: ReadonlySet<string>
 ): number | null {
   const cutoff = new Date(Date.parse(asOf) - 180 * 86_400_000).toISOString();
+  // 同 `restingHeartRate`：文本范围只做索引 seek 的预筛，`julianday` 残差保精确语义。
+  const lower = shiftedIsoBound(cutoff, -HEALTH_RECORD_TIME_SLACK_MS);
+  const upper = shiftedIsoBound(asOf, HEALTH_RECORD_TIME_SLACK_MS);
   const row = database
     .prepare(`
       SELECT MAX(value_numeric) AS value
       FROM health_records
       WHERE type = ?
         AND value_numeric IS NOT NULL
+        AND start_at >= ?
+        AND start_at < ?
+        AND end_at <= ?
         AND julianday(start_at) >= julianday(?)
         AND julianday(start_at) < julianday(?)
         AND julianday(end_at) <= julianday(?)
         ${excludedHealthEventSql(excluded)}
     `)
-    .get(healthTypes.heartRate, cutoff, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as { value: number | null } | undefined;
+    .get(healthTypes.heartRate, lower, upper, upper, cutoff, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as { value: number | null } | undefined;
   return typeof row?.value === "number" && Number.isFinite(row.value) ? row.value : null;
 }
 
@@ -706,6 +725,13 @@ function recordSeries(
   session: ThresholdSessionRow,
   type: string
 ): SeriesRow[] {
+  // 2026-10-18（P0-2）：原查询用 `julianday(start_at) >= julianday(?)` 包列，索引无法
+  // seek ⇒ 每个 threshold session × 两种类型都全表扫一遍 533,654 行（生产实测
+  // 单次 ~75 ms；剖面里 recordSeries 自耗 6.87 s）。文本范围 + `julianday` 残差：
+  // 前者把候选收窄到会话窗口 ±24 h（走 idx_health_records_source_time），后者保持
+  // 绝对时刻语义，对带偏移的遗留时间戳仍是超集。
+  const lower = shiftedIsoBound(session.observedAt, -HEALTH_RECORD_TIME_SLACK_MS);
+  const upper = shiftedIsoBound(session.completedAt, HEALTH_RECORD_TIME_SLACK_MS);
   return database
     .prepare(`
       SELECT value_numeric AS value, unit, start_at AS observedAt
@@ -713,6 +739,9 @@ function recordSeries(
       WHERE source_name = ?
         AND type = ?
         AND value_numeric IS NOT NULL
+        AND start_at >= ?
+        AND start_at <= ?
+        AND end_at <= ?
         AND julianday(start_at) >= julianday(?)
         AND julianday(start_at) <= julianday(?)
         AND julianday(end_at) <= julianday(?)
@@ -721,6 +750,9 @@ function recordSeries(
     .all(
       session.sourceName,
       type,
+      lower,
+      upper,
+      upper,
       session.observedAt,
       session.completedAt,
       session.completedAt

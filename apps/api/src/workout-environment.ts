@@ -7,7 +7,6 @@ import {
 } from "@rai/contracts";
 import { parsePerformanceConditions } from "@rai/application";
 import {
-  GRADE_ADJUSTMENT_POLICY_VERSION as PHYSIOLOGY_GRADE_POLICY_VERSION,
   buildWorkoutEnvironmentView,
   gradeAdjustedPace
 } from "@rai/physiology";
@@ -285,8 +284,12 @@ export function environmentCoverage(
  * The two version strings this module's output depends on, exported for the
  * acceptance tests: a change to either must fail a test rather than silently
  * re-label old numbers.
+ *
+ * `grade` reads the @rai/contracts binding directly. `@rai/physiology` re-exports
+ * the same binding, so importing it twice used to do nothing but suggest there
+ * were two independent policy versions to keep in sync.
  */
 export const ENVIRONMENT_VIEW_VERSIONS = {
   view: ENVIRONMENT_VIEW_POLICY_VERSION,
-  grade: PHYSIOLOGY_GRADE_POLICY_VERSION
+  grade: GRADE_ADJUSTMENT_POLICY_VERSION
 } as const;

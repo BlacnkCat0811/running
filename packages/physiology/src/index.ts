@@ -1,5 +1,6 @@
 import {
   ENVIRONMENT_VIEW_POLICY_VERSION,
+  GRADE_ADJUSTMENT_POLICY_VERSION,
   PHYSIOLOGY_PREDICTION_SCHEMA_VERSION,
   assertPhysiologyPredictionSnapshot,
   raceDistanceMeters,
@@ -314,7 +315,10 @@ export function performanceConditionPenaltyFraction(
 // `validateConditionLedger` exists to refuse.
 // -----------------------------------------------------------------------------
 
-export const GRADE_ADJUSTMENT_POLICY_VERSION = "rai-grade-adjustment-v1" as const;
+// Single source: the policy version is owned by @rai/contracts. Re-exported so the
+// existing importers of this package keep working; a second literal here would let
+// the two "same policy version" values drift apart with nothing failing in between.
+export { GRADE_ADJUSTMENT_POLICY_VERSION };
 
 /**
  * The Minetti polynomial is defined on |i| ≤ 0.45 (24°). Beyond that a

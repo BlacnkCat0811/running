@@ -3,7 +3,7 @@ import { NO_WRITE_GATE, type AnalysisStore, type WriteGate } from "../write-gate
 import { identityNormalizationConfigHash } from "@rai/normalization";
 import { READINESS_SLEEP_RATIO_THRESHOLD } from "@rai/readiness";
 import { readinessForRun } from "../model-v2-snapshots.js";
-import { DURABILITY_MODEL_VERSION, PREPARATION_TARGETS, PREPARATION_WINDOW_DAYS, assessPreparation, assessDurability, buildDurabilitySnapshot } from "@rai/durability";
+import { DURABILITY_MODEL_VERSION, PREPARATION_CONFIG_VERSION, PREPARATION_TARGETS, PREPARATION_WINDOW_DAYS, assessPreparation, assessDurability, buildDurabilitySnapshot } from "@rai/durability";
 import type { ModelLineageV2, WorkoutFeaturePayloadV4 } from "@rai/contracts";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { RecomputeProgressGate } from "./recompute-progress.js";
@@ -81,7 +81,7 @@ import {
   buildDailyTrainingMetrics as buildLegacyDailyTrainingMetrics,
   calculateWorkoutTrainingLoad, buildLoadVectorV2,
   classifyPhysState,
-  defaultDailyMetricConfig,
+  defaultDailyMetricConfig, TRAINING_LOAD_MODEL_VERSION,
   type DailyPhysEvidence,
 } from "@rai/training-load";
 import { TRAINING_LOAD_CONFIG_VERSION, type DailyTrainingMetric, type WorkoutTrainingLoad } from "@rai/contracts";
@@ -90,14 +90,14 @@ import {
   analyzeWorkoutZones,
   buildDailyZoneProfile,
   calculateCompositeTrainingLoad,
-  percentile,
+  percentile, TRAINING_ZONES_MODEL_VERSION,
   type MaximumHeartRateEvidence,
   type RestingHeartRateEvidence,
   type ThresholdPaceCandidate,
   type TimedMetricSample
 } from "@rai/training-zones";
 import {
-  estimateLactateThresholdFromPerformanceVdot,
+  estimateLactateThresholdFromPerformanceVdot, PHYSIOLOGY_MODEL_VERSION,
   estimatePerformanceVdot,
   estimateVo2Max
 } from "@rai/physiology";
@@ -4032,8 +4032,8 @@ export class RecomputePipeline {
     const assessments=this.database.prepare("SELECT * FROM ability_assessments WHERE model_run_id=? ORDER BY sequence_number").all(model.id);
     put("fitness",{lineage,assessments,daily:this.database.prepare("SELECT local_date,true_ability,snapshot_status FROM daily_ability_snapshots WHERE model_run_id=? ORDER BY local_date").all(model.id)});
     put("readiness",readinessForRun(this.facts,lineage));
-    put("load",{lineage:{...lineage,modelVersion:"rai-training-load-v2.0.0",configVersion:TRAINING_LOAD_CONFIG_VERSION,configHash:semanticHash({config:defaultDailyMetricConfig,version:TRAINING_LOAD_CONFIG_VERSION}),baselineEpochId:null,calibrationCohortHash:null},days:this.database.prepare("SELECT * FROM daily_training_metrics WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
-    put("zones",{lineage:{...lineage,modelVersion:"rai-training-zones-v2.0.0",configVersion:TRAINING_ZONE_CONFIG_VERSION,configHash:semanticHash({version:TRAINING_ZONE_CONFIG_VERSION,physiology:"rai-physiology-v1.8.0"}),baselineEpochId:null,calibrationCohortHash:null},profiles:this.database.prepare("SELECT * FROM daily_zone_profiles WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
+    put("load",{lineage:{...lineage,modelVersion:TRAINING_LOAD_MODEL_VERSION,configVersion:TRAINING_LOAD_CONFIG_VERSION,configHash:semanticHash({config:defaultDailyMetricConfig,version:TRAINING_LOAD_CONFIG_VERSION}),baselineEpochId:null,calibrationCohortHash:null},days:this.database.prepare("SELECT * FROM daily_training_metrics WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
+    put("zones",{lineage:{...lineage,modelVersion:TRAINING_ZONES_MODEL_VERSION,configVersion:TRAINING_ZONE_CONFIG_VERSION,configHash:semanticHash({version:TRAINING_ZONE_CONFIG_VERSION,physiology:PHYSIOLOGY_MODEL_VERSION}),baselineEpochId:null,calibrationCohortHash:null},profiles:this.database.prepare("SELECT * FROM daily_zone_profiles WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
     const cutoff=Date.parse(asOf)-56*86400000;
     const preparation=assessPreparation(features.filter((f)=>f.eligibilityStatus!=="excluded" && (f.distanceKm??0)>0 && Date.parse(f.workoutStartAt)>=cutoff)
       .map((f)=>({observedAt:f.workoutStartAt,distanceKm:f.distanceKm!,durationSeconds:f.durationSeconds})),asOf);
@@ -4048,7 +4048,7 @@ export class RecomputePipeline {
     });
     const comparableCount=lateRuns.filter((row)=>row.normalizationStatus==="not_needed"||row.normalizationStatus==="applied").length;
     const durability=assessDurability({lateRunStability:null,matchedPerformanceEvidence:null,lateRunEvidenceCount:comparableCount,evidenceTargetCount:2});
-    const domainLineage={...lineage,modelVersion:DURABILITY_MODEL_VERSION,configVersion:"rai-preparation-config-v1",
+    const domainLineage={...lineage,modelVersion:DURABILITY_MODEL_VERSION,configVersion:PREPARATION_CONFIG_VERSION,
       configHash:semanticHash({targets:PREPARATION_TARGETS,windowDays:PREPARATION_WINDOW_DAYS,penalty:"disabled_until_calibrated"}),baselineEpochId:null,calibrationCohortHash:null};
     put("durability",["five_k","ten_k","half_marathon"].map((distance)=>({
       ...buildDurabilitySnapshot({distance:distance as "five_k"|"ten_k"|"half_marathon",preparation,durability,lineage:domainLineage}),

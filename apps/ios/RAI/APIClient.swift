@@ -192,7 +192,11 @@ struct RaiAPIClient {
     // 保留直发入口等于给"静默丢幂等"留一条可误用的后路。
 
     func coachLoop(baseURL: URL, token: String) async throws -> CoachLoopResponse {
-        try await get(path: "/v1/mobile/coach-loop", baseURL: baseURL, token: token)
+        // 2026-10-18（事故复盘 P0-3）：coach-loop 是唯一的重计算读（服务端实测
+        // 13.4s/条，且与其余读共用同一条主线程）。前台给它 60s 的专用超时：15s
+        // 在故障恢复期仍会先把这条已排队的重读砍成 -1001，而重发只会再压一条
+        // 重计算。其余 GET 一律保持默认 15s（轻读不应陪着重读一起等）。
+        try await get(path: "/v1/mobile/coach-loop", baseURL: baseURL, token: token, timeout: 60)
     }
 
     func coachFeedback(_ input: CoachLoopFeedbackCommand, baseURL: URL, token: String) async throws -> CoachLoopFeedbackResult {
@@ -381,9 +385,11 @@ struct RaiAPIClient {
         path: String,
         query: [URLQueryItem] = [],
         baseURL: URL,
-        token: String
+        token: String,
+        timeout: TimeInterval? = nil
     ) async throws -> T {
-        try await request(path: path, query: query, method: "GET", body: Optional<Data>.none, baseURL: baseURL, token: token)
+        try await request(path: path, query: query, method: "GET", body: Optional<Data>.none,
+            baseURL: baseURL, token: token, timeout: timeout)
     }
 
     private func send<T: Encodable, U: Decodable>(

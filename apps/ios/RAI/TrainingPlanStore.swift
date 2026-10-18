@@ -25,6 +25,13 @@ final class TrainingPlanStore {
     private let now: () -> Date
     private(set) var scope: String
     var legacyRetryCount = 2
+    /// 2026-10-18（事故复盘 P0-3）：旧服务（无快照契约）的瞬态重试计划。
+    ///
+    /// 旧实现是**零退避**立即重试：`.timeout`/`.offline` 一到期就重发，服务端被慢
+    /// 查询占住时把 1 条昂贵读放大成 3 条（事故里 coach-loop 实测 13.4s/条）。
+    /// 现在与新快照契约同一口径 —— 优先服务端 `Retry-After`，无提示时按本计划退避，
+    /// 且只有**服务端已经答复**的瞬态码才重试。测试可注入 `[]` 关闭重试。
+    var legacyRetryDelays: [TimeInterval] = [0.15, 0.3]
     /// 2026-10-18（审查 P2-6）：新快照契约下 `503 plan_snapshot_changed` 是
     /// "读期间事实变化，请重读"的瞬态信号。旧实现只对旧服务重试，新契约直接
     /// unavailable。这里做有界退避重试（默认 2 次、150/300ms），测试可注入空数组
@@ -348,13 +355,34 @@ final class TrainingPlanStore {
                     guard valid() else { return false }
                     continue
                 }
-                if !aggregateContract, attempt < legacyRetries, reason.retryable { continue }
+                // 2026-10-18（事故复盘 P0-3）：旧服务只重试**服务端已经答复**的瞬态
+                // 错误。`.timeout`/`.offline` 表示一个字节都没拿到：服务端正被慢查询
+                // 占住时，零退避立即重试只会把 1 条昂贵读放大成 3 条，延长故障恢复。
+                // 等待同样走 `snapshotRetryDelay`（Retry-After 优先、0.1...5s 夹取）
+                // 与 `sleepBeforeSnapshotRetry`；取消即放弃，不把取消包装成成功。
+                if !aggregateContract, attempt < legacyRetries,
+                   Self.legacyRetryableCodes.contains(reason.code),
+                   let delay = Self.snapshotRetryDelay(serverHint: retryAfterHint,
+                       defaults: legacyRetryDelays, attempt: attempt) {
+                    guard await sleepBeforeSnapshotRetry(delay) else { return false }
+                    guard valid() else { return false }
+                    continue
+                }
                 availability = acknowledgement != nil ? .savedAwaitingRefresh : reason.code == .revisionConflict ? .revisionMismatch : .unavailable
                 return false
             }
         }
         return false
     }
+
+    /// 2026-10-18（事故复盘 P0-3）：旧服务可安全重试的错误码。
+    ///
+    /// 只有**服务端已经答复**的瞬态失败（HTTP 5xx/409）才在名单里。`.timeout`/
+    /// `.offline` 描述的是"没拿到任何答复"，这时重试等于给已经排队的慢请求再加一条
+    /// 昂贵重计算 —— 事故里服务端 13.4s/条，客户端 15s/4s 超时先到期，重试只会让
+    /// 恢复更慢。`PlanReadIssue.retryable`（含 `.timeout`/`.offline`）仍用于 UI 的
+    /// "可重试"提示，这里只在 store 的读循环里收窄重试面。
+    static let legacyRetryableCodes: [PlanReadIssue.Code] = [.serverUnavailable, .revisionConflict]
 
     /// 2026-10-18（审查 P2-6 收尾）：纯函数选择下一次重试延迟。
     ///

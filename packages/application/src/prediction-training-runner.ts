@@ -363,7 +363,7 @@ function mapMetrics(evaluation: EvaluationJson): PredictionModelEvaluationMetric
     intervalCoverageChange:
       -finiteNumber("interval coverage drop", evaluation.releaseHoldout.intervalCoverageDrop),
     regressesAnyDistanceByMoreThan5Percent: distances.some(
-      (distance) => (evaluation.releaseHoldout.distanceMaeRegression[distance] ?? Infinity) > 0.05
+      (distance) => (evaluation.releaseHoldout.distanceMaeRegression[distance] ?? Infinity) > MAXIMUM_DISTANCE_MAE_REGRESSION
     ),
     onnxMaximumAbsoluteError: evaluation.onnxParity.maximumAbsoluteError,
     maeImprovementBootstrap95Lower: Number.isFinite(bootstrapLower) ? bootstrapLower : null,

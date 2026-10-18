@@ -85,7 +85,13 @@ final class NativeAppModel {
     private(set) var isOffline = false
     private(set) var isTodayAvailable: Bool {
         get { trainingPlanStore.isCurrent }
-        set { if !newValue { trainingPlanStore.invalidate() } }
+        set {
+            guard !newValue else { return }
+            // 2026-10-18（事故复盘 P0-3）：store 被作废时，在飞的计划读同样失效，
+            // 否则下一次刷新会复用一个注定被 store 拒绝的读。
+            cancelInFlightPlanRefresh()
+            trainingPlanStore.invalidate()
+        }
     }
     var canConfirmToday: Bool {
         guard let today else { return false }
@@ -115,6 +121,18 @@ final class NativeAppModel {
     private var saveGoalsRequestID = UUID()
     private var refreshQueued = false
     private var refreshHandshakeQueued = false
+    /// 2026-10-18（事故复盘 P0-3）：计划读的单飞句柄。
+    ///
+    /// `refreshPlanState` 是客户端唯一会触发 coach-loop 重计算的入口（服务端实测
+    /// 13.4s/条，且与所有读共用一条主线程）。同一时刻只允许一条在飞，重复调用复用
+    /// 它的结果而不是再发一条教练闭环读。`cancelInFlightPlanRefresh()` 在配置/身份/
+    /// 计划代次变化时取消它并清句柄，避免旧 scope 的结果写回或被下一次刷新复用。
+    private var planRefreshTask: Task<Bool, Never>?
+    private var planRefreshID: UUID?
+    /// 训练列表读的"新请求取消旧请求"句柄与代次：旧任务被取消后既不写结果，
+    /// 也不清 `isLoadingWorkouts`（见 `refreshWorkouts`）。
+    private var workoutRefreshTask: Task<Bool, Never>?
+    private var workoutReadGeneration = 0
     var isPlanBusy: Bool { isSavingGoals || isLockingSession || isRegeneratingPlan || isSyncingPlan || isUpdatingRunCoach }
     var currentPlanRevision: Int { trainingPlanStore.revision }
     /// Human-readable result of the last plan generation, including fallbacks.
@@ -167,6 +185,9 @@ final class NativeAppModel {
         didSet {
             guard oldValue != workoutSessionType else { return }
             workoutRequestID = UUID()
+            // 2026-10-18（事故复盘 P0-3）：筛选切换就是"新请求"——旧列表读必须真正
+            // 取消（只换 requestID 挡得住结果，挡不住还在服务端排队的那条网络请求）。
+            cancelWorkoutReads()
             isLoadingWorkouts = false
             workouts = []
             workoutTotal = 0
@@ -246,6 +267,8 @@ final class NativeAppModel {
         isTodayAvailable = false
         isLoading = false
         isRefreshing = false
+        // 2026-10-18（事故复盘 P0-3）：配置已换，在飞的训练列表读属于旧配置。
+        cancelWorkoutReads()
         invalidatePlanOperations()
         session.isReachable = false
         guard let baseURL = session.serverURL else {
@@ -317,7 +340,16 @@ final class NativeAppModel {
                     let handshake = refreshHandshakeQueued
                     refreshQueued = false
                     refreshHandshakeQueued = false
-                    Task { await self.refreshAll(requestHandshake: handshake) }
+                    Task {
+                        // 2026-10-18（事故复盘 P0-3）：排队重跑加 ~350ms 合并窗口。
+                        // 同一波 burst（回前台 + 同步成功 + 进页面）会在前一次刷新还没
+                        // 回来时排入多次重跑；旧实现"完成即立刻重跑"等于在 burst 里再
+                        // 叠一轮 coach-loop/四连读。窗口期间又来的调用照旧走
+                        // `isRefreshing` 守卫排队，不会并发起第二条刷新。
+                        try? await Task.sleep(nanoseconds: 350_000_000)
+                        guard !Task.isCancelled, configuration == self.configurationID else { return }
+                        await self.refreshAll(requestHandshake: handshake)
+                    }
                 }
             }
         }
@@ -379,7 +411,11 @@ final class NativeAppModel {
         let tally = Self.ReadPanelTally.of(panelOutcomes)
         let failedPanels = tally.failed
         isOffline = !tally.anySucceeded && !tally.serverAnswered
-        session.isReachable = tally.anySucceeded || tally.serverAnswered
+        // 2026-10-18（事故复盘 P0-3）：一次 refreshAll 全失败**不再**把 isReachable
+        // 打回 false。失败判定交给 ServerSession 的 3 次探针阈值（`markUnreachable`）；
+        // 否则服务端仅仅是慢了一次，isReachable=false 就会把探针间隔从 30s 收紧到
+        // ~5s 并禁用同步入口（TechSyncStatus），等于用一次失败制造更多请求。
+        if tally.anySucceeded || tally.serverAnswered { session.isReachable = true }
         if failedPanels > 0 {
             // 刻意不在这里 `loadCachedData()`：那会把刚刚成功的那几项也推回旧值，
             // 等于用一次部分失败抹掉一次部分成功。首启的空态由 `bootstrap()`
@@ -524,6 +560,8 @@ final class NativeAppModel {
                 baseURL: baseURL, token: token, isCurrent: valid)
             guard valid() else { return false }
             planMutationEpoch = UUID()
+            // 2026-10-18（事故复盘 P0-3）：代次变化后旧的计划读不再有权写入。
+            cancelInFlightPlanRefresh()
             trainingPlanStore.acceptCoachLoopWrite(value); finishPlanPublication()
             runCoachError = nil
             let refreshed = await refreshPlanState()
@@ -564,6 +602,7 @@ final class NativeAppModel {
             guard cache.saveCoachFeedback(nil, scope: scope) else {
                 runCoachError = "反馈已保存，本地操作确认未持久化，请重试原反馈。"; return false
             }
+            cancelInFlightPlanRefresh()
             trainingPlanStore.invalidate()
             let refreshed = await refreshPlanState()
             runCoachError = !refreshed ? "反馈已保存，读取失败；尚未刷新训练安排。" :
@@ -620,8 +659,35 @@ final class NativeAppModel {
 
     private var workoutReadOutcome: ReadPanelOutcome = .failure
 
+    /// 2026-10-18（事故复盘 P0-3）：新请求取消旧请求。
+    ///
+    /// 旧实现只换 `workoutRequestID`：迟到响应不会覆盖新结果（守卫仍然有效），但
+    /// 那条**网络请求**还在服务端排队 —— 服务端被慢查询占住时，一次筛选切换或多
+    /// 一次刷新就能叠出两条并发读。现在旧任务的 `Task` 被 `cancel()`（URLSession
+    /// 会随 Task 取消真正断开连接）；旧任务的 defer 与结果写入仍由
+    /// `workoutRequestID` + `!Task.isCancelled` 双重守卫，所以它既不清掉新请求的
+    /// `isLoadingWorkouts`，也不写 `isOffline`/`workoutReadOutcome`。调用方被取消
+    /// （如视图消失）时，取消同样转发给内层任务。
     @discardableResult
     func refreshWorkouts() async -> Bool {
+        guard session.serverURL != nil else { return false }
+        workoutRefreshTask?.cancel()
+        workoutReadGeneration &+= 1
+        let generation = workoutReadGeneration
+        let task = Task { () -> Bool in await self.performWorkoutRefresh() }
+        workoutRefreshTask = task
+        return await withTaskCancellationHandler {
+            let result = await task.value
+            // 只有最新代次能清句柄：旧任务的完成不得让新任务"失去句柄"（那样下一次
+            // 刷新就无法取消它了）。
+            if workoutReadGeneration == generation { workoutRefreshTask = nil }
+            return result
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performWorkoutRefresh() async -> Bool {
         guard let baseURL = session.serverURL else { return false }
         let requestID = UUID()
         workoutRequestID = requestID
@@ -632,12 +698,14 @@ final class NativeAppModel {
         workoutListError = nil
         workoutReadOutcome = .failure
         isLoadingWorkouts = true
+        // 清 spinner 只属于"仍然是当前代次"的任务：被新请求取代后，spinner 归新请求管。
         defer { if workoutRequestID == requestID { isLoadingWorkouts = false } }
         do {
             let response = try await api.workouts(
                 baseURL: baseURL, token: token, limit: workoutPageSize,
                 offset: 0, sessionType: filter
             )
+            // 结果写入同样只允许当前代次（`workoutRequestID`）+ 未被取消的任务做。
             guard workoutRequestID == requestID, scope == cacheScope,
                   baseURL == session.serverURL, token == session.apiToken,
                   !Task.isCancelled else { return false }
@@ -1191,6 +1259,9 @@ final class NativeAppModel {
         }
         self.handshake = handshake
         cacheScope = nextScope
+        // 2026-10-18（事故复盘 P0-3）：`configure` 会作废 store 自己的 requestID/epoch，
+        // 在飞的计划读注定写不进去 —— 让单飞句柄一起失效，别让下一次刷新复用它。
+        cancelInFlightPlanRefresh()
         trainingPlanStore.configure(scope: nextScope, clear: changed)
         restorePlanSafetyState()
         scheduleStateChanged()
@@ -1202,6 +1273,8 @@ final class NativeAppModel {
 
     private func clearPresentation() {
         workoutRequestID = UUID()
+        // 2026-10-18（事故复盘 P0-3）：清展示层时取消在飞的训练列表读。
+        cancelWorkoutReads()
         detailRequestID = UUID()
         invalidatePlanOperations()
         isLoadingWorkouts = false
@@ -1261,7 +1334,30 @@ final class NativeAppModel {
         planMutationEpoch = UUID()
         runCoachRequestID = UUID()
         isLoadingRunCoach = false
+        // 2026-10-18（事故复盘 P0-3）：单飞的 in-flight 任务必须一起失效，否则旧
+        // scope/旧代次的读结果会回来覆盖 ack 之后的展示状态，或让下一次刷新复用
+        // 一个已被 store 作废的读。
+        cancelInFlightPlanRefresh()
         trainingPlanStore.invalidate()
+    }
+
+    /// 2026-10-18（事故复盘 P0-3）：让"在飞的计划读"失效并真正取消。
+    ///
+    /// 单飞复用的前提是"那条读还写得进去"：凡是 store 身份/代次/缓存权威变化
+    /// （写确认、配置切换、scope 切换、缓存重载、待确认发布作废）都必须走这里。
+    /// 只依赖 store 自己的 `requestID`/`epoch` 也能挡住结果写入，但会让调用方白等
+    /// 一条已经注定失败的读，并让下一次刷新复用它。
+    private func cancelInFlightPlanRefresh() {
+        planRefreshTask?.cancel()
+        planRefreshTask = nil
+        planRefreshID = nil
+    }
+
+    /// 2026-10-18（事故复盘 P0-3）：让"在飞的训练列表读"失效并真正取消。
+    private func cancelWorkoutReads() {
+        workoutReadGeneration &+= 1
+        workoutRefreshTask?.cancel()
+        workoutRefreshTask = nil
     }
 
     private func acceptGoals(_ value: MobileGoalsResponse) {
@@ -1270,19 +1366,45 @@ final class NativeAppModel {
 
     /// Writes refresh only their dependent surfaces. Older full-page reads cannot
     /// undo the acknowledgement, and unrelated statistics never delay feedback.
+    ///
+    /// 2026-10-18（事故复盘 P0-3）：单飞。重复调用直接复用在飞 `Task` 的结果，
+    /// 不再发第二条教练闭环读；只有最新代次的任务在完成后清句柄。
     @discardableResult
     func refreshPlanState() async -> Bool {
+        if let task = planRefreshTask { return await task.value }
         guard let baseURL = session.serverURL else { return false }
         let configuration = configurationID
         let token = session.apiToken
         let mutation = planMutationEpoch
-        let complete = await trainingPlanStore.refresh(baseURL: baseURL, token: token, handshake: handshake) {
-            configuration == self.configurationID && token == self.session.apiToken && baseURL == self.session.serverURL && mutation == self.planMutationEpoch
+        let id = UUID()
+        planRefreshID = id
+        let task = Task { () -> Bool in
+            let complete = await self.trainingPlanStore.refresh(baseURL: baseURL, token: token, handshake: self.handshake) {
+                configuration == self.configurationID && token == self.session.apiToken &&
+                    baseURL == self.session.serverURL && mutation == self.planMutationEpoch
+            }
+            // 迟到的读不得改写新配置/新代次下的展示状态（旧实现没有这道守卫）。
+            // 2026-10-18（事故复盘 P0-3 复查）：取消与句柄归属也必须进同一道守卫 ——
+            // 写确认/反馈/待确认发布这些**不改 epoch** 的入口会取消在飞读；被取消的读
+            // 若继续写 `workoutPlanError`/`isReachable`，就会抹掉新读刚写入的失败提示，
+            // 或把一次全失败刷新后的离线状态翻回在线。
+            guard !Task.isCancelled, self.planRefreshID == id,
+                  configuration == self.configurationID, token == self.session.apiToken,
+                  baseURL == self.session.serverURL, mutation == self.planMutationEpoch else {
+                return false
+            }
+            self.workoutPlanError = complete ? nil : self.trainingPlanStore.issue?.message
+            if self.trainingPlanStore.serviceReachable { self.isOffline = false; self.session.isReachable = true }
+            if complete { self.lastCacheUpdate = self.trainingPlanStore.cachedAt }
+            return complete && self.currentWorkoutPlan != nil
         }
-        workoutPlanError = complete ? nil : trainingPlanStore.issue?.message
-        if trainingPlanStore.serviceReachable { isOffline = false; session.isReachable = true }
-        if complete { lastCacheUpdate = trainingPlanStore.cachedAt }
-        return complete && currentWorkoutPlan != nil
+        planRefreshTask = task
+        let result = await task.value
+        if planRefreshID == id {
+            planRefreshTask = nil
+            planRefreshID = nil
+        }
+        return result
     }
 
     /// Device scheduling shares the mutation gate with saves and generation.
@@ -1377,6 +1499,8 @@ final class NativeAppModel {
         if durable, !cache.savePublication(pending, scope: scope) {
             throw RaiAPIClientError.server(code: "plan_publication_storage_unavailable", message: "无法持久化发布意图，尚未提交。", status: 409)
         }
+        // 2026-10-18（事故复盘 P0-3）：写在飞时旧的计划读不再有权写入展示状态。
+        cancelInFlightPlanRefresh()
         trainingPlanStore.invalidate()
         do { return try await api.replayPlanPublication(pending, baseURL: baseURL, token: token) }
         catch {
@@ -1451,6 +1575,8 @@ final class NativeAppModel {
                 let value: CoachLoopResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)
                 guard valid() else { return "连接已变化，请在原服务确认结果。" }
                 planMutationEpoch = UUID()
+                // 2026-10-18（事故复盘 P0-3）：代次变化后旧的计划读不再有权写入。
+                cancelInFlightPlanRefresh()
                 trainingPlanStore.acceptCoachLoopWrite(value)
             case "coach":
                 let value: MobileRunCoachResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)

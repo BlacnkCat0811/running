@@ -44,6 +44,10 @@ struct NativeRootView: View {
     @Environment(HealthKitSync.self) private var healthSync
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: NativeTab = .home
+    /// 2026-10-18（事故复盘 P0-3 复查）：后台窗口完成的健康同步不在当时发 UI 级读，
+    /// 但 `refreshBodyMetrics` 没有别的触发入口（`refreshAll` 不读预测/仪表盘/体重），
+    /// 因此记下这次完成，回前台补刷一次。
+    @State private var bodyMetricsRefreshPending = false
 
     var body: some View {
         ZStack {
@@ -75,6 +79,12 @@ struct NativeRootView: View {
             // begins so the coach, today's recommendation and the executable
             // Watch week cannot remain on yesterday's snapshot.
             await native.refreshAll()
+            // 2026-10-18（事故复盘 P0-3 复查）：后台完成的同步不直接发 UI 级读，改为
+            // 回前台补刷 body metrics（`refreshAll` 不读预测/仪表盘/体重，没有别的入口）。
+            if bodyMetricsRefreshPending {
+                bodyMetricsRefreshPending = false
+                await native.refreshBodyMetrics()
+            }
             while !Task.isCancelled {
                 let timezone = TimeZone(identifier: native.today?.timezone ?? "Asia/Shanghai") ?? .current
                 var calendar = Calendar(identifier: .gregorian)
@@ -93,6 +103,15 @@ struct NativeRootView: View {
         }
         .onChange(of: healthSync.dataUpdatedGeneration) { _, _ in
             Task {
+                // 2026-10-18（事故复盘 P0-3）：同步成功（+1）不等于"用户正在看"。
+                // 后台窗口里发起的 UI 级读会带着 15s/60s 超时跨过后台到期点，进程被
+                // 挂起后请求冻结、恢复前台时集中以 -1001 报出。回前台时
+                // `.task(id: scenePhase)` 已经会 refreshAll 一次，这里只在前台补刷。
+                guard scenePhase == .active else {
+                    // 后台窗口：不发起 UI 级读，只记下这次同步，回前台补刷一次。
+                    bodyMetricsRefreshPending = true
+                    return
+                }
                 await native.refreshAll()
                 await native.refreshBodyMetrics()
             }

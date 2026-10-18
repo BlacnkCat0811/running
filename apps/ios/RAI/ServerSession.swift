@@ -49,8 +49,12 @@ final class ServerSession {
 
     private static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 4
-        configuration.timeoutIntervalForResource = 8
+        // 2026-10-18（事故复盘 P0-3）：探针不再用 4s/8s。事故里服务端被慢查询占住
+        // 13.4s/条，4s 探针必然超时（-1001），而"失败即离线"会把探针间隔从 30s 收紧
+        // 到 ~5s、并禁用同步入口，进一步放大请求。10s/20s 让探针先让位于真实读；
+        // 失败判定仍由 `failureThreshold`（3 次）决定，不因一次超时就翻离线。
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 20
         configuration.waitsForConnectivity = true
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return RaiURLSession.make(configuration: configuration)
@@ -185,7 +189,9 @@ final class ServerSession {
         let requestToken = apiToken
         let requestGeneration = probeGeneration
         if !requestToken.isEmpty { request.setValue("Bearer \(requestToken)", forHTTPHeaderField: "Authorization") }
-        request.timeoutInterval = 4
+        // 与 session 配置同口径（2026-10-18 事故复盘 P0-3）：4s 探针在服务端被
+        // 慢查询占住时必然 -1001，且每次失败都缩短下一次探针的间隔。
+        request.timeoutInterval = 10
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
             let (_, response) = try await session.data(for: request)

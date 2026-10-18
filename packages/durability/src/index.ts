@@ -13,6 +13,13 @@ import type { ModelLineageV2, RaceDistance } from "@rai/contracts";
 
 export const DURABILITY_MODEL_VERSION = "rai-durability-v1.0.0" as const;
 
+/**
+ * The config version of the Preparation domain snapshot. It used to be a literal
+ * in `@rai/application`'s lineage, so changing the targets/window here would not
+ * have moved the snapshot's config version.
+ */
+export const PREPARATION_CONFIG_VERSION = "rai-preparation-config-v1" as const;
+
 /** §8.1：现有实现使用的窗口。 */
 export const PREPARATION_WINDOW_DAYS = 56;
 /**

@@ -106,14 +106,35 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let (status, body, delay) = Self.handler(request)
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
-            lock.lock(); defer { lock.unlock() }
-            guard !stopped else { return }
+            lock.lock()
+            let alreadyStopped = stopped
+            stopped = true
+            lock.unlock()
+            guard !alreadyStopped else { return }
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: Self.extraHeaders)!, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: Data(body.utf8))
             client?.urlProtocolDidFinishLoading(self)
         }
     }
-    override func stopLoading() { lock.lock(); stopped = true; lock.unlock() }
+    override func stopLoading() {
+        lock.lock()
+        let cancelled = !stopped
+        stopped = true
+        lock.unlock()
+        // 2026-10-18（事故复盘 P0-3）：`stopLoading` 在任务被取消时被 URLSession 调起，
+        // 用例用它钉住"新请求真的取消了旧 URLSession 请求"，而不只是丢弃旧结果。
+        if cancelled { CancellationLog.shared.record() }
+    }
+}
+
+/// 被取消的 URLSession 请求计数（跨用例归零；只在"真的取消"时 +1）。
+final class CancellationLog: @unchecked Sendable {
+    static let shared = CancellationLog()
+    private let lock = NSLock()
+    private var stored = 0
+    var count: Int { lock.lock(); defer { lock.unlock() }; return stored }
+    func reset() { lock.lock(); stored = 0; lock.unlock() }
+    func record() { lock.lock(); stored += 1; lock.unlock() }
 }
 
 final class RequestLog: @unchecked Sendable {
@@ -289,12 +310,18 @@ final class RequestLog: @unchecked Sendable {
              request.url!.query!.contains("easy") ? 0.15 : 0.01)
         }
         model.workoutSessionType = "easy"
+        CancellationLog.shared.reset()
         let old = Task { await model.refreshWorkouts() }
         try await Task.sleep(for: .milliseconds(30))
         model.workoutSessionType = "tempo"
         await model.refreshWorkouts()
         _ = await old.value
         check(model.workouts.first?.id == "new", "late filter response cannot replace current list")
+        // 2026-10-18（事故复盘 P0-3）：只换 requestID 挡得住结果，挡不住旧网络请求还在
+        // 服务端排队；新请求必须真正取消它（URLSession 随 Task 取消断开连接）。
+        try await Task.sleep(for: .milliseconds(30))
+        check(CancellationLog.shared.count >= 1,
+              "a new workouts request cancels the old URLSession request, not merely discards its result")
         model.workoutSessionType = "interval"
         StubProtocol.handler = { _ in (503, "{}", 0) }
         await model.refreshWorkouts()
@@ -399,6 +426,107 @@ final class RequestLog: @unchecked Sendable {
          "injuryFlags":[],"weekPlan":[],"phase":"morning_open",
          "lock":{"present":false,"relockSuggested":false,"lockedAt":null}}
         """
+        do {
+            // 2026-10-18（事故复盘 P0-3）：`refreshPlanState` 单飞。
+            //
+            // 它是客户端唯一会触发 coach-loop 重计算的入口（服务端实测 13.4s/条）。
+            // 并发调用必须复用同一个在飞 `Task`，不再各发一条教练闭环/完整计划读。
+            let flightLog = RequestLog()
+            let flightPlan = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16"]))
+            StubProtocol.handler = { request in
+                flightLog.record(request)
+                switch request.url!.path {
+                case "/v1/mobile/goals": return (200, goalsJSON, 0.12)
+                case "/v1/mobile/today": return (200, todayJSON, 0.12)
+                case "/v1/mobile/workout-plan": return (200, flightPlan, 0.12)
+                default: return (503, "{}", 0)
+                }
+            }
+            let flightModel = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let firstRead = Task { await flightModel.refreshPlanState() }
+            try await Task.sleep(for: .milliseconds(30))
+            let reusedRead = await flightModel.refreshPlanState()
+            let firstResult = await firstRead.value
+            check(firstResult && reusedRead && flightModel.currentWorkoutPlan?.planRevision == 12,
+                  "concurrent plan refreshes both observe the shared completed read")
+            check(flightLog.count(method: "GET", path: "/v1/mobile/goals") == 1 &&
+                  flightLog.count(method: "GET", path: "/v1/mobile/today") == 1 &&
+                  flightLog.count(method: "GET", path: "/v1/mobile/workout-plan") == 1,
+                  "a concurrent refreshPlanState reuses the in-flight Task instead of issuing a second plan read")
+
+            // 配置变化必须取消在飞读：旧 scope 的结果不得写回新配置，也不得让下一次
+            // 刷新复用一个已作废的读。
+            let staleModel = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let staleRead = Task { await staleModel.refreshPlanState() }
+            try await Task.sleep(for: .milliseconds(30))
+            staleModel.session.serverURL = URL(string: "https://rai-ios-lane-new-server.invalid")
+            staleModel.serverConfigurationChanged()
+            let staleResult = await staleRead.value
+            check(!staleResult && staleModel.currentWorkoutPlan == nil && !staleModel.isTodayAvailable,
+                  "a configuration change cancels the in-flight plan read so an old scope can never publish")
+
+            // 取消后再次刷新必须是**新**读，而不是复用已取消的任务。
+            StubProtocol.handler = { request in
+                switch request.url!.path {
+                case "/v1/mobile/goals": return (200, goalsJSON, 0)
+                case "/v1/mobile/today": return (200, todayJSON, 0)
+                case "/v1/mobile/workout-plan": return (200, flightPlan, 0)
+                default: return (503, "{}", 0)
+                }
+            }
+            let recoveredRead = await staleModel.refreshPlanState()
+            check(recoveredRead && staleModel.currentWorkoutPlan?.planRevision == 12,
+                  "a refresh after the cancelled single-flight task starts a fresh read for the new configuration")
+        }
+
+        do {
+            // 2026-10-18（事故复盘 P0-3）：`refreshAll` 排队重跑加 ~350ms 合并窗口，
+            // 让同一波 burst（回前台 + 同步成功 + 进页面）合并成一次重跑，而不是
+            // "完成即立刻重跑"再叠一轮 coach-loop/四连读。
+            let coalesceLog = RequestLog()
+            let coalescePlan = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16"]))
+            StubProtocol.handler = { request in
+                coalesceLog.record(request)
+                switch request.url!.path {
+                case "/v1/mobile/goals": return (200, goalsJSON, 0.05)
+                case "/v1/mobile/today": return (200, todayJSON, 0.05)
+                case "/v1/mobile/workout-plan": return (200, coalescePlan, 0.05)
+                case "/v1/workouts": return (200, fastList, 0.05)
+                default: return (503, "{}", 0)
+                }
+            }
+            let coalesceModel = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let firstRefresh = Task { await coalesceModel.refreshAll(requestHandshake: false) }
+            for _ in 0..<100 {
+                if coalesceLog.count(method: "GET", path: "/v1/mobile/goals") > 0 { break }
+                try await Task.sleep(for: .milliseconds(2))
+            }
+            await coalesceModel.refreshAll(requestHandshake: false) // 在飞时排入一次重跑
+            await firstRefresh.value
+            let roundsAfterFirst = coalesceLog.count(method: "GET", path: "/v1/mobile/goals")
+            try await Task.sleep(for: .milliseconds(150))
+            check(coalesceLog.count(method: "GET", path: "/v1/mobile/goals") == roundsAfterFirst,
+                  "a queued refreshAll waits out the coalescing window instead of rerunning immediately")
+            try await Task.sleep(for: .milliseconds(500))
+            check(coalesceLog.count(method: "GET", path: "/v1/mobile/goals") == roundsAfterFirst + 1,
+                  "the coalesced refreshAll runs exactly once after the ~350ms window")
+        }
+
+        do {
+            // 2026-10-18（事故复盘 P0-3）：一次 refreshAll 全失败**不**把 isReachable 打回
+            // false。失败判定交给 ServerSession 的 3 次探针阈值；否则一次慢刷新就会把探针
+            // 间隔从 30s 收紧到 ~5s、禁用同步入口，等于制造更多请求。
+            let offlineSession = ServerSession()
+            offlineSession.isReachable = true
+            let offlineModel = NativeAppModel(session: offlineSession, api: api, now: { modelNow })
+            StubProtocol.handler = { _ in (503, "{}", 0) }
+            await offlineModel.refreshAll(requestHandshake: false)
+            check(offlineModel.isOffline && offlineSession.isReachable,
+                  "an all-failure refreshAll leaves reachability to the probe failure threshold")
+            check((offlineModel.errorMessage ?? "").contains("核心数据均未能更新"),
+                  "the all-panel failure classification and copy stay unchanged")
+        }
+
         // Race editor uses the real API client/model, including refresh and conflict recovery.
         let raceModel = NativeAppModel(session: ServerSession(), api: api)
         let raceRequests = RequestLog()

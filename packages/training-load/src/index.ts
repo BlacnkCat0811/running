@@ -376,6 +376,14 @@ export function assessLoad(
 }
 
 /**
+ * The load model's own engine version. It belongs to this package: the domain
+ * snapshots used to spell `"rai-training-load-v2.0.0"` as a literal in
+ * `@rai/application`, so bumping this package could leave the snapshot lineage
+ * pointing at an old version with no test failing.
+ */
+export const TRAINING_LOAD_MODEL_VERSION = "rai-training-load-v2.0.0" as const;
+
+/**
  * §9.2 `LoadVectorV2`：现有 `TrainingLoadBreakdown` 的**扩展**，不是替代品。
  *
  * 三条硬约束（都写成断言）：

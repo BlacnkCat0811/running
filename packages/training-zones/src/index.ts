@@ -527,6 +527,13 @@ function stimulusScore(
 // §10.4 HR / Pace coherence
 // -----------------------------------------------------------------------------
 
+/**
+ * The zone model's own engine version. Owned here rather than spelled as a
+ * literal in `@rai/application`'s snapshot lineage, where it would not follow a
+ * bump to this package.
+ */
+export const TRAINING_ZONES_MODEL_VERSION = "rai-training-zones-v2.0.0" as const;
+
 export const ZONE_COHERENCE_POLICY_VERSION = "rai-zone-coherence-v1";
 
 /**
