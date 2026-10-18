@@ -3,7 +3,7 @@ import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../s
 
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
-import { HEALTH_RECORD_TIME_SLACK_MS, nullableNumber, paceSeconds, parseJson, shiftedIsoBound } from "./read-utils.js";
+import { adaptiveHealthRecordOverlapQuery, nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
 import { SqliteRoutePointReader } from "./route-point-reader.js";
 
 const rawAverageMetricTypes = new Set([
@@ -395,30 +395,18 @@ export class SqliteWorkoutReadRepository {
     // "OR 分支让 start_at 失去下界 ⇒ 全来源历史扫描"的谓词（同一类读放大）。
     // 拆成两个各自可走索引 seek 的 UNION 分支（窗口内 start_at 双端；跨窗口起点
     // 只有 end_at 下界 + 24 h slack）；精确归属仍由 julianday 残差判断（与改造前逐行等价）。
-    const overlapBound = shiftedIsoBound(workout.start_at, -HEALTH_RECORD_TIME_SLACK_MS);
-    const rows = this.database
-      .prepare(`
-        WITH bounded AS MATERIALIZED (
-          SELECT start_at, end_at, value_numeric
-          FROM health_records
-          WHERE source_name = ? AND type = ? AND value_numeric IS NOT NULL
-            AND start_at >= ? AND start_at < ?
-          UNION
-          SELECT start_at, end_at, value_numeric
-          FROM health_records
-          WHERE source_name = ? AND type = ? AND value_numeric IS NOT NULL
-            AND start_at < ? AND end_at > ?
-            AND julianday(end_at) > julianday(start_at)
-            AND julianday(end_at) > julianday(?)
-        )
-        SELECT start_at, end_at, value_numeric
-        FROM bounded
-        ORDER BY start_at
-      `)
-      .all(
-        workout.source_name, type, workout.start_at, workout.end_at,
-        workout.source_name, type, workout.start_at, overlapBound, workout.start_at
-      ) as Record<string, unknown>[];
+    // 2026-10-18（复查 P1）：同一处"split 分支 B 只有 end_at 下界、窗口越老越慢"的自适应
+    // （形状、成本模型与回退规则见 `read/read-utils.ts` 的 `HealthRecordOverlapShape`）。
+    // 注意这里的投影**不含 unit**：本方法的去重键历来是 (start_at, end_at, value_numeric)，
+    // 加 unit 会把"同区间同值、仅 unit 文本不同"的行从两行变一行，改变加权分母。
+    const { sql, params } = adaptiveHealthRecordOverlapQuery(this.database, {
+      type,
+      sourceName: workout.source_name,
+      startedAt: workout.start_at,
+      endedAt: workout.end_at,
+      columns: ["start_at", "end_at", "value_numeric"]
+    });
+    const rows = this.database.prepare(sql).all(...params) as Record<string, unknown>[];
     let weightedValue = 0;
     let coveredMs = 0;
     for (const [index, row] of rows.entries()) {

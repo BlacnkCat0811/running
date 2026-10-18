@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
-import { HEALTH_RECORD_TIME_SLACK_MS, nullableNumber, shiftedIsoBound } from "./read-utils.js";
+import { adaptiveHealthRecordOverlapQuery, nullableNumber } from "./read-utils.js";
 import {
   SqliteRoutePointReader,
   type StoredRoutePoint
@@ -209,34 +209,25 @@ export class SqliteSeriesReadRepository {
     // ×多次调用 ⇒ 13.5 s 同步占满 Node 主线程。改成两个互斥、各自可走索引 seek 的分支：
     // 窗口内按 `start_at` 双端 seek；跨窗口起点的长区间按 `end_at` 下界 seek（该分支
     // **没有** end_at 上界，代价 = 该类型 end 晚于窗口起点的历史行数，窗口越老行数越多；
-    // 近期窗口是这条读的热路径，老 workout 的详情读仍远低于一次请求预算）。
-    // 第二分支的 `end_at` 文本下界加 24 h slack（`shiftedIsoBound`）：带 ±HH:MM 偏移的
-    // 遗留文本比 UTC 最多早 14 h，slack 保证文本范围是精确 `julianday` 条件的超集，
-    // 最终归属仍由 `julianday` 残差谓词决定（语义与改造前逐行一致）。
-    const overlapBound = shiftedIsoBound(startedAt, -HEALTH_RECORD_TIME_SLACK_MS);
+    // 近期窗口是这条读的热路径）。
+    // 2026-10-18（复查 P1）：上面这个代价模型在**老窗口**上不成立 —— 合成 21 万行时
+    // 最老窗口 16.8 ms，而 P0 之前的单段形状在老窗口上只要 0.11 ms（它只 seek
+    // `start_at < 窗口终点`，窗口越新才越慢）。现在按窗口在数据时间轴上的位置自适应
+    // 选形状：两种形状已证明与改造前**逐行等价**（±HH:MM 遗留文本、malformed end<start、
+    // 零长、重复、边界行都含在内），选择只决定用哪一条；
+    // 成本模型与回退规则见 `read/read-utils.ts` 的 `HealthRecordOverlapShape`。
+    // SQL/参数只在这里和 `SqliteWorkoutReadRepository.averageRawMetric` 两处使用，
+    // 且都经 `adaptiveHealthRecordOverlapQuery` 单点构造，不会再次各写一份而漂移。
+    const { sql, params } = adaptiveHealthRecordOverlapQuery(this.database, {
+      type,
+      sourceName,
+      startedAt,
+      endedAt,
+      columns: ["start_at", "end_at", "value_numeric", "unit"]
+    });
     const rows = this.database
-      .prepare(`
-        WITH bounded AS MATERIALIZED (
-          SELECT start_at, end_at, value_numeric, unit
-          FROM health_records
-          WHERE type = ? AND source_name = ? AND value_numeric IS NOT NULL
-            AND start_at >= ? AND start_at < ?
-          UNION
-          SELECT start_at, end_at, value_numeric, unit
-          FROM health_records
-          WHERE type = ? AND source_name = ? AND value_numeric IS NOT NULL
-            AND start_at < ? AND end_at > ?
-            AND julianday(end_at) > julianday(start_at)
-            AND julianday(end_at) > julianday(?)
-        )
-        SELECT start_at, end_at, value_numeric, unit
-        FROM bounded
-        ORDER BY start_at
-      `)
-      .all(
-        type, sourceName, startedAt, endedAt,
-        type, sourceName, startedAt, overlapBound, startedAt
-      ) as unknown as Record<string, unknown>[];
+      .prepare(sql)
+      .all(...params) as unknown as Record<string, unknown>[];
     return rows.flatMap((row, index) => {
       const sourceStartMs = Date.parse(String(row.start_at));
       const startMs = Math.max(workoutStartMs, sourceStartMs);
