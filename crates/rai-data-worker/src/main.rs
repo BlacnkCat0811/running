@@ -535,12 +535,18 @@ fn apply_records(input: &Path, target: &Path, permit: &str) -> Result<Value> {
             "SELECT 1 FROM import_entity_tombstones WHERE entity_kind='record' AND entity_id=?",
         )?;
         let mut existing = db.prepare("SELECT 1 FROM health_records WHERE id=?")?;
+        // R7 parity with `MobileGoalsStore`/`observeImportEntity` (TS): the change
+        // ledger's "before" side records the previous start/end/type for an
+        // updated record. A stale Rust worker left these NULL and the TS↔Rust
+        // import-equivalence test caught it.
+        let mut previous_range = db.prepare("SELECT start_at,end_at,type FROM health_records WHERE id=?")?;
         let mut old_hash = db.prepare("SELECT content_hash FROM import_entity_generations WHERE entity_kind='record' AND entity_id=?")?;
         let mut generation_write = db.prepare("INSERT INTO import_entity_generations (entity_kind,entity_id,generation,content_hash,effective_at)
             VALUES ('record',?,?,?,?) ON CONFLICT(entity_kind,entity_id) DO UPDATE SET generation=excluded.generation,
             content_hash=excluded.content_hash,effective_at=excluded.effective_at")?;
         let mut change = db.prepare("INSERT OR REPLACE INTO import_entity_changes
-            (batch_id,entity_kind,entity_id,change_type,effective_at,content_hash) VALUES (?,'record',?,?,?,?)")?;
+            (batch_id,entity_kind,entity_id,change_type,effective_at,content_hash,
+             previous_effective_at,previous_end_at,previous_type) VALUES (?,'record',?,?,?,?,?,?,?)")?;
         let mut insert = db.prepare("INSERT INTO health_records (id,type,source_name,source_category,source_version,device,unit,
             value_numeric,value_text,start_at,end_at,created_at,metadata_json,raw_attributes_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET type=excluded.type,source_name=excluded.source_name,source_category=excluded.source_category,
@@ -580,12 +586,29 @@ fn apply_records(input: &Path, target: &Path, permit: &str) -> Result<Value> {
             generation_write.execute(params![id, generation, hash, at])?;
             if let Some(batch) = &batch {
                 if !exists || updated {
+                    let (previous_effective_at, previous_end_at, previous_type) = if updated {
+                        previous_range
+                            .query_row([&id], |r| {
+                                Ok((
+                                    Some(r.get::<_, String>(0)?),
+                                    Some(r.get::<_, String>(1)?),
+                                    Some(r.get::<_, String>(2)?),
+                                ))
+                            })
+                            .optional()?
+                            .unwrap_or((None, None, None))
+                    } else {
+                        (None, None, None)
+                    };
                     change.execute(params![
                         batch,
                         id,
                         if exists { "updated" } else { "inserted" },
                         at,
-                        hash
+                        hash,
+                        previous_effective_at,
+                        previous_end_at,
+                        previous_type
                     ])?;
                 }
             }
