@@ -88,6 +88,16 @@ nonisolated enum HealthSyncBackgroundRecovery {
         /// 全被甩给后台；反过来若把"有待续页"也算新代次，大批导入期间的前台自旋护栏就失效了。
         /// 见 `SyncFollowUp.handoff`。
         let hasPendingContinuation: Bool
+        /// 该 scope 上是否有**现在就该查**的 workout 定向补齐窗口（A4，2026-10-19 复核）。
+        ///
+        /// 与 `hasPendingContinuation` 是两件事：后者是"上一批导出被预算截断的续页"，
+        /// 本字段是"盘上登记了一个到期未收口的窗口"。缺了它，普通 anchor 已追平、通知已确认、
+        /// 没有在途批次时，探针会回答"没有下一轮" —— 而窗口的 `nextCheckAt` 就躺在库里，
+        /// 没人执行它。用户看到的现象就是"得再点一次同步"。
+        ///
+        /// ⚠️ **只算"已到期且未过期"**：未来的 `nextCheckAt` 不算活儿（否则前台每轮都会
+        /// 立刻重跑），超过 7 天上限的也不算（那是 `WorkoutBackfillScheduler.isExpired`）。
+        var hasDueWorkoutWindow: Bool = false
 
         /// 盘上可能还有没走完的活儿。`unknown` 算"有" —— 保守方向是"多排一轮"，
         /// 而不是"报个成功然后没人再管"。
@@ -110,6 +120,7 @@ nonisolated enum HealthSyncBackgroundRecovery {
         /// 但对"要不要再排一轮"的回答与另两种成因一致）。
         var needsAnotherRound: Bool {
             hasUnfinishedWork || hasIntent || hasRecoveryRequest || hasPendingContinuation
+                || hasDueWorkoutWindow
         }
 
         /// 这一轮能不能向系统报"成功"。判据就是"收工时还有没有事情没做完"（`needsAnotherRound`）。

@@ -865,7 +865,14 @@ final class HealthKitSync {
             // 待续页槽（S2.3）：读失败按"没有待续"处理 —— 后果只是前台少续几轮
             // （后台路径由"意图"与 `needsAnotherRound` 兜底），不是数据正确性问题。
             // scope 口径与 `loadRecordCursors` 一致（权威 scope 优先）。
-            hasPendingContinuation: taskStore.loadContinuation(scope: authoritativeScope ?? urlScope) != nil
+            hasPendingContinuation: taskStore.loadContinuation(scope: authoritativeScope ?? urlScope) != nil,
+            // A4（2026-10-19 复核）：到期窗口也是"下一轮该干的活"。
+            // 判据本身在 `WorkoutBackfillScheduler.hasDueWindow`（纯函数，回归钉着）：
+            // 未收口 + 未过期 + 已到期，三条缺一不可。
+            hasDueWorkoutWindow: WorkoutBackfillScheduler.hasDueWindow(
+                taskStore.loadWorkoutBackfillWindows(scope: authoritativeScope ?? urlScope),
+                now: Date()
+            )
         )
     }
 

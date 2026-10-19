@@ -431,7 +431,7 @@ struct HealthKitRecordCursorRegression {
         check(!SyncCoveragePolicy.needsCoverageQuery(cursors: [:], types: []),
               "an empty type list needs no request")
 
-        // historyFloor：knownUntil − 24h，四种"不知道/不可用"一律 nil。
+        // historyFloor 的算术夹具：knownUntil − 24h；四种"不知道/不可用"一律 nil。
         let coverageNow = Date(timeIntervalSince1970: 1_792_326_526)  // 2026-10-18T12:28:46Z
         let freshCoverage: [String: SyncCoveragePolicy.TypeCoverage] = [
             "hr": .init(type: "hr", knownUntil: coverageNow.addingTimeInterval(-3_600), sampleCount: 1_000),
@@ -440,21 +440,37 @@ struct HealthKitRecordCursorRegression {
             "future": .init(type: "future", knownUntil: coverageNow.addingTimeInterval(3_600), sampleCount: 10),
             "unparsed": .init(type: "unparsed", knownUntil: nil, sampleCount: 10)
         ]
-        check(SyncCoveragePolicy.historyFloor(type: "hr", coverage: freshCoverage, now: coverageNow) ==
+
+        // 🔴 A7 闸门（2026-10-19）：覆盖点只证明"服务端有这条样本"，证明不了区间连续。
+        // 默认必须**不允许**跳过任何历史 —— 否则一条今日样本就能把该类型 90 天的历史永久跳过。
+        check(SyncCoveragePolicy.allowsHistorySkip == false,
+              "coverage points must not authorize skipping history until the server reports continuous segments")
+        check(SyncCoveragePolicy.historyFloor(type: "hr", coverage: freshCoverage, now: coverageNow) == nil,
+              "the gate is closed by default even for a fresh, dense coverage point")
+
+        // 闸门打开时的算术（`allowSkip: true` 只给回归用；生产路径不传这个参数）。
+        check(SyncCoveragePolicy.historyFloor(
+                type: "hr", coverage: freshCoverage, now: coverageNow, allowSkip: true) ==
               coverageNow.addingTimeInterval(-3_600 - 24 * 3600),
               "a fresh coverage point yields knownUntil − 24h (the 24h overlap protects the edge)")
-        check(SyncCoveragePolicy.historyFloor(type: "missing", coverage: freshCoverage, now: coverageNow) == nil,
+        check(SyncCoveragePolicy.historyFloor(
+                type: "missing", coverage: freshCoverage, now: coverageNow, allowSkip: true) == nil,
               "a type the server did not report keeps the old full-history replay")
-        check(SyncCoveragePolicy.historyFloor(type: "empty", coverage: freshCoverage, now: coverageNow) == nil,
+        check(SyncCoveragePolicy.historyFloor(
+                type: "empty", coverage: freshCoverage, now: coverageNow, allowSkip: true) == nil,
               "sampleCount == 0 means 'the server has nothing' ⇒ never skip that history")
-        check(SyncCoveragePolicy.historyFloor(type: "old", coverage: freshCoverage, now: coverageNow) == nil,
+        check(SyncCoveragePolicy.historyFloor(
+                type: "old", coverage: freshCoverage, now: coverageNow, allowSkip: true) == nil,
               "a coverage point older than 90 days is not worth skipping history for")
-        check(SyncCoveragePolicy.historyFloor(type: "unparsed", coverage: freshCoverage, now: coverageNow) == nil,
+        check(SyncCoveragePolicy.historyFloor(
+                type: "unparsed", coverage: freshCoverage, now: coverageNow, allowSkip: true) == nil,
               "an unparsable knownUntil falls back to full replay (fail open)")
-        let clamped = SyncCoveragePolicy.historyFloor(type: "future", coverage: freshCoverage, now: coverageNow)
+        let clamped = SyncCoveragePolicy.historyFloor(
+            type: "future", coverage: freshCoverage, now: coverageNow, allowSkip: true)
         check(clamped == coverageNow.addingTimeInterval(-24 * 3600),
               "a coverage point slightly in the future is clamped to now before subtracting the overlap")
-        check(SyncCoveragePolicy.historyFloor(type: "hr", coverage: [:], now: coverageNow) == nil,
+        check(SyncCoveragePolicy.historyFloor(
+                type: "hr", coverage: [:], now: coverageNow, allowSkip: true) == nil,
               "an empty coverage table (old server / failed probe) is the full-replay fallback")
 
         // shouldRestartHistory：只把"旧的、没有下界的续读"换成带下界的新重放。

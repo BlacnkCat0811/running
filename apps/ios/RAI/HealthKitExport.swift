@@ -937,9 +937,13 @@ nonisolated enum HealthKitExport {
             // B2：轮转起点透传。2026-10-17 起**窗口 pass 与正式段共用同一个起点**（旧实现
             // 窗口恒从下标 0 开始，预算总被前几个高频类型用光，排尾的跑步动态类型被挤掉）。
             typeRotationStart: typeRotationStart,
-            // P0-4：到期窗口（导出开始前从 store 读出）。窗口 pass 排在迟到补读/48h 窗口/
-            // 历史重放**之前**，用自己的 25% 份额做全类型有界查询。
-            workoutWindows: workoutBackfillWindows,
+            // P0-4：到期窗口（导出开始前从 store 读出 **+ 本批已交付页新登记的**）。
+            // A1：只并入"页已交付"的登记（`windowRegistrations` 的写入点就是交付点），
+            // 被拒页的窗口不进快照，下一批从同一锚点重来。
+            workoutWindows: WorkoutBackfillScheduler.batchSnapshot(
+                persisted: workoutBackfillWindows,
+                acceptedPageRegistrations: Array(windowRegistrations.values)
+            ),
             // P1-1：服务端覆盖表（空 = 老服务端/失败 ⇒ 历史段回落全量重放）。
             coverage: coverage,
             onProgress: onProgress
@@ -1911,7 +1915,8 @@ nonisolated enum HealthKitExport {
                 var interruptedCoverageFloor: Date?
                 // 本类型**本轮最后一次实际查询**用的下界。P1-1 的"谓词粘住"靠它：历史段跑完
                 // 之后游标也要继续带着同一个下界（下一批的增量查询沿用），绝不能清成 nil。
-                var currentQueryFloor: Date? = previous?.historyCoverageFloor
+                var currentQueryFloor: Date? = SyncCoveragePolicy.allowsHistorySkip
+                    ? previous?.historyCoverageFloor : nil
                 // 本类型是否出现过"一段一页都没读"（S2.5）。
                 var stoppedBeforePage = false
                 if history { channelCounts.replayingTypes += 1 }
@@ -1928,6 +1933,10 @@ nonisolated enum HealthKitExport {
                 //     否则用本轮覆盖探测给出的 `coverageFloor`（可空 ⇒ 旧的全量重放）。
                 //   - `.historyResume`：必须沿用上一轮持久化的下界 —— 否则续读会从页首重来。
                 func segmentFloor(_ segment: RecordReplayPlan.Segment) -> Date? {
+                    // 🔴 A7 闸门（2026-10-19）：覆盖表证明不了区间连续 ⇒ 连**历史遗留在游标上的**
+                    // 下界也一并作废。只挡住"新算出的下界"是不够的：一旦某个旧构建把下界写进
+                    // 游标，下一批会从 `previous?.historyCoverageFloor` 把它捡回来继续用。
+                    guard SyncCoveragePolicy.allowsHistorySkip else { return nil }
                     switch segment {
                     case .incremental: return previous?.historyCoverageFloor
                     case .historyFromScratch: return previous?.historyCoverageFloor ?? coverageFloor

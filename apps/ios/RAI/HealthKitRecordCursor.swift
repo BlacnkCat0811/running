@@ -423,6 +423,27 @@ nonisolated enum SyncCoveragePolicy {
     /// 覆盖点超过这么久没有更新 ⇒ 认为"太旧、不值得跳过"（见类型说明）。
     static let maximumUsefulLag: TimeInterval = 90 * 24 * 60 * 60
 
+    /// 🔴 **跳过历史的授权闸门**（2026-10-19 A7 复核）。
+    ///
+    /// `false` = 覆盖点**只可用于优先级**，不得用来跳过任何历史区间。
+    ///
+    /// 为什么默认关闭：`GET /v1/sync/coverage` 现在只返回 `MIN(start_at) / MAX(end_at) /
+    /// COUNT(*)`，**这三个数证明不了区间内没有空洞**。而 `historyFloor` 的判据是
+    /// `sampleCount > 0` —— 服务端只要有一条今日样本，就会把该类型的历史下界抬到
+    /// `knownUntil − 24h`，并把下界**粘在游标上**：
+    ///
+    /// - 缺传的旧样本（更早的 10 天、权限扩大后补录、旧样本更正/删除）**永久读不到**；
+    /// - 一条今日 VO2Max / PhysicalEffort 就足以触发，而这两类在生产上恰恰是稀疏的
+    ///   （2026-10-18 该训练：VO2Max 1 条、PhysicalEffort 120 条）。
+    ///
+    /// 打开条件（三条**同时**满足，缺一不可）：
+    /// 1. 服务端按类型返回**连续段**（`segments: [{from,to,count}]`）而不只是 MIN/MAX；
+    /// 2. 客户端只用"段内"授权跳过，且段落之间显式留出 `overlap`；
+    /// 3. 有回归能构造"中间有洞"的覆盖表并断言**不产生**跳过。
+    ///
+    /// 在此之前，跳过省下的是手机读取时间，赔的是数据完整性 —— 不划算。
+    static let allowsHistorySkip = false
+
     /// 服务端覆盖表的一行（由 `HealthKitSync` 从 `SyncCoverageResponse` 映射而来，
     /// 刻意不引用 APIModels 类型：本文件被"只编译 HealthKitRecordCursor"的回归单元执行，
     /// 引 APIModels 会让那个单元编译不过 —— 与 `RouteTodoScheduler` 零外部依赖同源）。
@@ -470,11 +491,16 @@ nonisolated enum SyncCoveragePolicy {
     ///   - type: HealthKit 类型标识（如 `HKQuantityTypeIdentifierHeartRate`）。
     ///   - coverage: 服务端覆盖表（类型 → 覆盖点）。空表 = 老服务端/探测失败。
     ///   - now: 本批的判定基准（与导出共用一个时钟，便于回归用合成时钟）。
+    ///   - allowSkip: 是否允许据此**跳过**历史。默认取自 `allowsHistorySkip`（当前为 `false`）；
+    ///     传 `true` 只在回归里验证"若打开会怎样"，生产路径不得传入。
     static func historyFloor(
         type: String,
         coverage: [String: TypeCoverage],
-        now: Date
+        now: Date,
+        // 默认走全局闸门；参数只给回归用（`allowsHistorySkip == false` 时两条路径都必须返回 nil）。
+        allowSkip: Bool = allowsHistorySkip
     ) -> Date? {
+        guard allowSkip else { return nil }
         guard let entry = coverage[type], entry.sampleCount > 0, let knownUntil = entry.knownUntil else {
             return nil
         }

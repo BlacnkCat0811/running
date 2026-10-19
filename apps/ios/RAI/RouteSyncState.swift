@@ -591,6 +591,48 @@ nonisolated enum WorkoutBackfillScheduler {
         )
     }
 
+    /// A1（2026-10-19 复核）：**本批可用的窗口快照**。
+    ///
+    /// `persisted` 是"上一批结束时就已在盘上"的窗口；`acceptedPageRegistrations` 是本批
+    /// **已完整交付的页**新登记/刷新的窗口（`pageWindowRegistrations` 只在页被接受后并入，
+    /// 被拒页的那一份随页丢弃）。读记录必须用两者的并集，否则"本批刚发现的训练"永远不会在
+    /// 本批被定向补读 —— 现象是用户必须再点一次同步才能看到各项时序。
+    ///
+    /// 同 UUID 以页内登记为准：它可能因窗口变宽而重开（`register` 的 `widened` 分支）。
+    static func batchSnapshot(
+        persisted: [WorkoutBackfillWindow],
+        acceptedPageRegistrations: [WorkoutBackfillWindow]
+    ) -> [WorkoutBackfillWindow] {
+        // 用逐个赋值而不是 `Dictionary(uniqueKeysWithValues:)`：后者在重复键上会崩溃，
+        // 而这里的输入是"同一 UUID 的旧值与新值"，后写覆盖正是想要的行为。
+        var byUUID: [String: WorkoutBackfillWindow] = [:]
+        for window in persisted { byUUID[window.workoutUUID] = window }
+        for window in acceptedPageRegistrations { byUUID[window.workoutUUID] = window }
+        return Array(byUUID.values)
+    }
+
+    /// 窗口是否已过 7 天上限。**选择之前**就要问一次（A2/A4 复核）。
+    ///
+    /// 旧实现只在 `afterPass` 里结算过期，而 `afterPass` 只在"整窗所有类型都跑完"时才调用 ——
+    /// 一个被份额反复截断的窗口永远跑不完，于是它的 `nextCheckAt` 永远 `<= now`：
+    /// 既排在 `due` 的最前面挡住别的窗口，又会让待办探针永远回答"还有活"。
+    static func isExpired(_ window: WorkoutBackfillWindow, now: Date) -> Bool {
+        now.timeIntervalSince(window.createdAt) >= completionWindow
+    }
+
+    /// 盘上是否存在**现在就该查**的窗口（A4）。待办探针与前台补跑共用同一条判据。
+    ///
+    /// 三个条件缺一不可：未收口、未过期、已到期。写成纯函数是为了让"未来 6 小时后的复查"
+    /// 与"7 天前的死窗口"这两种容易写成自旋的形态，必须有回归执行者。
+    static func hasDueWindow(
+        _ windows: [String: WorkoutBackfillWindow],
+        now: Date
+    ) -> Bool {
+        windows.values.contains {
+            !$0.isCompleted && !isExpired($0, now: now) && $0.nextCheckAt <= now
+        }
+    }
+
     /// 本批要处理的窗口（到期、未收口；有界 + 公平序）。
     static func due(
         _ windows: [WorkoutBackfillWindow],
@@ -599,7 +641,7 @@ nonisolated enum WorkoutBackfillScheduler {
     ) -> [WorkoutBackfillWindow] {
         guard limit > 0 else { return [] }
         return windows
-            .filter { !$0.isCompleted && $0.nextCheckAt <= now }
+            .filter { !$0.isCompleted && !isExpired($0, now: now) && $0.nextCheckAt <= now }
             .sorted { lhs, rhs in
                 if lhs.nextCheckAt != rhs.nextCheckAt { return lhs.nextCheckAt < rhs.nextCheckAt }
                 return lhs.workoutUUID < rhs.workoutUUID

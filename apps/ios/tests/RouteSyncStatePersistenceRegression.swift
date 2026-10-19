@@ -709,6 +709,53 @@ struct RouteSyncStatePersistenceRegression {
                   "completion reason distinguishes 'stable' from 'expired'")
             check(WorkoutBackfillScheduler.due([stablePass], now: windowNow.addingTimeInterval(10 * 24 * 3600)).isEmpty,
                   "a completed window is never queried again")
+            // A1（2026-10-19 复核）：本批**已交付页**新登记的窗口必须进本批快照 —— 否则新训练
+            // 至少要多点一次同步才会被定向补读（2026-10-18 生产：workout 提交 20:29:38，
+            // 482 条步幅 20:30:23 才到，用户在中间点了 4 次同步）。
+            let newlyDiscovered = WorkoutBackfillWindow(
+                workoutUUID: "window-new", windowStart: windowNow, windowEnd: windowNow,
+                createdAt: windowNow, nextCheckAt: windowNow,
+                attemptCount: 0, lastSampleCount: 0, stableCount: 0, completedAt: nil)
+            let snapshot = WorkoutBackfillScheduler.batchSnapshot(
+                persisted: [registered], acceptedPageRegistrations: [newlyDiscovered])
+            check(snapshot.count == 2
+                  && Set(snapshot.map(\.workoutUUID)) == ["window-workout", "window-new"],
+                  "the batch snapshot carries persisted windows AND windows registered by accepted pages")
+            // 同 UUID：页内登记覆盖盘上的旧值（窗口变宽后重开）。
+            let widened = WorkoutBackfillWindow(
+                workoutUUID: "window-workout", windowStart: windowNow.addingTimeInterval(-7_200),
+                windowEnd: windowNow, createdAt: windowNow, nextCheckAt: windowNow,
+                attemptCount: 0, lastSampleCount: 0, stableCount: 0, completedAt: nil)
+            let deduped = WorkoutBackfillScheduler.batchSnapshot(
+                persisted: [registered], acceptedPageRegistrations: [widened])
+            check(deduped.count == 1 && deduped[0].windowStart == widened.windowStart,
+                  "a page-level registration replaces the persisted window of the same UUID")
+            check(WorkoutBackfillScheduler.batchSnapshot(
+                    persisted: [], acceptedPageRegistrations: []).isEmpty,
+                  "an empty snapshot stays empty (no phantom windows)")
+            // A4：待办探针要能看见"到期窗口"，但看不见"未来的"和"已过期的"。
+            // 后两种都是前台自旋的来源，必须由纯函数挡住。
+            check(WorkoutBackfillScheduler.hasDueWindow(
+                    [registered.workoutUUID: registered], now: windowNow),
+                  "a due window counts as pending work (the probe must schedule another round)")
+            check(!WorkoutBackfillScheduler.hasDueWindow(
+                    [firstPass.workoutUUID: firstPass], now: windowNow.addingTimeInterval(60)),
+                  "a window whose nextCheckAt is in the future is not pending work (no foreground spin)")
+            let expiredWindow = WorkoutBackfillWindow(
+                workoutUUID: "window-expired",
+                windowStart: windowNow.addingTimeInterval(-8 * 24 * 3600),
+                windowEnd: windowNow.addingTimeInterval(-8 * 24 * 3600),
+                createdAt: windowNow.addingTimeInterval(-8 * 24 * 3600),
+                nextCheckAt: windowNow.addingTimeInterval(-7 * 24 * 3600),
+                attemptCount: 3, lastSampleCount: 0, stableCount: 0, completedAt: nil)
+            check(!WorkoutBackfillScheduler.hasDueWindow(
+                    [expiredWindow.workoutUUID: expiredWindow], now: windowNow),
+                  "a window past the 7-day cap is not pending work (otherwise the probe never reports success)")
+            check(WorkoutBackfillScheduler.due([expiredWindow], now: windowNow).isEmpty,
+                  "an expired window is not selected at all — it used to sit at the head of the queue forever")
+            check(!WorkoutBackfillScheduler.hasDueWindow(
+                    [stablePass.workoutUUID: stablePass], now: windowNow.addingTimeInterval(10 * 24 * 3600)),
+                  "a completed window is not pending work")
             // 🔴 Lead 复核修正：空窗（0 样本）**不得**靠"连续两次相同"收口 ——
             // Apple Watch 迟到样本实测 36–72h 才到，15m/1h 两次空查就关闭会把
             // "样本还没到手机"读成"这条训练没有这些类型"（与 10-14 空窗不推进水位同源）。

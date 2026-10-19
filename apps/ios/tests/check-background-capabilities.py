@@ -1209,6 +1209,21 @@ check(
     "run-health-sync-tests.sh does not run HealthSyncBlockedRecoveryRegression.swift",
 )
 
+# 12i. A1（2026-10-19 复核）：定向补读窗口必须**本批就生效**。
+#      这是"判据写了、接线没接"的典型形态 —— `WorkoutBackfillScheduler` 一直都在，
+#      但记录段拿到的是函数入口的旧数组，于是本批刚发现的训练永远等下一批才被补读。
+#      2026-10-18 生产症状：workout 20:29:38 提交，482 条步幅 20:30:23 才到，用户中间点了 4 次同步。
+check(
+    "acceptedPageRegistrations: Array(windowRegistrations.values)" in health_export,
+    "HealthKitExport does not feed the workout record pass with windows registered by accepted pages; "
+    "a freshly discovered workout would only be backfilled on the *next* batch (A1 regression)",
+)
+check(
+    "workoutWindows: workoutBackfillWindows" not in health_export,
+    "the record pass is wired back to the entry-time `workoutBackfillWindows` array; page-level "
+    "registrations (already delivery-gated) would be ignored again (A1 regression)",
+)
+
 # --- 13. 门禁自己：判据的**载体**也要有守卫 ------------------------------------
 # 为什么单列一节（2026-09-23 实测）：这一节修的不是"某条判据写错了"，而是"判据会静默消失"。
 # 载体坏了，内容判据写得再好也读不到 —— 这正是本仓那条原始纪律的翻版：

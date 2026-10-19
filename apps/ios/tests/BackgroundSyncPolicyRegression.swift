@@ -52,7 +52,8 @@ struct BackgroundSyncPolicyRegression {
         verdict: HealthSyncBackgroundRecovery.PendingWork.Verdict,
         hasIntent: Bool = false,
         hasRecoveryRequest: Bool = false,
-        hasPendingContinuation: Bool = false
+        hasPendingContinuation: Bool = false,
+        hasDueWorkoutWindow: Bool = false
     ) -> HealthSyncBackgroundRecovery.PendingWork {
         HealthSyncBackgroundRecovery.PendingWork(
             serverURL: "http://127.0.0.1:8787",
@@ -61,7 +62,8 @@ struct BackgroundSyncPolicyRegression {
             verdict: verdict,
             hasIntent: hasIntent,
             hasRecoveryRequest: hasRecoveryRequest,
-            hasPendingContinuation: hasPendingContinuation
+            hasPendingContinuation: hasPendingContinuation,
+            hasDueWorkoutWindow: hasDueWorkoutWindow
         )
     }
 
@@ -537,6 +539,12 @@ struct BackgroundSyncPolicyRegression {
             BackgroundRunPolicy.reportedSuccess(pending(verdict: .unknown)) == false,
             "a run that could not read the journal reported success — the batch on disk is now nobody's"
         )
+        // A4：到期未读的窗口 = 这一轮还没干完，不能报成功（否则系统不再排下一轮）。
+        try require(
+            BackgroundRunPolicy.reportedSuccess(
+                pending(verdict: .empty, hasDueWorkoutWindow: true)) == false,
+            "a run that left a due workout backfill window reported success"
+        )
         try require(
             BackgroundRunPolicy.reportedSuccess(pending(verdict: .empty, hasIntent: true)) == false,
             "a run that left an unclaimed notification reported success"
@@ -563,6 +571,12 @@ struct BackgroundSyncPolicyRegression {
         try require(
             BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty, hasRecoveryRequest: true)),
             "a scope recovery request did not schedule a background run"
+        )
+        // A4（2026-10-19）：到期窗口也是"还有活"。缺这一条时，anchor 追平 + 无意图时
+        // 探针会回答"没事可做"，而窗口的 nextCheckAt 就躺在库里没人执行。
+        try require(
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty, hasDueWorkoutWindow: true)),
+            "a due workout backfill window did not schedule the next round"
         )
         try require(
             BackgroundRunPolicy.shouldResubmit(pending(verdict: .unknown)),
