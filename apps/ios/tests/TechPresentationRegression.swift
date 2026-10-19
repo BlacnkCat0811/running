@@ -649,6 +649,60 @@ struct TechPresentationRegression {
               "A failed analysis must not be shown as 分析中")
         check(failedBanner?.pollsInForeground == false,
               "Polling cannot fix a failed analysis — the detail page must not spin on it")
+        // ---------------------------------------------------------------------------
+        // 2026-10-19（A6/P2-2 + A5/P2-3）：三态与"旧分析可用"是**可选解码**的增量字段。
+        //
+        // 判据：老服务端的 freshness 没有这些键 ⇒ 必须照常解码为 nil（detail 页不能因为
+        // 缺键整页失败）；新服务端的取值必须原样读到，且 `pending + available` 这一对
+        // 恰好表达"旧分析可读、新分析未发布"——这是 A6 的客户端可观测形态。
+        // ---------------------------------------------------------------------------
+        let legacyFreshnessJSON = """
+        {"workoutId":"s","facts":{"committedAt":null,"lastBatchAt":null,"batches":0},
+         "analysis":{"status":"pending","jobId":null,"publishedAt":null},
+         "series":[],"completeness":"partial"}
+        """
+        if let legacy = try? JSONDecoder().decode(WorkoutFreshnessResponse.self,
+                                                  from: Data(legacyFreshnessJSON.utf8)) {
+            check(legacy.deliveryState == nil && legacy.analysisState == nil && legacy.stabilityState == nil,
+                  "An older server's freshness must decode the three-state fields as nil")
+            check(legacy.analysis.available == nil,
+                  "An older server's analysis must decode available as nil")
+        } else {
+            check(false, "An older server's freshness payload must still decode")
+        }
+        let threeStateJSON = """
+        {"workoutId":"s","facts":{"committedAt":null,"lastBatchAt":null,"batches":2},
+         "analysis":{"status":"pending","available":true,"jobId":"job",
+                     "publishedAt":"2026-10-18T12:31:21Z"},
+         "series":[],"completeness":"partial",
+         "deliveryState":"delivered","analysisState":"pending","stabilityState":"settling"}
+        """
+        if let three = try? JSONDecoder().decode(WorkoutFreshnessResponse.self,
+                                                 from: Data(threeStateJSON.utf8)) {
+            check(three.deliveryState == "delivered" && three.analysisState == "pending"
+                    && three.stabilityState == "settling",
+                  "The A5 three-state fields must decode verbatim")
+            check(three.analysis.available == true && three.analysis.status == "pending",
+                  "A6: a readable old analysis while the new one is pending must stay observable")
+        } else {
+            check(false, "The A5 three-state freshness payload must decode")
+        }
+        let staleItemJSON = """
+        {"id":"s","startedAt":"2026-10-18T11:46:38Z","endedAt":"2026-10-18T12:28:46Z",
+         "durationSeconds":2528,"distanceKm":6.0,"averagePaceSecondsPerKm":null,
+         "averageHeartRateBpm":null,"indoor":false,"sourceCategory":"apple_watch",
+         "sessionType":"unclassified","stimulusType":"unclassified","stimulusConfidence":null,
+         "eligibilityStatus":"pending","assessmentStatus":null,"missingReasons":[],
+         "qualityScore":0,"currentAbility":61.5,"confidence":null,"trueAbilityDelta":null,
+         "hasRoute":false,"analysisPublishStatus":"pending","analysisAvailable":true}
+        """
+        if let staleItem = try? JSONDecoder().decode(WorkoutListItem.self,
+                                                     from: Data(staleItemJSON.utf8)) {
+            check(staleItem.analysisPublishStatus == "pending" && staleItem.analysisAvailable == true,
+                  "A6: a pending list item with a readable old analysis must decode both flags")
+        } else {
+            check(false, "A6: the list item payload must decode")
+        }
         // 完整 ⇒ 不占位；老服务端（无 freshness）只有 `publishStatus == pending` 才占位。
         check(WorkoutFreshnessPresentation.banner(
             freshness: freshness(completeness: "complete", analysisStatus: "published", series: []),

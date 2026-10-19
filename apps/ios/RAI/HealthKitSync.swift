@@ -308,6 +308,19 @@ final class HealthKitSync {
         HealthSyncScopeRecoveryStore(baseKey: Self.backgroundRecoveryKey)
     }
 
+    /// 🔴 A8（2026-10-19 复核）：观察者回调可**同步**读到的"当前导出目标"投影 + 失败计数。
+    ///
+    /// 为什么不能直接读 `activeServerURL`：`HKObserverQuery` 的回调跑在 HealthKit 的私有队列
+    /// 上，而 `activeServerURL` / `activeScope` 是 MainActor 状态。回调里既不能 `await`
+    /// （`completion()` 必须同步跟上），也不该跨隔离去读它。投影里装的是**同一个 urlScope
+    /// 字符串**（唯一生产者是 `Self.urlScope(for:)`），所以"观察者写的 key"与"导出/确认读的
+    /// key"同源同形，不可能分叉。
+    ///
+    /// 发布点（= 目标真正定下来的那几处）：`performSync`、`restoreBackgroundContext`、
+    /// `recordBackgroundIntent(for:)`。判据与失败分类在 `HealthSyncObserverIntentHandoff`，
+    /// 执行者是 `BackgroundSyncPolicyRegression`（本文件不被任何回归脚本编译）。
+    private let observerIntentChannel: HealthSyncObserverIntentChannel
+
     /// 批次产物一律**按 `payloadHash` 确定性命名**。
     ///
     /// 这不是命名洁癖：名字里带着哈希，就让"这个文件属于哪一批"由文件名本身回答
@@ -467,6 +480,12 @@ final class HealthKitSync {
     init() {
         lastSyncAt = nil
         lastWorkoutCount = nil
+        // 写失败走 `[RAI]` 诊断通道（与 `enableBackgroundDelivery` 失败同一条路）：
+        // 观察者回调没有返回值，这条日志是"这次唤醒的耐久痕迹没落地"的唯一线索。
+        observerIntentChannel = HealthSyncObserverIntentChannel(
+            baseKey: Self.backgroundIntentKey,
+            report: { message in HealthKitSync.report(message) }
+        )
     }
 
     func syncIfNeeded(to serverURL: URL?, apiToken: String = "", force: Bool = false) async {
@@ -591,6 +610,9 @@ final class HealthKitSync {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
         observerStore = store
+        // A8：回调在 HealthKit 的私有队列上跑，读不到 MainActor 状态。这里（MainActor）取一次
+        // 通道引用交给闭包强捕获 —— 通道不反向引用 `self`，不会成环。
+        let intentChannel = observerIntentChannel
         let types: [(HKSampleType, NSPredicate?)] = [
             (.workoutType(), HKQuery.predicateForWorkouts(with: .running)),
             // Route 可独立于 workout 晚到；通知走既有节流/后台意图链路，
@@ -598,11 +620,21 @@ final class HealthKitSync {
             (HKSeriesType.workoutRoute(), nil)
         ] + HealthKitExport.recordSampleTypes.map { ($0, nil) }
         observers = types.map { sampleType, predicate in
-            HKObserverQuery(sampleType: sampleType, predicate: predicate) { [weak self] _, completion, _ in
-                // 🔴 `completion()` 必须在**任何 `await`／`Task`／状态守卫之前**调用。
+            HKObserverQuery(sampleType: sampleType, predicate: predicate) { [weak self, intentChannel] _, completion, _ in
+                // 🔴 A8（2026-10-19）：`completion()` **之前**先落一条耐久意图，且只做这一件事。
+                //
+                // 旧形态是"先 `completion()`、再 `Task { await onObserverChange?() }`"：进程若
+                // 死在这两步之间，HealthKit 已经收到回执，本地却没有这次变化的任何痕迹 ——
+                // 投递不会重放，那批数据只能等下一次唤醒（审计 A8 的那个窗口）。
+                // 判据（顺序 / 写失败仍要回执 / 失败分类计数）在 `HealthSyncObserverIntentHandoff`，
+                // 执行者是 `BackgroundSyncPolicyRegression`（本文件不被任何回归脚本编译）。
+                //
+                // 有界：一次默认域 `set` + 一次回读（微秒级），不 `await`、不遍历、不重试。
+                //
+                // 🔴 `completion()` 仍然**恰好一次**，且严格早于任何 `await`／`Task`／状态守卫：
                 // HealthKit 连续 3 次没收到它会**永久停掉**这个类型的投递 ——
                 // 现象是"第一次能唤醒，之后再也不唤醒"，而且毫无报错。
-                completion()
+                intentChannel.recordThenComplete { completion() }
                 Task { @MainActor in
                     // 这里**刻意不判** `applicationState`（P2 之前判过）。
                     // 判在哪跑不是观察者的事：派发方（`RaiStartup` 注册的回调，判据在
@@ -761,6 +793,20 @@ final class HealthKitSync {
         }
     }
 
+    /// A8（2026-10-19 复核）：只发布"当前导出目标"投影，**不写意图**。
+    ///
+    /// 与 `recordBackgroundIntent` 的分工：那个函数回答"数据变了、记一条待跑"，会写一条
+    /// 意图；这里只回答"观察者回调此刻该往哪个 scope 落意图"。启动期注册观察者时调用它，
+    /// 是为了关掉 A8 的**冷启动残余窗口**：后台冷启动的第一次投递可能早于 `performSync` /
+    /// 恢复上下文（那两处才发布投影），此时回调只能落 `.noTarget`，那一代投递就没有耐久痕迹。
+    ///
+    /// 🔴 为什么不能直接复用 `recordBackgroundIntent`：启动期调用它会凭空造出一条"数据变了"
+    /// 的意图（一次白读 HealthKit 的全量导出正是该函数注释里点名的代价）。
+    func publishObserverTarget(for serverURL: URL?) {
+        guard let url = serverURL ?? activeServerURL else { return }
+        observerIntentChannel.publish(scope: Self.urlScope(for: url))
+    }
+
     /// 记下"健康数据变了，等后台有机会就跑一次"。
     ///
     /// 为什么不能只靠 `submit`：`applicationDidEnterBackground` 每次切后台都会 submit 一次
@@ -768,7 +814,14 @@ final class HealthKitSync {
     /// 在数据没变时落到 BGTask 上会变成一次白读 HealthKit 的全量导出 —— 那是最贵的一步。
     func recordBackgroundIntent(for serverURL: URL? = nil) {
         guard let url = serverURL ?? activeServerURL else { return }
-        backgroundIntentStore.record(scope: Self.urlScope(for: url))
+        let scope = Self.urlScope(for: url)
+        // A8：派发方带着**会话的服务端**来记意图 ⇒ 这也是"当前导出目标"的权威时刻之一。
+        // 观察者回调在 `completion()` 之前写的是同一个 urlScope，两处不可能分叉。
+        observerIntentChannel.publish(scope: scope)
+        // 写失败不许静默：这条意图是"数据变了、等后台跑一轮"的唯一依据（`record` 会回读校验）。
+        if !backgroundIntentStore.record(scope: scope) {
+            Self.report("background intent write was not verified for scope \(scope)")
+        }
     }
 
     private func backgroundIntentObservation(for serverURL: URL) -> HealthSyncBackgroundRecovery.IntentObservation? {
@@ -1048,8 +1101,13 @@ final class HealthKitSync {
         #if os(iOS)
         isBusy = true
         let previousServerURL = activeServerURL
+        // urlScope 是导出/确认与 A8 观察者意图**共用的那一份**：同一次计算，不重算。
+        let urlScope = Self.urlScope(for: serverURL)
         activeServerURL = serverURL
-        activeScope = Self.urlScope(for: serverURL)
+        activeScope = urlScope
+        // A8：目标定下来 ⇒ 立刻投影给观察者回调，让它下一次投递能在 `completion()` 之前
+        // 用同一个 scope 落耐久意图（`observerIntentChannel`）。
+        observerIntentChannel.publish(scope: urlScope)
         activeIdentity = nil
         if previousServerURL?.absoluteString != serverURL.absoluteString {
             lastSyncAt = nil
@@ -3431,6 +3489,9 @@ final class HealthKitSync {
         activeServerURL = serverURL
         activeIdentity = identity
         activeScope = context.activeScope
+        // A8：后台冷启动恢复候选上下文，是**同步路径里第一处**能确定目标的地方 ——
+        // 把候选 URL scope 投影给观察者回调（意图 key 与导出/确认同源）。
+        observerIntentChannel.publish(scope: context.urlScope)
     }
 
     private func friendlyMessage(_ error: Error) -> String {

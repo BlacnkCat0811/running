@@ -43,14 +43,24 @@ export interface WorkoutListFilterQuery {
 }
 
 /**
- * 读侧可见性（P0-1，2026-10-18 同步诊断）。
+ * 读侧可见性（P0-1，2026-10-18 同步诊断；A6 扩展 2026-10-19）。
  *
- * `pending` = 事实（workout/session/records）已提交、派生分析尚未发布。
+ * `pending` = 事实（workout/session/records）已提交、派生分析尚未**发布到当前事实代次**。
  * 这一行必须可读：2026-10-18 生产实测里，事实提交到分析发布之间差了 102.5 s，
  * 旧读侧用 `INNER JOIN active_ability_assessments` 把这段窗口呈现成 404 ——
  * 与"这条训练不存在"完全同形。
+ *
+ * 🔴 A6（P2-2）：**有评估行 ≠ 分析是最新的**。旧实现只看 `a.id IS NOT NULL`，
+ * 于是"旧评估已发布 + 更新的分析任务仍在 queued"读成 `published`（审计 A6 复现）。
+ * 现在 `pending` 有两种子状态，由 {@link StoredWorkoutListItem.analysisAvailable} 区分：
+ * - `available = false`：从来没有已发布评估 ⇒ 派生字段是占位值（P0-1 的原始语义）；
+ * - `available = true`：**旧分析仍可用**（评估行可读），只是它覆盖的代次落后于本训练的
+ *   最新事实 ⇒ 状态报 `pending`，详情仍 200、旧分数仍返回。
+ * `failed` = 更新事实的分析任务失败（评估行可能仍是旧的）。
+ *
+ * 判据见 {@link SqliteWorkoutReadRepository} 的 `analysisVisibility*` 方法。
  */
-export type StoredAnalysisPublishStatus = "pending" | "published";
+export type StoredAnalysisPublishStatus = "pending" | "published" | "failed";
 
 export interface StoredWorkoutListItem {
   id: string;
@@ -73,8 +83,21 @@ export interface StoredWorkoutListItem {
   confidence: number | null;
   trueAbilityDelta: number | null;
   hasRoute: boolean;
-  /** 可见性状态；`pending` 时上面的派生字段为 null/占位（见 `data.ts` 的映射）。 */
+  /**
+   * 可见性状态。`pending` + `analysisAvailable = false` 时上面的派生字段是 null/占位
+   * （P0-1 的占位行）；`pending` + `true` 时它们是**旧分析**的取值（A6）。
+   */
   analysisPublishStatus: StoredAnalysisPublishStatus;
+  /**
+   * A6（P2-2，2026-10-19）：**旧分析是否仍可读**（存在指向 active model run 的评估行）。
+   *
+   * 与 `analysisPublishStatus` 是两件事：
+   * - `published` ⇒ available 必为 true；
+   * - `pending` + `available = true` ⇒ "旧分析可用，新分析未发布"（分数仍非 null，
+   *   但**不得**当作最新结论）；
+   * - `pending` + `available = false` ⇒ 从未发布过分析（P0-1 的占位行）。
+   */
+  analysisAvailable: boolean;
 }
 
 export interface StoredWorkoutDetailRow {
@@ -89,8 +112,10 @@ export interface StoredWorkoutDetailRow {
   sessionType: string;
   eligibilityStatus: string;
   assessmentStatus: string | null;
-  /** 可见性状态；`pending` 时 `modelVersion` 等派生字段是占位值。 */
+  /** 可见性状态；`pending` 时 `modelVersion` 等派生字段可能仍是旧分析的取值。 */
   analysisPublishStatus: StoredAnalysisPublishStatus;
+  /** A6：旧分析是否仍可读（存在评估行）；语义与列表项同名字段相同。 */
+  analysisAvailable: boolean;
   missingReasons: string[];
   qualityScore: number;
   currentAbility: number | null;
@@ -147,10 +172,18 @@ export interface StoredWorkoutFreshness {
   /** 触及本训练的批次数（workout 实体 + 窗口内记录）。 */
   batches: number;
   analysis: {
-    status: StoredAnalysisPublishStatus | "failed";
+    status: StoredAnalysisPublishStatus;
+    /**
+     * A6：旧分析是否仍可用（`published` 时必为 true）。`status = pending/failed` +
+     * `available = true` ⇒ 旧分析字段仍可读，只是没有覆盖最新事实代次。
+     */
+    available: boolean;
     /** 触发本训练分析的 recompute job id；无关联任务时为 `null`。 */
     jobId: string | null;
-    /** 分析发布（active model run 激活）时刻；未发布为 `null`。 */
+    /**
+     * 分析发布（active model run 激活）时刻；从未发布过为 `null`。
+     * A6 之后它同时是"旧分析可用"的证据：`status = pending` 且它非 null ⇒ 旧分析是那一刻发布的。
+     */
     publishedAt: string | null;
   };
   metrics: StoredWorkoutFreshnessMetric[];
@@ -235,6 +268,141 @@ const factDistanceSql = (featureAlias: string | null, workoutAlias: string, sess
 const factAverageHeartRateSql = (featureAlias: string | null, workoutAlias: string): string =>
   `COALESCE(${featureAlias === null ? "" : `${featureAlias}.average_heart_rate_bpm, `}
     ${statisticAverageHeartRateSql(workoutAlias)})`;
+
+/**
+ * 一个批次集合"触及了哪些训练"的读侧投影（A6，2026-10-19）。
+ *
+ * 🔴 为什么不是"逐 session 查它自己的批次"：那要对每个列表行做两次相关子查询，
+ * 而列表一次要读几十行、详情页还在前台轮询。这里把**批次集合先缩小**（只保留
+ * "可能没被 active release 覆盖"的那几个批次），再一次性取它们的触及范围：
+ * - `workoutIds`：`import_entity_changes` 的 `workout` 实体行直接给出 canonical workout；
+ * - `intervals`：`record` 行的 `effective_at` 区间（按批次取 MIN/MAX）。
+ *   "区间内的会话"是**保守**的：账本不记录这条记录属于哪次训练，所以同窗口内的
+ *   其它训练也会被算作可能受影响 —— 宁可多报 pending（分析本来就会按脏范围重算），
+ *   不可少报成 published（那正是 A6 的缺陷）。
+ */
+interface SessionTouchMatcher {
+  /** 被这些批次**直接写过** workout 实体的 canonical workout id。 */
+  workoutIds: Set<string>;
+  /** 被这些批次写过记录的时间区间（ISO，含端点）。 */
+  intervals: Array<{ fromAt: string; toAt: string }>;
+}
+
+/**
+ * 一次请求内复用的"分析可见性证据"（A6 / P2-2）。
+ *
+ * 🔴 判据（为什么这几列就够）：
+ *
+ * 1. **发布证明点**：`active_model_run.activated_at`。发布门（`verifyAndPoint`）要求
+ *    dataset 版本/依赖覆盖与候选捕获时逐字一致，任何在捕获之后提交的批次都会让候选被拒。
+ *    所以"批次在本训练**激活之前**完成"本身就证明它被这一版发布覆盖了（读侧可用的
+ *    最小充分证据；不要求逐批绑定行存在）。
+ * 2. **更硬的证明点**：`analysis_run_input_bindings.captured_dependency_generation`
+ *    （v39+ 的直连发布）。依赖代次是**结构性**的（只有 `analysis-required` 批次才推它，
+ *    见 `analysis-input-coverage.ts`），所以"影响本训练的批次代次 ≤ 捕获代次"就是
+ *    "这一版分析吃进了它"。两列都有时以代次为准，只有缺一半时才退回时间比较。
+ * 3. **排队/失败中的任务**：`recompute_jobs` 里 `queued|running|failed` 的 import 任务，
+ *    按 `request_json.importBatchId(s)` 关联到批次。只要它指向**未被覆盖**的批次，
+ *    本训练就是"新分析未发布"。⚠️ 不用 `analysis_job_coverage`：那是**执行方在发布事务**
+ *    写的，queued 任务根本没有行（见 v39 注释），拿它做判据会把"正在排队"读成"没影响"。
+ *
+ * 退化分支（**必须**留痕，否则下一个人会以为是漏实现）：
+ * - `import_generations` 计数器全库没有写入方之前（`raw_generation = 0`）或老批次没有
+ *   代次三列（v39 之前是 NULL）⇒ 代次证明不成立，退回 `activated_at` 时间证明。
+ * - 连 `activated_at` 都没有（从未发布过分析）⇒ 所有队列里的任务都算"未覆盖"：
+ *   这时任何评估行都不存在，状态本来就是 `pending`，只是让 `failed` 也能报出来。
+ * - `request_json` 解析不了的畸形任务行被 `json_valid` 过滤：一条坏行不能让整个列表 500。
+ */
+interface AnalysisVisibilityEvidence {
+  /** active release 的证明点；`null` = 还没有任何已发布分析。 */
+  release: { modelRunId: string; activatedAt: string } | null;
+  /** active release 捕获的依赖代次；`null` = 老 release/没有绑定行（退回时间证明）。 */
+  capturedDependencyGeneration: number | null;
+  /**
+   * 已成功、但可能未被 active release 覆盖的分析批次（本训练的旧分析因此可能不新鲜）。
+   *
+   * 逐批的 `import_batches.dependency_generation` 就是 `import_generations` 计数器在那一批
+   * **之后**的取值（同一接收事务写入），所以"批次代次 > 捕获代次"等价于"发布之后又有一个
+   * 影响分析的批次落库"。这里刻意不再读全局计数器：它是当前值，回答不了"某一批在发布之前还是之后"。
+   */
+  uncovered: SessionTouchMatcher;
+  /** 仍在 queued/running 的分析任务所指向的批次。 */
+  inFlight: SessionTouchMatcher;
+  /** 已 failed 的分析任务所指向的批次。 */
+  failed: SessionTouchMatcher;
+}
+
+/** 空匹配器：不触及任何训练（"没有证据"与"没有影响"在这里是同一个可读结果）。 */
+const emptyTouchMatcher = (): SessionTouchMatcher => ({ workoutIds: new Set<string>(), intervals: [] });
+
+/** 这个批次集合有没有触及给定训练（见 {@link SessionTouchMatcher} 的保守口径）。 */
+function matcherTouchesSession(
+  matcher: SessionTouchMatcher,
+  canonicalWorkoutId: string,
+  startedAt: string,
+  endedAt: string
+): boolean {
+  if (matcher.workoutIds.has(canonicalWorkoutId)) return true;
+  // ISO-8601 UTC 字符串按字典序比较即时间序（库里两类时刻都是 `toISOString()` 形状）。
+  return matcher.intervals.some((interval) => interval.fromAt <= endedAt && interval.toAt >= startedAt);
+}
+
+/**
+ * 这个**已成功**批次是否可能没被 active release 覆盖（A6 判据）。
+ *
+ * - 两侧代次都有 ⇒ 硬判据：`batch.dependency_generation > captured` 才算"发布之后分析输入又变了"。
+ * - 缺一半（老 release 没有绑定行 / 批次是 v39 之前的历史行）⇒ 退回时间证明：发布门
+ *   （`verifyAndPoint`）要求候选捕获之后不许再有批次提交，所以"批次完成于激活之后"
+ *   就是"未被这一版吃进"的充分证据。
+ */
+function batchBeyondRelease(
+  batch: { dependencyGeneration: number | null; completedAt: string },
+  capturedDependencyGeneration: number | null,
+  activatedAt: string
+): boolean {
+  if (capturedDependencyGeneration !== null && batch.dependencyGeneration !== null) {
+    return batch.dependencyGeneration > capturedDependencyGeneration;
+  }
+  return batch.completedAt > activatedAt;
+}
+
+/**
+ * 这条 queued/running/failed 的任务是否在证明点之后（A6）。
+ *
+ * - 目标代次与会话捕获代次都有 ⇒ 硬判据：`target > captured` 说明它要覆盖分析输入的新版本。
+ * - 否则退回时间证明：任务登记在激活之后。**没有任何已发布分析时**（`release === null`）
+ *   一律算"新分析未发布" —— 那时不存在可读的评估，状态本来就该是 pending/failed。
+ */
+function jobBeyondRelease(
+  job: { targetDependencyGeneration: number | null; createdAt: string | null },
+  release: { activatedAt: string } | null,
+  capturedDependencyGeneration: number | null
+): boolean {
+  if (capturedDependencyGeneration !== null && job.targetDependencyGeneration !== null) {
+    return job.targetDependencyGeneration > capturedDependencyGeneration;
+  }
+  if (release === null) return true;
+  return job.createdAt !== null && job.createdAt > release.activatedAt;
+}
+
+/**
+ * 任务在 request 里声明的批次：单任务 `importBatchId`，合并/覆盖任务 `importBatchIds`
+ * 成员并集（`recompute-pipeline.ts` 的 `insertCoveringJob` 写的就是这两个键）。
+ * 畸形 JSON 已在 SQL 里被 `json_valid` 过滤；解析失败仍按"没有批次"处理，不让列表 500。
+ */
+function jobLinkedBatchIds(job: { importBatchId: string | null; importBatchIds: string | null }): string[] {
+  const ids: string[] = [];
+  if (job.importBatchIds !== null) {
+    try {
+      const parsed: unknown = JSON.parse(job.importBatchIds);
+      if (Array.isArray(parsed)) {
+        for (const value of parsed) if (typeof value === "string" && value.length > 0) ids.push(value);
+      }
+    } catch { /* 见 doc：畸形载荷不参与判据。 */ }
+  }
+  if (typeof job.importBatchId === "string" && job.importBatchId.length > 0) ids.push(job.importBatchId);
+  return [...new Set(ids)];
+}
 
 export class SqliteWorkoutReadRepository {
   /** 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。 */
@@ -351,13 +519,14 @@ export class SqliteWorkoutReadRepository {
           zs.stimulus_confidence,
           COALESCE(f.eligibility_status, 'pending') AS eligibility_status,
           COALESCE(f.quality_score, 0) AS quality_score,
+          w.id AS canonical_workout_id,
           w.indoor,
           w.source_category,
           a.assessment_status,
           a.current_ability,
           a.confidence,
           a.true_ability_delta,
-          (a.id IS NOT NULL) AS analysis_published,
+          (a.id IS NOT NULL) AS analysis_available,
           EXISTS (
             SELECT 1
             FROM workout_routes wr
@@ -373,7 +542,20 @@ export class SqliteWorkoutReadRepository {
         LIMIT ? OFFSET ?
       `)
       .all(...params, limit, offset) as Record<string, unknown>[];
-    return rows.map(mapListItem);
+    // A6（2026-10-19）：`analysis_available` 只回答"有没有旧分析可读"；是否**最新**要跟
+    // 本训练的最新事实代次比（{@link analysisVisibility}）。证据（active release / 未覆盖
+    // 批次）**一次列表调用只算一次**，行内只做集合/区间匹配（不逐行查库）。
+    const evidence = this.analysisVisibilityEvidence();
+    return rows.map((row) => {
+      const item = mapListItem(row);
+      const visibility = this.analysisVisibility(
+        String(row.canonical_workout_id), item.startedAt, item.endedAt,
+        Number(row.analysis_available) === 1, evidence
+      );
+      item.analysisPublishStatus = visibility.status;
+      item.analysisAvailable = visibility.available;
+      return item;
+    });
   }
 
   listByQuery(query: WorkoutListFilterQuery): { items: StoredWorkoutListItem[]; total: number } {
@@ -432,7 +614,7 @@ export class SqliteWorkoutReadRepository {
           a.confidence_factors_json,
           a.explanation_codes_json,
           a.explanation_json,
-          (a.id IS NOT NULL) AS analysis_published,
+          (a.id IS NOT NULL) AS analysis_available,
           EXISTS (
             SELECT 1 FROM workout_routes wr
             WHERE wr.workout_id = w.id AND wr.point_count > 0
@@ -446,6 +628,14 @@ export class SqliteWorkoutReadRepository {
       `)
       .get(trainingSessionId) as Record<string, unknown> | undefined;
     if (!row) return null;
+    // A6（2026-10-19）：状态与"旧分析是否可读"分开派生 —— 与列表/`freshness` 同一个
+    // {@link analysisVisibility}，三处必须一致（测试钉住）。
+    const visibility = this.analysisVisibility(
+      String(row.canonical_workout_id),
+      String(row.workout_start_at),
+      String(row.anchor_end_at),
+      Number(row.analysis_available) === 1
+    );
     return {
       sessionId: String(row.session_id),
       startedAt: String(row.workout_start_at),
@@ -457,7 +647,8 @@ export class SqliteWorkoutReadRepository {
       sourceCategory: String(row.source_category),
       sessionType: String(row.session_type),
       eligibilityStatus: String(row.eligibility_status),
-      analysisPublishStatus: Number(row.analysis_published) === 1 ? "published" : "pending",
+      analysisPublishStatus: visibility.status,
+      analysisAvailable: visibility.available,
       assessmentStatus: typeof row.assessment_status === "string" ? row.assessment_status : null,
       missingReasons: parseJson<string[]>(row.missing_reasons_json, []),
       qualityScore: Number(row.quality_score ?? 0),
@@ -499,6 +690,9 @@ export class SqliteWorkoutReadRepository {
    *      未发布时关联到"最近一次登记给它的事实批次"上的分析任务（`recompute_jobs.request_json`）；
    *   3. 每指标窗口内样本数：与 `/series` **同一条** `type + source_name + start_at` 谓词与去重键，
    *      外加 `elevation` = 可读路线点数（走唯一路线点入口）。
+   *
+   * A6（2026-10-19）：② 的 `published` 判据不再是"有评估行"，而是
+   * {@link analysisVisibility}（旧评估可能落后于本训练的最新事实代次）。
    *
    * 会话不存在（或事实已被软删）⇒ `null`（路由回 404 「未找到该训练记录」，与详情一致）。
    */
@@ -555,7 +749,9 @@ export class SqliteWorkoutReadRepository {
       .sort()[0] ?? null;
     const lastBatchAt = [...batchCompletedAt.values()].sort().at(-1) ?? null;
 
-    // ② 分析状态。发布 = 存在指向 active model run 的评估行；`publishedAt` 取指针激活时刻。
+    // ② 分析状态。A6（2026-10-19）：`published` 不再由"有评估行"单独决定 ——
+    // 评估行若落后于本训练的最新事实代次，状态是 `pending`/`failed`，但
+    // `available = true`（旧分析仍可读），`publishedAt` 仍是旧指针的激活时刻。
     const published = this.database
       .prepare(`
         SELECT active.activated_at AS publishedAt
@@ -567,9 +763,9 @@ export class SqliteWorkoutReadRepository {
       `)
       .get(trainingSessionId) as { publishedAt: string } | undefined;
     const job = this.analysisJobForBatches([...batchCompletedAt.keys()]);
-    const analysisStatus: StoredWorkoutFreshness["analysis"]["status"] = published !== undefined
-      ? "published"
-      : job?.status === "failed" ? "failed" : "pending";
+    const visibility = this.analysisVisibility(
+      session.canonicalWorkoutId, session.startedAt, session.endedAt, published !== undefined
+    );
 
     // ③ 每指标样本数（与 `/series` 同口径）。`DISTINCT` 的键与 `metricSeries` 的
     // `SELECT DISTINCT start_at, end_at, value_numeric, unit` 逐列相同 —— 重复行不抬高样本数。
@@ -613,7 +809,8 @@ export class SqliteWorkoutReadRepository {
       lastBatchAt,
       batches: batchCompletedAt.size,
       analysis: {
-        status: analysisStatus,
+        status: visibility.status,
+        available: visibility.available,
         jobId: job?.id ?? null,
         publishedAt: published?.publishedAt ?? null
       },
@@ -642,6 +839,163 @@ export class SqliteWorkoutReadRepository {
         LIMIT 1
       `)
       .get(...batchIds) as { id: string; status: string } | undefined;
+  }
+
+  // ── A6（P2-2，2026-10-19）：分析发布状态 ─────────────────────────────────────────
+  //
+  // 证据按 `PRAGMA data_version` 缓存一次请求/一次提交：列表、详情、freshness 常在同一
+  // 进程里连着读，而真正改库的是**别的连接**（导入/直连），data_version 一变就重算 ——
+  // 与 `RaiReadStore.cached`、`syncCoverage` 的失效判据同源。
+  private analysisEvidenceCache: { dataVersion: number; evidence: AnalysisVisibilityEvidence } | null = null;
+
+  /**
+   * 本训练的**分析发布状态**（{@link StoredAnalysisPublishStatus}）。
+   *
+   * 判据顺序（保守优先，见 {@link AnalysisVisibilityEvidence} 的推导）：
+   * 1. 没有评估行 ⇒ `pending`（`available = false`）；若更新事实的分析任务确实失败 ⇒ `failed`；
+   * 2. 有评估行 + 队列/运行中指向未覆盖批次 ⇒ `pending`（旧分析可读，新分析未发布）；
+   * 3. 有评估行 + 未覆盖批次的分析任务失败 ⇒ `failed`；
+   * 4. 有评估行 + 已成功但未覆盖的批次触及本训练 ⇒ `pending`；
+   * 5. 以上都没有 ⇒ `published`。
+   *
+   * 🔴 为什么 4 不会被"raw-only 批次"误触发：`dependency_bumped = 0` 的批次在证据层就被
+   * 排除了（data-only 车道的结构性结论：它不可能动分析输入）。用 `raw_generation` 判会
+   * 让每一批记录都翻成 pending，那正是把"数据到了"错读成"分析落后"。
+   */
+  private analysisVisibility(
+    canonicalWorkoutId: string,
+    startedAt: string,
+    endedAt: string,
+    hasAssessment: boolean,
+    evidence: AnalysisVisibilityEvidence = this.analysisVisibilityEvidence()
+  ): { status: StoredAnalysisPublishStatus; available: boolean } {
+    const failed = matcherTouchesSession(evidence.failed, canonicalWorkoutId, startedAt, endedAt);
+    if (!hasAssessment) {
+      // 从未发布过分析：`failed` 只在"本训练的分析任务确实失败"时报（与 freshness 的
+      // 既有 failed 分支同义）；此时没有旧分析可读 ⇒ available = false。
+      return { status: failed ? "failed" : "pending", available: false };
+    }
+    if (matcherTouchesSession(evidence.inFlight, canonicalWorkoutId, startedAt, endedAt)) {
+      return { status: "pending", available: true };
+    }
+    if (failed) return { status: "failed", available: true };
+    if (matcherTouchesSession(evidence.uncovered, canonicalWorkoutId, startedAt, endedAt)) {
+      return { status: "pending", available: true };
+    }
+    return { status: "published", available: true };
+  }
+
+  private analysisVisibilityEvidence(): AnalysisVisibilityEvidence {
+    const row = this.database.prepare("PRAGMA data_version").get() as { data_version?: unknown } | undefined;
+    const dataVersion = Number(row?.data_version ?? -1);
+    if (this.analysisEvidenceCache?.dataVersion === dataVersion) return this.analysisEvidenceCache.evidence;
+    const evidence = this.computeAnalysisVisibilityEvidence();
+    this.analysisEvidenceCache = { dataVersion, evidence };
+    return evidence;
+  }
+
+  private computeAnalysisVisibilityEvidence(): AnalysisVisibilityEvidence {
+    const releaseRow = this.database.prepare(
+      "SELECT model_run_id AS modelRunId, activated_at AS activatedAt FROM active_model_run WHERE singleton = 1"
+    ).get() as { modelRunId?: unknown; activatedAt?: unknown } | undefined;
+    const release = typeof releaseRow?.modelRunId === "string" && typeof releaseRow.activatedAt === "string"
+      ? { modelRunId: releaseRow.modelRunId, activatedAt: releaseRow.activatedAt }
+      : null;
+    const capturedDependencyGeneration = release === null
+      ? null
+      : this.capturedDependencyGeneration(release.modelRunId);
+
+    // ① 可能未被 active release 覆盖的**已成功**批次。只有"可能动过分析输入"的批次入选：
+    //    `dependency_bumped = 0` 是写侧的结构性结论（raw-only，不推依赖代次），
+    //    NULL 是 v39 之前的历史行 ⇒ **未知**，必须留在证据里（保守）。
+    const uncoveredBatchIds: string[] = [];
+    if (release !== null) {
+      const batches = this.database.prepare(`
+        SELECT batch.id AS id,
+               batch.dependency_generation AS dependencyGeneration,
+               batch.completed_at AS completedAt
+        FROM import_batches batch
+        WHERE batch.status = 'succeeded' AND batch.completed_at IS NOT NULL
+          AND (batch.dependency_bumped IS NULL OR batch.dependency_bumped <> 0)
+      `).all() as Array<{ id: string; dependencyGeneration: number | null; completedAt: string }>;
+      for (const batch of batches) {
+        if (batchBeyondRelease(batch, capturedDependencyGeneration, release.activatedAt)) {
+          uncoveredBatchIds.push(String(batch.id));
+        }
+      }
+    }
+
+    // ② 仍在 queued/running、或已 failed 的分析任务。判据：目标代次越过发布捕获点
+    //    （更硬），或任务登记在发布激活之后（退化分支）。关系键与
+    //    {@link analysisJobForBatches} 一致：`request_json.importBatchId(s)`。
+    const jobs = this.database.prepare(`
+      SELECT job.id AS id, job.status AS status, job.created_at AS createdAt,
+             job.target_dependency_generation AS targetDependencyGeneration,
+             json_extract(job.request_json, '$.importBatchId') AS importBatchId,
+             json_extract(job.request_json, '$.importBatchIds') AS importBatchIds
+      FROM recompute_jobs job
+      WHERE job.job_type = 'import' AND json_valid(job.request_json)
+        AND job.status IN ('queued', 'running', 'failed')
+    `).all() as Array<{
+      id: string; status: string; createdAt: string | null;
+      targetDependencyGeneration: number | null; importBatchId: string | null; importBatchIds: string | null;
+    }>;
+    const inFlightBatchIds: string[] = [];
+    const failedBatchIds: string[] = [];
+    for (const job of jobs) {
+      if (!jobBeyondRelease(job, release, capturedDependencyGeneration)) continue;
+      const target = job.status === "failed" ? failedBatchIds : inFlightBatchIds;
+      for (const batchId of jobLinkedBatchIds(job)) {
+        if (!target.includes(batchId)) target.push(batchId);
+      }
+    }
+
+    return {
+      release,
+      capturedDependencyGeneration,
+      uncovered: this.touchMatcher(uncoveredBatchIds),
+      inFlight: this.touchMatcher(inFlightBatchIds),
+      failed: this.touchMatcher(failedBatchIds)
+    };
+  }
+
+  /**
+   * active release 的输入绑定捕获代次（`analysis_run_input_bindings`，v39）。
+   *
+   * 表不存在（v39 之前的库在迁移前被只读打开）⇒ `null`（退回时间证明），
+   * 不把"没有绑定行"读成"没有发布" —— 那会把所有已发布训练永久报成 pending。
+   */
+  private capturedDependencyGeneration(modelRunId: string): number | null {
+    if (!this.database.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='analysis_run_input_bindings'"
+    ).get()) return null;
+    const row = this.database.prepare(
+      "SELECT captured_dependency_generation AS captured FROM analysis_run_input_bindings WHERE run_id = ?"
+    ).get(modelRunId) as { captured?: unknown } | undefined;
+    const captured = Number(row?.captured);
+    return Number.isFinite(captured) ? Math.trunc(captured) : null;
+  }
+
+  /** 一组批次的"触及训练"投影（{@link SessionTouchMatcher}；两次查询，不是逐行子查询）。 */
+  private touchMatcher(batchIds: string[]): SessionTouchMatcher {
+    if (batchIds.length === 0) return emptyTouchMatcher();
+    const placeholders = batchIds.map(() => "?").join(",");
+    const workoutIds = new Set(
+      (this.database.prepare(`
+        SELECT DISTINCT change.entity_id AS workoutId
+        FROM import_entity_changes change
+        WHERE change.batch_id IN (${placeholders}) AND change.entity_kind = 'workout'
+      `).all(...batchIds) as Array<{ workoutId: string }>).map((row) => String(row.workoutId))
+    );
+    const intervals = (this.database.prepare(`
+      SELECT MIN(change.effective_at) AS fromAt, MAX(change.effective_at) AS toAt
+      FROM import_entity_changes change
+      WHERE change.batch_id IN (${placeholders})
+        AND change.entity_kind = 'record' AND change.effective_at IS NOT NULL
+      GROUP BY change.batch_id
+    `).all(...batchIds) as Array<{ fromAt: string; toAt: string }>)
+      .map((row) => ({ fromAt: String(row.fromAt), toAt: String(row.toAt) }));
+    return { workoutIds, intervals };
   }
 
   /**
@@ -966,6 +1320,9 @@ function mapListItem(row: Record<string, unknown>): StoredWorkoutListItem {
     hasRoute: Number(row.has_route) === 1,
     // 派生字段的"有没有"只由这一位解释：NULL 分数 + published 是"分析过但该量无值"，
     // NULL 分数 + pending 是"分析还没发布"。两者在响应里必须可分辨（P0-1）。
-    analysisPublishStatus: Number(row.analysis_published) === 1 ? "published" : "pending"
+    // ⚠️ A6（2026-10-19）：这里只是**默认值**；"是否最新"由 `list()` 用
+    // `analysisVisibility()` 覆写，`analysisAvailable` 单独表达"旧分析是否可读"。
+    analysisPublishStatus: Number(row.analysis_available) === 1 ? "published" : "pending",
+    analysisAvailable: Number(row.analysis_available) === 1
   };
 }

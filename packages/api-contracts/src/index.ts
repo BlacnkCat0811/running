@@ -366,19 +366,46 @@ export interface WorkoutListItem {
    * 可见性状态（P0-1，2026-10-18 同步诊断）：
    * 事实已提交但分析尚未发布时，列表/详情仍可读（派生字段为 null/占位），
    * 用本字段诚实标出 `pending`。老服务端省略 ⇒ undefined，消费方按已发布处理。
+   *
+   * A6（2026-10-19）：`pending` 不再只表示"从未发布"——**旧分析可用、新分析未发布**
+   * 也是 `pending`，此时派生字段是旧分析的取值（不是占位）。两者由
+   * {@link WorkoutListItem.analysisAvailable} 区分。
    */
   analysisPublishStatus?: AnalysisPublishStatus;
+  /**
+   * A6（2026-10-19）：**旧分析是否仍可读**（存在指向当前 active release 的评估行）。
+   *
+   * - `analysisPublishStatus = "published"` ⇒ 本字段必然为 `true`；
+   * - `"pending"` / `"failed"` + `analysisAvailable = true` ⇒ 旧分析字段仍可读，
+   *   但它**没有覆盖**本训练的最新事实代次，不得当作最新结论展示；
+   * - `false` ⇒ 从未发布过分析，派生字段是 null/占位（P0-1 的原始语义）。
+   *
+   * 老服务端省略 ⇒ undefined：此时只能退回 `analysisPublishStatus`，把 `pending`
+   * 一律按"占位行"处理（保守，不会把旧分数冒充最新）。
+   */
+  analysisAvailable?: boolean;
 }
 
 /**
  * 读侧可见性状态（P0-1）。
  *
- * - `pending`：事实（workout/session/records）已提交，派生分析尚未发布；
- *   派生字段必须为 null/占位，**不得**把 pending 当失败或不存在。
- * - `published`：分析已发布，派生字段可用。
- * - `failed`：分析任务失败；事实仍可读。
+ * - `pending`：事实（workout/session/records）已提交，派生分析尚未发布到**当前事实代次**；
+ *   `analysisAvailable = false` 时派生字段为 null/占位，**不得**把 pending 当失败或不存在。
+ *   A6（2026-10-19）：**旧分析可用**时状态也是 `pending`（见 `analysisAvailable`），
+ *   此时派生字段是旧分析取值，不是占位。
+ * - `published`：分析已发布且覆盖本训练的最新事实代次，派生字段可用。
+ * - `failed`：更新事实的分析任务失败；事实与（若有）旧分析仍可读。
  */
 export type AnalysisPublishStatus = "pending" | "published" | "failed";
+
+/** A5（P2-3，2026-10-19）：数据交付状态。 */
+export type WorkoutDeliveryState = "delivered" | "partial" | "unknown";
+
+/** A5（P2-3）：分析状态（与 {@link AnalysisPublishStatus} 同值域，独立列出便于契约自解释）。 */
+export type WorkoutAnalysisState = AnalysisPublishStatus;
+
+/** A5（P2-3）：观测稳定性。**只有它**受 24h 静默窗口影响。 */
+export type WorkoutStabilityState = "stable" | "settling";
 
 export interface DashboardResponse {
   generatedAt: string;
@@ -463,6 +490,12 @@ export interface WorkoutFreshnessFacts {
 
 export interface WorkoutFreshnessAnalysis {
   status: AnalysisPublishStatus;
+  /**
+   * A6（2026-10-19）：旧分析是否仍可读（存在指向 active release 的评估行）。
+   * `status = "published"` 时必为 `true`；`"pending"/"failed"` + `true` ⇒
+   * 旧分析字段仍可读，但没有覆盖最新事实代次（{@link WorkoutFreshnessAnalysis.publishedAt} 是旧发布时刻）。
+   */
+  available: boolean;
   /** 触发本训练分析的 recompute job id；无则 null。 */
   jobId: string | null;
   /** 分析发布（active model run 激活）时刻；未发布为 null。 */
@@ -475,9 +508,29 @@ export interface WorkoutFreshnessResponse {
   analysis: WorkoutFreshnessAnalysis;
   series: WorkoutFreshnessMetric[];
   /**
+   * A5（P2-3，2026-10-19）：三态拆分的**可选增量字段**（老服务端省略）。
+   *
+   * `deliveryState` 回答"事实到齐服务端没有"，`analysisState` 回答"分析覆盖到最新代次没有"，
+   * `stabilityState` 回答"观测是否已经稳定"。**24h 静默只影响 `stabilityState`**，
+   * 不参与 delivery/analysis。
+   *
+   * `deliveryState` 的服务端口径（退化分支，必须与 docs/IOS_NATIVE_API_CONTRACT.md 一致）：
+   * 服务端没有客户端"本次读到了哪些类型"的回执，只能给**到达证据**：
+   * - `unknown`：没有任何到达证据（`facts.batches = 0`）——"不知道"，**不是**"设备在传"；
+   * - `partial`：只有窗口内记录账本、没有 workout 实体写入证据（数据面不完整）；
+   * - `delivered`：本训练的 workout 实体已由成功批次交付到服务端。
+   * 它**不**声称"手机已读尽"，也不声称某指标设备一定具备。
+   */
+  deliveryState: WorkoutDeliveryState;
+  analysisState: WorkoutAnalysisState;
+  stabilityState: WorkoutStabilityState;
+  /**
    * `complete` = 分析已发布且最近 24h 没有新事实到达（数据已稳定）；
    * `partial` = 仍可能继续补齐（手表迟到样本/分析中）。
    * 这是**传输/分析**的完整性，不是"设备是否具备某项传感器能力"。
+   *
+   * ⚠️ A5 本轮**不改**本字段语义（下一版才改成 `deliveryState = delivered && analysisState = published`）；
+   * 三态信息请读上面的新字段。
    */
   completeness: "partial" | "complete";
 }

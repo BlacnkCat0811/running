@@ -298,7 +298,11 @@ struct WorkoutListItem: Codable, Identifiable, Equatable {
     let hasRoute: Bool
     /// P0-1：事实已提交但分析未发布时为 `pending`；老服务端省略 ⇒ nil（按已发布处理）。
     /// 派生字段在 pending 时可能为 null/占位，消费方必须看本字段而不是猜。
+    /// A6：`pending` 也可能是"旧分析可用、新分析未发布"（此时数值是旧分析的），由
+    /// `analysisAvailable` 区分。
     var analysisPublishStatus: String? = nil
+    /// A6（P2-3，2026-10-19）：旧分析是否仍可读；老服务端省略 ⇒ nil（按"不可读"保守处理）。
+    var analysisAvailable: Bool? = nil
 }
 
 struct AbilityMetricSet: Codable, Equatable {
@@ -1456,6 +1460,8 @@ struct WorkoutDetail: Codable {
     let elapsedSeconds: Double
     /// P0-1：事实已提交但分析未发布时为 `pending`；老服务端省略 ⇒ nil（按已发布处理）。
     var analysisPublishStatus: String? = nil
+    /// A6（P2-3，2026-10-19）：旧分析是否仍可读；老服务端省略 ⇒ nil（按"不可读"保守处理）。
+    var analysisAvailable: Bool? = nil
     let distanceKm: Double?
     let activeEnergyKcal: Double?
     let elevationGainMeters: Double?
@@ -1613,7 +1619,15 @@ nonisolated struct WorkoutFreshnessResponse: Codable, Equatable, Sendable {
     let analysis: WorkoutFreshnessAnalysis
     let series: [WorkoutFreshnessMetric]
     /// `complete` = 分析已发布且最近 24h 无新事实；`partial` = 仍可能补齐。
+    /// ⚠️ A5 本轮不改它；三态拆分读下面的可选字段。
     let completeness: String
+    /// A5（P2-3，2026-10-19）：`delivered | partial | unknown`。
+    /// 服务端口径是**到达证据**（没有批次账本 ⇒ `unknown`，不是"手表还在传"）；老服务端省略 ⇒ nil。
+    var deliveryState: String? = nil
+    /// A5：`published | pending | failed`，与 `analysis.status` 同源（A6 的判据）。
+    var analysisState: String? = nil
+    /// A5：`stable | settling`。**唯一**受 24h 静默窗口影响的字段。
+    var stabilityState: String? = nil
 }
 
 nonisolated struct WorkoutFreshnessFacts: Codable, Equatable, Sendable {
@@ -1624,6 +1638,9 @@ nonisolated struct WorkoutFreshnessFacts: Codable, Equatable, Sendable {
 
 nonisolated struct WorkoutFreshnessAnalysis: Codable, Equatable, Sendable {
     let status: String
+    /// A6（2026-10-19）：旧分析是否仍可读。`status != "published"` 且它为 true ⇒
+    /// 旧分析字段可读，但没有覆盖最新事实代次。老服务端省略 ⇒ nil。
+    var available: Bool? = nil
     let jobId: String?
     let publishedAt: String?
 }

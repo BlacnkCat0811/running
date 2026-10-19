@@ -36,6 +36,11 @@ import Foundation
 ///  17. 🔴 **软预算只接在后台轮询上，且只在后台生效**（`shouldYieldPolling`）。接错位置的两个
 ///      方向都是自伤：接到导出/上传上会让一次没跑完的 GB 级导出自断重来（永远做不完），
 ///      漏掉 `isBackground` 会掐掉用户正看着的那次前台同步。
+///  18. 🔴 **A8（2026-10-19 复核）：观察者回调必须"先落耐久意图、再 `completion()`"**，且
+///      写失败 / 还没有目标 / scope 非法这三条分支下 `completion()` **仍然恰好一次**。
+///      顺序判据不是"源码里谁在前"（那只能靠肉眼），而是**在 `completion()` 内部用导出侧的
+///      读法去读那条意图** —— 读得到才算 durable。代价是静默的：HealthKit 收到回执后投递
+///      不会重放，那批健康数据只能等下一次唤醒（`HealthSyncObserverIntentHandoff`）。
 ///
 /// 之所以要有这个可执行文件：`HealthKitSync.swift` 与 `RAIApp.swift`/`AppDelegate.swift`
 /// 都不被任何回归脚本编译（前者只被 `typecheck-ios.sh` 类型检查，后两个连同被
@@ -94,6 +99,11 @@ struct BackgroundSyncPolicyRegression {
         try foregroundContinuationWaveIsTimeBounded()
         try identifiersAreStableAndDistinct()
         try systemReloadedUploadsAreOnlyKeptWhenTracked()
+        // 放在最后：这三条钉的是**回调内部**的顺序与失败处置（A8），与上面的调度判据没有
+        // 共享输入。放前面会让"某条调度判据被改坏"先红在这几条上，失败信息就指错了地方。
+        try observerIntentIsPersistedBeforeCompletion()
+        try observerIntentFailureStillCompletesAndIsCounted()
+        try observerIntentNeverWritesAnotherTargetsScope()
         print("Background sync policy regression tests passed")
     }
 
@@ -894,6 +904,190 @@ struct BackgroundSyncPolicyRegression {
         try require(
             keptOnly.foundAny,
             "a report that kept an awaited task did not read as found — the '.awaitSystemUpload' path goes invisible"
+        )
+    }
+
+    // MARK: - A8：观察者回调的耐久意图（record → completion）
+
+    /// 生产形状的 URL scope：`HealthKitSync.urlScope(for:)` 取 `sha256(canonicalURL)` 前 24 位
+    /// 十六进制。这里**不复制那段算法**（复制就有两份语义、迟早分叉），只用一个同形的字面量。
+    private static let observerScope = "9f2c1a4b6d8e0f3a5c7b9d1e"
+
+    private static func isolatedIntentDefaults(_ label: String) throws -> (UserDefaults, String) {
+        let suiteName = "rai-observer-intent-\(label)-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            throw BackgroundPolicyRegressionFailure("could not create an isolated UserDefaults suite")
+        }
+        return (defaults, suiteName)
+    }
+
+    /// 🔴 契约 18 的上半条：**顺序**。判据写在 `completion()` **内部** —— 那一刻用导出侧的
+    /// 读法（`HealthSyncBackgroundIntentStore.observe(scope:)`）必须已经读得到这次投递的意图。
+    ///
+    /// 为什么不用"日志顺序"当判据：`record`/`complete` 两个闭包的调用顺序只能证明接线，
+    /// 证明不了"耐久痕迹真的落地了"（一条写到错误 key 上的意图也会让日志顺序漂亮）。
+    /// 这里走的是**生产构造**（真实的意图存储 + 真实的默认域），读的也是导出确认时的同一份 API。
+    private static func observerIntentIsPersistedBeforeCompletion() throws {
+        let (defaults, suiteName) = try isolatedIntentDefaults("order")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // 生产用的就是这两个字面量（`HealthKitSync.backgroundIntentKey`），键空间必须逐字相同，
+        // 否则观察者写进去的意图与导出确认读的是两个位置 —— 而两边都不会报错。
+        let baseKey = "rai.hk.backgroundIntent"
+        let store = HealthSyncBackgroundIntentStore(userDefaults: defaults, baseKey: baseKey)
+
+        var lines: [String] = []
+        let channel = HealthSyncObserverIntentChannel(
+            baseKey: baseKey, userDefaults: defaults, report: { lines.append($0) }
+        )
+        channel.publish(scope: observerScope)
+
+        var completions = 0
+        var intentVisibleInsideCompletion = false
+        let outcome = channel.recordThenComplete {
+            completions += 1
+            intentVisibleInsideCompletion = store.observe(scope: observerScope) != nil
+        }
+        try require(completions == 1, "completion() ran \(completions) times instead of exactly once")
+        try require(
+            intentVisibleInsideCompletion,
+            "completion() ran before the durable intent was readable — the A8 window is back"
+        )
+        try require(
+            outcome == .recorded(scope: observerScope),
+            "the delivery was not recorded against the projected target: \(outcome)"
+        )
+        try require(store.hasIntent(scope: observerScope), "no durable intent survived the delivery")
+        try require(lines.isEmpty, "a successful intent write still emitted a failure line: \(lines)")
+    }
+
+    /// 🔴 契约 18 的下半条：**写失败也必须 `completion()`**，且失败要**分类计数**、不许静默。
+    ///
+    /// 注入是唯一能在本机复现"默认域写不进去"的方式：真实的 `UserDefaults.set` 不抛错、也没有
+    /// 返回值，所以生产实现靠**回读**判定成败（`record(scope:)`），而回读失败路径由这里覆盖。
+    /// 失败不重试也是判据的一部分：重试会突破"回调里有上限的同步写"这条约束。
+    private static func observerIntentFailureStillCompletesAndIsCounted() throws {
+        var recordCalls = 0
+        var lines: [String] = []
+        let channel = HealthSyncObserverIntentChannel(
+            record: { _ in
+                recordCalls += 1
+                return false
+            },
+            report: { lines.append($0) }
+        )
+        channel.publish(scope: observerScope)
+
+        var completions = 0
+        let first = channel.recordThenComplete { completions += 1 }
+        try require(completions == 1, "a failed intent write swallowed completion()")
+        try require(first == .failed(.writeNotVerified), "a failed write was classified as \(first)")
+        try require(
+            recordCalls == 1,
+            "a failed write was attempted \(recordCalls) times — the callback must stay bounded to one attempt"
+        )
+        try require(channel.failures[.writeNotVerified] == 1, "the failed write was not counted")
+        try require(lines.count == 1, "a failed write left \(lines.count) diagnostic lines instead of one")
+        try require(
+            lines.first?.contains("writeNotVerified") == true && lines.first?.contains("n=1") == true,
+            "the diagnostic line carries neither the failure class nor its running count: \(lines)"
+        )
+
+        // 第二次失败：completion 照样执行，计数递增 —— "这不是偶发"必须能从日志里一眼看出来。
+        let second = channel.recordThenComplete { completions += 1 }
+        try require(completions == 2, "a repeated failed write swallowed completion()")
+        try require(second == .failed(.writeNotVerified), "a repeated failed write changed classification")
+        try require(channel.failures[.writeNotVerified] == 2, "repeated failures are not counted")
+        try require(
+            lines.count == 2 && lines.last?.contains("n=2") == true,
+            "the diagnostic line does not report the running failure count: \(lines)"
+        )
+        try require(
+            channel.failures[.scopeUnusable] == nil,
+            "a write failure was also counted as an unusable scope"
+        )
+    }
+
+    /// 🔴 契约 18 的边界：**scope 不匹配不得误记**，没有目标/非法 scope 时也绝不写。
+    ///
+    /// 三条都必须是"不写 + 仍然 `completion()`"：
+    ///   · 投影里是**另一个**目标 ⇒ 意图只许落在那个目标上，导出侧（`observerScope`）那一格
+    ///     必须仍然是空的 —— 否则这个 URL 的下一轮会以为"这条变化已经被覆盖"，而那批数据
+    ///     没人导；
+    ///   · 本进程还没有目标 ⇒ 没有位置可落（与 `SyncDeliveryPolicy` 的 `.ignore` 同一条理由），
+    ///     但回执必须发出去，且这个已知窗口每个进程只报一次；
+    ///   · scope 非法 ⇒ 写进去就是一条**没人读的死 key**，与"丢了这次唤醒"等价。
+    private static func observerIntentNeverWritesAnotherTargetsScope() throws {
+        let (defaults, suiteName) = try isolatedIntentDefaults("scope")
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let baseKey = "rai.hk.backgroundIntent"
+        let store = HealthSyncBackgroundIntentStore(userDefaults: defaults, baseKey: baseKey)
+        // 真实存储 + 可数的写入缝：既钉住 key 落在哪（真默认域），也钉住"没有写"那条判据。
+        var recordCalls = 0
+        var lines: [String] = []
+        let channel = HealthSyncObserverIntentChannel(
+            record: { scope in
+                recordCalls += 1
+                return store.record(scope: scope)
+            },
+            report: { lines.append($0) }
+        )
+
+        // ① 目标是另一个 URL scope（例如用户刚切过服务端）。
+        let otherTargetScope = "00112233445566778899aabb"
+        channel.publish(scope: otherTargetScope)
+        var completions = 0
+        let outcome = channel.recordThenComplete { completions += 1 }
+        try require(
+            outcome == .recorded(scope: otherTargetScope),
+            "the delivery was not recorded against the projected target: \(outcome)"
+        )
+        try require(completions == 1, "completion() did not run for a projected target")
+        try require(
+            !store.hasIntent(scope: observerScope),
+            "an intent for another target leaked into the export's scope — that export would skip real data"
+        )
+        try require(store.hasIntent(scope: otherTargetScope), "the intent did not land on the projected scope")
+
+        // ② 本进程还没有目标（全新安装 / 首个投递）。
+        channel.publish(scope: nil)
+        let writesBeforeNoTarget = recordCalls
+        var noTargetCompletions = 0
+        let noTarget = channel.recordThenComplete { noTargetCompletions += 1 }
+        try require(noTarget == .noTarget, "a delivery without a target was classified as \(noTarget)")
+        try require(noTargetCompletions == 1, "a delivery without a target swallowed completion()")
+        try require(recordCalls == writesBeforeNoTarget, "a delivery without a target still touched the store")
+        try require(channel.noTargets == 1, "the no-target delivery is not counted")
+        // 每个进程只报一次：逐条报会把日志刷满，而"一次都不报"会把已知窗口藏起来。
+        _ = channel.recordThenComplete {}
+        try require(
+            channel.noTargets == 2 && lines.count == 1,
+            "the no-target window is reported \(lines.count) times instead of once per process"
+        )
+
+        // ③ 非法 scope：空 / 只有空白 / 带空白 / 超过 64 字节。
+        let writesBeforeUnusable = recordCalls
+        for badScope in ["", " ", "  scope-a  ", String(repeating: "a", count: 65)] {
+            channel.publish(scope: badScope)
+            var badCompletions = 0
+            let bad = channel.recordThenComplete { badCompletions += 1 }
+            try require(
+                bad == .failed(.scopeUnusable),
+                "scope \(badScope.debugDescription) was accepted as a UserDefaults key"
+            )
+            try require(badCompletions == 1, "an unusable scope swallowed completion()")
+        }
+        try require(
+            recordCalls == writesBeforeUnusable,
+            "an unusable scope still reached the store — that writes a key nothing ever reads"
+        )
+        try require(
+            channel.failures[.scopeUnusable] == 4,
+            "unusable scopes are not counted per category: \(channel.failures)"
+        )
+        // 合法边界：生产形状的 scope 必须被接受（判据不能宽到把正常值也挡掉）。
+        try require(
+            HealthSyncObserverIntentHandoff.isUsableScope(observerScope),
+            "the production-shaped URL scope was rejected by the key-safety judge"
         )
     }
 

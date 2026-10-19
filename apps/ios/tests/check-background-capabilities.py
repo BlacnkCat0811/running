@@ -392,6 +392,19 @@ check(
     "RaiStartup.registerSyncEntryPoints(" in app_delegate,
     "AppDelegate.swift does not call RaiStartup.registerSyncEntryPoints",
 )
+# A8（2026-10-19）：注册观察者之前必须先发布"当前导出目标"投影。后台冷启动的第一次投递
+# 可能早于任何一次同步（`performSync` / 恢复上下文才发布投影），回调只能在已发布的投影上
+# 落耐久意图；不先发布，那一代投递只能落 `.noTarget`（A8 的冷启动残余窗口）。
+startup_body = tail_after(
+    app_delegate, "static func registerSyncEntryPoints(", "registerSyncEntryPoints"
+)
+ordered(
+    without_comment_lines(startup_body),
+    "publishObserverTarget(for: session.serverURL)",
+    "startObservingHealthChanges {",
+    "registerSyncEntryPoints must publish the observer target before registering observers — "
+    "otherwise a cold-start delivery has no scope to land its durable intent (A8 window)",
+)
 # `completion()` 必须早于**任何**后续动作：HealthKit 连续 3 次收不到它会**永久停掉**
 # 这类样本的投递，现象是"第一次能唤醒，之后再也不唤醒"，且毫无报错。
 #
@@ -406,6 +419,18 @@ if observer_body is not None:
     check(
         "completion()" in handler,
         "the HKObserverQuery handler no longer calls completion() at all",
+    )
+    # A8（2026-10-19）：completion() 不再是裸调用，而是"先落耐久意图、再回执"的唯一入口。
+    # 顺序判据在 `HealthSyncObserverIntentHandoff`（纯逻辑，有执行者）；这里钉生产接线没被
+    # 改回裸 `completion()` —— 改回去照样编译通过，但那一代投递会重新变成无痕消失。
+    check(
+        "recordThenComplete { completion() }" in handler,
+        "the observer handler no longer records the durable sync intent before completion(); "
+        "a delivery killed between completion and dispatch would leave no durable trace (A8)",
+    )
+    check(
+        "func publishObserverTarget(for serverURL: URL?)" in sync,
+        "HealthKitSync is missing publishObserverTarget(for:) — the startup projection has no publisher",
     )
     for later in ("Task {", "await ", "guard ", "if "):
         if later not in handler:
@@ -1222,6 +1247,65 @@ check(
     "workoutWindows: workoutBackfillWindows" not in health_export,
     "the record pass is wired back to the entry-time `workoutBackfillWindows` array; page-level "
     "registrations (already delivery-gated) would be ignored again (A1 regression)",
+)
+
+# 12j. A3（2026-10-19）：窗口收口判据从"整窗总数稳定"改成**逐类型进度**。
+#      旧形态在生产里把"500 条心率 + 其余类型全 0"的两次相同查询读成"补齐完成"，而迟到
+#      样本（实测 36–72h）随后到达时窗口已关（审计 A3）。判据本体住在
+#      `RouteSyncState.swift` 的纯函数里、由 `RouteSyncStatePersistenceRegression` 执行；
+#      这一段钉的是**接线**：判据有没有拿到逐类型事实、预算切断有没有单独记账、
+#      老行是不是按"未完成"读。这类"判据对了但没人喂它"的形态改错了照样编译通过。
+workout_window_loop = tail_after(
+    health_export,
+    "for window in WorkoutBackfillScheduler.due(",
+    "workout backfill window loop",
+).split("\n        /// 跑一趟补读")[0]
+window_store = read(RAI / "SyncTaskStore.swift")
+check(
+    "WorkoutBackfillScheduler.afterPass(" in workout_window_loop
+    and "registeredTypes: windowRegisteredTypes" in workout_window_loop,
+    "the workout window bookkeeping does not pass per-type observations AND the registered type "
+    "list to the scheduler; without the list, 'unseen' types would be treated as complete (A3)",
+)
+check(
+    "WorkoutBackfillScheduler.afterBlockedPass(" in workout_window_loop,
+    "a page-budget cut no longer goes through afterBlockedPass — the window would either book "
+    "stability it did not earn or lose the 'blocked' settlement reason (A3)",
+)
+check(
+    "observed: samples.count" in workout_window_loop
+    and "pageLimit: pageLimit" in workout_window_loop,
+    "the per-type observation must carry the returned count AND the page limit actually queried; "
+    "without the limit a full page looks like EOF (A2 pagination is not implemented yet)",
+)
+check(
+    "unauthorized: true" in workout_window_loop,
+    "authorization failures must be reported as unauthorized, not as an empty page — an empty page "
+    "counts as pageComplete and would close the window on a permission error (A3)",
+)
+check(
+    "observedSamples" not in workout_window_loop,
+    "the old whole-window sample total is still driving the loop — that is exactly the A3 criterion "
+    "('total count stable') which the per-type progress replaced",
+)
+check(
+    "types_json" in window_store
+    and "ALTER TABLE sync_pending_workout_windows ADD COLUMN types_json TEXT" in window_store
+    and "PRAGMA user_version = 4" in window_store,
+    "the sync journal needs an explicit v3→v4 migration for types_json (installed devices keep "
+    "their existing window table, so CREATE TABLE alone would never add the column)",
+)
+check(
+    "WorkoutBackfillScheduler.encodeProgress(record)" in window_store
+    and "WorkoutBackfillScheduler.decodeProgress(typesData)" in window_store,
+    "the window row must encode per-type progress on write and decode it on read",
+)
+check(
+    "completedAt: progress == nil ? nil : completedAt" in window_store
+    and "payload.attemptCount == attemptCount && payload.completedAt == completedAt" in window_store,
+    "a window row without decodable/trustworthy per-type progress must read back as NOT complete — "
+    "neither the old 'total count stable' completion nor a row rewritten by a downgraded app may "
+    "be trusted (A3 + rollback)",
 )
 
 # --- 13. 门禁自己：判据的**载体**也要有守卫 ------------------------------------
@@ -2093,7 +2177,13 @@ check(
 #   实测打印 **289** ⇒ 按同一纪律重设为 **288**。
 # 🟡 2026-10-16（R07）：新增"循环消费待办调度器"一条（§14h）后实测打印 **290**
 #   ⇒ 按同一纪律重设为 **289**。
-MIN_CHECKS = 289
+# 🟡 2026-10-19（P2-1/A3）：新增 §12j 的 8 条（逐类型进度接线 / types_json 迁移 /
+#   老行 fail-closed）后**现跑现设**：实测打印 **307** ⇒ 按"打印总数 − 1"重设为 **306**。
+#   判据：删掉 §12j 里任意一条 `check(...)` 必须变红。
+# 🟡 2026-10-19（P3-4/A8）：新增 3 条（冷启动目标投影先于注册 / recordThenComplete 接线 /
+#   publishObserverTarget 存在）后**现跑现设**：实测打印 **310** ⇒ 按"打印总数 − 1"重设为 **309**。
+#   判据：删掉这三条里任意一条 `check(...)` 必须变红。
+MIN_CHECKS = 309
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

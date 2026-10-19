@@ -125,6 +125,9 @@
   - 事实侧能回答的照常给出：`startedAt/endedAt/durationSeconds/distanceKm/averageHeartRateBpm`
     （来自 workout/session/`workout_statistics`；没有证据时保持 `null`，不编造）；
   - 详情 `facts.analysisState = "pending"`，且 `analysis` 块为 `null`（没有已发布 release）。
+  - ⚠️ 2026-10-19（A6）扩展：**旧分析可读但未覆盖最新事实**时状态同样是 `pending`，但派生字段是
+    旧分析取值 —— 由 `analysisAvailable` 区分，见下面的 2026-10-19 增量契约。本段的“null/占位”
+    只适用于 `analysisAvailable = false`。
 - 客户端**不得**把 `qualityScore = 0` 或空维度显示成真实分数；应显示“分析中”。
 - 带特征过滤（`status`/`sessionType`/`confidence`/`participation`）时 pending 行会被排除，
   这是契约允许的（它还没有 eligibility/sessionType）；**不带**过滤时必须包含 pending 行。
@@ -180,6 +183,64 @@
 `parsed` = 本批 XML 的 `<Record>` 条数，`inserted` = 新增行数，`unchanged = parsed - inserted`
 （显式删除事件不在 `parsed` 内）。老服务端省略该键 ⇒ 客户端按“未提供”处理，不得当成 0。
 它让“本批 0 新增”可以被回执直接解释；不改变 `ingestStatus` / `analysisStatus` 的既有语义。
+
+## 2026-10-19 增量契约：分析发布状态与三态新鲜度（A6 / A5，P2-2 / P2-3）
+
+背景：`analysisPublishStatus` 此前只回答“有没有评估行”，于是**旧评估已发布 + 更新的分析任务仍排队/失败**
+被读成 `published`（审计 A6 复现：`jobId` 指向新任务，`status` 仍是 `published`）。同时 `/freshness` 的
+`completeness` 把“事实到没到 / 分析跟没跟上 / 观测是否稳定”混成一个值（审计 A5：power 0 样本仍报 `complete`）。
+本轮是**兼容扩展**：只加字段，`/v1` 既有字段不删；`completeness` 语义本轮**不变**。
+
+### 分析发布状态：区分“旧分析可用”与“新分析未发布”
+
+- `analysisPublishStatus` 的 `"pending"` 含义扩展为**“没有覆盖本训练最新事实代次”**，不再等价于
+  “从未发布”；`"failed"` 表示更新事实的分析任务失败。两个状态都可能**仍有旧分析可读**。
+- 新可选字段 `analysisAvailable`（`/v1/workouts` 的 `items[]` 与 `/v1/workouts/{id}` 的 `workout` 块）：
+  `true` = 存在指向当前 active release 的评估行（旧分析可读）。
+  - `published` ⇒ `analysisAvailable = true`，派生字段是最新结论；
+  - `pending` + `analysisAvailable = true` ⇒ **旧分析可用、新分析未发布**：详情仍 **200**，派生字段是
+    **旧分析**的取值（`currentAbility/modelVersion/...` 非 null），但**不得**当作最新结论展示；
+  - `pending` + `analysisAvailable = false` ⇒ 从未发布过分析，派生字段是 null/占位（2026-10-18 的语义）；
+  - `failed` ⇒ 更新事实的分析任务失败；旧分析（若有）仍可读，界面应显示“分析未完成”而不是“分析中”。
+- 服务端判据（读侧推断，不新增存储）：已发布评估视为最新 ⟺ 它覆盖的依赖代次 ≥ 影响本训练的最新批次代次。
+  证明点优先用当前 active release 的 `analysis_run_input_bindings.captured_dependency_generation`（v39+），
+  退化时退回 `active_model_run.activated_at` 与批次完成时刻的比较；另外，指向未覆盖批次的
+  `queued|running` 任务一律视为“新分析未发布”，`failed` 任务视为 `failed`。
+- 详情 `facts.analysisState = "analyzed"` 且 `analysis` 块仍返回（旧分析可读），与 `pending` 可同时出现；
+  “是否最新”只看 `analysisPublishStatus`。列表、详情、`/freshness` 三处由同一判据派生，必须一致。
+- 老服务端省略 `analysisAvailable` ⇒ 客户端必须把 `pending` 一律按“占位行”处理（保守，不把旧分数冒充最新）。
+
+### `GET /v1/workouts/{id}/freshness`：`deliveryState` / `analysisState` / `stabilityState`
+
+```jsonc
+{
+  "workoutId": "training_session_…",
+  "facts":   { "committedAt": "2026-10-18T12:29:38.755Z",
+               "lastBatchAt": "2026-10-18T12:31:50.405Z", "batches": 6 },
+  "analysis":{ "status": "pending", "available": true,
+               "jobId": "recompute_job_…", "publishedAt": "2026-10-18T12:31:21.265Z" },
+  "series":  [ { "metric": "heartRate", "samples": 512, "state": "present", "lastAvailableAt": null } ],
+  "deliveryState": "delivered",
+  "analysisState": "pending",
+  "stabilityState": "settling",
+  "completeness": "partial"
+}
+```
+
+- `analysis.available`（A6）：旧分析是否仍可读（语义与列表项 `analysisAvailable` 相同）；`true` 时
+  `publishedAt` 是**旧发布**时刻，`status = pending` 表示它没有覆盖最新事实代次。
+- `analysisState`：`published | pending | failed`，与 `analysis.status` **同值同源**（不要各自解释）。
+- `stabilityState`：`stable`（`facts.lastBatchAt` 距当前 ≥ 24h）| `settling`（仍可能有新批次）。
+  **24h 静默只影响本字段**，不参与 `deliveryState` / `analysisState`。
+- `deliveryState`：`delivered | partial | unknown`。服务端只能给**到达证据**（没有客户端“本次读到哪些类型”
+  的回执）：
+  - `unknown`：没有任何到达证据（`facts.batches = 0`）——“不知道”，**不得**据此显示“Apple Watch 仍在传输”；
+  - `partial`：只有窗口内记录账本、没有 workout 实体写入证据 ⇒ 数据面不完整；
+  - `delivered`：本训练实体已由成功批次交付到服务端。它**不**声称“手机已读尽”，也不声称设备具备某指标；
+    逐类型是否“应当有”留给下一版（与逐类型读取回执同批）。
+- `completeness` 语义本轮**不变**（仍 = 分析已发布 && 24h 静默）；下一版才改为
+  `deliveryState = delivered && analysisState = published`。
+- 老服务端省略三个新字段 ⇒ 客户端按可选字段处理（`nil` = 不知道，不要当作 `delivered/stable`）。
 
 ## 训练计划一致性与排期回执（2026-10-09）
 

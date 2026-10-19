@@ -9,7 +9,10 @@ final class SyncTaskStore {
     /// - 2：路线降频记忆按 scope 隔离；`sync_pending_routes` 的调度列幂等补齐。
     /// - 3（P0-4/P1-3，2026-10-18）：`sync_route_state.delivered_route_hash`（已交付轨迹摘要）
     ///   与 `sync_pending_workout_windows`（workout 级定向补齐队列）。
-    private static let schemaVersion = 3
+    /// - 4（P2-1/A3，2026-10-19）：`sync_pending_workout_windows.types_json`（逐类型补齐进度）。
+    ///   老行没有这一列 ⇒ 读侧按"全部 unknown ⇒ 未完成"处理（见 `loadWorkoutBackfillWindows`），
+    ///   方向是"多查一次"，绝不把没读过类型的行读成已完整。
+    private static let schemaVersion = 4
     private var database: OpaquePointer?
     /// 受控重开需要它：`open()` 可能被调用不止一次（见 `reopenIfUnavailable()`）。
     private let directory: URL
@@ -188,6 +191,7 @@ final class SyncTaskStore {
         if version >= Self.schemaVersion {
             return ensureRouteStateSchema(database: database)
                 && ensurePendingWorkoutWindowsTable(database: database)
+                && ensureWorkoutWindowTypesColumn(database: database)
         }
         // v1 → v2：`sync_route_state` 改用 `(scope, workout_uuid)` 复合主键。旧行不归属于
         // 任意新 scope，安全丢弃（下一次每个 workout 都会按 UNKNOWN 首查）。
@@ -196,7 +200,11 @@ final class SyncTaskStore {
         }
         // v2 → v3（P0-4/P1-3）：路线摘要列 + workout 补齐窗口表。与 v2 分开成两步，
         // 而不是把 v2 的建表一起改到 3：老设备可能停在 v1、也可能停在 v2，两条路都要能走。
-        guard migrateToVersion3(database: database) else { return false }
+        if version < 3 {
+            guard migrateToVersion3(database: database) else { return false }
+        }
+        // v3 → v4（P2-1/A3）：窗口逐类型进度列。纯追加、可空。
+        guard migrateToVersion4(database: database) else { return false }
         return true
     }
 
@@ -259,6 +267,26 @@ final class SyncTaskStore {
         return true
     }
 
+    /// v3 → v4（P2-1/A3，2026-10-19）：给 `sync_pending_workout_windows` 追加
+    /// `types_json`（逐类型补齐进度）。
+    ///
+    /// **纯追加**（列可空）：老行 = 没有任何逐类型证据 ⇒ 读侧按"全部 unknown ⇒ 未完成"
+    /// 处理，绝不按完成读（见 `loadWorkoutBackfillWindows`）。失败整段回滚，
+    /// `PRAGMA user_version` 不会被推上去。
+    private func migrateToVersion4(database: OpaquePointer) -> Bool {
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard ensurePendingWorkoutWindowsTable(database: database) else { return false }
+        guard ensureWorkoutWindowTypesColumn(database: database) else { return false }
+        guard SQLiteSupport.execute("PRAGMA user_version = 4", database: database) else { return false }
+        guard SQLiteSupport.execute("COMMIT", database: database) else { return false }
+        committed = true
+        return true
+    }
+
     private func ensureRouteStateSchema(database: OpaquePointer) -> Bool {
         SQLiteSupport.execute("""
             CREATE TABLE IF NOT EXISTS sync_route_state (
@@ -309,10 +337,13 @@ final class SyncTaskStore {
         )
     }
 
-    /// P0-4（2026-10-18）：workout 级定向补齐队列。建表是幂等的，老库升级走 v3 迁移。
+    /// P0-4（2026-10-18）：workout 级定向补齐队列。建表是幂等的，老库升级走 v3/v4 迁移。
     ///
     /// 各列语义见 `WorkoutBackfillWindow`；时间列都是 REAL（写入前必须过 `Date.canonicalForREAL`，
     /// 否则提交前回读断言会按约一半概率把成功写入判成失败，见 ADR-004 补充 C）。
+    ///
+    /// `types_json`（P2-1/A3，v4 追加）承载逐类型进度 + 最近一趟结局；**NULL = 老行/损坏**
+    /// ⇒ 读侧按"全部 unknown ⇒ 未完成"处理。它是纯追加列，对已有行无损。
     private func ensurePendingWorkoutWindowsTable(database: OpaquePointer) -> Bool {
         SQLiteSupport.execute("""
             CREATE TABLE IF NOT EXISTS sync_pending_workout_windows (
@@ -326,11 +357,36 @@ final class SyncTaskStore {
                 last_sample_count INTEGER NOT NULL,
                 stable_count INTEGER NOT NULL,
                 completed_at REAL,
+                -- P2-1/A3（v4）：逐类型补齐进度（JSON；NULL = 老行 ⇒ 全部 unknown）。
+                types_json TEXT,
                 PRIMARY KEY (scope, workout_uuid)
             );
             CREATE INDEX IF NOT EXISTS idx_pending_workout_windows_due
                 ON sync_pending_workout_windows(scope, completed_at, next_check_at);
             """, database: database)
+    }
+
+    /// P2-1（A3）：`sync_pending_workout_windows.types_json` 的**幂等补齐**。
+    ///
+    /// 判据与 `ensureDeliveredRouteHashColumn` 同源：这列是纯追加且可空，对已有行无损。
+    /// 单独抽出来是因为它同时出现在 v3→v4 迁移与每次打开（`version >= 4` 的快速路径）里 ——
+    /// 两处必须走同一个"缺哪补哪"的判定，否则升级失败的库在重新打开时会静默少一列。
+    private func ensureWorkoutWindowTypesColumn(database: OpaquePointer) -> Bool {
+        guard let statement = SQLiteSupport.prepare(
+            "PRAGMA table_info(sync_pending_workout_windows)", database: database
+        ) else { return false }
+        var columns = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let pointer = sqlite3_column_text(statement, 1) {
+                columns.insert(String(cString: pointer))
+            }
+        }
+        sqlite3_finalize(statement)
+        guard !columns.contains("types_json") else { return true }
+        return SQLiteSupport.execute(
+            "ALTER TABLE sync_pending_workout_windows ADD COLUMN types_json TEXT",
+            database: database
+        )
     }
 
     /// R07（2026-10-16）：`sync_pending_routes` 的调度列**幂等补齐**。
@@ -1545,7 +1601,7 @@ final class SyncTaskStore {
         guard isAvailable else { return [:] }
         guard let statement = prepare("""
             SELECT workout_uuid, window_start, window_end, created_at, next_check_at,
-                   attempt_count, last_sample_count, stable_count, completed_at
+                   attempt_count, last_sample_count, stable_count, completed_at, types_json
             FROM sync_pending_workout_windows WHERE scope = ?
             """) else { return [:] }
         defer { sqlite3_finalize(statement) }
@@ -1559,6 +1615,31 @@ final class SyncTaskStore {
             let uuid = String(cString: uuidPointer)
             let completedAt: Date? = sqlite3_column_type(statement, 8) == SQLITE_NULL
                 ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 8))
+            // P2-1/A3：逐类型进度。**NULL / 解不开 / 未知版本 ⇒ 全部 unknown。**
+            //
+            // 🔴 此时必须把 `completedAt` 清掉：老行的"完成"来自"整窗总数两次相同"这条
+            // 已被 A3 判定不可信的判据，而我们手上没有任何逐类型证据证明它真的补齐了。
+            // 读成**未完成** = 下一轮重查一次；读成完成 = 迟到类型永久缺失（方向相反）。
+            // 新行一定带 `types_json`（见 `upsertWorkoutBackfillWindows`），所以正常路径
+            // 不会被误清。
+            let typesData: Data?
+            if sqlite3_column_type(statement, 9) == SQLITE_NULL {
+                typesData = nil
+            } else if let typesPointer = sqlite3_column_text(statement, 9) {
+                typesData = Data(String(cString: typesPointer).utf8)
+            } else {
+                typesData = nil
+            }
+            let decodedProgress = WorkoutBackfillScheduler.decodeProgress(typesData)
+            let attemptCount = Int(sqlite3_column_int64(statement, 5))
+            // 降级回滚的识别（见 `WorkoutBackfillScheduler.ProgressPayload` 的注释）：
+            // 旧版本 App 不写 `types_json`，它退回后改的是 `attempt_count`/`completed_at`，
+            // 这份 JSON 会**原样留下**。列值与 JSON 里记录的值对不上 ⇒ 这行被旧写入者改过
+            // ⇒ 按 unknown ⇒ 未完成处理（重查一次），绝不把旧版本的 completed 当新证据。
+            let progress = decodedProgress.flatMap { payload in
+                payload.attemptCount == attemptCount && payload.completedAt == completedAt
+                    ? payload : nil
+            }
             result[uuid] = WorkoutBackfillWindow(
                 workoutUUID: uuid,
                 windowStart: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
@@ -1568,7 +1649,9 @@ final class SyncTaskStore {
                 attemptCount: Int(sqlite3_column_int64(statement, 5)),
                 lastSampleCount: Int(sqlite3_column_int64(statement, 6)),
                 stableCount: Int(sqlite3_column_int64(statement, 7)),
-                completedAt: completedAt
+                types: progress?.types ?? [:],
+                lastPassOutcome: progress?.lastPassOutcome,
+                completedAt: progress == nil ? nil : completedAt
             )
         }
     }
@@ -1579,6 +1662,8 @@ final class SyncTaskStore {
     /// 时间列必须过 `Date.canonicalForREAL` 再写：`Date` ↔ `timeIntervalSince1970` 不是双射
     /// （实测约一半有损），而下面的回读断言比对的是整个 `WorkoutBackfillWindow` ——
     /// 不规范化就会按约一半概率把一次成功写入判成失败（ADR-004 补充 C 的同一条坑）。
+    /// 逐类型进度里的 `lastObservedAt` 走**同一份**规范化（它编在 JSON 里，见
+    /// `WorkoutBackfillScheduler.encodeProgress`）。
     ///
     /// 登记时机：**导出发现变更 workout 之后、任务行持久化锚点之前**（先表后锚，与
     /// `upsertPendingRoutes` 同一纪律）。失败方向：多登记一条窗口 ⇒ 下批多查一次，安全。
@@ -1599,6 +1684,12 @@ final class SyncTaskStore {
                 attemptCount: window.attemptCount,
                 lastSampleCount: window.lastSampleCount,
                 stableCount: window.stableCount,
+                types: window.types.mapValues { progress in
+                    var normalized = progress
+                    normalized.lastObservedAt = progress.lastObservedAt?.canonicalForREAL
+                    return normalized
+                },
+                lastPassOutcome: window.lastPassOutcome,
                 completedAt: window.completedAt?.canonicalForREAL
             )
         }
@@ -1612,9 +1703,9 @@ final class SyncTaskStore {
         guard let statement = prepare("""
             INSERT INTO sync_pending_workout_windows(
                 scope, workout_uuid, window_start, window_end, created_at, next_check_at,
-                attempt_count, last_sample_count, stable_count, completed_at
+                attempt_count, last_sample_count, stable_count, completed_at, types_json
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(scope, workout_uuid) DO UPDATE SET
                 window_start = excluded.window_start,
                 window_end = excluded.window_end,
@@ -1622,12 +1713,20 @@ final class SyncTaskStore {
                 attempt_count = excluded.attempt_count,
                 last_sample_count = excluded.last_sample_count,
                 stable_count = excluded.stable_count,
-                completed_at = excluded.completed_at
+                completed_at = excluded.completed_at,
+                types_json = excluded.types_json
             """) else { return false }
         defer { sqlite3_finalize(statement) }
         for record in records {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
+            // 逐类型进度：**总是写**（哪怕是空进度），这样"新行"与"老行"在盘上可区分 ——
+            // 老行是 NULL，读侧据此清掉老判据留下的 completedAt（见 load 的注释）。
+            guard let encodedTypes = WorkoutBackfillScheduler.encodeProgress(record),
+                  let typesJSON = String(data: encodedTypes, encoding: .utf8) else {
+                lastError = "workout 补齐窗口的逐类型进度无法编码，本次提交已回滚。"
+                return false
+            }
             // `created_at` 刻意**不**在 UPSERT 里更新：它是 7 天上限的起点，重开窗口也不刷新
             // （见 `WorkoutBackfillScheduler.register` 的形态 3）。
             guard SQLiteSupport.bind(scope, to: statement, at: 1),
@@ -1639,7 +1738,8 @@ final class SyncTaskStore {
                   sqlite3_bind_int64(statement, 7, Int64(record.attemptCount)) == SQLITE_OK,
                   sqlite3_bind_int64(statement, 8, Int64(record.lastSampleCount)) == SQLITE_OK,
                   sqlite3_bind_int64(statement, 9, Int64(record.stableCount)) == SQLITE_OK,
-                  bindOptionalReal(record.completedAt, to: statement, at: 10) else {
+                  bindOptionalReal(record.completedAt, to: statement, at: 10),
+                  SQLiteSupport.bind(typesJSON, to: statement, at: 11) else {
                 fail("workout windows bind"); return false
             }
             guard sqlite3_step(statement) == SQLITE_DONE else {

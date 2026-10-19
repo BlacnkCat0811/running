@@ -31,6 +31,11 @@ enum RaiStartup {
     /// 前台当场跑 / 后台记下意图、排一轮执行（立刻或延后）/ 未绑定目标才是真的不值得记。
     @MainActor
     static func registerSyncEntryPoints(healthSync: HealthKitSync, session: ServerSession) {
+        // 🔴 A8（2026-10-19）：**注册观察者之前**先把会话目标投影给观察者回调。
+        // 后台冷启动的第一次投递可能发生在任何一次同步（`performSync` / 恢复上下文）之前，
+        // 而回调只能在已发布的投影上落耐久意图；不先发布，那一代投递就落 `.noTarget`
+        // （A8 残余窗口）。这里只发布目标、不写意图 —— 写意图会凭空造出一条待跑变化。
+        healthSync.publishObserverTarget(for: session.serverURL)
         healthSync.startObservingHealthChanges { [weak healthSync, weak session] in
             guard let healthSync, let session else { return }
             // 按**本次会话的服务端**现读，不用全局展示标志：那个标志属于最后一次写它的那次同步，

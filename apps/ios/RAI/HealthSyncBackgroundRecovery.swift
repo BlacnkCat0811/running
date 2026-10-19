@@ -220,7 +220,13 @@ nonisolated enum HealthSyncBackgroundRecovery {
 
 /// 后台意图的生产存储器。使用者必须传 URL scope；确认时严格使用 observation 自带的 scope，
 /// 因而切换目标 URL 后不可能误删另一目标的意图。
-struct HealthSyncBackgroundIntentStore {
+///
+/// `nonisolated`：A8 之后 `record(scope:)` 有两个调用上下文 —— MainActor 上的派发路径，以及
+/// **HealthKit 私有队列**上的观察者回调（经 `HealthSyncObserverIntentChannel`）。默认隔离
+/// （`-default-isolation MainActor`）会把它算成 MainActor 类型，于是回调那条路只能在
+/// "把 `completion()` 推后"与"跨隔离读状态"之间二选一 —— 两者都不可接受。类型本身没有可变
+/// 状态（`UserDefaults` 是线程安全的，各调用点写的是**不同 key**）。
+nonisolated struct HealthSyncBackgroundIntentStore {
     private let userDefaults: UserDefaults
     private let baseKey: String
 
@@ -231,8 +237,22 @@ struct HealthSyncBackgroundIntentStore {
 
     func storageKey(scope: String) -> String { "\(baseKey).\(scope)" }
 
-    func record(scope: String, generation: String = UUID().uuidString) {
-        userDefaults.set(generation, forKey: storageKey(scope: scope))
+    /// 写入一条后台意图，并**回读校验**它确实在当前默认域里读得回来。
+    ///
+    /// 🔴 为什么要回读（A8，2026-10-19）：`UserDefaults.set` 不抛错、也没有返回值，观察者
+    /// 回调里"这次写到底成没成"否则无从判断 —— 而 A8 要的正是"写失败必须被分类记录，
+    /// 不许静默吞掉"。一次 `set` + 一次 `get` 仍然是 O(1)，不遍历、不编码、不 `synchronize()`。
+    ///
+    /// ⚠️ 能证明的边界：回读只证明"本进程的默认域里这份代次可见"—— 而观察者之后、导出
+    /// 确认时读的正是同一份默认域。跨进程耐久性由 cfprefsd 承担（与既有意图写同一档）；
+    /// 要更强只能 `synchronize()` 整域同步落盘，那与"回调里有上限的同步写"冲突
+    /// （见 `HealthSyncObserverIntentHandoff`）。
+    @discardableResult
+    func record(scope: String, generation: String = UUID().uuidString) -> Bool {
+        let key = storageKey(scope: scope)
+        userDefaults.set(generation, forKey: key)
+        return HealthSyncBackgroundRecovery.intentGeneration(from: userDefaults.object(forKey: key))
+            == generation
     }
 
     func observe(scope: String) -> HealthSyncBackgroundRecovery.IntentObservation? {
@@ -259,6 +279,220 @@ struct HealthSyncBackgroundIntentStore {
         ) else { return false }
         userDefaults.removeObject(forKey: key)
         return true
+    }
+}
+
+/// 🔴 A8（2026-10-19 复核）：`HKObserverQuery` 回调里"**先落耐久意图、再 `completion()`**"的判据。
+///
+/// 缺陷形态（审计 A8）：回调原先先 `completion()`、再 `Task { await onObserverChange?() }`。
+/// 若进程在这两步之间被系统结束，HealthKit 已经收到"这次投递处理完了"的回执，而本地没有留下
+/// 这次变化的任何耐久痕迹 —— 这次唤醒等于没有发生过（观察者投递不会被重放），那批健康数据
+/// 要等**下一次**投递才有人管。`SyncDeliveryPolicy` 那条"未绑定是唯一不记意图的分支"管的是
+/// 它**之后**的异步派发路径，管不到这个窗口：那一步自己就要先跨一次 `Task` 与 MainActor。
+///
+/// 两条硬约束（执行者是 `BackgroundSyncPolicyRegression`）：
+///
+///   1. **顺序**：耐久写一定在 `completion()` 之前；`completion()` **恰好一次**，且**每条分支**
+///      （写失败 / 还没有目标 / scope 非法）都必须调用它 —— HealthKit 连续 3 次收不到会**永久**
+///      停掉这个类型的投递，而且毫无报错。
+///   2. **有界**：一次投递最多一次 `UserDefaults.set` + 一次回读；不遍历、不编码大对象、
+///      不 `synchronize()`、失败**不重试**。加锁、哈希、磁盘遍历都不在这条路上。
+///
+/// ⚠️ Apple 的合同是"处理完这次新数据后调用 completion"，并没有要求 completion 是第一句。
+/// 真正不能做的是让 completion 等导出（秒到分钟级）—— 这里等的是微秒级的默认域写入。
+nonisolated enum HealthSyncObserverIntentHandoff {
+    /// 本次投递的意图落点。**每个分支都要留痕**：成功靠默认域里的代次（导出时读得到），
+    /// 失败靠 `HealthSyncObserverIntentChannel` 的分类计数 + `[RAI]` 日志 —— 观察者回调没有
+    /// 返回值，静默吞掉就等于"这次唤醒无痕消失"，而那正是本节要消灭的形态。
+    enum Outcome: Equatable, Sendable {
+        /// 已按 `scope` 落了一条耐久意图（代次由 store 生成/校验）。
+        case recorded(scope: String)
+        /// 进程里还没有任何"当前导出目标"（例如从未同步过的全新安装）。
+        /// 没有目标 ⇒ 意图没有消费者可查，与 `SyncDeliveryPolicy` 的 `.ignore` 同一条理由。
+        case noTarget
+        /// 耐久痕迹没有落地。分类见 `Failure`。
+        case failed(Failure)
+
+        /// 写失败的两类成因。每一类都意味着"这次唤醒的持久痕迹没了"，处置却不同：
+        /// `writeNotVerified` 要盯默认域（受保护数据锁定 / 容量），`scopeUnusable` 是代码
+        /// 把坏值投进了投影 —— 静默写下去只会得到一条没人读的死 key。
+        enum Failure: String, CaseIterable, Equatable, Sendable {
+            /// 写完读不回来：默认域拒绝这次写入。
+            case writeNotVerified
+            /// 目标 scope 不是一个可用的 key（空 / 超长 / 含控制字符或空白）。
+            case scopeUnusable
+        }
+    }
+
+    /// scope 能不能当一个 key 后缀。**刻意不钉死 24 位**：长度与算法是
+    /// `HealthKitSync.urlScope(for:)`（sha256 前 24 位十六进制）的职责，在这里再写一个 24
+    /// 就有两份语义、迟早分叉。这里只钉"能安全拼进 UserDefaults key"这件事；
+    /// 上限 64 只为不让一个坏值变成一条超长 key（列出的合法值里没有超过 24 的）。
+    ///
+    /// 🔴 为什么非法 scope 要单独分类、而不是"写进去算了"：空 / 含空白 / 超长的 scope 写进去
+    /// 就是一条**没有任何消费者**的死 key —— 现象与"这次唤醒被丢了"完全一样，还多一条永远
+    /// 清不掉的残留。宁可在这里记一笔 `scopeUnusable`。
+    static func isUsableScope(_ scope: String) -> Bool {
+        guard !scope.isEmpty, scope.utf8.count <= maxScopeBytes else { return false }
+        // 只接受可见 ASCII：合法的 scope 是十六进制摘要，不含空白也不需要任何转义。
+        return scope.utf8.allSatisfy { $0 > 0x20 && $0 < 0x7F }
+    }
+
+    /// `isUsableScope` 的长度上界（字节）。远大于生产值（24），只为挡住坏值。
+    static let maxScopeBytes = 64
+
+    /// 判据①②的生产实现：**先 record、再 completion()**。
+    ///
+    /// `record` 是注入 seam：生产是 `HealthSyncBackgroundIntentStore.record(scope:)`
+    /// （一次 `set` + 一次回读），回归里是"记一笔并返回 false/true"，于是"顺序"与"写失败仍要
+    /// 回执"这两条判据可以在**不碰真实 HealthKit、也不污染真实默认域**的条件下被执行。
+    ///
+    /// 🔴 本函数里 `complete()` 只有一个调用点，且在所有分支之后 —— 这就是"任何失败都不许
+    /// 吞掉回执"的形态。改回"先 complete 再 record"会让 A8 的窗口原样长回来，而顺序判据
+    /// （回归里在 `complete` 内部读意图）会立刻转红。
+    @discardableResult
+    static func recordThenComplete(
+        scope: String?,
+        record: (String) -> Bool,
+        complete: () -> Void
+    ) -> Outcome {
+        let outcome = recordOutcome(scope: scope, record: record)
+        complete()
+        return outcome
+    }
+
+    /// 只做"记"、不碰 completion。拆出来是为了让上面的顺序一眼可见：
+    /// 唯一的 `complete()` 在它返回**之后**，中间没有任何分支能绕开它。
+    static func recordOutcome(scope: String?, record: (String) -> Bool) -> Outcome {
+        guard let scope else { return .noTarget }
+        guard isUsableScope(scope) else { return .failed(.scopeUnusable) }
+        return record(scope) ? .recorded(scope: scope) : .failed(.writeNotVerified)
+    }
+
+    /// 失败/空目标的日志行（**唯一出处**，分类与计数都从这一处出）。
+    ///
+    /// 带**累计次数**：写失败若持续发生（默认域长期不可用），一行行一模一样的日志会淹没在
+    /// 噪声里，而递增的 n 让人一眼看出"这不是偶发"。成功**不留**日志：耐久痕迹本身就是回执。
+    static func reportLine(for outcome: Outcome, failures: Int) -> String? {
+        switch outcome {
+        case .recorded:
+            return nil
+        case .noTarget:
+            return "an observer delivery arrived before any export target was published; "
+                + "its intent has no scope to land on, so the completion window stays open"
+        case .failed(let failure):
+            return "observer intent was not persisted (\(failure.rawValue), n=\(failures)): "
+                + "completion was still reported to HealthKit"
+        }
+    }
+}
+
+/// `HealthSyncObserverIntentHandoff` 的**生产接线**：目标投影 + 分类计数 + `[RAI]` 日志。
+///
+/// 为什么要有"目标投影"这一层：观察者回调跑在 HealthKit 的私有队列上，而"当前服务端 ⇒
+/// urlScope"是 `HealthKitSync` 的 MainActor 状态（`activeServerURL` / `activeScope`）。
+/// 回调里既不能 `await`（`completion()` 必须同步跟上），也不该跨隔离去读那份状态。
+/// 投影里存的是**同一个 urlScope 字符串**（唯一生产者是 `HealthKitSync.urlScope(for:)`），
+/// 所以"观察者写的 key"与"导出/确认读的 key"同源同形 —— 不可能出现两份哈希算法各算一遍。
+///
+/// 线程安全：`publish` 在 MainActor 上调，`currentScope` / 记账在 HealthKit 队列上调，
+/// 全部走同一把 `NSLock`（O(1)，与 `RaiBackgroundUploadSession` 同一手法）。
+/// 因此这里标 `@unchecked Sendable`：那把锁就是这份承诺本身。
+nonisolated final class HealthSyncObserverIntentChannel: @unchecked Sendable {
+    private let lock = NSLock()
+    private var scope: String?
+    private var counts: [HealthSyncObserverIntentHandoff.Outcome.Failure: Int] = [:]
+    private var noTargetCount = 0
+    private var reportedNoTarget = false
+    private let record: (String) -> Bool
+    private let report: (String) -> Void
+
+    /// 生产与回归共用这一个构造：`record` 是唯一的写入缝。
+    init(record: @escaping (String) -> Bool, report: @escaping (String) -> Void = { _ in }) {
+        self.record = record
+        self.report = report
+    }
+
+    /// 生产构造：写的是后台意图存储（一次 `set` + 一次回读）。
+    convenience init(
+        baseKey: String,
+        userDefaults: UserDefaults = .standard,
+        report: @escaping (String) -> Void = { _ in }
+    ) {
+        let store = HealthSyncBackgroundIntentStore(userDefaults: userDefaults, baseKey: baseKey)
+        self.init(record: { store.record(scope: $0) }, report: report)
+    }
+
+    /// 🔴 目标投影的**唯一写点**：与 `activeServerURL` / `activeScope` 在同一处更新
+    /// （`HealthKitSync.performSync` / `restoreBackgroundContext` / `recordBackgroundIntent`）。
+    func publish(scope newValue: String?) {
+        lock.lock()
+        scope = newValue
+        lock.unlock()
+    }
+
+    /// 回调在 `completion()` 之前同步读到的那一个 scope。`nil` = 本进程还没有目标。
+    var currentScope: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return scope
+    }
+
+    /// 分类失败计数（诊断与回归用）。键是分类，值是本进程累计次数。
+    var failures: [HealthSyncObserverIntentHandoff.Outcome.Failure: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts
+    }
+
+    /// "还没有目标"的投递次数（本进程累计）。它是一项**已知窗口**的度量，不是错误。
+    var noTargets: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return noTargetCount
+    }
+
+    /// 一次投递的交接：**先 record、再 completion()**（判据在 `HealthSyncObserverIntentHandoff`）。
+    ///
+    /// 记账/日志刻意放在 `completion()` **之后**：诊断绝不挡在回执前面。写失败时唯一的痕迹
+    /// 就是这里的一条 `[RAI]` 日志 + 分类计数。
+    @discardableResult
+    func recordThenComplete(complete: () -> Void) -> HealthSyncObserverIntentHandoff.Outcome {
+        let outcome = HealthSyncObserverIntentHandoff.recordThenComplete(
+            scope: currentScope,
+            record: record,
+            complete: complete
+        )
+        note(outcome)
+        return outcome
+    }
+
+    private func note(_ outcome: HealthSyncObserverIntentHandoff.Outcome) {
+        var failureCount = 0
+        var shouldReport = true
+        lock.lock()
+        switch outcome {
+        case .recorded:
+            shouldReport = false
+        case .noTarget:
+            noTargetCount += 1
+            // 每个进程只报一次：全新安装的每次投递都会落在这里，逐条报会把日志刷满；
+            // 但"一次都不报"等于把一个已知窗口藏起来 —— 而这一条正是 A8 的剩余风险。
+            shouldReport = !reportedNoTarget
+            reportedNoTarget = true
+        case .failed(let failure):
+            counts[failure, default: 0] += 1
+            failureCount = counts[failure] ?? 0
+        }
+        lock.unlock()
+        // 日志在锁外发：拼字符串 + 写诊断通道不是 O(1)，而 MainActor 那边的 `publish`
+        // 要的是同一把锁 —— 不能拿回执的时效去换一行日志。
+        guard shouldReport,
+              let line = HealthSyncObserverIntentHandoff.reportLine(
+                  for: outcome, failures: failureCount
+              )
+        else { return }
+        report(line)
     }
 }
 

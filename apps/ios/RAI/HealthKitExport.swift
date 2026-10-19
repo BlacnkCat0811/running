@@ -1505,14 +1505,17 @@ nonisolated enum HealthKitExport {
         // 手机里落"的那个窗口（2026-10-18 实测：6km 跑步跑完 3 分钟只到了 4 类样本，
         // speed/power/cadence 等是后续 36–72 h 才陆续到达的）。
         //
-        // 三条纪律：
+        // 四条纪律：
         //   ① **全类型**：遍历所有 quantity descriptors（不只是 4 类跑步动态）；
         //   ② **有界 + 独立份额**（25%，`workoutWindowShare`）：单窗口单类型 limit 1500，
         //      单批最多 `passBatchLimit` 条窗口，页大小按剩余份额收窄 —— 装不下就整页不写、
-        //      该窗口本轮**不记账**（下批重试），绝不把正式流饿死；
+        //      该窗口本轮**不推进稳定计数**（下批重试），绝不把正式流饿死；
         //   ③ **不推进正式 anchor**：用 `recentSamples`（无锚点 + 时间谓词）查询，只写载荷。
         //      与 48h 窗口/正式段可能写出同一批样本是**有意接受**的：服务端按
         //      `RAIHealthKitSampleUUID` last-wins 幂等，而这条通道有 7 天上限与重试序列。
+        //   ④ **逐类型记账**（P2-1/A3）：把每个类型"读到几条 / 页上限 / 是否授权失败"当事实
+        //      报给 `WorkoutBackfillScheduler`，由它判"稳定"与"收口"。返回条数命中页上限
+        //      ⇒ 视为**可能截断**（A2 分页未实现，不得假设 EOF）。
         let workoutWindowShare = DirectSyncBatchBudget.workoutWindowShare(of: budget)
         var workoutWindowUpdates: [WorkoutBackfillWindow] = []
         var workoutWindowShareBytes = 0
@@ -1520,12 +1523,19 @@ nonisolated enum HealthKitExport {
         // 只对 quantity 类型做窗口查询：睡眠是分类样本、与"一次跑步的时序"无关。
         let windowQuantityDescriptors: [(HKSampleType, HKUnit?, String, String?)] =
             descriptors.filter { $0.1 != nil }
+        // P2-1（A3）：本窗口**已登记**的类型 = 这次要补的全部 quantity 类型。
+        // 它决定 unseen：登记过却从未读到样本的类型不允许被其它类型的正数"代为完成"，
+        // 只能等 7 天到期（迟到的类型因此仍有整段窗口时间被补齐的机会）。
+        let windowRegisteredTypes: [String] = windowQuantityDescriptors.map { $0.2 }
         for window in WorkoutBackfillScheduler.due(workoutWindows, now: now) {
             // 份额已耗尽 ⇒ 本批不再处理更多窗口（它们保持到期状态，下批优先）。
             guard workoutWindowShareBytes < workoutWindowShare.maxBytes,
                   workoutWindowShareRecords < workoutWindowShare.maxRecords else { break }
-            var observedSamples = 0
-            var windowCompleted = true
+            // P2-1（A3）：**逐类型**观测。调用方只报事实（读到几条、页上限多少、是否授权失败），
+            // "算不算稳定/算不算完成"全部由 `WorkoutBackfillScheduler` 的纯函数判定 ——
+            // 判据住在 HealthKitExport 里就没有任何回归能执行它。
+            var observations: [String: TypeObservation] = [:]
+            var windowCut = false
             for (type, unit, xmlType, xmlUnit) in windowQuantityDescriptors {
                 try Task.checkCancellation()
                 let estimate = workoutWindowShareRecords > 0
@@ -1536,7 +1546,7 @@ nonisolated enum HealthKitExport {
                     shareRecordsLeft: workoutWindowShare.maxRecords - workoutWindowShareRecords,
                     estimatePerRecord: estimate
                 )
-                guard pageLimit > 0 else { windowCompleted = false; break }
+                guard pageLimit > 0 else { windowCut = true; break }
                 let predicate = HKQuery.predicateForSamples(
                     withStart: window.windowStart, end: window.windowEnd, options: .strictStartDate
                 )
@@ -1544,46 +1554,82 @@ nonisolated enum HealthKitExport {
                     let samples: [HKSample] = try await recentSamples(
                         type: type, predicate: predicate, limit: pageLimit, store: store
                     )
-                    observedSamples += samples.count
-                    if !samples.isEmpty {
-                        let page = try renderedRecordPage(
-                            added: samples, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
+                    if samples.isEmpty {
+                        // 空页是合法观测（0 条）。它**不是**"稳定"证据 —— 样本可能还在手表上，
+                        // 所以 `afterPass` 对 0 条永远清零稳定计数，只能等 7 天到期。
+                        observations[xmlType] = TypeObservation(
+                            observed: 0, delivered: 0, pageLimit: pageLimit
                         )
-                        // 写前判定（与两个子通道同一个 `acceptsWithin`）：整页放不下 ⇒
-                        // 本窗口本轮**不记账**（样本已查询但不写，下批重来；服务端幂等）。
-                        guard DirectSyncBatchBudget.acceptsWithin(
-                            budget: budget,
-                            share: workoutWindowShare,
-                            shareBytesUsed: workoutWindowShareBytes,
-                            shareRecordsUsed: workoutWindowShareRecords,
-                            xmlBytes: xml.offsetInFile, records: count,
-                            pageBytes: page.data.count, pageRecords: page.recordCount
-                        ) else { windowCompleted = false; break }
-                        try xml.write(contentsOf: page.data)
-                        count += page.recordCount
-                        workoutWindowShareBytes += page.data.count
-                        workoutWindowShareRecords += page.recordCount
-                        writtenTypes.insert(xmlType)
+                        continue
                     }
+                    let page = try renderedRecordPage(
+                        added: samples, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
+                    )
+                    // 写前判定（与两个子通道同一个 `acceptsWithin`）：整页放不下 ⇒
+                    // 本窗口本轮**不记账**（样本已查询但不写，下批重来；服务端幂等）。
+                    guard DirectSyncBatchBudget.acceptsWithin(
+                        budget: budget,
+                        share: workoutWindowShare,
+                        shareBytesUsed: workoutWindowShareBytes,
+                        shareRecordsUsed: workoutWindowShareRecords,
+                        xmlBytes: xml.offsetInFile, records: count,
+                        pageBytes: page.data.count, pageRecords: page.recordCount
+                    ) else { windowCut = true; break }
+                    try xml.write(contentsOf: page.data)
+                    count += page.recordCount
+                    workoutWindowShareBytes += page.data.count
+                    workoutWindowShareRecords += page.recordCount
+                    writtenTypes.insert(xmlType)
+                    // 🔴 A2 分页尚未实现：返回条数 == 本次页上限 ⇒ **可能被截断**，
+                    // 不得把"这一页装满了"读成 EOF（`TypeObservation.pageComplete` 负责判）。
+                    observations[xmlType] = TypeObservation(
+                        observed: samples.count,
+                        delivered: page.recordCount,
+                        pageLimit: pageLimit
+                    )
                 } catch {
-                    // 与类型循环同口径：授权/无数据 ⇒ 该类型按"空"处理（其余类型照查），
-                    // 库不可达 ⇒ 抛（绝不把锁屏当成空窗口）。
-                    if isAuthorizationError(error) || isNoDataError(error) { continue }
+                    // 与类型循环同口径，但**区分"授权失败"与"没有数据"**：
+                    // - 授权失败 = "不知道"（HealthKit 对未授权读报错/返空），不能读成空页，
+                    //   否则该类型会被误判 pageComplete ⇒ 假收口；
+                    // - 无数据 = 合法空观测（页读到了，只是 0 条）；
+                    // - 库不可达 ⇒ 抛（绝不把锁屏当成空窗口）。
+                    if isAuthorizationError(error) {
+                        observations[xmlType] = TypeObservation(
+                            observed: 0, delivered: 0, pageLimit: pageLimit, unauthorized: true
+                        )
+                        continue
+                    }
+                    if isNoDataError(error) {
+                        observations[xmlType] = TypeObservation(
+                            observed: 0, delivered: 0, pageLimit: pageLimit
+                        )
+                        continue
+                    }
                     if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
                     throw error
                 }
             }
-            guard windowCompleted else {
-                // 预算/份额把这一趟切断了：**不记账**（下批从同一窗口重来）。
-                // 已写出的样本不回滚（载荷是追加写的），服务端按 UUID 幂等吸收重复。
+            if windowCut {
+                // 预算/份额把这一趟切断了：**不推进稳定计数**（下批从同一窗口重来）。
+                // 但把已经读到的逐类型实况与结局记下来 —— 这是"份额耗尽后仍有进展、
+                // 到期有原因"的载体；已写出的样本不回滚（载荷是追加写的，服务端按 UUID
+                // 幂等吸收重复）。
+                workoutWindowUpdates.append(
+                    WorkoutBackfillScheduler.afterBlockedPass(
+                        window, observations: observations, now: now
+                    )
+                )
                 break
             }
             let updated = WorkoutBackfillScheduler.afterPass(
-                window, observedSamples: observedSamples, now: now
+                window,
+                observations: observations,
+                registeredTypes: windowRegisteredTypes,
+                now: now
             )
             workoutWindowUpdates.append(updated)
             channelCounts.workoutWindows += 1
-            channelCounts.workoutWindowRecords += observedSamples
+            channelCounts.workoutWindowRecords += observations.values.reduce(0) { $0 + $1.observed }
             if updated.isCompleted { channelCounts.workoutWindowsCompleted += 1 }
         }
 

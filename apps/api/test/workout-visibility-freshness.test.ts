@@ -139,40 +139,74 @@ function addStrideBatch(path: string): void {
  * 发布分析（模拟写侧的发布事务）：feature_run → workout_feature → model_run →
  * ability_assessment → active_model_run 指针。行按生产 DDL 的最小必填集插入，
  * **不**跑评分（本文件只证明读侧怎么解释已发布状态，不重复验证模型）。
+ *
+ * A6（2026-10-19）：`capturedDependencyGeneration` 传入时同时写 v39 的
+ * `analysis_run_input_bindings`（"这一版发布吃到了哪个依赖代次"的硬证据）；
+ * 不传则模拟**老 release**（没有绑定行 ⇒ 读侧退回激活时刻的时间证明）。
+ * `suffix` 让同一个测试里发布第二版（新 run 的评估行 + 指针翻转）。
  */
-function publishAnalysis(path: string): void {
+function publishAnalysis(path: string, options: {
+  suffix?: string;
+  activatedAt?: string;
+  currentAbility?: number;
+  capturedDependencyGeneration?: number;
+  jobId?: string;
+} = {}): void {
+  const suffix = options.suffix ?? "fixture";
+  const activatedAt = options.activatedAt ?? "2026-10-18T12:31:21.265Z";
+  const evaluatedAt = "2026-10-18T12:31:16.543Z";
+  const currentAbility = options.currentAbility ?? 61.5;
+  const jobId = options.jobId ?? ANALYSIS_JOB;
+  const featureRunId = `feature_run_${suffix}`;
+  const featureId = `workout_feature_${suffix}`;
+  const modelRunId = `model_run_${suffix}`;
   const database = new DatabaseSync(path);
   try {
     database.prepare(`INSERT INTO feature_runs
       (id, dataset_version, canonical_contract_version, feature_schema_version,
        feature_config_json, feature_config_hash, status)
-      VALUES ('feature_run_fixture', 'dataset_fixture', 'v1', 'v1', '{}', 'hash', 'succeeded')`).run();
+      VALUES (?, 'dataset_fixture', 'v1', 'v1', '{}', 'hash', 'succeeded')`).run(featureRunId);
     database.prepare(`INSERT INTO workout_features
       (id, feature_run_id, training_session_id, canonical_workout_id, workout_start_at,
        duration_seconds, distance_km, average_heart_rate_bpm, heart_rate_sample_count,
        heart_rate_coverage, route_point_count, route_quality, source_confidence, session_type,
        session_type_source, eligibility_status, quality_score, missing_reasons_json,
        features_json, provenance_json)
-      VALUES ('workout_feature_fixture', 'feature_run_fixture', ?, ?, ?, 2528, 6.0125, 153.4, 3,
+      VALUES (?, ?, ?, ?, ?, 2528, 6.0125, 153.4, 3,
         0.8, 0, NULL, 0.9, 'easy', 'auto', 'eligible', 0.82, '[]', '{}', '{}')`)
-      .run(SESSION_ID, WORKOUT_ID, STARTED_AT);
+      .run(featureId, featureRunId, SESSION_ID, WORKOUT_ID, STARTED_AT);
     database.prepare(`INSERT INTO model_runs
       (id, feature_run_id, dataset_version, model_version, model_config_json, model_config_hash,
        evaluated_at, status)
-      VALUES ('model_run_fixture', 'feature_run_fixture', 'dataset_fixture', 'rai-model-config-fixture',
-        '{}', 'hash', '2026-10-18T12:31:16.543Z', 'succeeded')`).run();
+      VALUES (?, ?, 'dataset_fixture', 'rai-model-config-fixture',
+        '{}', 'hash', ?, 'succeeded')`).run(modelRunId, featureRunId, evaluatedAt);
     database.prepare(`INSERT INTO ability_assessments
       (id, model_run_id, feature_id, training_session_id, sequence_number, assessment_status,
        current_ability, efficiency_score, pace_score, cardio_score, stability_score, recovery_score,
        effective_weights_json, confidence, confidence_factors_json, workout_contribution,
        updated_true_ability, explanation_codes_json, explanation_json, assessed_at)
-      VALUES ('assessment_fixture', 'model_run_fixture', 'workout_feature_fixture', ?, 1, 'eligible',
-        61.5, 60, 62, 58, 55, 50, '{"pace":0.4}', 0.72, '{}', 0.3, 1, '[]', '{}',
-        '2026-10-18T12:31:16.543Z')`).run(SESSION_ID);
+      VALUES (?, ?, ?, ?, 1, 'eligible',
+        ?, 60, 62, 58, 55, 50, '{"pace":0.4}', 0.72, '{}', 0.3, 1, '[]', '{}',
+        ?)`).run(`assessment_${suffix}`, modelRunId, featureId, SESSION_ID, currentAbility, evaluatedAt);
     database.prepare(`INSERT INTO active_model_run (singleton, model_run_id, activated_at)
-      VALUES (1, 'model_run_fixture', '2026-10-18T12:31:21.265Z')`).run();
+      VALUES (1, ?, ?)
+      ON CONFLICT(singleton) DO UPDATE SET model_run_id = excluded.model_run_id,
+        activated_at = excluded.activated_at`).run(modelRunId, activatedAt);
     database.prepare("UPDATE recompute_jobs SET status = 'succeeded', completed_at = ? WHERE id = ?")
-      .run("2026-10-18T12:31:21.669Z", ANALYSIS_JOB);
+      .run(activatedAt, jobId);
+    if (options.capturedDependencyGeneration !== undefined) {
+      // v39 输入绑定：证明这一版发布实际捕获（并覆盖）到的依赖代次。
+      database.prepare(`INSERT INTO analysis_run_input_bindings
+        (run_id, job_id, scope, dataset_version, captured_raw_generation,
+         captured_dependency_generation, target_raw_generation, target_dependency_generation,
+         incumbent_release_id, timezone_identifier, override_digest, config_digest, cutoff_at, input_digest)
+        VALUES (?, ?, 'direct-sync', 'dataset_fixture', ?, ?, NULL, NULL, NULL, 'Asia/Shanghai',
+          'override-digest', 'config-digest', ?, 'input-digest')
+        ON CONFLICT(run_id) DO UPDATE SET
+          captured_dependency_generation = excluded.captured_dependency_generation`)
+        .run(modelRunId, jobId, options.capturedDependencyGeneration, options.capturedDependencyGeneration,
+          evaluatedAt);
+    }
   } finally {
     database.close();
   }
@@ -268,7 +302,8 @@ test("P0-3：freshness 按事实批次/分析任务/每指标样本数回答，s
       assert.equal(freshness.facts.lastBatchAt, FACTS_BATCH_COMPLETED_AT);
       assert.equal(freshness.facts.batches, 1);
       assert.deepEqual(freshness.analysis, {
-        status: "pending", jobId: ANALYSIS_JOB, publishedAt: null
+        // A6：没有评估行 ⇒ 旧分析不可用（available = false）。
+        status: "pending", available: false, jobId: ANALYSIS_JOB, publishedAt: null
       });
       assert.equal(freshness.completeness, "partial");
       const byMetric = new Map(freshness.series.map((metric) => [metric.metric, metric]));
@@ -316,6 +351,7 @@ test("P0-3：freshness 按事实批次/分析任务/每指标样本数回答，s
       assert.ok(published);
       assert.deepEqual(published.analysis, {
         status: "published",
+        available: true,
         jobId: ANALYSIS_JOB,
         publishedAt: "2026-10-18T12:31:21.265Z"
       });
@@ -460,6 +496,37 @@ test("HTTP：pending 详情返回 200，freshness/coverage 端点与 handshake �
     const handshake = await (await authorized("/v1/handshake")).json() as HandshakeResponse;
     assert.equal(handshake.syncCoverageVersion, 1,
       "缺这个能力位，客户端只能回落全量重放（P1-1 的服务端契约）");
+
+    // ── A6（P2-2）：旧分析可用 + 新分析未发布 ⇒ 详情仍 **200**，状态 pending ──────────
+    // 直接对运行中的库追加写：读连接是只读 WAL 连接，别的连接的提交立即可见。
+    publishAnalysis(databasePath);
+    backdateFixtureAnalysisJob(databasePath);
+    addAnalysisBearingBatch(databasePath, {
+      batchId: "batch_http_a6_late", completedAt: "2026-10-18T13:10:00.000Z",
+      rawGeneration: 3, dependencyGeneration: 1, jobId: "recompute_job_http_a6_late",
+      jobStatus: "queued", recordEffectiveAt: "2026-10-18T11:51:00.000Z"
+    });
+    const a6List = await (await authorized("/v1/workouts?limit=10&offset=0")).json() as WorkoutListResponse;
+    assert.equal(a6List.items[0]?.analysisPublishStatus, "pending");
+    assert.equal(a6List.items[0]?.analysisAvailable, true, "旧分析仍可读必须可观测");
+    const a6DetailResponse = await authorized(`/v1/workouts/${SESSION_ID}`);
+    assert.equal(a6DetailResponse.status, 200,
+      "A6：旧分析可用、新分析未发布时详情仍必须是 200（不是 404，也不是 published）");
+    const a6Detail = await a6DetailResponse.json() as WorkoutDetailResponse;
+    assert.equal(a6Detail.workout.analysisPublishStatus, "pending");
+    assert.equal(a6Detail.workout.analysisAvailable, true);
+    assert.equal(a6Detail.workout.currentAbility, 61.5, "旧分析的分数必须仍可读");
+    assert.equal(a6Detail.facts?.analysisState, "analyzed");
+    assert.ok(a6Detail.analysis, "旧分析块仍返回");
+    const a6Freshness = await (await authorized(`/v1/workouts/${SESSION_ID}/freshness`))
+      .json() as WorkoutFreshnessResponse;
+    assert.equal(a6Freshness.analysis.status, "pending");
+    assert.equal(a6Freshness.analysis.available, true);
+    assert.equal(a6Freshness.analysis.jobId, "recompute_job_http_a6_late");
+    assert.equal(a6Freshness.analysisState, "pending", "三处必须一致");
+    assert.equal(a6Freshness.deliveryState, "delivered");
+    assert.equal(a6Freshness.stabilityState, "settling", "刚有新批次 ⇒ 观测未稳定");
+    assert.equal(a6Freshness.completeness, "partial");
   } finally {
     await stopApi(child);
     await removeRuntimeRoot(runtimeRoot);
@@ -549,5 +616,295 @@ test("P2-2：freshness 的 lastAvailableAt 读 health_records.available_at（v46
     });
   } finally {
     await removeRuntimeRoot(root);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// A6 / P2-2 + A5 / P2-3（2026-10-19）：旧分析可用 ≠ 最新；三态新鲜度
+//
+// 审计 A6 的复现形态：旧评估已发布，之后又进来"影响分析"的批次 + 更新的 queued 任务，
+// 旧实现只因为评估行存在就读成 `published`（jobId 指向新任务、publishedAt 还是旧的）。
+// 这里钉三条判据：
+//   (a) 已发布且没有更新的事实 ⇒ published；
+//   (b) 已发布 + 更新后 queued ⇒ pending，**详情仍 200** 且旧分析字段仍可读；
+//   (c) 新 run 发布（覆盖到新代次）⇒ 回到 published。
+// 另加一条变异靶子：raw-only 批次（`dependency_bumped = 0`）不得把状态翻成 pending ——
+// 用 `raw_generation` 判会红（分析输入没变，只是记录到了）。
+// ---------------------------------------------------------------------------
+
+const A6_LATE_BATCH = "batch_a6_late_fixture";
+const A6_LATE_JOB = "recompute_job_a6_late_fixture";
+
+/** 把夹具升级到 v39+ 的"现代代次证据"：批次行声明代次、计数器就位。 */
+function seedModernGenerationEvidence(path: string): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.prepare(`UPDATE import_batches
+      SET raw_generation = 1, dependency_generation = 1, dependency_bumped = 1 WHERE id = ?`)
+      .run(FACTS_BATCH);
+    // 批 3 是 record-only：只推 raw，不推依赖代次（写侧的结构性结论）。
+    database.prepare(`UPDATE import_batches
+      SET raw_generation = 2, dependency_generation = 1, dependency_bumped = 0 WHERE id = ?`)
+      .run(STRIDE_BATCH);
+    database.prepare("UPDATE import_generations SET raw_generation = 2, dependency_generation = 1 WHERE singleton = 1")
+      .run();
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * 把夹具里的旧分析任务回拨到批 2 的完成时刻。
+ *
+ * `freshness.analysis.jobId` 取"关联本训练批次的最新任务"（`ORDER BY created_at DESC`），
+ * 而夹具任务的 `created_at` 默认是**真实墙钟**（2026-10-19），会盖过测试里 2026-10-18 的新任务。
+ * 生产不会出现这种顺序（任务与批次同事务落库），这是夹具的时间漂移，不是读侧逻辑。
+ */
+function backdateFixtureAnalysisJob(path: string): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.prepare("UPDATE recompute_jobs SET created_at = ? WHERE id = ?")
+      .run(FACTS_BATCH_COMPLETED_AT, ANALYSIS_JOB);
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * 追加一个**影响分析**的批次 + 它登记的分析任务（默认 queued）。
+ *
+ * 形态与生产一致：批次的完成时刻/代次与任务都在同一个接收事务里落库，
+ * 记录变更用 `effective_at` 落在本训练窗口内（freshness 也是用这个窗口判"碰到本训练"）。
+ */
+function addAnalysisBearingBatch(path: string, options: {
+  batchId: string;
+  completedAt: string;
+  /** 省略 = v39 之前形态的批次行（代次三列 NULL，只靠完成时刻证明）。 */
+  rawGeneration?: number;
+  dependencyGeneration?: number;
+  /** 目标代次（省略 = v35 之前的任务行，只靠登记时刻证明）。 */
+  targetDependencyGeneration?: number;
+  jobId: string;
+  jobStatus?: "queued" | "running" | "failed";
+  recordEffectiveAt: string;
+}): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.prepare(`INSERT INTO import_batches
+      (id, xml_sha256, status, import_mode, completed_at, summary_json,
+       raw_generation, dependency_generation, dependency_bumped)
+      VALUES (?, ?, 'succeeded', 'incremental', ?, '{}', ?, ?, ?)`)
+      .run(options.batchId, "d".repeat(64), options.completedAt,
+        options.rawGeneration ?? null, options.dependencyGeneration ?? null,
+        options.rawGeneration === undefined ? null : 1);
+    database.prepare(insertImportChangeSql)
+      .run(options.batchId, "record", `${options.batchId}_hr`, options.recordEffectiveAt);
+    if (options.rawGeneration !== undefined && options.dependencyGeneration !== undefined) {
+      database.prepare("UPDATE import_generations SET raw_generation = ?, dependency_generation = ? WHERE singleton = 1")
+        .run(options.rawGeneration, options.dependencyGeneration);
+    }
+    database.prepare(`INSERT INTO recompute_jobs
+      (id, job_type, status, request_json, created_at, progress_phase,
+       target_raw_generation, target_dependency_generation)
+      VALUES (?, 'import', ?, ?, ?, 'queued', ?, ?)`)
+      .run(options.jobId, options.jobStatus ?? "queued",
+        JSON.stringify({ mode: "direct_sync_analysis", importBatchId: options.batchId }),
+        options.completedAt, options.rawGeneration ?? null,
+        options.targetDependencyGeneration ?? null);
+  } finally {
+    database.close();
+  }
+}
+
+/** 追加一个 **raw-only**（record-only）批次：只推 raw 代次，不推依赖代次。 */
+function addRawOnlyBatch(path: string, options: {
+  batchId: string; completedAt: string; rawGeneration: number; dependencyGeneration: number;
+}): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.prepare(`INSERT INTO import_batches
+      (id, xml_sha256, status, import_mode, completed_at, summary_json,
+       raw_generation, dependency_generation, dependency_bumped)
+      VALUES (?, ?, 'succeeded', 'incremental', ?, '{}', ?, ?, 0)`)
+      .run(options.batchId, "e".repeat(64), options.completedAt,
+        options.rawGeneration, options.dependencyGeneration);
+    database.prepare(insertImportChangeSql)
+      .run(options.batchId, "record", `${options.batchId}_stride`, "2026-10-18T11:50:00.000Z");
+    database.prepare("UPDATE import_generations SET raw_generation = ? WHERE singleton = 1")
+      .run(options.rawGeneration);
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * 三处一致性断言：列表项、详情、freshness 必须给**同一个**发布状态。
+ *
+ * 这是 A6 验收里最容易被"只改一处"绕过的地方（列表读 `a.id`、详情读另一条 SQL、
+ * freshness 读第三条），所以把它写成单一入口。
+ */
+function assertAnalysisVisibility(
+  read: RaiReadStore,
+  expected: { status: "published" | "pending" | "failed"; available: boolean }
+): void {
+  const item = read.workouts({ limit: 10, offset: 0 }).items.find((entry) => entry.id === SESSION_ID);
+  assert.ok(item, "训练必须出现在列表里");
+  assert.equal(item.analysisPublishStatus, expected.status, "列表 analysisPublishStatus");
+  assert.equal(item.analysisAvailable, expected.available, "列表 analysisAvailable");
+
+  const detail = read.workout(SESSION_ID);
+  assert.ok(detail, "详情必须可读（A6：旧分析落后时**不是** 404）");
+  assert.equal(detail.workout.analysisPublishStatus, expected.status, "详情 analysisPublishStatus");
+  assert.equal(detail.workout.analysisAvailable, expected.available, "详情 analysisAvailable");
+
+  const freshness = read.workoutFreshness(SESSION_ID, new Date("2026-10-18T13:01:00.000Z"));
+  assert.ok(freshness, "freshness 必须可读");
+  assert.equal(freshness.analysis.status, expected.status, "freshness.analysis.status");
+  assert.equal(freshness.analysis.available, expected.available, "freshness.analysis.available");
+  // 顶部三态里的 analysisState 与 analysis.status 同源：一处改判据、另一处不改会立刻红。
+  assert.equal(freshness.analysisState, expected.status, "freshness.analysisState 必须与 analysis.status 同值");
+}
+
+test("A6/P2-2：旧分析可用 ≠ 最新——新事实/queued 之后 pending（详情 200、旧分数可读），新 run 发布后回到 published", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-analysis-staleness-"));
+  try {
+    const path = await createPendingFixture(root);
+    seedModernGenerationEvidence(path);
+    // 发布第一版：捕获依赖代次 1（覆盖 FACTS_BATCH 的 gen=1），激活于 12:31:21。
+    publishAnalysis(path, { capturedDependencyGeneration: 1 });
+    backdateFixtureAnalysisJob(path);
+
+    // (a) 已发布、且没有更新的事实 ⇒ published（列表/详情/freshness 一致）。
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "published", available: true });
+    });
+
+    // 变异靶子：raw-only 批次（record-only，dependency_bumped = 0）不算"分析落后"。
+    addRawOnlyBatch(path, {
+      batchId: "batch_a6_raw_only", completedAt: "2026-10-18T12:45:00.000Z",
+      rawGeneration: 3, dependencyGeneration: 1
+    });
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "published", available: true });
+    });
+
+    // (b) 新事实 + 更晚登记、仍 queued 的分析任务 ⇒ pending，但旧分析仍可读。
+    addAnalysisBearingBatch(path, {
+      batchId: A6_LATE_BATCH, completedAt: "2026-10-18T13:00:00.000Z",
+      rawGeneration: 4, dependencyGeneration: 2, targetDependencyGeneration: 2,
+      jobId: A6_LATE_JOB, jobStatus: "queued", recordEffectiveAt: "2026-10-18T11:50:00.000Z"
+    });
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "pending", available: true });
+
+      const detail = read.workout(SESSION_ID);
+      assert.ok(detail);
+      // 🔴 A6 的核心：旧分析字段**仍可读**（不是占位），只是不能当最新。
+      assert.equal(detail.workout.currentAbility, 61.5, "旧分析的分数必须仍可读");
+      assert.equal(detail.workout.modelVersion, "rai-model-config-fixture");
+      assert.equal(detail.workout.qualityScore, 0.82);
+      assert.equal(detail.facts?.analysisState, "analyzed", "事实确实被（旧一版）分析过");
+      assert.ok(detail.analysis, "旧分析块仍返回（可读但 stale）");
+
+      const freshness = read.workoutFreshness(SESSION_ID, new Date("2026-10-18T13:01:00.000Z"));
+      assert.ok(freshness);
+      assert.equal(freshness.analysis.jobId, A6_LATE_JOB, "jobId 指向真正在排队的新任务");
+      assert.equal(freshness.analysis.publishedAt, "2026-10-18T12:31:21.265Z",
+        "旧分析的发布时刻仍是可读证据（旧分析可用）");
+      // 24h 静默不参与：此刻最近一批刚完成 ⇒ settling；delivery/analysis 不吃时间窗口。
+      assert.equal(freshness.stabilityState, "settling");
+      assert.equal(freshness.analysisState, "pending");
+    });
+
+    // (c) 新 run 发布并捕获到代次 2 ⇒ 三个入口一起回到 published，且分数更新。
+    publishAnalysis(path, {
+      suffix: "second", activatedAt: "2026-10-18T13:02:00.000Z",
+      currentAbility: 62.5, capturedDependencyGeneration: 2, jobId: A6_LATE_JOB
+    });
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "published", available: true });
+      assert.equal(read.workout(SESSION_ID)?.workout.currentAbility, 62.5,
+        "新 run 的评估必须成为可读结论");
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("A6/P2-2：没有绑定行的老 release 也不能把旧评估当最新（退回激活时刻的时间证明）", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-analysis-legacy-release-"));
+  try {
+    const path = await createPendingFixture(root);
+    // 老 release：没有 analysis_run_input_bindings（v39 之前的发布），批次也没有代次列。
+    publishAnalysis(path);
+    backdateFixtureAnalysisJob(path);
+    await withReadStore(path, (read) => {
+      // 夹具里的两个批次都完成于激活（12:31:21）之前 ⇒ 覆盖证明成立 ⇒ published。
+      assertAnalysisVisibility(read, { status: "published", available: true });
+    });
+
+    // 激活之后又到了一个影响分析的批次 + 新 queued 任务 ⇒ pending（时间证明）。
+    // 🔴 这里刻意用**审计 A6 的原始形态**：批次没有代次三列、任务没有目标代次 ——
+    // 即 2026-10-19 复现报告里那种"旧评估 + 新账本 + 新 queued"的最裸证据。
+    // 判据必须只靠"完成/登记于激活之后"就成立，不能要求 v39+ 的新列。
+    addAnalysisBearingBatch(path, {
+      batchId: "batch_a6_legacy_late", completedAt: "2026-10-18T13:20:00.000Z",
+      jobId: "recompute_job_a6_legacy_late",
+      jobStatus: "queued", recordEffectiveAt: "2026-10-18T11:52:00.000Z"
+    });
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "pending", available: true });
+      assert.equal(read.workout(SESSION_ID)?.workout.currentAbility, 61.5, "旧分析仍可读");
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("A5/P2-3：deliveryState/analysisState/stabilityState——24h 只影响 stabilityState", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-visibility-three-state-"));
+  try {
+    const path = await createPendingFixture(root);
+    publishAnalysis(path);
+
+    // 发布后 1h：事实已交付、分析已发布，但最近一批在 24h 内 ⇒ settling。
+    await withReadStore(path, (read) => {
+      const fresh = read.workoutFreshness(SESSION_ID, new Date("2026-10-18T13:31:00.000Z"));
+      assert.ok(fresh);
+      assert.equal(fresh.deliveryState, "delivered", "workout 实体已由成功批次交付");
+      assert.equal(fresh.analysisState, "published");
+      assert.equal(fresh.stabilityState, "settling");
+      assert.equal(fresh.completeness, "partial", "A5 本轮不改 completeness 语义");
+    });
+
+    // 24h 之后：**只有** stabilityState 翻转；delivery/analysis 不吃时间窗口。
+    await withReadStore(path, (read) => {
+      const fresh = read.workoutFreshness(SESSION_ID, new Date("2026-10-20T13:00:00.000Z"));
+      assert.ok(fresh);
+      assert.equal(fresh.deliveryState, "delivered");
+      assert.equal(fresh.analysisState, "published");
+      assert.equal(fresh.stabilityState, "stable", "24h 静默只抬 stabilityState");
+      assert.equal(fresh.completeness, "complete");
+    });
+
+    // 没有任何到达证据 ⇒ deliveryState = unknown（"不知道"，不得读成"手表仍在传输"）；分析状态不变。
+    const database = new DatabaseSync(path);
+    try {
+      database.prepare("DELETE FROM import_entity_changes").run();
+      database.prepare("DELETE FROM import_batches").run();
+    } finally {
+      database.close();
+    }
+    await withReadStore(path, (read) => {
+      const fresh = read.workoutFreshness(SESSION_ID, new Date("2026-10-20T13:00:00.000Z"));
+      assert.ok(fresh);
+      assert.equal(fresh.facts.batches, 0);
+      assert.equal(fresh.facts.committedAt, null);
+      assert.equal(fresh.deliveryState, "unknown");
+      assert.equal(fresh.stabilityState, "settling", "没有批次到达 ⇒ 不能声明观测稳定");
+      assert.equal(fresh.analysisState, "published", "delivery 未知不影响 analysisState");
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

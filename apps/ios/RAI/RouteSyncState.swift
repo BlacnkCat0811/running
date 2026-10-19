@@ -445,6 +445,76 @@ nonisolated enum RouteCommitSettlement {
     }
 }
 
+/// P2-1（A3）：**单个类型**的补齐进度。
+///
+/// 为什么"整窗总数"不够：见 `WorkoutBackfillWindow` 的 P2-1 一节。这里只放逐类型的可读状态，
+/// 判据全部在 `WorkoutBackfillScheduler`（纯函数、有回归执行者）。
+///
+/// ⚠️ 本结构是 `types_json` 的**载荷**，它会被编成 JSON 落进 SQL 列。新增字段必须 Optional
+/// （或提供显式 `init(from:)`），否则老 JSON 会整段解不开 —— 而读侧对解不开的处理是
+/// "全部 unknown ⇒ 未完成"（安全方向，但会把窗口打成死循环重查）。当前版本由载荷里的
+/// `ProgressPayload.version` 显式标记，未知版本同样按 unknown 处理。
+nonisolated struct TypeProgress: Codable, Equatable, Sendable {
+    /// **最近一趟**（完整窗口查询，不是增量）本类型读到的样本条数。0 = 读到了空页。
+    var observed: Int = 0
+    /// 已写进载荷的**累计**条数（只作诊断；不参与收口判据 —— 判据只看"读到了多少"）。
+    var delivered: Int = 0
+    /// 连续多少趟"与上一趟相同**且为正**"。`stabilityToComplete`（= 1）即"第二次相同"。
+    /// 只有 `pageComplete && observed > 0` 且与 `previousObserved` 相等时才 +1；任何变化、
+    /// 截断或空观测都清零。
+    var stablePasses: Int = 0
+    /// 上一趟是否读到了窗口末尾（`observed < pageLimit`）。`false` = 命中单类型上限，
+    /// 页**可能被截断**（A2 分页尚未实现，不得把"这一页装满了"读成"没有更多了"）。
+    var pageComplete: Bool = false
+    /// 最近一次**真实查询**的时刻（授权失败 / 被预算切断的类型不动它）。
+    var lastObservedAt: Date? = nil
+    /// 上一趟**可比较**的条数。
+    ///
+    /// 为什么不能用别的字段代替：判据是"与上一趟相同"，而 `observed` 每次都被覆盖 ——
+    /// 没有这一格，"稳定"就只能靠调用方跨批次记忆，进程重启即丢。`nil` = 没有可比基线
+    /// （首查 / 上一趟被截断 / 上一趟为空观测）。
+    var previousObserved: Int? = nil
+}
+
+/// P2-1（A3）：**本趟**对某个类型的观测事实。调用方只报事实，判据在调度器里。
+///
+/// 🔴 为什么要把 `pageLimit` 一起报上来：`HealthKitExport` 的窗口查询会按剩余份额**收窄**
+/// 页大小（`DirectSyncBatchBudget.shareLimitedPageSize`）。返回条数恰好等于**本次的**
+/// 页上限时，剩下的样本可能还在后面 —— 那种趟不能算"读到了 EOF"。
+nonisolated struct TypeObservation: Equatable, Sendable {
+    /// 本次查询返回的样本条数（0 = 空页，是合法观测）。
+    let observed: Int
+    /// 本趟真正写进载荷的条数。
+    let delivered: Int
+    /// 本次查询的页上限（`recentSamples(limit:)` 实际用的值）。
+    let pageLimit: Int
+    /// 授权错误：HealthKit 对"未授权读"报错或返回空，**不能**读成"没有样本"。
+    /// 这类查询不是观测 —— 该类型的既有进度会被作废（方向：宁可多查，不可误判完整）。
+    let unauthorized: Bool
+
+    init(observed: Int, delivered: Int, pageLimit: Int, unauthorized: Bool = false) {
+        self.observed = max(0, observed)
+        self.delivered = max(0, delivered)
+        self.pageLimit = max(0, pageLimit)
+        self.unauthorized = unauthorized
+    }
+
+    /// 是否读到窗口末尾。`observed >= pageLimit` = 命中上限 ⇒ **可能**被截断。
+    var pageComplete: Bool {
+        !unauthorized && pageLimit > 0 && observed < pageLimit
+    }
+}
+
+/// P2-1（A3）：最近一趟窗口查询的**结局**（`completionReason` 的载体，随 `types_json` 落盘）。
+nonisolated enum WorkoutBackfillPassOutcome: String, Codable, Sendable {
+    /// 整窗跑完（可能仍然 pending：只是"这一趟读完了"，不是"补齐了"）。
+    case settled
+    /// 页预算/份额把这一趟切断 ⇒ 不记账，下批从同一窗口重来。
+    case budgetBlocked = "blocked"
+    /// 本趟有类型因授权失败而**没读到**（不是空，是不知道）。
+    case unauthorized
+}
+
 /// P0-4（2026-10-18 同步诊断）：一条「刚完成的训练」的**定向补齐窗口**。
 ///
 /// ## 为什么需要它
@@ -457,7 +527,25 @@ nonisolated enum RouteCommitSettlement {
 ///
 /// 本类型是那个缺口的持久载体：把"这次训练的时间窗还没补齐"写成一行（与路线待办同库、
 /// 同一条"成功后才结算"纪律），后续每批在**任何历史重放之前**按窗口做一次**全类型**有界
-/// 查询，直到"连续两次观测样本数不变"或 7 天到期才收口。
+/// 查询，直到"每个已登记类型都读到窗口末尾且连续两趟一致"或 7 天到期才收口。
+///
+/// ## P2-1（A3，2026-10-19）：为什么收口判据必须是**逐类型**的
+///
+/// 旧判据是"整窗总样本数连续两次相同"（`lastSampleCount` / `stableCount`）。生产实测
+/// （`deliverables/IOS_SYNC_INGEST_AUDIT_2026-10-19.md` A3）里它把"500 条心率 + 其余类型
+/// 全 0"的两次查询读成"补齐完成"，而 HealthKit 的迟到样本（实测 36–72 h）随后到达时窗口
+/// 已经关闭 —— 迟到的类型**没有任何机制重开**。总数相同既不证明缺失类型已提供，也不证明
+/// 已有类型的内容/覆盖没有变化。所以现在：
+/// - 每个类型的可读状态各自记账（见 `TypeProgress` 与 `TypeObservation`）；
+/// - "已见类型"必须 `pageComplete && stablePasses >= 1`；命中单类型 `limit` 视为**可能截断**
+///   （A2 分页尚未实现 ⇒ **不得**假设 EOF）；
+/// - "已登记但从未读到样本"的类型记 unseen，**只有 7 天到期**才退出 —— "稳定"可以用于降频，
+///   但不能直接等同"完整"；
+/// - 结算原因区分 `completed` / `expired` / `blocked`（页预算）/ `unauthorized`。
+///
+/// 🔴 向下兼容：`types` / `lastPassOutcome` 是**新增列**（`types_json`）。老行没有它 ⇒
+/// 读侧按"全部 unknown ⇒ 未完成"处理（`SyncTaskStore` 里显式清掉 `completedAt`），
+/// 方向是"多查一次"而不是"把没读到读成已完整"。
 ///
 /// ## 为什么窗口要加 5 分钟
 ///
@@ -485,11 +573,23 @@ nonisolated struct WorkoutBackfillWindow: Codable, Equatable, Sendable {
     var nextCheckAt: Date
     /// 已完成的**整窗查询**次数（预算没跑完的一趟不计数）。
     var attemptCount: Int
-    /// 最近一次整窗查询**写进载荷**的样本数。判据是"与上一次相同" ⇒ 连续稳定。
+    /// **老判据的遗留字段**（P2-1 之前：整窗总样本数"连续两次相同"）。
+    ///
+    /// 现在只记"最近一趟查到的样本总数"（诊断/日志），**不再参与收口判据** —— 判据已移到
+    /// `types` 的逐类型进度。保留这一列是为了不重建表、也让降级回旧版本时行还是可读的。
     var lastSampleCount: Int
-    /// 连续多少次观测的样本数与上一次相同（首查后为 0；第二次相同 ⇒ 1）。
+    /// **老判据的遗留字段**（连续多少次整窗总数相同）。新逻辑不再写非零值，只保留列兼容。
     var stableCount: Int
-    /// 非 nil = 已收口（连续稳定或 7 天到期），不再查询；行保留供诊断。
+    /// P2-1（A3）：**逐类型进度**（键 = `export.xml` 类型名，如
+    /// `HKQuantityTypeIdentifierHeartRate`）。
+    ///
+    /// 空字典 = 这一行没有**任何**逐类型证据（新登记的窗口，或老版本写下的行）。
+    /// 两种都必须读成"未完成"：老行的 `completedAt` 会被读侧清掉（见类型头部兼容一节）。
+    var types: [String: TypeProgress] = [:]
+    /// P2-1（A3）：最近一趟窗口查询的结局。`completed`/`pending` 之外的收口原因
+    /// （`blocked`/`unauthorized`）由它承载；见 `WorkoutBackfillScheduler.completionReason`。
+    var lastPassOutcome: WorkoutBackfillPassOutcome? = nil
+    /// 非 nil = 已收口（逐类型补齐完成或 7 天到期），不再查询；行保留供诊断。
     var completedAt: Date?
 
     var isCompleted: Bool { completedAt != nil }
@@ -527,8 +627,25 @@ nonisolated enum WorkoutBackfillScheduler {
     /// 单类型单窗口的查询上限（`recentSamples` 的 limit）。有界同 `recentWindowLimit`。
     static let perTypeLimit = 1500
 
-    /// 连续多少次"与上次样本数相同"算稳定（= 两次观测一致）。
+    /// 逐类型"连续多少次相同"算稳定。
+    ///
+    /// **= 1 ⇒ 第二次观测到相同正数即该类型稳定**（不是"三次"：旧注释写"连续两次一致"容易
+    /// 被读成需要两格增量，审计报告 §3.1 专门点过这一处）。判定在 `afterPass`：
+    /// 首趟只记基线（`stablePasses == 0`），第二趟相同才 +1。
     static let stabilityToComplete = 1
+
+    /// 本批窗口**尝试**的结局（供日志/收口原因；纯值，不落库）。
+    ///
+    /// - `completed`：每个登记类型都 `pageComplete && stablePasses >= 1`。
+    /// - `expired`：7 天上限到期（无论观测如何）。
+    /// - `blocked`：页预算/份额切断了一趟，**没有**推进稳定计数。
+    /// - `unauthorized`：本趟有类型因授权失败而没读到（不是空，是不知道）。
+    /// - `pending`：还没收口，继续走重试阶梯。
+    static let reasonPending = "pending"
+    static let reasonCompleted = "completed"
+    static let reasonExpired = "expired"
+    static let reasonBlocked = "blocked"
+    static let reasonUnauthorized = "unauthorized"
 
     /// 是否该为这条 workout 登记/刷新窗口。
     /// - Parameter endDate: workout 的结束时刻（**不是**开始时刻：轨迹/统计跑完才成形）。
@@ -551,8 +668,12 @@ nonisolated enum WorkoutBackfillScheduler {
     ///    反复命中的常见形态 —— 不刷新调度、不重开已收口的窗口，否则"每批都改一行元数据"
     ///    就能让这条窗口永远排队（无界重复查询）。
     /// 3. 有旧行、窗口**变宽了**（endDate 后移/startDate 前移 ⇒ 确实出现新的样本区间）：
-    ///    重新排队（清 `completedAt`/稳定计数/尝试次数），但**保留 `createdAt`** ——
+    ///    重新排队（清 `completedAt`/逐类型进度/尝试次数），但**保留 `createdAt`** ——
     ///    7 天上限仍然从首次登记起算。已过 7 天的窗口不再重开。
+    ///
+    /// 🔴 形态 3 必须清空 `types`：旧进度是**旧时间区间**的观测，窗口一宽就不可比
+    /// （"上一次相同"的判据会把两个不同区间的计数当成一次稳定）。清空 = 全部回到 unseen，
+    /// 方向是"多读一遍"，绝不把扩大后的区间读成已完整。
     static func register(
         workoutUUID: String,
         startDate: Date,
@@ -575,6 +696,8 @@ nonisolated enum WorkoutBackfillScheduler {
             refreshed.attemptCount = 0
             refreshed.lastSampleCount = 0
             refreshed.stableCount = 0
+            refreshed.types = [:]
+            refreshed.lastPassOutcome = nil
             refreshed.completedAt = nil
             return refreshed
         }
@@ -650,12 +773,47 @@ nonisolated enum WorkoutBackfillScheduler {
             .map { $0 }
     }
 
-    /// 一趟**整窗**查询之后的记账（只有整窗所有类型都查完才调用；预算没跑完的一趟不记账）。
+    /// 逐类型收口判据（P2-1/A3）：**每个登记类型**都必须
+    /// `pageComplete && stablePasses >= stabilityToComplete`。
     ///
-    /// 判据（2026-10-18 Lead 复核修正）：
-    /// - 连续两次观测到**相同且为正**的样本数，且此前确实观测过 ⇒ `stableCount += 1`；
-    ///   样本数变化**或为 0** ⇒ 清零；
-    /// - `stableCount >= stabilityToComplete`（= 连续两次一致）或 7 天到期 ⇒ 收口；
+    /// 🔴 三个"不得"：
+    /// - `registeredTypes` 为空 ⇒ **不得**收口（没有登记类型 = 没有判据，老行/未知形态都走这里）；
+    /// - 没有进度条目的类型 = unseen ⇒ 不得收口（"没读到"不是"没有"）；
+    /// - 命中单类型上限（`pageComplete == false`）⇒ 不得收口，即便两次条数相同
+    ///   （A2 分页未实现，`observed == pageLimit` 只是"这一页满了"）。
+    static func isComplete(
+        _ window: WorkoutBackfillWindow,
+        registeredTypes: [String]
+    ) -> Bool {
+        let registered = Set(registeredTypes)
+        guard !registered.isEmpty else { return false }
+        return registered.allSatisfy { type in
+            guard let progress = window.types[type] else { return false }
+            return progress.pageComplete && progress.stablePasses >= stabilityToComplete
+        }
+    }
+
+    /// 已登记但**从未读到样本**的类型（诊断/回归用；顺序确定）。
+    ///
+    /// "unseen" 的口径 = 没有进度条目，或最近一趟观测为 0（0 是合法观测，但不是"看到了样本"）。
+    /// 它们不参与完成，只能等 7 天到期 —— 这正是 A3 要的"迟到类型自动重开"的另一面。
+    static func unseenTypes(
+        _ window: WorkoutBackfillWindow,
+        registeredTypes: [String]
+    ) -> [String] {
+        Set(registeredTypes).sorted().filter { type in
+            guard let progress = window.types[type] else { return true }
+            return progress.observed == 0
+        }
+    }
+
+    /// 一趟**完整**窗口查询之后的记账（整窗所有类型都查完；被预算切断的一趟走
+    /// `afterBlockedPass`）。
+    ///
+    /// 判据（P2-1/A3，替代旧的"整窗总数两次相同"）：
+    /// - 逐类型：本趟 `pageComplete && observed > 0` 且与上一趟同一个数 ⇒ `stablePasses += 1`；
+    ///   首趟 / 数变了 / 被截断 / 空观测 ⇒ 清零（`previousObserved` 只在"可比较"时才记）；
+    /// - 收口：每个登记类型都 `pageComplete && stablePasses >= stabilityToComplete`，或 7 天到期；
     /// - 否则按重试序列排下一次检查。
     ///
     /// 🔴 **为什么"0 样本"不能靠稳定收口**：Apple Watch → iPhone 的迟到样本实测 36–72 h
@@ -663,24 +821,60 @@ nonisolated enum WorkoutBackfillScheduler {
     /// 15m/1h 两次空查后就判"稳定、已收口"，那正好把"样本还没到手机"读成"这条训练没有这些
     /// 类型"—— P0-4 会在最需要它的场景里失效。空观测不是"数据已稳定"的证据（与 10-14
     /// "空窗不得推进水位"同一条纪律：**没读到 ≠ 没有**）。
-    /// 因此空窗只能靠**7 天到期**强制收口；期间按 15m/1h/6h/24h/72h 继续重试。
-    /// 一旦样本数从 0 变正，就更新计数并清零稳定计数；之后仍按"有样本 + 连续两次相同"收口。
+    /// 因此空类型只能靠**7 天到期**强制收口；期间按 15m/1h/6h/24h/72h 继续重试。
+    ///
+    /// - Parameters:
+    ///   - observations: 本趟每个**成功查询**的类型的观测事实。缺条目 = 该类型本趟没读到
+    ///     （授权失败或被预算挡住）⇒ 既有进度保留，但本趟不构成"新证据"。
+    ///   - registeredTypes: 本窗口**已登记**的类型（`HealthKitExport` 的 quantity descriptors）。
+    ///     它决定 unseen：登记过却从未读到样本的类型不允许被其它类型的正数"代为完成"。
     static func afterPass(
         _ window: WorkoutBackfillWindow,
-        observedSamples: Int,
+        observations: [String: TypeObservation],
+        registeredTypes: [String],
         now: Date
     ) -> WorkoutBackfillWindow {
         var next = window
-        let observed = max(0, observedSamples)
-        // 「稳定」的前提是**两次都看到真实样本**：空观测永远不会让 stableCount 前进。
-        let stableObservation = window.attemptCount > 0
-            && observed > 0
-            && observed == window.lastSampleCount
-        next.stableCount = stableObservation ? window.stableCount + 1 : 0
-        next.lastSampleCount = observed
+        var merged = window.types
+        var unauthorized = false
+        for type in observations.keys.sorted() {
+            guard let observation = observations[type] else { continue }
+            if observation.unauthorized {
+                // 授权失败不是"空页"：作废该类型的可读证据（宁可多查，不可误判完整）。
+                unauthorized = true
+                if var progress = merged[type] {
+                    progress.stablePasses = 0
+                    progress.previousObserved = nil
+                    progress.pageComplete = false
+                    merged[type] = progress
+                }
+                continue
+            }
+            var progress = merged[type] ?? TypeProgress()
+            if observation.pageComplete, observation.observed > 0 {
+                if let previous = progress.previousObserved, previous == observation.observed {
+                    progress.stablePasses += 1
+                } else {
+                    progress.stablePasses = 0
+                }
+                progress.previousObserved = observation.observed
+            } else {
+                // 截断/空观测都不是"数据已稳定"的证据；0 → 正数时必须重新从首查算起。
+                progress.stablePasses = 0
+                progress.previousObserved = nil
+            }
+            progress.observed = observation.observed
+            progress.delivered += observation.delivered
+            progress.pageComplete = observation.pageComplete
+            progress.lastObservedAt = now
+            merged[type] = progress
+        }
+        next.types = merged
+        next.lastSampleCount = observations.values.reduce(0) { $0 + $1.observed }
         next.attemptCount = window.attemptCount + 1
+        next.lastPassOutcome = unauthorized ? .unauthorized : .settled
         let expired = now.timeIntervalSince(window.createdAt) >= completionWindow
-        if (observed > 0 && next.stableCount >= stabilityToComplete) || expired {
+        if isComplete(next, registeredTypes: registeredTypes) || expired {
             next.completedAt = now
             next.nextCheckAt = now
             return next
@@ -690,13 +884,107 @@ nonisolated enum WorkoutBackfillScheduler {
         return next
     }
 
-    /// 收口的可读原因（日志/任务行只记原因，不记样本值）。
-    static func completionReason(_ window: WorkoutBackfillWindow) -> String {
-        guard window.isCompleted else { return "pending" }
-        if window.attemptCount > 0, window.stableCount >= stabilityToComplete {
-            return "stable"
+    /// 被页预算/份额**切断**的一趟的记账（P2-1/A3）。
+    ///
+    /// 与 `afterPass` 的分工：
+    /// - **推进**逐类型实况（`observed`/`pageComplete`/`delivered`/`lastObservedAt`）——
+    ///   这叫"份额耗尽后仍有进展"；
+    /// - **不推进** `stablePasses`/`previousObserved`，也**不**加 `attemptCount`、**不**动
+    ///   `nextCheckAt`：这一趟不是一次完整的整窗查询，下批必须从同一窗口重来（与旧实现
+    ///   "不记账"同一条纪律）。已写出的样本不回滚（载荷是追加写的，服务端按 UUID 幂等）。
+    /// - 记下结局（`blocked` / `unauthorized`），让"到期有原因"成立。
+    static func afterBlockedPass(
+        _ window: WorkoutBackfillWindow,
+        observations: [String: TypeObservation],
+        now: Date
+    ) -> WorkoutBackfillWindow {
+        var next = window
+        var merged = window.types
+        var unauthorized = false
+        for type in observations.keys.sorted() {
+            guard let observation = observations[type] else { continue }
+            if observation.unauthorized {
+                unauthorized = true
+                if var progress = merged[type] {
+                    progress.stablePasses = 0
+                    progress.previousObserved = nil
+                    progress.pageComplete = false
+                    merged[type] = progress
+                }
+                continue
+            }
+            var progress = merged[type] ?? TypeProgress()
+            progress.observed = observation.observed
+            progress.delivered += observation.delivered
+            progress.pageComplete = observation.pageComplete
+            progress.lastObservedAt = now
+            // stablePasses / previousObserved 刻意不动（见函数说明）。
+            merged[type] = progress
         }
-        return "expired"
+        next.types = merged
+        next.lastSampleCount = observations.values.reduce(0) { $0 + $1.observed }
+        next.lastPassOutcome = unauthorized ? .unauthorized : .budgetBlocked
+        return next
+    }
+
+    /// 收口原因（日志/任务行只记原因，不记样本值）。
+    ///
+    /// 取值：`completed` / `expired` / `blocked` / `unauthorized` / `pending`。
+    /// - 已收口：`completedAt` 距 `createdAt` 达到 7 天上限 ⇒ `expired`，否则 `completed`；
+    /// - 未收口：看最近一趟结局（被预算切断 ⇒ `blocked`；授权失败 ⇒ `unauthorized`）。
+    static func completionReason(_ window: WorkoutBackfillWindow) -> String {
+        if window.isCompleted {
+            let completedAt = window.completedAt ?? window.createdAt
+            let elapsed = completedAt.timeIntervalSince(window.createdAt)
+            return elapsed >= completionWindow ? reasonExpired : reasonCompleted
+        }
+        switch window.lastPassOutcome {
+        case .budgetBlocked: return reasonBlocked
+        case .unauthorized: return reasonUnauthorized
+        case .settled, nil: return reasonPending
+        }
+    }
+
+    /// `types_json` 的载荷形态（P2-1/A3）。
+    ///
+    /// 为什么不直接编码 `WorkoutBackfillWindow`：窗口的其余字段各有独立 SQL 列（时间列必须走
+    /// `canonicalForREAL`），只有这一组是 JSON。`version` 是显式的：未知版本一律当 unknown 读
+    /// （`decodeProgress` 返回 nil），不按当前字段猜 —— 与 `RouteCommitCandidate` 同一条纪律。
+    nonisolated struct ProgressPayload: Codable, Equatable, Sendable {
+        static let currentVersion = 1
+        let version: Int
+        let types: [String: TypeProgress]
+        let lastPassOutcome: WorkoutBackfillPassOutcome?
+        /// 写这份 JSON 时窗口行的 `attempt_count` / `completed_at`。
+        ///
+        /// 用途是**降级回滚的识别**：老版本 App 的 UPSERT 不含 `types_json` 列，退回老版本再
+        /// 跑一轮时，它会改 `attempt_count`/`completed_at` 却把这份 JSON 原样留在盘上。
+        /// 读侧拿这两个字段与列值对账，对不上就说明"这行被旧写入者改过" ⇒ 按 unknown 处理
+        /// （未完成，重查一次），绝不拿旧版本的 completed 当新判据的证据。
+        let attemptCount: Int
+        let completedAt: Date?
+    }
+
+    /// 编码为 `types_json`。`sortedKeys` 让同一窗口两次编码**逐字节相同**（回读/对账可比较）。
+    static func encodeProgress(_ window: WorkoutBackfillWindow) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try? encoder.encode(ProgressPayload(
+            version: ProgressPayload.currentVersion,
+            types: window.types,
+            lastPassOutcome: window.lastPassOutcome,
+            attemptCount: window.attemptCount,
+            completedAt: window.completedAt
+        ))
+    }
+
+    /// 解码 `types_json`。**nil = 全部 unknown**（老行没有这一列 / 未知版本 / 损坏）——
+    /// 读侧必须据此把该窗口当成"未完成"，绝不能按完成处理。
+    static func decodeProgress(_ data: Data?) -> ProgressPayload? {
+        guard let data, !data.isEmpty else { return nil }
+        guard let payload = try? JSONDecoder().decode(ProgressPayload.self, from: data) else { return nil }
+        guard payload.version == ProgressPayload.currentVersion else { return nil }
+        return payload
     }
 
     /// 需要持久化的窗口集合（去重 + 稳定排序；表键 `(scope, workout_uuid)`）。

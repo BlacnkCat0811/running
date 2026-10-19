@@ -1508,7 +1508,11 @@ export class RaiReadStore {
       // 2026-10-18（P0-1）：事实已提交但分析未发布时，这一行仍是 200 —— 派生字段是
       // null/占位（`qualityScore 0`、`modelVersion ''`、`eligibilityStatus 'pending'`），
       // 由本字段解释"为什么它们还不是结论"。旧实现让整个响应变成 404，与"不存在"同形。
+      //
+      // A6（2026-10-19）：`pending` + `analysisAvailable = true` = **旧分析可用、新分析未发布**，
+      // 此时上面那些派生字段是**旧分析的取值**（可读但不得当作最新）。
       analysisPublishStatus: row.analysisPublishStatus,
+      analysisAvailable: row.analysisAvailable,
       elapsedSeconds: Math.max(0, (Date.parse(row.endedAt) - Date.parse(row.startedAt)) / 1000),
       activeEnergyKcal: this.workoutsRepository.workoutStatistic(
         row.canonicalWorkoutId,
@@ -1607,7 +1611,13 @@ export class RaiReadStore {
     // 而 `row` 就是 `getDetailRow` 的返回值，所以 `assessed` 恒为 true，详情端点的
     // `analysisState: "pending"` 分支是**死代码**。现在判据改为行上的发布状态，
     // 事实侧能诚实地报 `pending`，分析块在没有已发布 release 时显式给 `null`。
-    const assessed = row.analysisPublishStatus === "published";
+    //
+    // A6（2026-10-19）：判据从 `analysisPublishStatus === "published"` 改成
+    // `analysisAvailable` —— "旧分析可用，但新分析未发布"时详情仍要 200、旧分析块
+    // （冻结的输入 + 那次发布的结论）仍可读；把"未覆盖最新代次"读成"没有分析"
+    // 会让用户在每次同步窗口里丢掉旧结论。是否最新由 `workout.analysisPublishStatus`
+    // 单独表达，两者在响应里可分辨。
+    const assessed = row.analysisAvailable;
     const pointer = this.workoutsRepository.routePointer(row.canonicalWorkoutId);
     const publishedVersionId = pointer?.publishedRouteVersionId ?? null;
     const currentRoute = includeRoute
@@ -1935,6 +1945,12 @@ export class RaiReadStore {
    * 其余一律 `partial`。24h 内没有新批次 ≠ "永不补齐"：手表迟到样本仍可能在下一轮到达，
    * 所以 `complete` 是"数据已稳定"的下界证据，`partial` 是"仍可能继续补"的诚实状态。
    *
+   * A5（P2-3，2026-10-19）：**只加字段** `deliveryState / analysisState / stabilityState`，
+   * `completeness` 语义本轮不变。新增三态把此前混在 `complete` 里的三件事分开：
+   * 事实到没到（delivery）、分析是否覆盖最新代次（analysis，A6 的判据）、观测是否稳定
+   * （stability，**唯一**吃 24h 窗口）。消费方不得用 `completeness = complete` 反推
+   * "设备没有某项指标"（逐类型理由留给下一版）。
+   *
    * `now` 可注入，便于测试固定时间；生产路径不传。
    */
   workoutFreshness(id: string, now = new Date()): WorkoutFreshnessResponse | null {
@@ -1957,6 +1973,22 @@ export class RaiReadStore {
         state: metric.samples > 0 ? "present" : "not_seen_yet",
         lastAvailableAt: metric.lastAvailableAt
       })),
+      // A5（P2-3，2026-10-19）：三态拆分，**只加字段**，`completeness` 语义本轮不变。
+      //
+      // `deliveryState` 用**到达证据**判（服务端收不到"手机读到了哪些类型"的回执，见契约）：
+      //   无任何批次账本 ⇒ unknown（"不知道"，不得写成"手表还在传"）；
+      //   只有窗口记录账本、没有 workout 实体写入证据 ⇒ partial（数据面不完整）；
+      //   本训练实体已由成功批次交付 ⇒ delivered。它**不**声称手机已读尽、也不声称设备具备某指标。
+      //
+      // `analysisState` 与 `analysis.status` **同源**（同一个结论文，见测试的"三处一致"断言）。
+      //
+      // `stabilityState` 是**唯一**吃 24h 静默窗口的量：24h 内还有新批次 ⇒ settling。
+      // 这正是 A5 的整改点：安静 ≠ 完整，安静只说明"观测稳定"。
+      deliveryState: stored.batches === 0
+        ? "unknown"
+        : stored.committedAt === null ? "partial" : "delivered",
+      analysisState: stored.analysis.status,
+      stabilityState: stable ? "stable" : "settling",
       completeness: stored.analysis.status === "published" && stable ? "complete" : "partial"
     };
   }
