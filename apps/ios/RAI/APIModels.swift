@@ -560,6 +560,15 @@ struct MobileWeekPlanDay: Codable, Identifiable {
     let distanceKm: Double
     let workoutCount: Int
     let structure: MobileSessionStructure?
+    /// 这一天**原本被排了什么**，与展示用的 `kind` 分开（F03 读模型）。
+    ///
+    /// `kind == "completed"` 只说明观测到了训练，不说明跑的就是原处方；
+    /// `nil` 表示存储里这一天没有处方（"没排课"不等于"排了休息"）。
+    /// 可选：F03 之前的服务端载荷没有该键，客户端必须原样忽略而不是解码失败。
+    var intentKind: String? = nil
+    /// 这一天是否有导入的训练观测。`unknown` 只说"没有证据"，从不说"跑者休息了"。
+    /// today/future 省略该键（还不是可观测的日期）。
+    var observation: String? = nil
 
     var id: String { localDate }
 }
@@ -1299,6 +1308,89 @@ struct TrainingPlanStateResponse: Codable {
     let today: MobileTodayResponse
     let workoutPlan: MobileWorkoutPlanResponse
     let coachSummary: MobileRunCoachResponse
+}
+
+/// v2 统一训练计划的读侧载荷（`GET /v1/mobile/training-plan-state` +
+/// `X-RAI-Training-Contract: 2`，字段冻结于 `packages/api-contracts` 的
+/// `TrainingPlanStateResponseV2`）。
+///
+/// 为什么不把它并进 v1 的 `TrainingPlanStateResponse`：那是同一路径上的**第二份合同**，
+/// 不是同一份数据的另一版。v1 携带可执行处方与今日建议（执行、写确认依赖它）；
+/// v2 只携带统一计划状态（模式/运行状态/准入/比赛目标/已发布意图），并且按合同
+/// **不携带执行授权**。合成一个类型会让"页面展示的状态"和"可执行的处方"再次混用，
+/// 而 PR5 要消灭的正是这种混用。两者只在各自的 compose 点使用，绝不互相兜底。
+///
+/// 字段刻意保留原始字符串（`mode` / `runState` / `admission` / `migration.source`）：
+/// 解成 Swift 枚举会把一个**未来新增的取值**变成解码失败，用户看到的将是
+/// "数据格式不兼容"，而真实处置是"这一份状态无法判定"（升级或等待服务端）。
+/// 取值判定集中在 `TrainingPlanUnifiedPolicy`，那里可以逐条写清为什么不是休息。
+struct TrainingPlanStateResponseV2: Codable, Equatable {
+    struct Migration: Codable, Equatable {
+        let version: Int
+        /// `legacy_goals` / `run_coach` / `coach_loop` / `new`。
+        let source: String
+        /// `active` / `paused` / `ended` / `none`。`ended` 是历史事实，不是活跃计划。
+        let sourceStatus: String
+        let sourceDigest: String
+    }
+
+    struct RaceGoalSupport: Codable, Equatable {
+        /// `nil` = 自定义距离：仍是比赛，只是没有标准骨架。
+        let distance: String?
+        let support: String
+        let horizon: String
+        let preparation: String
+        let weeksToRace: Int
+        let daysToRace: Int
+        let reasonCodes: [String]
+    }
+
+    struct RaceGoal: Codable, Equatable {
+        let id: String
+        let date: String
+        let distanceKm: Double
+        let goal: String
+        let targetTimeSeconds: Double?
+        let support: RaceGoalSupport
+    }
+
+    struct Plan: Codable, Equatable {
+        /// 计划发布时的 goals 版本；服务端尚未记录过发布时为 nil。
+        let goalsRevision: Int?
+        let currentGoalsRevision: Int
+        /// `false` = 迁移后旧 goals 行又变过：这份统一状态已陈旧，必须刷新。
+        let current: Bool
+        /// 业务日起七日内的**已发布意图**（按日期升序）。
+        let days: [MobilePlannedDay]
+        let lockedToday: Bool
+    }
+
+    struct Execution: Codable, Equatable {
+        let permitted: Bool
+        let reasonCodes: [String]
+    }
+
+    let contractVersion: Int
+    let scope: PlanReceiptScope
+    let businessDate: String
+    let stateRevision: Int
+    let migratedAt: String
+    let migration: Migration
+    let mode: String
+    let modeReason: String
+    let daysToRace: Int?
+    let runState: String
+    let admission: String
+    let raceGoal: RaceGoal?
+    let plan: Plan
+    let execution: Execution
+}
+
+extension TrainingPlanStateResponseV2 {
+    /// 当前业务日这一天的已发布意图。没有行 = 存储里今天没有处方（不等于休息）。
+    func intent(on localDate: String) -> MobilePlannedDay? {
+        plan.days.first { $0.localDate == localDate }
+    }
 }
 
 /// A locally verified system-schedule receipt, NOT physical Watch delivery.

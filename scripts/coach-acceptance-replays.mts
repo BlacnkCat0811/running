@@ -86,8 +86,8 @@ const cases: AcceptanceReplayCase[] = [
       check("AC0-05", `duration-${seconds}`, input, out, () => {
         assert.equal(out.status, seconds < 1800 ? "not_feasible" : "feasible");
         assert.equal(out.durationSeconds?.lower, seconds);
-        assert.ok(Math.abs(out.distanceKm!.upper - seconds / 360) < 1e-9);
-        assert.ok(Math.abs(out.distanceKm!.lower - seconds / 420) < 1e-9);
+        assert.ok(Math.abs((out.distanceKm?.upper ?? Number.NaN) - seconds / 360) < 1e-9);
+        assert.ok(Math.abs((out.distanceKm?.lower ?? Number.NaN) - seconds / 420) < 1e-9);
       });
     }
     for (const availableSeconds of [1200, 1800]) {
@@ -278,7 +278,7 @@ const cases: AcceptanceReplayCase[] = [
     padded.warmup!.goal = { type: "time", seconds: 1500 };
     const dose = assessSessionDose({ kind: "interval", structure: padded, zones: input.zones });
     check("AC4-11", "padding-does-not-rescue-interval", padded, dose, () => {
-      assert.ok(dose.durationSeconds!.lower >= 1800);
+      assert.ok((dose.durationSeconds?.lower ?? Number.NaN) >= 1800);
       assert.equal(dose.status, "not_feasible");
       assert.ok(dose.reasonCodes.includes("minimum_work_dose_not_met"));
     });

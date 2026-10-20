@@ -1334,6 +1334,26 @@ export interface MobileWeekPlanDay {
   workoutCount: number;
   /** Present for planned days that carry an interval/prescription breakdown. */
   structure: MobileSessionStructure | null;
+  /**
+   * What the runner was prescribed for this date, kept apart from `kind` — which
+   * is the display kind. `completed` says something was *observed*, so the
+   * prescription it replaced (or that it failed to match) would otherwise be
+   * erased; `null` means the stored plan holds no prescription for this date
+   * (an unplanned date is not a rest day that was prescribed).
+   *
+   * Optional so payloads cached before this field existed keep decoding, and so
+   * a client can tell "the server does not report intent" from "there is none".
+   */
+  intentKind?: MobileSessionKind | null;
+  /**
+   * Whether an imported training observation exists for this date.
+   *
+   * `unknown` is a statement about missing evidence, never about training: a
+   * past date with no import may be a missed upload, a watch left at home, or a
+   * real rest. Absent on payloads cached before this field existed; today and
+   * future dates omit it because the date is not observable yet.
+   */
+  observation?: "observed" | "unknown";
 }
 
 /**
@@ -1925,6 +1945,12 @@ export interface UpdateMobileGoalsInput {
   weekPlan?: MobilePlannedDay[];
   lockedSession?: MobileLockedSession | null;
   weekPlanAudit?: MobilePlanAudit | null;
+  /**
+   * Legacy safety marker: a v2 configuration command sets it so the legacy weekly
+   * generator cannot overwrite the window with a second scheduler before the
+   * unified refresh publishes a new plan. Omitted = unchanged.
+   */
+  weekPlanReplanRequired?: boolean;
 }
 
 export interface WorkoutSplit {
@@ -2068,3 +2094,200 @@ export type {
   SubjectiveFeedback, CoachPredictionSummary, CoachGoalGap,
   CoachLoopSettings, CoachLoopCommand, CoachLoopRuntimeResponse, CoachLoopReceiptContext, CoachLoopDeviceReceipt
 } from "./coach-loop.js";
+
+// ---------------------------------------------------------------------------
+// Unified training-plan read contract (PR4-1; field freeze for the v2 endpoints)
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire contract negotiated with `X-RAI-Training-Contract`.
+ *
+ * v1 is every existing response (unchanged). v2 is this module's unified state
+ * projection. The API never silently switches a client between them: an unknown
+ * version is an explicit upgrade error, not a fallback.
+ */
+export const TRAINING_PLAN_CONTRACT_VERSION = 2;
+
+export type TrainingPlanContractVersion = 1 | 2;
+
+export interface TrainingPlanScope {
+  serverId: string;
+  athleteId: string;
+  datasetEpoch: string;
+}
+
+export type TrainingPlanMode = "coach" | "race";
+export type TrainingPlanRunState = "active" | "paused";
+/** Admission is a configuration prerequisite, never a mode switch. */
+export type TrainingPlanAdmissionState = "ready" | "needs_configuration" | "needs_confirmation";
+
+export interface TrainingPlanRaceGoalSupport {
+  /** `null` for a custom distance; the goal is still a race. */
+  distance: MobileRaceDistance | null;
+  support: "standard" | "limited";
+  horizon: "within_horizon" | "beyond_horizon";
+  preparation: "ready" | "short";
+  weeksToRace: number;
+  daysToRace: number;
+  reasonCodes: string[];
+}
+
+export interface TrainingPlanRaceGoalView {
+  id: string;
+  date: string;
+  distanceKm: number;
+  goal: "finish" | "time";
+  targetTimeSeconds: number | null;
+  support: TrainingPlanRaceGoalSupport;
+}
+
+/**
+ * v2 read response: the migrated unified state, with the mode derived live from
+ * `(raceGoal, businessDate)` so a stored copy can never drift from its inputs.
+ *
+ * Read-only by contract: this payload carries no execution grant and the endpoint
+ * never migrates, publishes or writes.
+ */
+export interface TrainingPlanStateResponseV2 {
+  contractVersion: typeof TRAINING_PLAN_CONTRACT_VERSION;
+  scope: TrainingPlanScope;
+  businessDate: string;
+  stateRevision: number;
+  migratedAt: string;
+  migration: {
+    version: number;
+    source: "legacy_goals" | "run_coach" | "coach_loop" | "new";
+    sourceStatus: "active" | "paused" | "ended" | "none";
+    sourceDigest: string;
+  };
+  mode: TrainingPlanMode;
+  modeReason: "no_race_goal" | "race_goal_upcoming" | "race_day" | "race_goal_passed";
+  daysToRace: number | null;
+  runState: TrainingPlanRunState;
+  admission: TrainingPlanAdmissionState;
+  raceGoal: TrainingPlanRaceGoalView | null;
+  plan: {
+    goalsRevision: number | null;
+    currentGoalsRevision: number;
+    /** False when the legacy goals row moved after migration: the state is stale. */
+    current: boolean;
+    days: MobilePlannedDay[];
+    lockedToday: boolean;
+  };
+  /** This slice is a projection only: it deliberately carries no execution grant. */
+  execution: {
+    permitted: false;
+    reasonCodes: string[];
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Unified training-plan commands (PR4-2)
+// ---------------------------------------------------------------------------
+
+/** The only configuration commands; there is deliberately no coach/race enable pair. */
+export type TrainingPlanCommandAction = "set_race_goal" | "clear_race_goal" | "pause" | "resume";
+
+export interface TrainingPlanRaceGoalDraft {
+  date?: string | null;
+  distanceKm?: number | null;
+  goal?: "finish" | "time" | null;
+  targetTimeSeconds?: number | null;
+}
+
+/** State summary shared by preview and command responses. */
+export interface TrainingPlanStateSummary {
+  mode: TrainingPlanMode;
+  modeReason: "no_race_goal" | "race_goal_upcoming" | "race_day" | "race_goal_passed";
+  daysToRace: number | null;
+  runState: TrainingPlanRunState;
+  admission: TrainingPlanAdmissionState;
+  raceGoal: TrainingPlanRaceGoalView | null;
+}
+
+export interface TrainingPlanCommandChangeSet {
+  goalIdentity: "unset" | "kept" | "replaced" | "cleared" | "unchanged";
+  goalChanged: boolean;
+  runStateChanged: boolean;
+  modeChanged: boolean;
+}
+
+export interface TrainingPlanCommandPreviewRequest {
+  contractVersion: 2;
+  operationScope: TrainingPlanScope;
+  action: TrainingPlanCommandAction;
+  expectedStateRevision?: number | null;
+  raceGoal?: TrainingPlanRaceGoalDraft | null;
+}
+
+/**
+ * Preview never persists. `candidateId` + `expiresAt` bind the confirmed submit to
+ * the exact previewed configuration; a submit after the TTL is rejected instead of
+ * silently applying a stale intent.
+ */
+export interface TrainingPlanCommandPreviewResponse {
+  contractVersion: 2;
+  candidateId: string;
+  expiresAt: string;
+  expectedStateRevision: number;
+  before: TrainingPlanStateSummary;
+  after: TrainingPlanStateSummary;
+  changes: TrainingPlanCommandChangeSet;
+  /** The published plan was not regenerated in this slice. */
+  planRefreshRequired: true;
+  warnings: string[];
+}
+
+export interface TrainingPlanCommandRequest {
+  contractVersion: 2;
+  operationId: string;
+  operationScope: TrainingPlanScope;
+  expectedStateRevision: number;
+  candidateId: string;
+  action: TrainingPlanCommandAction;
+  raceGoal?: TrainingPlanRaceGoalDraft | null;
+}
+
+export interface TrainingPlanCommandResponse {
+  contractVersion: 2;
+  operationId: string;
+  stateRevision: number;
+  before: TrainingPlanStateSummary;
+  after: TrainingPlanStateSummary;
+  changes: TrainingPlanCommandChangeSet;
+  /**
+   * False only when this same operation also published a fresh plan. A `pause`
+   * never publishes, so it keeps `true` (resume/refresh own the next plan).
+   */
+  planRefreshRequired: boolean;
+  plan: {
+    days: MobilePlannedDay[];
+    audit: MobilePlanAudit;
+    contextDigest: string;
+    goalsRevision: number;
+  } | null;
+  warnings: string[];
+}
+
+/** PR4-3: publish a fresh plan for the migrated unified configuration. */
+export interface TrainingPlanRefreshRequest {
+  contractVersion: 2;
+  operationId: string;
+  operationScope: TrainingPlanScope;
+  expectedStateRevision: number;
+}
+
+export interface TrainingPlanRefreshResponse {
+  contractVersion: 2;
+  operationId: string;
+  stateRevision: number;
+  goalsRevision: number;
+  plan: {
+    days: MobilePlannedDay[];
+    audit: MobilePlanAudit;
+    /** Always a fresh plan published from this refresh. */
+    current: true;
+    contextDigest: string;
+  };
+  warnings: string[];
+}

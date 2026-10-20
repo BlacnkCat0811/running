@@ -75,6 +75,74 @@ test("legacy-day protection survives confirmation and restart, expires by Shangh
 const runDate = (index: number): string =>
   new Date(Date.UTC(2025, 0, 1 + index * 3, 0, 0, 0)).toISOString();
 
+test("the week read model reports a past prescription as planned and unobserved", async (context) => {
+  // §5.3：意图（开了什么）、观测（记录了什么）、可执行（今天还能跑什么）是三件事。
+  // 旧投影在读取已存课表**之前**就把过去无训练的日子写成「休息」，所以周一计划的间歇
+  // 到周三会变成休息；存储没有被改写，丢的是读取模型。这里从真实读入口验证修复：
+  // 过去行保留计划课型，并显式标注观测未知；未排课的日子仍为休息，但说明"未安排"。
+  // PR2 只改 API 读取模型 —— 今天的行仍然是闸门解析出的可执行课，未来行仍然是执行版。
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-week-intent-"));
+  const databasePath = join(root, "rai.sqlite");
+  (await RaiDatabase.open(databasePath)).close();
+  const read = new RaiReadStore(databasePath);
+  try {
+    // 2026-10-07T04:00:00Z = 2026-10-07 12:00 Asia/Shanghai (周三，本周从 10-05 周一算起)
+    assert.equal(mobileLocalDate(), "2026-10-07");
+    const goals = {
+      easyDurationFloorFraction: 0.7,
+      qualitySessionCap: 2,
+      raceTarget: null,
+      lockedSession: null,
+      weekPlanPreservedDate: null,
+      runCoach: null,
+      weekPlanAudit: null,
+      revision: 1,
+      weekPlan: [{ localDate: "2026-10-05", kind: "interval" as const, distanceKm: 9.4, reason: "F03 计划" }]
+    };
+    const payload = read.mobileToday(goals);
+    const rows = new Map(payload.weekPlan.map((day) => [day.localDate, day]));
+
+    const planned = rows.get("2026-10-05");
+    assert.ok(planned);
+    assert.equal(planned.kind, "interval", "过去已存的间歇不能被覆盖成休息");
+    assert.equal(planned.title, "原计划间歇／尚无训练观测");
+    assert.equal(planned.observation, "unknown", "没有导入训练是观测未知，不是已观测的休息");
+    assert.equal(planned.intentKind, "interval", "计划意图必须独立于显示课型报告");
+    assert.equal(planned.planned, true);
+    assert.ok(planned.distanceKm > 0, "意图仍按结构测量距离");
+    assert.ok(planned.structure, "过去行保留处方结构，供 PR5 渲染原计划");
+
+    const unplanned = rows.get("2026-10-06");
+    assert.ok(unplanned);
+    assert.equal(unplanned.kind, "rest");
+    assert.equal(unplanned.planned, false, "没有计划的日子不是被安排的休息日");
+    assert.equal(unplanned.intentKind, null);
+    assert.equal(unplanned.observation, "unknown");
+    assert.equal(unplanned.title, "未安排训练");
+    assert.notEqual(planned.kind, unplanned.kind, "有计划与没计划必须可区分");
+
+    // 今天/未来：行为不变，也不携带意图/观测字段（渲染在 PR5）。
+    const todayRow = rows.get("2026-10-07");
+    assert.ok(todayRow);
+    assert.equal(todayRow.kind, payload.nextSession.kind);
+    assert.equal(todayRow.observation, undefined);
+    assert.equal(todayRow.intentKind, undefined);
+    for (const futureDay of payload.weekPlan.filter((day) => day.localDate > "2026-10-07")) {
+      assert.equal(futureDay.observation, undefined);
+      assert.equal(futureDay.intentKind, undefined);
+    }
+
+    // `/v1/mobile/workout-plan` 的窗口从今天开始，过去的行不会进入设备同步。
+    const effective = read.mobileWorkoutPlan(goals);
+    assert.equal(effective.windowStart, "2026-10-07");
+    assert.ok(effective.days.every((day) => day.localDate >= "2026-10-07"));
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 async function seed(path: string): Promise<RaiDatabase> {
   const store = await RaiDatabase.open(path);
   const database = store.database;

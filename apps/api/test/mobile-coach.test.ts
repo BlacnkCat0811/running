@@ -534,6 +534,126 @@ test("both plan endpoints give a stored day the same distance", () => {
   assert.notEqual(fromCoach.distanceKm, 7);
 });
 
+test("a past prescribed session with no observation reports intent, not rest", () => {
+  // §5.3: intent (what was prescribed), observation (what was recorded) and
+  // effective (what may execute) are three different facts. The old projection
+  // returned `rest` for every past date without an import *before* it read the
+  // stored plan, so a prescribed interval and an intentional rest day produced
+  // the same row. A past date no longer executes; its prescription is a record,
+  // so the row has to say "planned, unobserved" instead of claiming a rest.
+  const today = base().today;
+  const past = "2026-09-01"; // Monday of the same week as today (2026-09-03)
+  const structure = buildSessionStructure("interval", base().zones, { reps: 6 });
+  assert.ok(structure);
+  const input: CoachInput = {
+    ...base(),
+    storedWeekPlan: [{ localDate: past, kind: "interval", distanceKm: 7, structure }],
+    weekDaily: [
+      { localDate: past, distanceKm: 0, workoutCount: 0, workoutId: null },
+      { localDate: today, distanceKm: 0, workoutCount: 0, workoutId: null }
+    ]
+  };
+  const day = buildWeekPlan(input, decideNextSession(input, decideVerdict(input)))
+    .find((row) => row.localDate === past);
+  assert.ok(day);
+  assert.equal(day.kind, "interval", "the prescription must not be overwritten with rest");
+  assert.equal(day.intentKind, "interval", "what was prescribed is reported separately from the display kind");
+  assert.equal(day.observation, "unknown", "no import was recorded; unknown is not the same claim as rest");
+  assert.equal(day.planned, true);
+  assert.match(day.title, /^原计划间歇／尚无训练观测$/);
+  // The distance still comes from the prescription's own structure, never from
+  // the stored hint beside it — the same measurement path as a future stored day.
+  assert.equal(
+    day.distanceKm,
+    roundKm(measureStructure(structure, "interval", pacesFromZones(base().zones)).distanceKm)
+  );
+  assert.ok(day.structure, "intent keeps the prescription the runner was given");
+});
+
+test("an observed date stays completed/observed and keeps the prescription it replaced", () => {
+  const observed = "2026-09-01";
+  const input: CoachInput = {
+    ...base(),
+    storedWeekPlan: [{ localDate: observed, kind: "interval", distanceKm: 7 }],
+    weekDaily: [{ localDate: observed, distanceKm: 5.2, workoutCount: 1, workoutId: "workout-1" }]
+  };
+  const row = buildWeekPlan(input, decideNextSession(input, decideVerdict(input)))
+    .find((day) => day.localDate === observed);
+  assert.ok(row);
+  assert.equal(row.kind, "completed");
+  assert.equal(row.observation, "observed");
+  assert.equal(row.intentKind, "interval", "the observation does not erase what was prescribed");
+  assert.equal(row.completedWorkoutId, "workout-1");
+
+  const unplanned = buildWeekPlan({ ...input, storedWeekPlan: [] }, decideNextSession(input, decideVerdict(input)))
+    .find((day) => day.localDate === observed);
+  assert.ok(unplanned);
+  assert.equal(unplanned.kind, "completed");
+  assert.equal(unplanned.observation, "observed");
+  assert.equal(unplanned.intentKind, null, "an unplanned run has no prescription to report");
+});
+
+test("a past date with no prescription says it was not planned", () => {
+  const input: CoachInput = {
+    ...base(),
+    storedWeekPlan: [{ localDate: "2026-09-01", kind: "rest", distanceKm: null }],
+    weekDaily: [
+      { localDate: "2026-09-01", distanceKm: 0, workoutCount: 0, workoutId: null },
+      { localDate: "2026-09-02", distanceKm: 0, workoutCount: 0, workoutId: null }
+    ]
+  };
+  const week = buildWeekPlan(input, decideNextSession(input, decideVerdict(input)));
+  const prescribedRest = week.find((day) => day.localDate === "2026-09-01");
+  const unplanned = week.find((day) => day.localDate === "2026-09-02");
+  assert.ok(prescribedRest && unplanned);
+  for (const day of [prescribedRest, unplanned]) {
+    assert.equal(day.kind, "rest");
+    assert.equal(day.observation, "unknown");
+  }
+  // Both display as rest, but they are not the same claim: one was prescribed,
+  // the other was never planned and no rest was observed.
+  assert.equal(prescribedRest.planned, true);
+  assert.equal(prescribedRest.intentKind, "rest");
+  assert.equal(prescribedRest.title, "原计划休息");
+  assert.equal(unplanned.planned, false);
+  assert.equal(unplanned.intentKind, null);
+  assert.equal(unplanned.title, "未安排训练");
+});
+
+test("today and future rows keep their existing projection", () => {
+  // Scope guard: PR2 fixes the past-day read projection only. Today's row is the
+  // gate-resolved effective session and future rows are the executable plan;
+  // neither reports intent/observation yet (iOS rendering lands in PR5).
+  const today = base().today;
+  const future = "2026-09-05";
+  const input: CoachInput = {
+    ...base(),
+    storedWeekPlan: [
+      { localDate: future, kind: "easy", distanceKm: 8 },
+      { localDate: today, kind: "interval", distanceKm: 9 }
+    ],
+    weekDaily: [
+      { localDate: today, distanceKm: 0, workoutCount: 0, workoutId: null },
+      { localDate: future, distanceKm: 0, workoutCount: 0, workoutId: null }
+    ]
+  };
+  const next = decideNextSession(input, decideVerdict(input));
+  const week = buildWeekPlan(input, next);
+  const todayRow = week.find((day) => day.localDate === today);
+  const futureRow = week.find((day) => day.localDate === future);
+  assert.ok(todayRow && futureRow);
+  assert.equal(todayRow.kind, next.kind);
+  assert.equal(todayRow.title, next.title);
+  assert.equal(todayRow.planned, true);
+  assert.equal(todayRow.observation, undefined);
+  assert.equal(todayRow.intentKind, undefined);
+  assert.equal(futureRow.kind, "easy");
+  assert.equal(futureRow.title, "轻松跑");
+  assert.equal(futureRow.planned, true);
+  assert.equal(futureRow.observation, undefined);
+  assert.equal(futureRow.intentKind, undefined);
+});
+
 test("a locked snapshot is re-measured, and today's card matches the executable week", () => {
   // The lock is a frozen copy of a recommendation, and snapshots written before
   // structured sessions existed carry a distance with no structure at all.

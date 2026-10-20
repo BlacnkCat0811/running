@@ -23,6 +23,16 @@ struct PlanWatchSyncOutcome: Equatable {
     var didAttemptClear = false
     var superseded = false
     var cleanupVerified = true
+    /// What changed between the context the installed schedule was pushed under
+    /// and this operation's context (PR6). `.unknown` when no provenance was
+    /// recorded (first push, explicit clear, pre-PR6 journal).
+    var contextChange: PlanScheduleContextChange = .unknown
+    /// True when this operation replaces entries pushed under a different
+    /// configuration (mode / race goal / receipt contract / policy).
+    var contextSwitch = false
+    /// True once the switch withdrawal was read back empty AND durably recorded,
+    /// i.e. the "register withdrawal" step completed before any new push.
+    var withdrawalRegistered = false
     var validationError: String?
     var storageError: String?
     var submittedEntries: [PlanScheduledEntry] = []
@@ -55,10 +65,23 @@ struct PlanWatchSyncOutcome: Equatable {
         }
         if let validationError { return validationError + "；未改动系统排期。" }
         if offered == 0 {
-            return clearVerified ? "当前窗口没有需要下发的新训练；系统旧排期已核验清空。"
-                : "没有新训练，但旧排期未能确认撤回，请重试并检查手表「体能训练」。"
+            if !clearVerified {
+                return contextSwitch
+                    ? "训练配置已切换，但没有新训练；旧排期未能确认撤回，请重试并检查手表「体能训练」。"
+                    : "没有新训练，但旧排期未能确认撤回，请重试并检查手表「体能训练」。"
+            }
+            return contextSwitch
+                ? "训练模式或赛事目标已切换，旧排期已核验撤回并登记；当前窗口没有需要下发的新训练。"
+                : "当前窗口没有需要下发的新训练；系统旧排期已核验清空。"
         }
         var text = verified ? "系统训练日程已核验 \(scheduled) 项。" : "系统训练日程部分核验 \(scheduled)/\(offered) 项，未核验日期不登记回执。"
+        if contextSwitch {
+            // A configuration switch is the user-visible reason the old entries
+            // are gone; never let it read as an ordinary replacement.
+            text = (clearVerified
+                ? "训练模式或赛事目标已切换，旧排期已核验撤回并登记；"
+                : "训练配置已切换，旧排期属于上一配置，尚未确认撤回；") + text
+        }
         if !clearVerified { text += " 旧排期未能确认撤回。" }
         let reasons = days.filter { $0.status != .confirmed }.compactMap { day in day.reason.map { "\(day.localDate)：\($0)" } }
         if !reasons.isEmpty { text += " " + reasons.joined(separator: "；") }
@@ -205,6 +228,25 @@ enum PlanWatchScheduling {
             outcome.storageError = "无法持久化排期意图，未改动系统排期"
             return outcome
         }
+        // PR6: a receipt is scoped to the training context it was produced under.
+        // The journal already holds the context this push will use and the context
+        // the installed entries were pushed under, so classify the replacement
+        // BEFORE any destructive SDK call. A configuration switch becomes
+        // fail-closed below; an unrecorded provenance is only made attributable.
+        let contextChange = PlanScheduleContextChange.evaluate(previous: journal.previousContext,
+                                                               current: journal.operation.context)
+        outcome.contextChange = contextChange
+        outcome.contextSwitch = contextChange.isConfigurationSwitch && !journal.operation.previousEntries.isEmpty
+        if outcome.contextSwitch {
+            journal.recordDiagnostic(name: "schedule_context_switch", errorCode: nil,
+                                     owed: journal.operation.previousEntries.count)
+        } else if case .unknown = contextChange, !journal.operation.previousEntries.isEmpty {
+            // Pre-PR6 journals have no recorded context. Withdrawing our own UUIDs
+            // must still work, so this never blocks; the absence is recorded so
+            // "why can't this operation name the old mode?" has an answer.
+            journal.recordDiagnostic(name: "schedule_context_unverified", errorCode: "context_missing",
+                                     owed: journal.operation.previousEntries.count)
+        }
         let before = await scheduler.readBack()
         guard isCurrent() else { outcome.superseded = true; return outcome }
         let previousIDs = Set(journal.operation.previousEntries.map(\.workoutID))
@@ -225,6 +267,20 @@ enum PlanWatchScheduling {
         guard isCurrent() else { return await superseded() }
         // A silent clear failure must not be made to look like a replacement.
         guard outcome.clearVerified else { outcome.skipped = owed.count; return outcome }
+        // PR6 switch protocol, step 4: register the withdrawal. Only now are all
+        // three prerequisites true — the installed entries were identity-verified
+        // against `previousEntries`, they were withdrawn, and a strong empty
+        // read-back confirmed the removal. If the registration cannot be written,
+        // stop before pushing: the journal stays unfinished (.clearing) with the
+        // prepared reservation and the old entry identities intact, so recovery
+        // withdraws again instead of pushing under an unregistered new mode.
+        if outcome.contextSwitch {
+            guard journal.persist(.verifying) else {
+                outcome.storageError = "旧排期撤回已读回，但撤回登记未能持久化；未下发新排期"
+                return outcome
+            }
+            outcome.withdrawalRegistered = true
+        }
         for request in requests {
             guard isCurrent() else { return await superseded() }
             guard journal.persist(.scheduling, entry: request.entry.workoutID, itemPhase: .submitting) else {

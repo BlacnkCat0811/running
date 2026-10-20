@@ -77,6 +77,29 @@ export function validateCoachLoopSettings(settings: Omit<CoachLoopSettings, "sta
   }
 }
 
+/**
+ * F06：一条教练闭环回执是否**仍然**把数据集置于"新版托管"语义下。
+ *
+ * 回执是 append-only 的审计轨迹，`end` 只追加一条 `status: "ended"` 的新回执
+ * （不删除旧行，也没有 tombstone）。因此"存在回执"只能回答"这个数据集曾经
+ * 启用过新版教练"，不能回答"现在是否仍由新版教练管理"：结束后的数据集必须
+ * 交还给旧版读写路径（否则旧计划路由永久 409、握手永久不宣告旧快照能力）。
+ *
+ * 失败关闭：没有回执 = 未托管；回执存在但 `settings` 缺失/不可解析 = 仍然托管
+ * （宁可继续要求客户端走新版合同，也不要在证据不完整时放开旧写路径）；只有
+ * 明确的 `settings.status === "ended"` 才释放。
+ *
+ * 纯函数、无 I/O：`server.ts` 把 `coachLoopState()` 的结果传进来，测试可直接
+ * 断言状态矩阵。
+ */
+export function coachLoopReceiptManaged(receipt: unknown): boolean {
+  if (receipt === null || receipt === undefined) return false;
+  if (typeof receipt !== "object" || Array.isArray(receipt)) return true;
+  const settings = (receipt as { settings?: unknown }).settings;
+  if (settings === null || settings === undefined || typeof settings !== "object" || Array.isArray(settings)) return true;
+  return (settings as { status?: unknown }).status !== "ended";
+}
+
 /** `readCached()` 的 memo 配置；缺 `mainDataVersion` 时 memo 关闭（退化为每次重算）。 */
 export interface CoachLoopReadMemoOptions {
   readonly memo?: CoachLoopMemo<CoachLoopRuntimeResponse>;
@@ -263,15 +286,40 @@ export class CoachLoopRuntime {
       const planned = evaluation.planned;
       const effectiveDigest = digest(evaluation.response.days.map(row =>
         [row.day.localDate, key(row.day), row.executable, row.decisionRef]));
-      const changed = digest(goals.weekPlan.map(d => [d.localDate, key(d)])) !== digest(planned.map(d => [d.localDate, key(d)])) ||
-        digest(previous?.settings) !== digest(settings) || digest(previous?.reservations) !== digest(evaluation.reservations) ||
+      // F04: the public `raceTarget` is a legacy goal, not a second copy of the
+      // coach settings. A `daily_adaptive` programme declares no race at all, so
+      // the old unconditional `raceTarget: settings.race ? ... : null` erased a
+      // goal the loop never owned — and `end` recomputed the same null, so it
+      // could never restore it (no backup field exists by design). Only a
+      // declared race publishes the target, and only on enable/update; every
+      // other command omits the property so `MobileGoalsStore.write` keeps the
+      // stored value. A declared distance the public contract cannot express
+      // (`runCoachRaceTarget` → null) also omits instead of writing null.
+      const declaredRace = command.action === "enable" || command.action === "update"
+        ? settings.race ? runCoachRaceTarget(settings.race) : null
+        : null;
+      // F06: `end` is a lifecycle command, not a plan publication. Evaluating an
+      // ended programme marks every day non-permitted, so writing that window
+      // replaced the stored week with rest at the exact moment the dataset is
+      // handed back to legacy planning. The rule is keyed on the ended status,
+      // not only on the `end` action: an ordinary `refresh` sent after the end
+      // would otherwise republish the same all-rest window and undo the release.
+      // Keep `weekPlan`, its audit row and the migration-confirmation state;
+      // the receipt still records the ended settings.
+      const publishesPlan = settings.status !== "ended";
+      const weekPlanChanged = publishesPlan &&
+        digest(goals.weekPlan.map(d => [d.localDate, key(d)])) !== digest(planned.map(d => [d.localDate, key(d)]));
+      const changed = weekPlanChanged || digest(previous?.settings) !== digest(settings) ||
+        digest(previous?.reservations) !== digest(evaluation.reservations) ||
         previous?.effectiveDigest !== effectiveDigest;
+      const planAudit = { generatedBy: "heuristic" as const, model: null, promptVersion: null, generatedAt: facts.asOf };
       const updated = changed ? this.store.write({
-        expectedRevision: goals.revision, weekPlan: planned,
-        raceTarget: settings.race ? runCoachRaceTarget(settings.race) : null,
-        weekPlanAudit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt: facts.asOf },
+        expectedRevision: goals.revision,
+        ...(publishesPlan ? { weekPlan: planned, weekPlanAudit: planAudit } : {}),
+        ...(declaredRace === null ? {} : { raceTarget: declaredRace }),
         ...(settings.status !== "active" ? { lockedSession: null } : {})
-      }, { prescription: facts.inputs.prescription, runCoach: null, confirmCoachPlan: true, evaluatedAt: facts.asOf }) : goals;
+      }, { prescription: facts.inputs.prescription, runCoach: null,
+        ...(publishesPlan ? { confirmCoachPlan: true } : {}), evaluatedAt: facts.asOf }) : goals;
       const receipt: CoachRuntimeReceipt = {
         settings, policyHash: COACH_RUNTIME_POLICY_HASH, policyManifest: COACH_RUNTIME_MANIFEST,
         factsHash: facts.factsHash, inputDigest: evaluation.inputDigest, effectiveDigest,
@@ -279,11 +327,14 @@ export class CoachLoopRuntime {
         volumePolicy: evaluation.response.volumePolicy,
         templateIds: evaluation.templateIds, goalsRevision: updated.revision, evaluatedAt: facts.asOf,
         result: changed ? "patched" : "no_change",
-        changes: planned.flatMap(day => {
+        // `end` publishes no plan window, so it cannot have changed one: an empty
+        // list is the receipt's honest record (the ended settings above are the
+        // lifecycle evidence, not a phantom "every day became rest" diff).
+        changes: publishesPlan ? planned.flatMap(day => {
           const old = goals.weekPlan.find(d => d.localDate === day.localDate);
           return old && key(old) === key(day) ? [] : [{ date: day.localDate, before: old ? key(old) : null,
             after: key(day), reason: day.reason ?? "coach_rule_changed" }];
-        })
+        }) : []
       };
       if (changed || previous?.inputDigest !== receipt.inputDigest)
         this.store.appendCoachLoopReceipt(this.scope(), command.operationId, receipt);
@@ -398,15 +449,20 @@ export class CoachLoopRuntime {
       digest({ slotId, inputDigest, prescription: candidate.prescriptionDigest });
     const projectedReservations = historicalReservations.filter(slot => slot.localDate !== date ||
       slot.status !== "pending" || slot.deviceScheduleUnresolved);
-    if (isExtension && (publishing || originalToday?.prescriptionDigest === candidate.prescriptionDigest)) {
+    // An extension reservation is a volume obligation. Without a provable upper km
+    // bound there is nothing safe to reserve, so it is not authorized either.
+    const extensionCostKm = candidate.dose.distanceKm?.upper ?? null;
+    const extensionApproved = isExtension && extensionCostKm !== null &&
+      (publishing || originalToday?.prescriptionDigest === candidate.prescriptionDigest);
+    if (extensionApproved && extensionCostKm !== null) {
       const previousSlotIndex = projectedReservations.findIndex(slot => slot.slotId === slotId);
       if (previousSlotIndex >= 0) projectedReservations.splice(previousSlotIndex, 1);
       projectedReservations.push({ slotId, localDate: date, allocation: "extension",
-        distanceKm: candidate.dose.distanceKm!.upper, approvedAt: originalToday?.approvedAt ?? facts.asOf,
+        distanceKm: extensionCostKm, approvedAt: originalToday?.approvedAt ?? facts.asOf,
         status: "pending", matchedWorkoutIds: [], deviceScheduleUnresolved: false,
         prescriptionDigest: candidate.prescriptionDigest!, decisionRef });
     }
-    const authorization = isExtension && (publishing || originalToday?.prescriptionDigest === candidate.prescriptionDigest) ? decisionRef : null;
+    const authorization = extensionApproved ? decisionRef : null;
     const choices: Record<string, ReturnType<typeof coachTemplateCandidates>["candidates"]> = {};
     const targetedTemplate = (day: string, choice: ReturnType<typeof coachTemplateCandidates>["candidates"][number]) => {
       const proposed = runCoachSessionTargets(templateDay(day, choice), { targetType: config.targetType }, zones);
@@ -464,14 +520,19 @@ export class CoachLoopRuntime {
           const protections = context.protections.flatMap(p => p.constraints);
           const protectedCap = protections.find(c => c.kind === "cap_distance")?.value;
           const phaseForDay = currentPeriodizationWeek({ today: day.localDate, raceTarget, recentWeeklyKm: facts.inputs.recentWeeklyKm });
-          permitted &&= dose.status === "feasible" && (protectedCap == null || dose.distanceKm!.upper <= protectedCap);
+          // A distance cap that cannot be compared against a provable bound is not
+          // satisfied by assumption.
+          const doseDistanceUpper = dose.distanceKm?.upper ?? null;
+          permitted &&= dose.status === "feasible" &&
+            (protectedCap == null || doseDistanceUpper !== null && doseDistanceUpper <= protectedCap);
           permitted &&= !protections.some(c => c.kind === "no_extra_training" ||
             c.kind === "no_quality_or_long_run" && (quality(day) || day.kind === "long_run"));
           // Eligibility approved one exact complete course, not any retained
           // day that happens to fit H. A mismatch must participate in repair.
           if (day.localDate === date && isExtension) permitted &&= key(day) === candidate.prescriptionDigest;
-          if (day.kind === "long_run") permitted &&= dose.distanceKm!.upper <= (phaseForDay?.longRunCapKm ?? suggested * 0.38) &&
-            dose.distanceKm!.upper <= priorMaximum * 1.1;
+          if (day.kind === "long_run") permitted &&= doseDistanceUpper !== null &&
+            doseDistanceUpper <= (phaseForDay?.longRunCapKm ?? suggested * 0.38) &&
+            doseDistanceUpper <= priorMaximum * 1.1;
           if (quality(day)) {
             permitted &&= todayData.calibration.status === "completed" && !input.blockingFlagCodes.length &&
               !(day.localDate === date && (feedback.qualityBlocked || todayData.verdict.tone !== "green")) &&
@@ -481,8 +542,11 @@ export class CoachLoopRuntime {
                 Math.abs(Date.parse(d) - Date.parse(day.localDate)) >= 2 * 86_400_000);
             plannedQuality.push(day.localDate);
           }
+          // The weekly envelope is spent in km: a day without a provable upper bound
+          // cannot be accounted for, so it cannot be permitted.
+          if (permitted && doseDistanceUpper === null) permitted = false;
           if (!permitted && !protectedDates.includes(day.localDate)) feasible = false;
-          if (permitted) dailyCosts.set(day.localDate, dose.distanceKm!.upper);
+          if (permitted && doseDistanceUpper !== null) dailyCosts.set(day.localDate, doseDistanceUpper);
         }
         all.push(permitted || day.kind === "rest" ? day : rest(day.localDate, "有效训练限制；保留原课历史"));
       }

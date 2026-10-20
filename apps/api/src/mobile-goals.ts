@@ -41,6 +41,7 @@ import {
   readPublicationGuard,
   type PublicationGuardState
 } from "./publication-guard.js";
+import { TrainingPlanStore, ensureTrainingPlanSchema, type TrainingPlanState, type TrainingPlanStateRow } from "./training-plan-store.js";
 
 const GOALS_FILE = "mobile-goals.json";
 /** Derived from the shared list so this set cannot drift from the API's enum. */
@@ -304,6 +305,40 @@ export class MobileGoalsStore {
     return row ? JSON.parse(row.payload_json) as T : null;
   }
 
+  /**
+   * Unified training-plan state for the v2 read contract (PR3/PR4-1).
+   *
+   * Strictly read-only: a GET must never migrate, publish or write. `null` means
+   * "this scope has not been migrated" (and also "this store has no control
+   * database"), which the route answers with an explicit not-migrated error rather
+   * than a legacy fallback. A damaged store throws instead of guessing.
+   */
+  trainingPlanStateRow(scope: string): TrainingPlanStateRow | null {
+    if (!this.controlDatabase) return null;
+    return new TrainingPlanStore(this.controlDatabase).read(scope);
+  }
+
+  /**
+   * PR4-2: CAS write of a command-derived unified state.
+   *
+   * Must run inside the caller's publication transaction so the state write, its
+   * history row, the legacy goals mirror and the operation result commit or roll
+   * back together. Calling it without a transaction throws instead of silently
+   * creating a second, torn publication path.
+   */
+  commitTrainingPlanCommandState(input: {
+    scope: string;
+    expectedRevision: number;
+    state: TrainingPlanState;
+    eventType: string;
+  }): { revision: number; updatedAt: string } {
+    if (!this.controlDatabase) throw new PlanOperationError("training_plan_state_unavailable",
+      "当前存储没有控制库，不能提交统一训练状态。", 503);
+    if (!this.publicationTransaction) throw new PlanOperationError("training_plan_transaction_required",
+      "统一状态必须与发布在同一事务内提交。", 500);
+    return new TrainingPlanStore(this.controlDatabase).commitState(input, { inTransaction: true });
+  }
+
   coachLoopReceipts<T>(scope: string, limit = 100): T[] {
     return (this.controlDatabase?.prepare(`SELECT payload_json FROM mobile_coach_loop_receipts
       WHERE scope=? ORDER BY sequence DESC LIMIT ?`).all(scope, cappedReadLimit(limit)) as
@@ -499,6 +534,21 @@ export class MobileGoalsStore {
     });
   }
 
+  /**
+   * Read-only replay lookup for a durable operation (PR4-3).
+   *
+   * A retry of an already-committed operation must be answered with the stored
+   * result BEFORE any freshness/precondition check: those checks compare against a
+   * state that this very operation already changed, so running them first would
+   * turn a safe retry into a revision conflict. The request digest is verified, so a
+   * different payload under the same key still fails closed.
+   */
+  replayOperation<Result>(scope: string, operationId: string, route: string, input: unknown): Result | null {
+    if (!this.controlDatabase) return null;
+    const replayed = this.replayPublicationResult<Result>(scope, operationId, digest({ route, input }));
+    return replayed?.result ?? null;
+  }
+
   /** Retire tomorrow and later from legacy model weeks, without rewriting today's prescription. */
   retireLegacyModelPlan(today: string): MobileGoalsResponse {
     if (!isValidLocalDate(today)) throw new MobileGoalsInputError("迁移日期无效");
@@ -559,7 +609,8 @@ export class MobileGoalsStore {
           ? current.lockedSession
           : normalizeLockedSession(input.lockedSession, options?.prescription),
       weekPlanAudit: input.weekPlanAudit === undefined ? current.weekPlanAudit : normalizePlanAudit(input.weekPlanAudit),
-      weekPlanReplanRequired: options?.confirmCoachPlan ? false : current.weekPlanReplanRequired,
+      weekPlanReplanRequired: input.weekPlanReplanRequired ??
+        (options?.confirmCoachPlan ? false : current.weekPlanReplanRequired),
       weekPlanPreservedDate: current.weekPlanPreservedDate,
       runCoach: options?.runCoach === undefined ? current.runCoach : options.runCoach,
       updatedAt: options?.evaluatedAt ?? new Date().toISOString()
@@ -1099,7 +1150,12 @@ export class MobileGoalsStore {
       { version: number } | undefined;
     const applied = Number(row?.version ?? 0);
     const migrations: Array<{ version: number; apply: () => void }> = [
-      { version: 1, apply: () => this.migratePlanPushIdentity(database) }
+      { version: 1, apply: () => this.migratePlanPushIdentity(database) },
+      // Version 2 is the next free number (nothing above 1 existed in the file or
+      // in any control database when it was added); `applied` above is still the
+      // runtime source of truth, so a restored/older database only runs what it
+      // has not recorded yet.
+      { version: 2, apply: () => this.migrateTrainingPlanState(database) }
     ];
     for (const migration of migrations) {
       if (migration.version <= applied) continue;
@@ -1175,6 +1231,21 @@ export class MobileGoalsStore {
       }
       update.run(payload, scopeKey, idempotencyKey, workoutID, scheduledAt, row.id);
     }
+  }
+
+  /**
+   * Migration 2: the unified training-state tables (PR3 first slice).
+   *
+   * Add-only. The state, its history and the data-migration audit live beside the
+   * legacy rows, which are neither rewritten nor deleted: `mobile_goals`,
+   * `mobile_goals_history`, `mobile_plan_pushes`, `mobile_plan_operations` and
+   * `mobile_coach_loop_receipts` keep their exact identity, so the migration can
+   * be developed and rolled back without losing a receipt. The DDL is
+   * `IF NOT EXISTS` (see `training-plan-store.ts`) because the operator CLI may
+   * have created the same tables before this process restarted.
+   */
+  private migrateTrainingPlanState(database: DatabaseSync): void {
+    ensureTrainingPlanSchema(database);
   }
 
   private readControlGoals(): StoredGoals {

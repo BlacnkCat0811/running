@@ -76,6 +76,7 @@ npm run check:package-boundaries
 | 今日页计划类卡片的口径冲突与改法 | [计划卡口径](docs/TODAY_PLAN_CARDS_REVIEW.md) |
 | iOS 构建、权限和平台入口 | [iOS](apps/ios/README.md) |
 | 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |
+| 统一训练排课三项政策门槛（G01 赛前剂量 / G02 无历史重启 / G03 受控追加；工程提案，未批准） | [训练计划政策评审](docs/TRAINING_PLAN_POLICY_REVIEW.md) |
 | iOS 训练计划现状复核与后续实施方案 | [训练计划架构方案](docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md) |
 | iOS 增量同步、解析入库与模型计算审查及具体优化方法 | [同步与计算优化方案](docs/IOS_SYNC_PERFORMANCE_REVIEW.md) |
 | 同步优化后七项问题的修复步骤、回归及验收 | [优化后修复实施方案](docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md) |

@@ -107,6 +107,69 @@ enum RaiAPIClientError: LocalizedError {
     }
 }
 
+/// v2 训练读合同（`X-RAI-Training-Contract`）的协商常量。
+///
+/// 客户端**只发 2**：PR5 之后训练页读的是统一状态，保留"先发 1 看看"的降级路径
+/// 会把"合同不认识"这种必须升级才能解决的问题静默变成一次成功的旧读 —— 用户看到的
+/// 是一份旧引擎排出的计划，而不是"需要升级"。服务端也按同一条规则协商
+/// （`apps/api/src/training-plan-routes.ts`）：未知版本 409，不回退。
+enum RaiTrainingPlanContract {
+    static let headerField = "X-RAI-Training-Contract"
+    static let version = 2
+    /// 唯一的请求值。与 `version` 分开命名是刻意的：升级客户端时要同时想清楚
+    /// "我理解第几版"和"我现在要请求第几版"，两者不是永远相等。
+    static let requestedVersion = "2"
+}
+
+/// v2 训练读被服务端**显式拒绝**时的分类错误。
+///
+/// 为什么不折叠进 `.server(code:message:status:)`：这几种拒绝的处置方式各不相同 ——
+/// 合同版本不认识要升级，未迁移要先迁移数据，暂不可读可以重试。全部压成一条
+/// 服务端原文，UI 就只剩"出错了"，而"未知合同版本绝不能显示成休息"这条要求
+/// 恰好需要调用方**分得清**自己面对的是哪一种。
+///
+/// 与 `RaiAPIClientError` 分家：后者是传输层的分类，其它 18 处调用点仍在用它；
+/// 只有训练读这一个入口把服务端码翻译成合同语义。
+enum RaiTrainingPlanContractError: LocalizedError, Equatable {
+    /// 服务端不理解合同 2（或根本没有这条路由）：必须升级，不能回退旧合同。
+    case contractUnsupported
+    /// 该数据域尚未迁移：需要先执行迁移方案，不能把"未迁移"当成"没有训练"。
+    case notMigrated
+    /// 统一状态暂不可读（存储损坏/业务日期不可解析）：可重试，仍不回退旧合同。
+    case unavailable(code: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .contractUnsupported:
+            return "训练数据合同版本不受支持，请升级 App 或服务端；本版本不会退回旧合同读取。"
+        case .notMigrated:
+            return "该数据域尚未迁移到统一训练状态；请先完成迁移，当前不会退回旧合同。"
+        case .unavailable:
+            return "统一训练状态暂不可读，请稍后重试；当前不会退回旧合同。"
+        }
+    }
+
+    /// 服务端错误码/状态码 → 合同分类。返回 `nil` 表示这不是合同拒绝
+    /// （网络错误、鉴权失败等由调用方原样抛出，避免把临时故障伪装成升级问题）。
+    static func classification(serverCode: String?, status: Int) -> RaiTrainingPlanContractError? {
+        // 老服务端没有这条路由：404 与"不认识合同"对客户端是同一处置（升级）。
+        if status == 404 { return .contractUnsupported }
+        // 缺 code 时落到 `default`（不是合同拒绝），所以这里的空串只用于 switch 匹配。
+        let code = serverCode ?? ""
+        switch code {
+        case "training_contract_unsupported":
+            return .contractUnsupported
+        case "training_plan_not_migrated":
+            return .notMigrated
+        case "training_plan_state_unavailable", "training_plan_state_invalid",
+             "training_plan_business_date_invalid":
+            return .unavailable(code: code)
+        default:
+            return nil
+        }
+    }
+}
+
 /// 2026-10-18（审查 P2-6 收尾）：`Retry-After` 的解析规则。
 ///
 /// RFC 7231 允许 HTTP-date，但本客户端只消费**整数秒**形式：HTTP-date 需要与
@@ -217,6 +280,25 @@ struct RaiAPIClient {
 
     func trainingPlanState(baseURL: URL, token: String) async throws -> TrainingPlanStateResponse {
         try await get(path: "/v1/mobile/training-plan-state", baseURL: baseURL, token: token)
+    }
+
+    /// 训练页唯一的计划读：**永远**声明合同 2（`TrainingPlanUnifiedPolicy` 消费它）。
+    ///
+    /// 没有"先按 v1 读"的降级分支 —— 见 `RaiTrainingPlanContract` 的说明。服务端
+    /// 显式拒绝（未知版本/未迁移/暂不可读）在这里翻译成
+    /// `RaiTrainingPlanContractError`；网络与鉴权错误原样抛出，因为"连不上"不该
+    /// 被提示成"升级 App"。
+    func trainingPlanStateV2(baseURL: URL, token: String) async throws -> TrainingPlanStateResponseV2 {
+        do {
+            return try await get(path: "/v1/mobile/training-plan-state", baseURL: baseURL, token: token,
+                headers: [RaiTrainingPlanContract.headerField: RaiTrainingPlanContract.requestedVersion])
+        } catch let error as RaiAPIClientError {
+            if let classified = RaiTrainingPlanContractError.classification(
+                serverCode: error.serverCode, status: error.httpStatus ?? 0) {
+                throw classified
+            }
+            throw error
+        }
     }
 
     func planOperation<Result: Decodable>(id: String, baseURL: URL, token: String) async throws -> PlanPublicationResult<Result> {
@@ -399,10 +481,11 @@ struct RaiAPIClient {
         query: [URLQueryItem] = [],
         baseURL: URL,
         token: String,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        headers: [String: String] = [:]
     ) async throws -> T {
         try await request(path: path, query: query, method: "GET", body: Optional<Data>.none,
-            baseURL: baseURL, token: token, timeout: timeout)
+            baseURL: baseURL, token: token, timeout: timeout, headers: headers)
     }
 
     private func send<T: Encodable, U: Decodable>(
@@ -429,7 +512,8 @@ struct RaiAPIClient {
         body: Data?,
         baseURL: URL,
         token: String,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        headers: [String: String] = [:]
     ) async throws -> T {
         guard let url = endpoint(baseURL: baseURL, path: path, query: query) else {
             throw RaiAPIClientError.invalidServerAddress
@@ -444,6 +528,11 @@ struct RaiAPIClient {
         }
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        // 契约协商头等附加头由调用方显式传入：这条通道只服务于会协商合同的读，
+        // 不能让所有请求都悄悄带上一个版本声明。
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
         }
 
         let data: Data

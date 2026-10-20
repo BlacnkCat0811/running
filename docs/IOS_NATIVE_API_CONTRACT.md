@@ -34,22 +34,18 @@
 | 同步覆盖 | `GET /v1/sync/coverage?types=` | 只用于避免重传服务端已有历史；不得清除本地游标 |
 | 统计 | `GET /v1/mobile/statistics` | 月度、总量和心率区间直接展示服务端结果 |
 | 趋势 | `GET /v1/mobile/trends` | 12 周、增幅、纪录和洞察直接展示服务端结果 |
-| 目标 | `GET /v1/mobile/goals` | 保存当前 revision 和逐日计划 |
-| 跑步教练 | `GET /v1/mobile/run-coach` | 读取计划、阶段、容量说明和力量补充；读取不写入 |
+| 目标 | ~~`GET /v1/mobile/goals`~~ | **已退役（2026-10-20）**：返回 `410 legacy_surface_retired`；读用 `GET /v1/mobile/training-plan-state`（v2 合同 `X-RAI-Training-Contract: 2`） |
+| 跑步教练 | ~~`GET /v1/mobile/run-coach`~~ | **已退役（2026-10-20）**：返回 `410 legacy_surface_retired`；读用 `GET /v1/mobile/training-plan-state` |
 
 日期字符串保持服务端返回的 ISO/本地日期语义。页面显示使用本地格式化，不能把缓存时间冒充健康数据截至时间。
 
 ## 写接口
 
-`PUT /v1/mobile/goals` 在已有目标上必须带 `expectedRevision`，其余字段**皆可省略**：请求里没出现的字段沿用已存值，因此"只改比赛目标"不会顺手改写其它设置。可编辑字段为轻松训练下限、质量课上限、比赛目标和逐日计划（**周跑量目标已退役**，见 `DECISIONS.md`；周容量改由比赛目标或近期实测跑量推导）；锁课由 `POST /v1/mobile/lock` 专门维护，不随目标保存请求发送。服务端以 revision 做并发检查；`409 mobile_goals_revision_conflict` 时重新读取后提示用户，不静默覆盖。
+**2026-10-20 旧接口退役**：`PUT /v1/mobile/goals` 与 `POST /v1/mobile/run-coach` 不再执行旧协议，统一返回 `410 legacy_surface_retired`（带 `replacement`）。旧手动课表保存、旧教练生命周期与旧目标 CAS 的客户端行为已不可用；写配置改走 `POST /v1/mobile/training-plan/commands`（v2 合同），计划刷新改走 `POST /v1/mobile/training-plan/commands/refresh`。退役路由仍挂载，避免旧客户端把"刻意退役"读成 404 或网络错误。
 
-`GET /v1/mobile/goals` 可返回服务端只读 `weekPlanPreservedDate: string | null`，表示旧课表迁移当日的保护日期；客户端不得在 `PUT` 中回传。该保护不随预览确认清除，仅在上海本地日期相等时生效；今日建议和 WorkoutKit 使用同一处方，恢复与负荷闸门仍有效，未来课表容量不被抬高。旧 Swift 客户端可忽略这一新增字段，保护、过期及校验均在服务端完成。
+仍在服务的是锁课：`POST /v1/mobile/lock` 带 `action: lock|relock` 和当前 `recommendationRevision`。服务端只拒绝两种情形：上次健康同步失败（`409 mobile_refresh_failed`），或建议版本已过期（`409 mobile_recommendation_stale`）。**今天没有恢复记录不是拒绝理由** —— 没戴表是普通的覆盖缺口，不应阻止锁课；锁课只允许联网执行。
 
-`runCoach` 也是 goals 的只读元数据，不得在 `PUT` 中回传。`POST /v1/mobile/run-coach` 接受 `{ expectedRevision, action, config? }`，action 为 `start|update|refresh|pause|resume|end`；仅 start/update 携带完整 config。返回 `{ revision, plan, phase, phases, daysToRace, elapsedWeeks, weeklyCapacityKm, notices, strength }`。配置及边界见 [RUN_COACH](RUN_COACH.md)。
-
-教练命令与 goals 共用 CAS；无效状态/配置为 `422 run_coach_invalid`，过期修订为 `409 mobile_goals_revision_conflict`。active/paused 期间，直接 PUT 目标或逐日计划返回 `409 run_coach_managed`，旧生成和预览也被拒绝。独立手动课表在结束后显式保存或确认时清除教练管理状态。
-
-旧协议原生全量刷新和教练入口先 GET，再对 active 计划 POST refresh，事实相同不会增加 revision。支持完整快照的新协议入口只读取；适应通过用户显式点击“按最新训练事实调整计划”执行。命令确认成功后刷新完整计划，依赖读取失败只报告“已保存但未刷新”，不伪装成保存失败。教练缓存按服务身份和 revision 隔离，已确认的新教练缓存可独立于较旧 goals 缓存恢复；旧修订的今日处方和手表课表不得展示为新计划，缺少匹配安排时显示尚未刷新。旧读取不能覆盖新命令；离线不执行命令。手表同步和撤回仍需用户手动操作，教练状态变化不会自动修改设备。
+统一合同下，配置命令与计划刷新共用发布事务：配置（赛事目标/暂停/恢复）与计划在同一操作、同一事务边界内发布，响应以 `planRefreshRequired` 标明计划是否需要重算；计划刷新在控制事务外生成、提交时复核事实指纹。读取只给投影，`execution.permitted=false` 不构成执行授权。旧读取不能覆盖新命令；离线不执行命令。手表同步和撤回仍需用户手动操作，教练状态变化不会自动修改设备。
 
 `POST /v1/mobile/lock` 带 `action: lock|relock` 和当前 `recommendationRevision`。服务端只拒绝两种情形：上次健康同步失败（`409 mobile_refresh_failed`），或建议版本已过期（`409 mobile_recommendation_stale`）。**今天没有恢复记录不是拒绝理由** —— 没戴表是普通的覆盖缺口，不应阻止锁课；锁课只允许联网执行。
 
@@ -88,11 +84,17 @@
 
 返回 `{ from, through, timezone, count, csv }`；有效范围最多 366 日、最多 2000 条，否则明确返回 400。CSV 仅包含已分析训练的开始时间、类型、距离、时长、配速；无路线、备注、健康原始值或内部 ID。结束日完整包含。响应禁止缓存，用户必须先预览再显式导出。
 
-### 旧周计划生成接口
+### 旧周计划生成接口（已退役）
 
-原生已不再定义直接 `generate` 客户端方法，使用 preview/confirm 两阶段。服务端旧接口为兼容保留并标记 deprecated，不再作为新客户端集成入口。
+`POST /v1/mobile/workout-plan/generate`、`/preview`、`/confirm` 于 2026-10-20 退役：仍挂载但一律返回
+`410 legacy_surface_retired`，替代面分别为 `/v1/mobile/training-plan/commands/refresh`、
+`/commands/preview`、`/commands`。旧的进程内 preview/confirm 候选机制已删除；OpenAPI 中保留路径并标记
+`deprecated` + 410，供旧客户端识别迁移方向。
 
-## 2026-10-07 增量契约：跑步教练的准备度与预算
+## 2026-10-07 增量契约：跑步教练的准备度与预算（历史存档）
+
+> **2026-10-20 退役说明**：`GET` / `POST /v1/mobile/run-coach` 已返回 `410 legacy_surface_retired`。
+> 本节保留的是退役前字段语义，供旧客户端迁移与历史排查阅读，**不再代表可用接口**。
 
 `GET` / `POST /v1/mobile/run-coach` 新增两个字段，均为**兼容扩展**（旧客户端忽略即安全）：
 

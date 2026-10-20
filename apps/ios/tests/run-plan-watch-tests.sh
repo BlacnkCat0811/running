@@ -3,7 +3,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-xcrun swiftc -parse-as-library -disable-sandbox -swift-version 5 -default-isolation MainActor \
+# `-warnings-as-errors`（2026-10-20）：与 `typecheck-ios.sh` 同一条纪律 ——
+# app target 用 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 编译，漏写 `nonisolated`
+# 这类诊断只得到 warning，而在 Swift 6 语言模式下是 error。开闸时两个编译单元
+# 0 warning；引入新 warning ⇒ 当场红。
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-version 5 -default-isolation MainActor \
   apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
   apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/PlanReceiptMatcher.swift \
   apps/ios/RAI/UserDataNoticePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
@@ -11,6 +15,16 @@ xcrun swiftc -parse-as-library -disable-sandbox -swift-version 5 -default-isolat
   apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/PlanWatchSchedulingRegression.swift \
   -o "$tmp/plan-watch-tests"
 "$tmp/plan-watch-tests"
+# PR6：训练上下文 + 撤回先于下发协议 + 回执准入的纯逻辑回归。单独一个编译单元，
+# 因为它有自己的 @main（同一模块不能有两个 @main）。
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-version 5 -default-isolation MainActor \
+  apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
+  apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/PlanReceiptMatcher.swift \
+  apps/ios/RAI/UserDataNoticePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
+  apps/ios/RAI/PlanScheduleOperationJournal.swift \
+  apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/PlanWatchContextRegression.swift \
+  -o "$tmp/plan-watch-context-tests"
+"$tmp/plan-watch-context-tests"
 # Optional red/green proof using isolated copies only. Normal npm test:ios keeps
 # the fast production regressions; release audits can request semantic mutants.
 if [ "${RAI_PLAN_WATCH_MUTATIONS:-0}" = 1 ]; then
@@ -38,7 +52,7 @@ PY
     scheduling=apps/ios/RAI/PlanWatchScheduling.swift
     if [ "$mutant" = wrong-id ]; then matcher="$tmp/$mutant.swift"; else scheduling="$tmp/$mutant.swift"; fi
     # A compile error is NOT a killed behavioral mutant.
-    xcrun swiftc -parse-as-library -disable-sandbox -swift-version 5 -default-isolation MainActor \
+    xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-version 5 -default-isolation MainActor \
       apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
       apps/ios/RAI/WorkoutPlanMapper.swift "$matcher" apps/ios/RAI/UserDataNoticePolicy.swift "$scheduling" \
       apps/ios/RAI/PlanScheduleOperationJournal.swift \

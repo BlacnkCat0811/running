@@ -13,6 +13,7 @@
     "check:docs": "node scripts/check-doc-links.mjs",
     "check:scripts": "node scripts/check-npm-scripts-portable.mjs",
     "check:ios-gates": "node scripts/run-ios-python-gates.mjs",
+    "check:training-plan-single-writer": "node scripts/check-training-plan-single-writer.mjs",
     "review:model-boundaries": "tsx scripts/review-model-boundaries.mts",
     "preinstall": "node scripts/check-node-version.mjs",
     "pretypecheck": "node scripts/check-node-version.mjs",

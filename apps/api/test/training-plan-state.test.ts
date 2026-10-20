@@ -11,7 +11,6 @@ import { RaiReadStore } from "../src/data.js";
 import { MobileGoalsStore } from "../src/mobile-goals.js";
 import { PlanOperationError, PlanPublicationService } from "../src/plan-publication.js";
 import { prescriptionDigest } from "../src/plan-digest.js";
-import { registerRunCoachRoutes } from "../src/run-coach.js";
 import { apiErrorPayload } from "../src/api-error.js";
 import { assemblePlanCandidates, matchPlanDay } from "../src/workout-segments.js";
 import type { MobileRunCoachPlan, MobileSessionStructure } from "@rai/api-contracts";
@@ -257,34 +256,27 @@ test("an uncommitted intent is bound to its original dataset, not only keys alre
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("coach command same-key retry after server reconstruction returns its original response before CAS", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-09T04:00:00Z") });
+test("coach command same-key retry after server reconstruction returns its original response before CAS", () => {
+  // The /v1/mobile/run-coach route is retired (410). The publication contract it
+  // exercised is still live for every remaining writer, so pin the same idempotency
+  // at the PlanPublicationService boundary: a rebuilt service returns the stored
+  // result before touching CAS, and a different request under the same key conflicts.
   const root = mkdtempSync(join(tmpdir(), "rai-coach-operation-"));
-  const path = join(root, "facts.sqlite");
-  (await RaiDatabase.open(path)).close();
   let store = new MobileGoalsStore(root, join(root, "control.sqlite"));
-  const read = new RaiReadStore(path);
-  let app = Fastify();
-  const setup = () => {
-    app.setErrorHandler((error, _request, reply) => { const result = apiErrorPayload(error); reply.code(result.status).send(result.body); });
-    registerRunCoachRoutes({ app, store, scope: () => "scope", identity, inputs: goals => read.mobileWeeklyPlanInputs(goals) });
-  };
+  const publication = () => new PlanPublicationService(store, () => "scope", identity);
   try {
-    setup();
-    const payload = { operationId: randomUUID(), operationScope: identity(), expectedRevision: 0, action: "start", config };
-    const first = await app.inject({ method: "POST", url: "/v1/mobile/run-coach", payload });
-    assert.equal(first.statusCode, 200);
-    await app.close(); store.close();
-    app = Fastify(); store = new MobileGoalsStore(root, join(root, "control.sqlite")); setup();
-    const retry = await app.inject({ method: "POST", url: "/v1/mobile/run-coach", payload });
-    assert.deepEqual(retry.json(), first.json());
+    const payload = { operationId: randomUUID(), operationScope: identity(), expectedRevision: 0 };
+    const first = publication().publish("run-coach", payload, () => store.write({ qualitySessionCap: 1 }));
+    store.close();
+    store = new MobileGoalsStore(root, join(root, "control.sqlite"));
+    const retry = publication().publish("run-coach", payload, () => store.write({ qualitySessionCap: 1 }));
+    assert.deepEqual(retry, first);
     assert.equal(store.read().revision, 1);
-    const conflict = await app.inject({ method: "POST", url: "/v1/mobile/run-coach", payload: { ...payload, action: "pause" } });
-    assert.equal(conflict.statusCode, 409);
-    assert.equal(conflict.json().code, "plan_operation_key_conflict");
-  } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+    assert.throws(() => publication().publish("run-coach", { ...payload, expectedRevision: 1 },
+      () => store.write({ qualitySessionCap: 2 })), { code: "plan_operation_key_conflict" });
+    assert.equal(store.read().revision, 1, "the conflicting replays must not write");
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
-
 test("G08: receipt lifecycle preserves immutable history and bounds execution associations to validity time", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-receipt-events-"));
   const store = new MobileGoalsStore(root, join(root, "control.sqlite"));

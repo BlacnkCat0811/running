@@ -9,7 +9,13 @@ trap 'rm -rf "$tmp"' EXIT
 # 目前是纯 Foundation（`@Observable` 计数为 0），所以不带也能过；但那不是保证 —— 一旦引入
 # `@Observable`，宏插件被 `sandbox-exec` 包住后会死在 "sandbox_apply: Operation not
 # permitted"，随后满屏 "produced malformed response"，看起来像一屏源码错误其实不是。
-xcrun swiftc -parse-as-library -disable-sandbox \
+# `-warnings-as-errors`（2026-10-20）作用于本文件**每一个**编译单元，与
+# `typecheck-ios.sh` / `run-model-tests.sh` 同一条纪律：app target 用
+# `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 编译，漏写 `nonisolated` 这类诊断
+# 只得到 warning，而它们在 Swift 6 语言模式下是 error；旧行为打印完照样 exit 0，
+# 警告可以无限攒（本文件就留下过一条 `_ =` 冗余）。开闸时 19 个编译单元全部
+# 0 warning；引入新 warning ⇒ 当场红，静默通过才是要防的东西。
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/HealthSyncCancellation.swift \
   apps/ios/RAI/StoredZip.swift \
   apps/ios/tests/HealthSyncCancellationRegression.swift \
@@ -18,7 +24,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 "$tmp/health-sync-cancellation-tests"
 
 # 与 App 一样启用 MainActor 默认隔离，防止纯逻辑编译掩盖大文件 helper 的执行边界错误。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   -swift-version 5 -default-isolation MainActor \
   apps/ios/RAI/HealthSyncCancellation.swift \
   apps/ios/RAI/HealthSyncArchive.swift \
@@ -29,7 +35,7 @@ python3 apps/ios/tests/check-health-sync-archive.py
 
 # 恢复分支的判据单独一个可执行：一个模块只能有一个 `@main`，所以共用源码、分开编译。
 # 它是 2026-09-22 线上「未找到导入来源」死锁的回归（详见该测试文件头部）。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/HealthSyncCancellation.swift \
   apps/ios/tests/HealthSyncResumeRegression.swift \
   -o "$tmp/health-sync-resume-tests"
@@ -39,7 +45,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # `HealthKitSync.swift` 本身不被任何回归编译，判据留在它里面就等于没有执行者。
 # `SyncPhase.swift` 一起编：阶段闭集与原子单元判据都住在那里，而 `HealthSyncLifecycle`
 # 的 `persistedPhases` / `terminalPhases` 由它派生 —— 少编它这里根本连不上。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/HealthSyncLifecycle.swift \
   apps/ios/tests/HealthSyncLifecycleRegression.swift \
@@ -49,7 +55,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 原子单元协议：`upload → inspect → startImport` 的下一步由**字段**推导（计划 §8）。
 # 「按字段推导」这条纪律在 2026-09-22 的线上死锁里付过一次代价 —— 当时恢复分支按
 # `phase` 字符串猜，于是"批次已上传、导入没发起"与"导入已在跑"分不出来。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/tests/SyncAtomicUnitRegression.swift \
   -o "$tmp/sync-atomic-unit-tests"
@@ -62,7 +68,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # `lastAnalysisStatus`（类型 `DirectSyncReceipt` / `DirectSyncAnalysisStatus` 住在那个文件里），
 # 少编这一支会以 `cannot find 'DirectSyncReceipt' in scope` 炸 —— 而全量类型检查（一起编）
 # 完全看不出来（2026-10-13 实测：本支在 HEAD 上红了整轮 `npm run test:ios`）。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/DirectSyncReceiptState.swift \
   apps/ios/RAI/SyncTaskState.swift \
@@ -72,7 +78,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   -o "$tmp/sync-task-migration-tests"
 "$tmp/sync-task-migration-tests"
 
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/HealthKitRecordCursor.swift \
   apps/ios/tests/HealthKitRecordCursorRegression.swift \
   -o "$tmp/healthkit-record-cursor-tests"
@@ -90,7 +96,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 的入参是那份**按目标读到的待办快照**（`PendingWork`）。少编它，这个单元会在真跑门禁时以
 # `cannot find type 'HealthSyncBackgroundRecovery' in scope` 炸掉 —— 而 `typecheck-ios.sh`
 # 是全量一起编的，"少列一个文件"在那里完全看不出来（同 capabilities §14i 的教训）。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/BackgroundSyncPolicy.swift \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
   apps/ios/RAI/HealthSyncWorkPlanner.swift \
@@ -104,7 +110,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 队列写、确认在 MainActor 删，三步之间没有任何原子性 ⇒ 旧确认可以删掉刚写入的新代次。
 # 这里用**真实 SQLite 文件**逐条执行两种交错顺序、并发记录/确认、跨连接重开、失败分类与
 # 旧键迁移。判据的全部意义是"跨线程 + 跨连接"，替身会把它绕过去，所以必须用真库。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
   apps/ios/RAI/HealthSyncIntentJournal.swift \
   apps/ios/RAI/SQLiteSupport.swift \
@@ -114,7 +120,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 
 # R3（2026-10-19 复核）：训练窗口 anchored 分页的**纯状态机**（rev/EOF/轮转/CAS 前驱）。
 # 判据全部是"改错了照样编译通过"的形态：满页当 EOF、缺锚点仍推进、窗口扩宽后复用旧锚。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/tests/WorkoutWindowPagingRegression.swift \
@@ -124,7 +130,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # R3 的**落盘**一侧：分页候选只在 commitSuccess 的同一事务里提交，且带前驱锚点 CAS。
 # 与既有的单事务提交回归同一手法：`SyncTaskStore(directory:)` 注入临时目录，
 # 跑的是真实 SQLite 文件，不是替身。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
@@ -141,7 +147,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 后台冷启动的恢复/意图确认时序。生产接线在 `HealthKitSync.swift`，但 URL/HealthKit/UIKit
 # 依赖使它不能进入纯逻辑可执行；因此“陈旧 epoch 不接纳”“失败不消费”“任务落盘才消费”
 # 与“导出期间新通知不被旧代次吞掉”必须在这个无副作用核心里执行。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
@@ -160,7 +166,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 「阻塞态绝不推进 anchor」这条不变式 —— 破了它不是报错，而是**静默丢数据**：
 # 客户端会把"这一次没读到"当成"数据没有变化"从而推进水位，那段健康数据从此再也导不出来。
 # `HealthSyncLifecycle.swift` 一起编：阻塞态经生命周期中止之后该保留还是降级，判据跨两个文件。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/HealthSyncLifecycle.swift \
   apps/ios/RAI/HealthSyncBlockedRecovery.swift \
@@ -175,7 +181,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 一句话而没有写入路径上的执行者 —— 那正是本次修复前的形态。
 # `SyncTaskStore` + `SQLiteSupport` 只依赖 Foundation + SQLite3，所以这里跑的是**真库**，
 # 不是替身（与 `run-store-tests.sh` 同一手法：`SyncTaskStore(directory:)` 支持注入目录）。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
@@ -193,7 +199,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 #
 # 它单独一个可执行、且**只**编译纯 Foundation 的三个文件，是刻意的：这台机器的全部价值
 # 来自"无副作用"，一旦它能碰到 HealthKit 或数据库，判据就只能靠真机复现了。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/RAI/RouteSyncStateMachine.swift \
   apps/ios/tests/RouteSyncStateMachineTests.swift \
@@ -204,7 +210,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 两件事共用 `RouteSyncState.swift` 的同一份类型（候选/结算/策略），所以同编一个单元 ——
 # 分家会让"要删哪些待办"与"允不允许 fetch"各自演化，而它们必须回答同一个问题：
 # 这条 UUID 这一批到底有没有**完整观测**。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/RAI/RouteSyncStateMachine.swift \
   apps/ios/tests/RouteCommitSettlementRegression.swift \
@@ -214,7 +220,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 直连单批预算（S2.1/S2.2 + 2026-10-14 route 维度补全）：换算与边界都是纯函数，
 # 失效方向静默（换算漏 0.9 ⇒ 载荷贴服务端硬上界；闸门边界写错 ⇒ 恰好等于上界时
 # 放行一个必被拒的批）。`APIModels.swift` 必须一起编：决策依赖 `DirectSyncBounds`。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/tests/DirectSyncBatchBudgetTests.swift \
@@ -225,7 +231,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 为什么不能只测"函数返回了什么"：这张表是降频记忆的唯一住处（不许落 `UserDefaults`、
 # 不许落 JSON、不许落内存单例），所以"跨进程还记得住""NULL 与空串分得开""半批写失败会整批
 # 回滚"这三件事，只有在一个真库文件上跑才算数。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
@@ -242,7 +248,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # 路线 GPX 的**流式写出**：判据是"与旧的拼串实现逐字节相同" + 预算分类 + 放弃时不留残片。
 # 只有 `RouteGpxWriter.swift`（纯 Foundation/CryptoKit）进本单元 —— 它刻意不依赖 CLLocation，
 # 所以"格式漂移"这条在 macOS 上就能抓到，不必等真机。
-xcrun swiftc -parse-as-library -disable-sandbox \
+xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors \
   -swift-version 5 -default-isolation MainActor \
   apps/ios/RAI/RouteGpxWriter.swift \
   apps/ios/tests/RouteGpxStreamingRegression.swift \

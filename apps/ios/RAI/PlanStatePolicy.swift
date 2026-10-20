@@ -241,10 +241,367 @@ struct PlanReadIssue: Equatable {
         /// 服务端数据通过了协议形状，但安全字段（身份/日期/窗口/逐日/摘要）不可信。
         /// 与 `contractMismatch` 分开：前者不该提示升级客户端（2026-10-18 审查 P2-8）。
         case snapshotValidationFailed
+        /// v2 训练读合同不被服务端理解（409 `training_contract_unsupported` 或 404）。
+        /// 与 `contractMismatch` 分开：这是**必须升级**才能解决的状态，不是某份载荷
+        /// 解不开；把它折进"计划快照不可信"会让升级提示消失。
+        case upgradeRequired
+        /// v2 统一安装尚未迁移（409 `training_plan_not_migrated`）。
+        case notMigrated
     }
     let code: Code
     let message: String
     var retryable: Bool { [.offline, .timeout, .serverUnavailable, .revisionConflict].contains(code) }
+}
+
+/// v2 统一训练页的**纯**展示状态。
+///
+/// 为什么把判定放在这里而不是视图里：页面必须把休息 / 比赛日 / 需要刷新 /
+/// 事实待确认 / 不可判定 / 设备协调待确认 / 合同需升级分开，其中任何一项写错，
+/// 用户就会把"不知道"读成"今天休息"。视图没有回归通道，这里可以用纯逻辑钉住；
+/// 七个状态里只有"休息"允许出现"休息"二字。
+struct TrainingPlanUnifiedView: Equatable {
+    enum Phase: Equatable {
+        /// 还没读到（首次进入页面），不是"没有训练"。
+        case loading
+        /// 服务端不认识合同 2：显示升级提示，绝不显示成休息。
+        case upgradeRequired
+        /// 数据域尚未迁移：显示迁移提示，绝不显示成休息。
+        case notMigrated
+        /// 网络/服务端暂时不可读。
+        case unavailable(String)
+        /// 载荷解开了，但模式/运行状态/准入取值本版本不认识：不猜，不当作休息。
+        case notAssessable(String)
+        /// 缺少（或未接受）训练配置：唯一入口是配置向导。
+        case needsConfiguration
+        /// 程序已结束，需要确认后才能创建新的训练模式。
+        case needsConfirmation
+        /// 状态陈旧（业务日已过 / 旧 goals 行又变过 / 只有上次缓存）。
+        case refreshRequired
+        case ready
+    }
+
+    let phase: Phase
+    /// 这份状态只作上次参考，不能当作当前安排。
+    let isReferenceOnly: Bool
+    let mode: String?
+    let runState: String?
+    let admission: String?
+    let daysToRace: Int?
+    let isRaceDay: Bool
+    /// 只有存储里今天**明确排了休息**才是 true；没有行 = 不知道，不是休息。
+    let isRest: Bool
+    let todayIntent: MobilePlannedDay?
+    let weekDays: [MobilePlannedDay]
+    /// 事实新鲜度尚未评估（`execution.reasonCodes`）。
+    let factsPending: Bool
+    /// 设备（手表）排期尚未协调完成：不可把"还没同步"说成"今天没有训练"。
+    let deviceCoordinationPending: Bool
+    /// 读投影**从不**产生执行授权；恒为 false（见 `TrainingPlanUnifiedPolicy.executionGranted`）。
+    let executionGranted: Bool
+    /// 服务端若在投影里给了执行授权，这里记下契约冲突（消费方不得据此执行）。
+    let contractViolation: String?
+}
+
+/// 过去一天在统一训练页"本周回顾"里的展示行。
+///
+/// F03 的渲染侧：过去一天有处方、没有观测时，`kind` 是原计划类型、`observation`
+/// 是 `unknown`。把它画成"休息"等于断言跑者休息了，而数据只说明**没有证据**。
+struct TrainingPlanWeekReviewRow: Identifiable, Equatable {
+    let localDate: String
+    /// 用于配色/图标的展示类型。未观测的日期用**原处方类型**，不是 rest。
+    let displayKind: String
+    let title: String
+    let detail: String
+    var id: String { localDate }
+}
+
+enum TrainingPlanUnifiedValidationError: Error, LocalizedError, Equatable {
+    case unsupportedContractVersion(Int)
+    case identityMismatch
+    case staleGoalsRevision(reported: Int, floor: Int)
+    case invalidBusinessDate(String)
+    case invalidDays(String)
+    case unknownValue(field: String, value: String)
+    case inconsistentRaceMode(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unsupportedContractVersion(version):
+            return "训练读合同版本 \(version) 与客户端理解的版本 2 不一致。"
+        case .identityMismatch:
+            return "统一训练状态的数据域与服务身份不一致。"
+        case let .staleGoalsRevision(reported, floor):
+            return "统一训练状态的目标版本 \(reported) 低于已确认的 \(floor)。"
+        case let .invalidBusinessDate(value):
+            return "统一训练状态的业务日期不是当前业务日：\(value)。"
+        case let .invalidDays(reason):
+            return "统一训练状态的七日意图不可信：\(reason)。"
+        case let .unknownValue(field, value):
+            return "统一训练状态的 \(field) 取值 \(value) 本版本无法判定。"
+        case let .inconsistentRaceMode(reason):
+            return "统一训练状态的比赛模式自相矛盾：\(reason)。"
+        }
+    }
+}
+
+/// v2 统一训练状态的全部判定（纯函数）。
+///
+/// 两个职责：
+/// 1. `validate`：接受一份快照前校验身份、业务日、七日窗口和版本下限。**失败即拒绝**，
+///    不做"看起来差不多就先用"的降级 —— 旧快照被当成当前安排，比没有安排更危险。
+/// 2. `view`：把"服务端说了什么"翻译成页面可渲染的七种状态。这是"未知合同版本
+///    显示升级、不显示休息"这条要求的唯一实现点。
+enum TrainingPlanUnifiedPolicy {
+    static let businessTimeZone = "Asia/Shanghai"
+    static let modes: Set<String> = ["coach", "race"]
+    static let runStates: Set<String> = ["active", "paused"]
+    static let admissions: Set<String> = ["ready", "needs_configuration", "needs_confirmation"]
+    static let windowDays = 7
+
+    private static let zone = TimeZone(identifier: businessTimeZone)
+        ?? TimeZone(secondsFromGMT: 8 * 3600)
+        ?? TimeZone.current
+
+    /// 严格 `YYYY-MM-DD`（`2026-02-30` 这类近似值不算）。业务日期会移动整个窗口，
+    /// `DateFormatter` 默认的宽松解析会把它们悄悄挪到 3 月。
+    static func isValidLocalDate(_ value: String) -> Bool {
+        guard value.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", options: .regularExpression) != nil else {
+            return false
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = zone
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.isLenient = false
+        guard let date = formatter.date(from: value) else { return false }
+        return formatter.string(from: date) == value
+    }
+
+    private static func parseLocalDate(_ value: String) -> Date? {
+        guard isValidLocalDate(value) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = zone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: value)
+    }
+
+    private static func formatLocalDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = zone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    /// 业务日起七日窗口的最后一天（含）。
+    static func windowEnd(after businessDate: String) -> String? {
+        guard let start = parseLocalDate(businessDate) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        guard let end = calendar.date(byAdding: .day, value: windowDays - 1, to: start) else { return nil }
+        return formatLocalDate(end)
+    }
+
+    /// 接受一份 v2 快照之前的全部校验。抛出即拒绝，调用方必须回到"未确认"状态。
+    static func validate(
+        _ snapshot: TrainingPlanStateResponseV2,
+        identity: PlanReceiptScope?,
+        minimumGoalsRevision: Int,
+        now: Date
+    ) throws {
+        guard snapshot.contractVersion == 2 else {
+            throw TrainingPlanUnifiedValidationError.unsupportedContractVersion(snapshot.contractVersion)
+        }
+        // 身份校验必须先于任何展示：缓存按 scope 命名空间存放，但一条错域快照
+        // 仍然会污染另一个数据域的页面。
+        guard let identity, !identity.serverId.isEmpty, !identity.athleteId.isEmpty,
+              !identity.datasetEpoch.isEmpty, identity == snapshot.scope else {
+            throw TrainingPlanUnifiedValidationError.identityMismatch
+        }
+        guard isValidLocalDate(snapshot.businessDate),
+              UserDataNoticePolicy.isCurrentDay(snapshot.businessDate, timezone: businessTimeZone, now: now) else {
+            throw TrainingPlanUnifiedValidationError.invalidBusinessDate(snapshot.businessDate)
+        }
+        guard modes.contains(snapshot.mode) else {
+            throw TrainingPlanUnifiedValidationError.unknownValue(field: "mode", value: snapshot.mode)
+        }
+        guard runStates.contains(snapshot.runState) else {
+            throw TrainingPlanUnifiedValidationError.unknownValue(field: "runState", value: snapshot.runState)
+        }
+        guard admissions.contains(snapshot.admission) else {
+            throw TrainingPlanUnifiedValidationError.unknownValue(field: "admission", value: snapshot.admission)
+        }
+        // 版本下限：写确认（acknowledgement）只提高下限，读侧永远不能把它拉低。
+        guard snapshot.plan.currentGoalsRevision >= minimumGoalsRevision else {
+            throw TrainingPlanUnifiedValidationError.staleGoalsRevision(
+                reported: snapshot.plan.currentGoalsRevision, floor: minimumGoalsRevision)
+        }
+        guard let end = windowEnd(after: snapshot.businessDate) else {
+            throw TrainingPlanUnifiedValidationError.invalidBusinessDate(snapshot.businessDate)
+        }
+        var previous = ""
+        var seen = Set<String>()
+        for day in snapshot.plan.days {
+            guard isValidLocalDate(day.localDate) else {
+                throw TrainingPlanUnifiedValidationError.invalidDays("日期不可解析：\(day.localDate)")
+            }
+            guard day.localDate >= snapshot.businessDate, day.localDate <= end else {
+                throw TrainingPlanUnifiedValidationError.invalidDays(
+                    "日期 \(day.localDate) 不在业务日窗口 \(snapshot.businessDate)…\(end) 内")
+            }
+            guard seen.insert(day.localDate).inserted else {
+                throw TrainingPlanUnifiedValidationError.invalidDays("重复日期：\(day.localDate)")
+            }
+            guard day.localDate > previous else {
+                throw TrainingPlanUnifiedValidationError.invalidDays("未按日期升序：\(day.localDate)")
+            }
+            previous = day.localDate
+        }
+        if snapshot.mode == "race" {
+            guard snapshot.raceGoal != nil, let days = snapshot.daysToRace, days >= 0 else {
+                throw TrainingPlanUnifiedValidationError.inconsistentRaceMode(
+                    "mode=race 但没有可用的比赛目标或天数")
+            }
+        }
+    }
+
+    /// 读投影**从不**执行。即便服务端（或中间人）在 `execution.permitted` 里写了
+    /// true，这里也返回 false：统一状态是投影，事实新鲜度与设备协调都还没有评估过；
+    /// 真正的执行授权只能来自执行快照（`TrainingPlanStore.executablePlan`）。
+    static func executionGranted(for snapshot: TrainingPlanStateResponseV2) -> Bool {
+        _ = snapshot
+        return false
+    }
+
+    /// 把快照/读取错误翻译成页面状态。`issue` 来自最近一次 v2 读，
+    /// `isReferenceOnly` 表示手上的快照只是上次接受过的参考（不是本次确认的当前状态）。
+    static func view(
+        snapshot: TrainingPlanStateResponseV2?,
+        issue: PlanReadIssue?,
+        isRefreshing: Bool,
+        isReferenceOnly: Bool,
+        deviceCoordinationPending: Bool,
+        now: Date
+    ) -> TrainingPlanUnifiedView {
+        func blank(_ phase: TrainingPlanUnifiedView.Phase) -> TrainingPlanUnifiedView {
+            .init(phase: phase, isReferenceOnly: isReferenceOnly, mode: nil, runState: nil,
+                  admission: nil, daysToRace: nil, isRaceDay: false, isRest: false,
+                  todayIntent: nil, weekDays: [], factsPending: false,
+                  deviceCoordinationPending: false, executionGranted: false, contractViolation: nil)
+        }
+        // 合同拒绝优先于一切：一份昨天可读的状态不能掩盖"服务端已不认识合同"。
+        switch issue?.code {
+        case .upgradeRequired: return blank(.upgradeRequired)
+        case .notMigrated: return blank(.notMigrated)
+        default: break
+        }
+        guard let snapshot else {
+            if let issue { return blank(.unavailable(issue.message)) }
+            if isRefreshing { return blank(.loading) }
+            return blank(.loading)
+        }
+        guard snapshot.contractVersion == 2 else { return blank(.upgradeRequired) }
+        guard modes.contains(snapshot.mode), runStates.contains(snapshot.runState),
+              admissions.contains(snapshot.admission) else {
+            return blank(.notAssessable("服务端返回了本版本无法判定的模式、运行状态或准入状态"))
+        }
+        let todayIntent = snapshot.intent(on: snapshot.businessDate)
+        let reasonCodes = snapshot.execution.reasonCodes
+        let currentBusinessDate = isValidLocalDate(snapshot.businessDate)
+            && UserDataNoticePolicy.isCurrentDay(snapshot.businessDate, timezone: businessTimeZone, now: now)
+        let phase: TrainingPlanUnifiedView.Phase
+        if snapshot.admission == "needs_configuration" {
+            phase = .needsConfiguration
+        } else if snapshot.admission == "needs_confirmation" || snapshot.migration.sourceStatus == "ended" {
+            phase = .needsConfirmation
+        } else if !currentBusinessDate || !snapshot.plan.current || isReferenceOnly {
+            phase = .refreshRequired
+        } else {
+            phase = .ready
+        }
+        let isRaceDay = snapshot.mode == "race" && snapshot.modeReason == "race_day"
+        return .init(
+            phase: phase,
+            isReferenceOnly: isReferenceOnly,
+            mode: snapshot.mode,
+            runState: snapshot.runState,
+            admission: snapshot.admission,
+            daysToRace: snapshot.daysToRace,
+            isRaceDay: isRaceDay,
+            // 只有"今天存储里明确排了休息"才算休息。没有今天的行 = 不知道，
+            // 这是 F03 在客户端这边的同一判据。
+            isRest: phase == .ready && !isRaceDay && todayIntent?.kind == "rest",
+            todayIntent: todayIntent,
+            weekDays: snapshot.plan.days,
+            factsPending: reasonCodes.contains("facts_freshness_not_evaluated"),
+            deviceCoordinationPending: deviceCoordinationPending
+                || reasonCodes.contains("device_coordination_not_evaluated"),
+            executionGranted: executionGranted(for: snapshot),
+            contractViolation: snapshot.execution.permitted
+                ? "训练读合同返回了执行授权；本版本把统一状态当作只读投影，已忽略该授权。"
+                : nil
+        )
+    }
+
+    /// 过去日期的回顾行（F03 渲染侧）。规则与 `apps/api/src/mobile-coach.ts` 的
+    /// `buildWeekPlan` 对齐：`observation == "unknown"` 说明**没有证据**，
+    /// 有原处方就是"已排课、尚无观测"，没有原处方就是"未排课"，两者都不是"休息"。
+    static func weekReview(from days: [MobileWeekPlanDay], businessDate: String) -> [TrainingPlanWeekReviewRow] {
+        days.filter { $0.localDate < businessDate }
+            .sorted { $0.localDate < $1.localDate }
+            .map { day in
+                let observed = day.observation == "observed" || day.completedWorkoutId != nil
+                if observed {
+                    return TrainingPlanWeekReviewRow(
+                        localDate: day.localDate,
+                        displayKind: day.kind,
+                        title: day.title.isEmpty ? "已完成" : day.title,
+                        detail: "已导入训练"
+                    )
+                }
+                let plannedKind = day.intentKind ?? (day.planned && day.kind != "rest" ? day.kind : nil)
+                if let plannedKind, plannedKind != "rest" {
+                    return TrainingPlanWeekReviewRow(
+                        localDate: day.localDate,
+                        displayKind: plannedKind,
+                        title: day.title.isEmpty ? "原计划 \(plannedKind)" : day.title,
+                        detail: "尚无训练观测"
+                    )
+                }
+                if day.observation == "unknown" {
+                    return TrainingPlanWeekReviewRow(
+                        localDate: day.localDate,
+                        displayKind: "rest",
+                        title: day.title.isEmpty ? "未安排训练" : day.title,
+                        detail: "未排课，也未观测到训练"
+                    )
+                }
+                // F03 之前的服务端不区分"排了休息"和"没取到观测"：只能如实说明
+                // 这份载荷没有该字段，不能据此断言跑者休息了。
+                return TrainingPlanWeekReviewRow(
+                    localDate: day.localDate,
+                    displayKind: day.kind,
+                    title: day.title.isEmpty ? "无观测记录" : day.title,
+                    detail: "该服务端未提供观测状态"
+                )
+            }
+    }
+
+    /// 单日状态副标题：把"没有观测证据"和"没排课"分开。
+    ///
+    /// 返回值只用于补充 `kind`（展示类型）**旁边**的说明，不参与配色或执行判断：
+    /// 一个 past interval 的展示类型仍是 interval，不能被渲染成 rest。
+    /// `nil` = 现行契约没有给出观测字段（老服务端），调用方沿用原状态文案。
+    static func observationNote(_ day: MobileWeekPlanDay) -> String? {
+        if day.completedWorkoutId != nil || day.observation == "observed" { return "已导入训练" }
+        if day.observation == "unknown" {
+            if let intent = day.intentKind, intent != "rest" { return "原计划 · 尚无训练观测" }
+            if day.planned, day.kind != "rest" { return "尚无训练观测" }
+            return "未排课"
+        }
+        return nil
+    }
 }
 
 struct PlanPublicationResult<Result: Decodable>: Decodable {

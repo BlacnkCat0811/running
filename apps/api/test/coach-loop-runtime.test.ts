@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Fastify from "fastify";
-import { COACH_RUNTIME_POLICY_HASH, type CoachRuntimeReceipt } from "../src/coach-loop-runtime.js";
+import { COACH_RUNTIME_POLICY_HASH, coachLoopReceiptManaged, type CoachRuntimeReceipt } from "../src/coach-loop-runtime.js";
 import { registerCoachLoopRoutes } from "../src/coach-loop-routes.js";
 import { replayRun } from "../../../scripts/coach-replay-scenarios.mjs";
 import { coachRuntimeFixture as fixture, runtimeReplaySettings as settings, runtimeReplayScope as scope } from "../../../scripts/coach-runtime-fixtures.mjs";
@@ -122,4 +122,91 @@ test("AC3-01/AC0-21: fractional real-world zones are canonical before authorizat
       assert.ok(refreshed.today.executable, "positive fractional-zone authorization cannot be passed by resting");
     } finally { f.close(); }
   }
+});
+
+test("F04: a daily-adaptive programme never writes the public race goal, so enable/update/pause/resume/end preserve it", () => {
+  const f = fixture();
+  try {
+    // A public/legacy race goal that predates opt-in and is not the loop's own
+    // declared race: before F04 every command wrote `raceTarget: null` for
+    // daily_adaptive, so enabling silently deleted it and `end` could not
+    // restore it (there is deliberately no backup field).
+    const publicRace = { date: "2026-12-06", distance: "ten_k" as const, targetPaceSecondsPerKm: null };
+    f.store.write({ raceTarget: publicRace });
+    assert.deepEqual(f.store.read().raceTarget, publicRace);
+    const enabled = f.runtime.command(f.command("enable", { settings, acceptedPolicyHash: COACH_RUNTIME_POLICY_HASH }));
+    assert.ok(enabled.today.executable);
+    assert.deepEqual(f.store.read().raceTarget, publicRace, "daily enable must not erase a goal the loop does not own");
+    f.runtime.command(f.command("update", { settings: { ...settings, runningDays: [1, 2, 3, 4, 5, 6], longRunDays: [6] } }));
+    assert.deepEqual(f.store.read().raceTarget, publicRace, "update preserves it");
+    const paused = f.runtime.command(f.command("pause"));
+    assert.equal(paused.settings?.status, "paused");
+    assert.deepEqual(f.store.read().raceTarget, publicRace, "pause preserves it");
+    const resumed = f.runtime.command(f.command("resume"));
+    assert.equal(resumed.settings?.status, "active");
+    assert.deepEqual(f.store.read().raceTarget, publicRace, "resume preserves it");
+    const ended = f.runtime.command(f.command("end"));
+    assert.equal(ended.settings?.status, "ended");
+    assert.deepEqual(f.store.read().raceTarget, publicRace, "end preserves it; the loop never owned it to restore");
+  } finally { f.close(); }
+});
+
+test("F04: a race-mode enable still publishes its declared race and end keeps that published goal", () => {
+  const f = fixture();
+  try {
+    const race = { goal: "finish" as const, raceDate: "2026-12-06", raceDistanceKm: 10, targetTimeSeconds: null,
+      runningDays: [1, 2, 3, 4, 5, 6, 7], longRunDays: [7], targetType: "pace" as const, strengthTraining: false };
+    const enabled = f.runtime.command(f.command("enable", {
+      settings: { ...settings, mode: "race_preparation", race }, acceptedPolicyHash: COACH_RUNTIME_POLICY_HASH
+    }));
+    assert.equal(enabled.settings?.mode, "race_preparation");
+    const published = { date: "2026-12-06", distance: "ten_k" as const, targetPaceSecondsPerKm: null };
+    assert.deepEqual(f.store.read().raceTarget, published, "race mode still publishes the declared race");
+    f.runtime.command(f.command("end"));
+    assert.deepEqual(f.store.read().raceTarget, published, "end neither deletes nor rewrites the declared race");
+  } finally { f.close(); }
+});
+
+test("F06: an ended receipt is not managed, end keeps the stored week, and same-key replay stays idempotent", () => {
+  const f = fixture();
+  try {
+    const scopeKey = JSON.stringify(scope);
+    f.runtime.command(f.command("enable", { settings, acceptedPolicyHash: COACH_RUNTIME_POLICY_HASH }));
+    assert.equal(coachLoopReceiptManaged(f.store.coachLoopState(scopeKey)), true,
+      "an active programme keeps the dataset managed");
+    const weekPlanBefore = f.store.read().weekPlan;
+    assert.ok(weekPlanBefore.some(day => day.kind !== "rest"), "precondition: the programme published a real week");
+    const receiptsBefore = f.store.coachLoopReceipts(scopeKey).length;
+    const endCommand = f.command("end");
+    const ended = f.runtime.command(endCommand);
+    assert.equal(ended.settings?.status, "ended");
+    const receipt = f.store.coachLoopState<CoachRuntimeReceipt>(scopeKey)!;
+    assert.equal(receipt.settings.status, "ended", "the receipt records the ended settings");
+    assert.equal(coachLoopReceiptManaged(receipt), false, "ending releases the legacy plan routes and handshake capability");
+    // The old code wrote `evaluate(..., ended)` back as the window, which marks
+    // every day non-permitted and replaced the stored week with rest.
+    assert.deepEqual(f.store.read().weekPlan, weekPlanBefore, "end must not overwrite the stored week with rest");
+    assert.deepEqual(receipt.changes, [], "end records no plan change it never wrote");
+    assert.equal(f.store.coachLoopReceipts(scopeKey).length, receiptsBefore + 1);
+    const replayed = f.runtime.command(endCommand);
+    assert.deepEqual(replayed, ended, "same operationId replays the stored result");
+    assert.equal(f.store.coachLoopReceipts(scopeKey).length, receiptsBefore + 1, "replay appends no receipt");
+    assert.deepEqual(f.store.read().weekPlan, weekPlanBefore);
+    // The preservation must survive an ordinary refresh as well: republishing the
+    // ended evaluation (all rest) on the next refresh would undo the release.
+    f.runtime.command(f.command("refresh"));
+    assert.deepEqual(f.store.read().weekPlan, weekPlanBefore, "refresh after end does not rewrite the stored week");
+    assert.equal(f.store.coachLoopState<CoachRuntimeReceipt>(scopeKey)?.settings.status, "ended");
+  } finally { f.close(); }
+});
+
+test("F06: the managed predicate fails closed except for an explicit ended receipt", () => {
+  assert.equal(coachLoopReceiptManaged(null), false, "no receipt means the dataset was never opted in");
+  assert.equal(coachLoopReceiptManaged(undefined), false);
+  assert.equal(coachLoopReceiptManaged({ settings: { status: "active" } }), true);
+  assert.equal(coachLoopReceiptManaged({ settings: { status: "paused" } }), true, "a paused programme is still managed");
+  assert.equal(coachLoopReceiptManaged({ settings: { status: "ended" } }), false, "only an explicit end releases");
+  assert.equal(coachLoopReceiptManaged({ settings: null }), true, "missing status evidence stays managed");
+  assert.equal(coachLoopReceiptManaged({}), true, "a receipt without settings stays managed");
+  assert.equal(coachLoopReceiptManaged("corrupt"), true, "a malformed receipt fails closed");
 });

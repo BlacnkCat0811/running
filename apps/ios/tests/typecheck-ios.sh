@@ -124,7 +124,17 @@ echo "类型检查 ${#keep[@]} 个文件（已跳过 $((${#files[@]} - ${#keep[@
 set +e
 # Match the app target: checking only the compiler's nonisolated default misses
 # actor-isolation diagnostics that appear in Xcode builds.
+#
+# `-warnings-as-errors`（2026-10-20）：app target 用 `SWIFT_DEFAULT_ACTOR_ISOLATION =
+# MainActor` 编译，于是"该写 nonisolated 却没写"的声明只得到一条 warning —— 而同一批
+# 诊断在 Swift 6 语言模式下全是 error。旧版本 `printf` 出来就 exit 0（warning 不影响
+# 退出码），等于「判据存在 ≠ 判据被执行」：`HealthKitRecordCursor` 的扩展漏了
+# `nonisolated`，5 条 warning（`HealthKitExport.swift` 的 4 个 helper 调用点）攒到一次
+# 人工排查才被发现，门禁一路都是绿的。让 warning 直接红，下一次写错当场拦住。
+# 开闸时实测 98 文件 0 warning，不会误报；将来若某个 SDK 带进新 warning，要修掉它，
+# 而不是加 `-suppress-warnings` —— 静默通过才是这里真正要防的东西。
 output=$(xcrun -sdk iphonesimulator swiftc -typecheck -disable-sandbox \
+  -warnings-as-errors \
   -swift-version 5 -default-isolation MainActor \
   -target x86_64-apple-ios17.0-simulator \
   "${keep[@]}" "$tmp/SandboxStubs.swift" 2>&1)

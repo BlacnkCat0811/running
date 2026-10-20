@@ -18,6 +18,12 @@ final class PlanWatchSyncCoordinator {
             return "未能确认最新完整计划，未改动系统排期。请联网刷新后重试。"
         }
         guard let journal = model.makeScheduleJournal(snapshot: snapshot) else { return "本地安全存储无法读取，未改动系统排期。请先恢复账目。" }
+        // PR6: a `PlanSyncSnapshot` deliberately carries no coach settings and no
+        // race goal (they live in `TrainingPlanStore`), yet exactly those fields
+        // decide whether the receipts belong to the same training authority. They
+        // are captured onto the journal BEFORE the first persistent write, so a
+        // mode/config switch is durable even if this operation is interrupted.
+        journal.attachContext(Self.trainingContext(model: model, snapshot: snapshot))
         let outcome = await PlanWatchScheduling.sync(scheduler: scheduler, plan: plan,
             completedDates: snapshot.completedDates, hour: snapshot.reminderHour, now: model.planSyncNow,
             journal: journal,
@@ -33,7 +39,17 @@ final class PlanWatchSyncCoordinator {
             model.recordWatchInterrupted(cancelled, snapshot: snapshot, journal: journal)
             return cancelled.report
         }
-        let receipts = model.enrichPlanReceipts(outcome.receipts, snapshot: snapshot, operationID: journal.operation.operationId)
+        let enriched = model.enrichPlanReceipts(outcome.receipts, snapshot: snapshot, operationID: journal.operation.operationId)
+        // PR6: a receipt from another server/athlete/dataset must never be journaled
+        // or posted; equivalents stay idempotent. A receipt from an OLDER context is
+        // admitted (as history) because withdrawal/replacement must still register.
+        let admission = journal.admitReceipts(enriched)
+        if !admission.rejected.isEmpty || admission.duplicateCount > 0 {
+            journal.recordDiagnostic(name: "schedule_receipt_admission",
+                errorCode: !admission.rejected.isEmpty ? "receipt_scope_mismatch" : "receipt_duplicate",
+                owed: enriched.count, confirmed: admission.admitted.count)
+        }
+        let receipts = admission.admitted
         guard outcome.storageError == nil else { model.scheduleStateChanged(); return outcome.report }
         if !model.commitWatchResult(outcome, snapshot: snapshot, journal: journal, receipts: receipts) {
             return outcome.report + "\n系统副作用后的本地账目提交失败，需重新核验；不能继续登记回执。"
@@ -77,6 +93,35 @@ final class PlanWatchSyncCoordinator {
         model.diagnoseSchedule(result, journal: journal)
         guard model.isCurrentPlanSync(id) else { return "操作已失效，请重新核验。" }
         return await model.recordRecoveredSchedule(result, journal: journal, withdraw: withdraw)
+    }
+
+    /// Captures the training context a push happens under (PR6).
+    ///
+    /// Why combine snapshot and store: the snapshot proves the plan/state
+    /// revision, the business date and the receipt contract, but it deliberately
+    /// excludes coach settings and the race goal — exactly the fields that decide
+    /// whether two pushes belong to the same training authority. A mode/race edit
+    /// between two pushes must be read from the store and frozen onto the journal.
+    private static func trainingContext(model: NativeAppModel, snapshot: PlanSyncSnapshot) -> PlanScheduleContext {
+        .init(planRevision: snapshot.revision,
+              receiptContractVersion: snapshot.coachLoop?.contractVersion,
+              businessDate: snapshot.localDate,
+              mode: model.isCoachLoopManaged ? model.coachLoop?.settings?.mode : nil,
+              raceGoalID: Self.raceGoalID(model),
+              policyHash: snapshot.coachLoop?.policyHash)
+    }
+
+    /// Local identity of the declared race goal: the coach-loop race settings when
+    /// the new contract is active, the legacy goals target otherwise. Both reduce
+    /// to one stable string, so moving the race date or distance counts as a
+    /// configuration switch and forces withdrawal before the new schedule.
+    private static func raceGoalID(_ model: NativeAppModel) -> String? {
+        if model.isCoachLoopManaged {
+            guard let race = model.coachLoop?.settings?.race else { return nil }
+            return PlanScheduleContext.raceGoalIdentity(date: race.raceDate, distanceKm: race.raceDistanceKm, goal: race.goal)
+        }
+        guard let target = model.goals?.raceTarget else { return nil }
+        return PlanScheduleContext.raceGoalIdentity(date: target.date, distance: target.distance, goal: nil)
     }
 
     #if os(iOS)

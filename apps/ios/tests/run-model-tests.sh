@@ -10,7 +10,13 @@ trap 'rm -rf "$tmp"' EXIT
 # 直接死在 "sandbox_apply: Operation not permitted"，随后每个 `@Observable` 展开
 # 都报 "produced malformed response"，看起来像一屏源码错误其实不是。
 # 详见 typecheck-ios.sh 里同一段注释；两处必须一起加，否则 macOS 纯逻辑回归会被误判。
-swiftc_flags=(-parse-as-library -disable-sandbox)
+#
+# `-warnings-as-errors`（2026-10-20）与 `typecheck-ios.sh` 同一条纪律：app target 用
+# `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 编译，"该写 nonisolated 却没写"这类诊断
+# 只得到 warning，而它们在 Swift 6 语言模式下是 error。旧行为是打印完照样 exit 0，于是
+# 警告可以无限攒；`HealthSyncIntentJournalRegression.swift` 里那条 `_ =` 就是这么留下的。
+# 开闸时 5 个编译单元全部 0 warning；引入新 warning ⇒ 当场红，静默通过才是要防的东西。
+swiftc_flags=(-parse-as-library -disable-sandbox -warnings-as-errors)
 sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > "$tmp/NativeAppModel.swift"
 # `WorkoutPlanMapper.swift` 一起编：`NativeAppModel` 与映射器共用同一批课表 DTO
 # （`MobileWorkoutPlanDay` / `MobileWorkoutPlanResponse`），少编它就会在模型回归里
@@ -34,6 +40,14 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"
+# PR5：v2 统一训练读合同（`X-RAI-Training-Contract: 2`）的纯逻辑回归。
+# 只编模型 + API 客户端 + 纯判定：协商常量、409/503 的合同分类、接受前的
+# 身份/业务日/窗口/版本下限校验、以及"未知合同版本绝不显示成休息"的页面状态派生。
+# 这些判定一旦写错，编译和全量类型检查都不会红，而用户看到的是"今天休息"。
+xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
+  apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/UserDataNoticePolicy.swift \
+  apps/ios/tests/TrainingPlanV2Regression.swift -o "$tmp/training-plan-v2-tests"
+"$tmp/training-plan-v2-tests"
 bash apps/ios/tests/run-plan-watch-tests.sh
 bash apps/ios/tests/run-training-plan-store-tests.sh
 bash apps/ios/tests/run-user-experience-tests.sh

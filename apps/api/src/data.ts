@@ -110,7 +110,7 @@ import { isPublicationGuardPending, publicationGuardChanged } from "./publicatio
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { constrainUpcomingPlan } from "./weekly-plan-service.js";
 import { weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
-import { weeklyCapacity } from "./weekly-capacity.js";
+import { legacyRestartBaseline, weeklyCapacity, type LegacyHistoryCapacity } from "./weekly-capacity.js";
 import { runCoachEndDate, runCoachIsTraining, runCoachWeekday } from "./run-coach-policy.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP, plannedDayNumbers } from "./mobile-coach.js";
 import {
@@ -155,6 +155,40 @@ export function recentWeeklyKm(
     totalMeters += metric.distanceMeters;
   }
   return Math.round((totalMeters / 4_000) * 10) / 10;
+}
+
+/**
+ * G02-C: the stable window is the four complete weeks ending at least 28 days
+ * before today; a release also needs four consecutive observed weeks since then,
+ * so a long gap cannot silently restore old volume.
+ */
+export function legacyCapacityHistory(
+  oldMetrics: ReadonlyArray<{ localDate: string; distanceMeters: number }>,
+  recentMetrics: ReadonlyArray<{ localDate: string; distanceMeters: number }>,
+  today: string
+): LegacyHistoryCapacity {
+  const currentWeekStart = mobileWeekStart(today);
+  const gapEnd = shiftMobileDate(currentWeekStart, -28);
+  const windowStart = shiftMobileDate(gapEnd, -28);
+  const buckets = new Map<string, number>();
+  for (const metric of oldMetrics) {
+    if (metric.localDate < windowStart || metric.localDate >= gapEnd) continue;
+    const week = mobileWeekStart(metric.localDate);
+    buckets.set(week, (buckets.get(week) ?? 0) + metric.distanceMeters);
+  }
+  const weekStarts = Array.from({ length: 4 }, (_, index) => shiftMobileDate(windowStart, index * 7));
+  const covered = weekStarts.every((week) => (buckets.get(week) ?? 0) > 0);
+  const stableWeeklyKm = covered
+    ? Math.round(weekStarts.reduce((sum, week) => sum + (buckets.get(week) ?? 0), 0) / 4_000 * 10) / 10
+    : 0;
+  let observedRecentWeeks = 0;
+  for (let index = 1; index <= 4; index++) {
+    const start = shiftMobileDate(currentWeekStart, -7 * index);
+    const end = shiftMobileDate(start, 7);
+    if (!recentMetrics.some((metric) => metric.localDate >= start && metric.localDate < end)) break;
+    observedRecentWeeks += 1;
+  }
+  return { stableWeeklyKm, observedRecentWeeks };
 }
 
 export const mobileLocalDate = (): string => localDateInShanghai(new Date());
@@ -949,7 +983,8 @@ export class RaiReadStore {
       raceTarget: goals?.raceTarget ?? null,
       runCoach: goals?.runCoach ?? null,
       recentWeeklyKm: recentWeeklyKmValue,
-      previousWeekDistanceKm
+      previousWeekDistanceKm,
+      legacyHistory: this.mobileLegacyCapacityHistory(today)
     }).baselineKm;
     // Two roles, one source. The coach *spends* against a ceiling, while the plan
     // generator and the export re-derive their own ceiling from the baseline —
@@ -1118,6 +1153,15 @@ export class RaiReadStore {
    * a generator that computed its own baseline could disagree with the card the
    * runner is looking at.
    */
+  /** G02-C: old stable window + recent observation, read once for capacity. */
+  mobileLegacyCapacityHistory(today: string): LegacyHistoryCapacity {
+    const currentWeekStart = mobileWeekStart(today);
+    const gapEnd = shiftMobileDate(currentWeekStart, -28);
+    const old = this.statisticsRepository.metricsBetween(shiftMobileDate(gapEnd, -28), gapEnd);
+    const recent = this.statisticsRepository.metricsBetween(gapEnd, currentWeekStart);
+    return legacyCapacityHistory(old, recent, today);
+  }
+
   mobileWeeklyPlanInputs(
     goals?: Pick<
       MobileGoalsResponse,
@@ -1130,6 +1174,8 @@ export class RaiReadStore {
     prescription: ReturnType<typeof zonePrescription>;
     previousWeekDistanceKm: number;
     recentWeeklyKm: number;
+    /** G02-C: old stable window + observed recent weeks (capacity restart). */
+    legacyHistory: LegacyHistoryCapacity;
     weeklyVolumeBaselineKm: number;
     /**
      * The prep assessment the today payload was built from, handed to the coach so
@@ -1148,18 +1194,21 @@ export class RaiReadStore {
       this.statisticsRepository.metricsBetween(shiftMobileDate(metricEnd, -56), metricEnd),
       today.today.localDate
     );
+    const legacyHistory = this.mobileLegacyCapacityHistory(today.today.localDate);
     return {
       today,
       prescription: zonePrescription(this.trainingZonesCurrent()),
       previousWeekDistanceKm,
       recentWeeklyKm: recent,
+      legacyHistory,
       preparation,
       weeklyVolumeBaselineKm: weeklyCapacity({
         today: today.today.localDate,
         raceTarget: goals?.raceTarget ?? null,
         runCoach: goals?.runCoach ?? null,
         recentWeeklyKm: recent,
-        previousWeekDistanceKm
+        previousWeekDistanceKm,
+        legacyHistory
       }).baselineKm
     };
   }

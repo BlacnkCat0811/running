@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,102 +13,15 @@ import { buildSessionStructure, plannedDayNumbers } from "../src/mobile-coach.js
 import { constrainUpcomingPlan } from "../src/weekly-plan-service.js";
 import { seedRecentRunningWeeks } from "./weekly-training-fixture.js";
 import {
-  buildCoachConfidence, buildRunCoachWeek, coachConfidenceFromPreparation, COACH_CONFIDENCE_MODERATE_FLOOR,
-  COACH_CONFIDENCE_HIGH_FLOOR, COACH_PREPARATION_STALE_AFTER_DAYS, registerRunCoachRoutes, runCoachAdaptationKey, runCoachResponse,
-  runCoachUnplannedDays, runCoachWeeklyBudget, runCoachPlanExecutionIdentity
+  buildCoachConfidence, coachConfidenceFromPreparation, COACH_CONFIDENCE_MODERATE_FLOOR,
+  COACH_CONFIDENCE_HIGH_FLOOR, COACH_PREPARATION_STALE_AFTER_DAYS, runCoachResponse,
+  runCoachUnplannedDays, runCoachWeeklyBudget
 } from "../src/run-coach.js";
 import { normalizeRunCoachPlan, runCoachEndDate, runCoachIsTraining, runCoachPhase, runCoachRaceTarget, runCoachWeekday, validateRunCoachConfig } from "../src/run-coach-policy.js";
 
 const config: MobileRunCoachConfig = { goal: "fitness", raceDate: null, raceDistanceKm: null, targetTimeSeconds: null,
   runningDays: [1, 2, 4, 6, 7], longRunDays: [7], targetType: "pace", strengthTraining: true };
 const plan: MobileRunCoachPlan = { ...config, id: "fixture", startedOn: "2026-10-06", status: "active", pausedOn: null, endedOn: null, adaptationKey: null, adaptedAt: null };
-
-test("AC3-01/02 partial route: changed evidence with unchanged execution does not create goals/history revisions", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
-  const root = mkdtempSync(join(tmpdir(), "rai-coach-no-change-"));
-  const path = join(root, "rai.sqlite");
-  (await RaiDatabase.open(path)).close();
-  const store = new MobileGoalsStore(root, join(root, "rai-control.sqlite"));
-  const read = new RaiReadStore(path);
-  const app = Fastify();
-  let explanationOnly = false;
-  let observedWeekKm = 0;
-  const noChangeOperationId = "11111111-1111-4111-8111-111111111111";
-  const staleOperationId = "22222222-2222-4222-8222-222222222222";
-  const changedOperationId = "33333333-3333-4333-8333-333333333333";
-  const inputs = (goals: ReturnType<MobileGoalsStore["read"]>) => {
-    const current = read.mobileWeeklyPlanInputs(goals, store.planHistory());
-    return { ...current, today: { ...current.today,
-      week: { ...current.today.week, distanceKm: observedWeekKm },
-      verdict: { ...current.today.verdict, reason: explanationOnly ? `${current.today.verdict.reason} 补充解释。` : current.today.verdict.reason }
-    } };
-  };
-  const scopeIdentity = { serverId: "local", athleteId: "athlete_1", datasetEpoch: "default" };
-  // Production registration always passes `identity`; the publication contract
-  // now requires it, so the test must declare the same scope and send it with
-  // each operationId (review P3-9).
-  registerRunCoachRoutes({ app, store, scope: () => "synthetic-no-change-scope",
-    identity: () => scopeIdentity, inputs });
-  try {
-    const started = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: store.read().revision, action: "start", config } });
-    assert.equal(started.statusCode, 200, started.body);
-    const before = store.read();
-    const beforeHistory = store.planHistory();
-    assert.ok(before.runCoach);
-    const originalKey = runCoachAdaptationKey(before.runCoach, inputs(before));
-    const identity = runCoachPlanExecutionIdentity(before.runCoach, before.weekPlan, inputs(before));
-    assert.equal(runCoachPlanExecutionIdentity({ ...before.runCoach, adaptedAt: "2026-10-07T05:00:00Z", adaptationKey: "metadata-only" },
-      before.weekPlan.map(day => ({ ...day, reason: "new explanation only" })), inputs(before)), identity);
-    explanationOnly = true;
-    assert.notEqual(runCoachAdaptationKey(before.runCoach, inputs(before)), originalKey);
-    const refreshed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId, operationScope: scopeIdentity } });
-    assert.equal(refreshed.statusCode, 200, refreshed.body);
-    assert.equal(refreshed.json().revision, before.revision);
-    assert.deepEqual(store.read(), before);
-    assert.deepEqual(store.planHistory(), beforeHistory);
-    assert.equal((store.publicationResult("synthetic-no-change-scope", noChangeOperationId) as { status: string }).status, "committed");
-    const repeated = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId, operationScope: scopeIdentity } });
-    assert.deepEqual(repeated.json(), refreshed.json());
-    assert.equal(store.read().revision, before.revision);
-    assert.equal((await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision - 1, action: "refresh", operationId: staleOperationId, operationScope: scopeIdentity } })).statusCode, 409);
-    observedWeekKm = 5;
-    const changed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: before.revision, action: "refresh", operationId: changedOperationId, operationScope: scopeIdentity } });
-    assert.equal(changed.statusCode, 200, changed.body);
-    assert.ok(store.read().revision > before.revision, "real constraint changes must still publish a revision");
-    assert.ok(store.read().weekPlan.filter(day => day.localDate >= "2026-10-07" && day.localDate <= "2026-10-11")
-      .every(day => day.kind === "rest"), "completed volume cannot be swallowed by the no-change gate");
-  } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
-});
-
-test("AC3-05 partial route: refresh retains future rows beyond its replacement window", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
-  const root = mkdtempSync(join(tmpdir(), "rai-coach-fixed-outside-"));
-  const path = join(root, "rai.sqlite");
-  (await RaiDatabase.open(path)).close();
-  const store = new MobileGoalsStore(root);
-  const read = new RaiReadStore(path);
-  const app = Fastify();
-  registerRunCoachRoutes({ app, store, inputs: goals => read.mobileWeeklyPlanInputs(goals, store.planHistory()) });
-  try {
-    const started = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: store.read().revision, action: "start", config } });
-    assert.equal(started.statusCode, 200, started.body);
-    const current = store.read();
-    const structure = buildSessionStructure("easy", null, { targetDistanceKm: 3 });
-    const outside = { localDate: "2026-10-15", kind: "easy" as const, distanceKm: 3, structure, reason: "future fixed original" };
-    const written = store.write({ expectedRevision: current.revision, weekPlan: [...current.weekPlan, outside] });
-    const original = written.weekPlan.find(day => day.localDate === outside.localDate);
-    const refreshed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: written.revision, action: "refresh" } });
-    assert.equal(refreshed.statusCode, 200, refreshed.body);
-    assert.deepEqual(store.read().weekPlan.find(day => day.localDate === outside.localDate), original);
-  } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
-});
 
 test("AC1 compatibility read: unsupported two-day quality/long protection applies to the effective layer without rewriting storage", async context => {
   context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
@@ -166,174 +80,6 @@ test("coach setup validates actual dates, distance/time, unique weekdays and lon
   }
 });
 
-test("coach lifecycle persists atomically, refresh is idempotent and stopped programmes cannot restart by fallback", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T04:00:00Z") });
-  const root = mkdtempSync(join(tmpdir(), "rai-run-coach-"));
-  const path = join(root, "rai.sqlite");
-  (await RaiDatabase.open(path)).close();
-  const goals = new MobileGoalsStore(root, join(root, "control.sqlite"));
-  const read = new RaiReadStore(path);
-  const app = Fastify();
-  registerRunCoachRoutes({ app, store: goals, inputs: value => read.mobileWeeklyPlanInputs(value, goals.planHistory()) });
-  const command = async (action: string, extra: object = {}) => app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-    payload: { expectedRevision: goals.read().revision, action, ...extra } });
-  try {
-    goals.write({ weekPlan: [{ localDate: "2026-11-06", kind: "rest", distanceKm: null }] });
-    const start = await command("start", { config });
-    assert.equal(start.statusCode, 200, start.body);
-    assert.equal(goals.read().runCoach?.status, "active");
-    assert.ok(goals.read().weekPlan.some(day => day.kind !== "rest"));
-    assert.ok(goals.read().weekPlan.filter(day => day.kind !== "rest").every(day => config.runningDays.includes(runCoachWeekday(day.localDate))));
-    assert.ok(goals.read().weekPlan.every(day => day.localDate <= "2026-10-12"), "old future slots cannot survive outside the new adaptive window");
-    const weekdaySet = new Set(config.runningDays);
-    assert.ok(read.mobileWorkoutPlan(goals.read()).days.filter(day => !weekdaySet.has(runCoachWeekday(day.localDate))).every(day => !day.executable));
-    const revision = goals.read().revision;
-    assert.equal((await command("refresh")).statusCode, 200);
-    assert.equal(goals.read().revision, revision, "own plan writes cannot poison the facts fingerprint");
-    assert.equal((await app.inject({ method: "POST", url: "/v1/mobile/run-coach", payload: { expectedRevision: revision - 1, action: "pause" } })).statusCode, 409);
-    assert.equal((await command("start", { config })).statusCode, 422);
-    assert.equal((await command("update", { config: { ...config, runningDays: [1, 3, 5], longRunDays: [5] } })).statusCode, 200);
-    context.mock.timers.setTime(Date.parse("2026-10-14T04:00:00Z"));
-    assert.ok(read.mobileWorkoutPlan(goals.read()).days.every(day => !day.executable), "an expired saved window cannot fall back to the legacy template even on a preferred running day");
-    assert.equal((await command("refresh")).statusCode, 200);
-    assert.ok(goals.read().weekPlan.some(day => day.localDate >= "2026-10-14" && day.kind !== "rest"));
-    assert.equal((await command("pause")).statusCode, 200);
-    assert.equal(read.mobileToday(goals.read()).nextSession.kind, "rest");
-    assert.ok(read.mobileWorkoutPlan(goals.read()).days.every(day => !day.executable));
-    context.mock.timers.setTime(Date.parse("2026-10-23T04:00:00Z"));
-    assert.equal(read.mobileToday(goals.read()).nextSession.kind, "rest", "expired pause window cannot invent a run");
-    assert.equal((await command("resume")).statusCode, 200);
-    assert.equal(goals.read().runCoach?.status, "active");
-    assert.equal((await command("end")).statusCode, 200);
-    assert.ok(read.mobileWorkoutPlan(goals.read()).days.every(day => !day.executable));
-    const reopened = new MobileGoalsStore(root, join(root, "control.sqlite"));
-    assert.equal(reopened.read().runCoach?.status, "ended"); reopened.close();
-    assert.equal((await command("resume")).statusCode, 422);
-    assert.equal((await command("start", { config: { ...config, goal: "finish", raceDate: "2027-01-10", raceDistanceKm: 42.195 } })).statusCode, 200);
-    assert.ok((await app.inject({ url: "/v1/mobile/run-coach" })).json().notices.some((message: string) => message.includes("暂无")));
-    assert.equal((await command("update", { config: { ...config, goal: "finish", raceDate: "2027-02-10", raceDistanceKm: 42.195 } })).statusCode, 422);
-  } finally { await app.close(); read.close(); goals.close(); rmSync(root, { recursive: true, force: true }); }
-});
-
-test("adaptive plans respect cold-start budgets, target evidence and immutable completed dates", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T04:00:00Z") });
-  const root = mkdtempSync(join(tmpdir(), "rai-run-coach-rules-"));
-  const path = join(root, "rai.sqlite");
-  (await RaiDatabase.open(path)).close();
-  const store = new MobileGoalsStore(root);
-  const read = new RaiReadStore(path);
-  try {
-    const goals = { ...store.read(), runCoach: plan };
-    const inputs = read.mobileWeeklyPlanInputs(goals);
-    const days = buildRunCoachWeek(plan, goals, inputs);
-    assert.ok(days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 5);
-    assert.ok(days.every(day => day.kind === "rest" || day.kind === "easy"));
-    const hr = buildRunCoachWeek({ ...plan, targetType: "heart_rate" }, goals, inputs);
-    assert.ok(hr.flatMap(day => day.structure?.blocks.flatMap(block => block.steps) ?? []).every(step => step.alert == null));
-    const measuredHR = buildRunCoachWeek({ ...plan, targetType: "heart_rate" }, goals, { ...inputs, prescription: {
-      easyPaceLower: 360, easyPaceUpper: 450, easyHrLower: 130, easyHrUpper: 145,
-      thresholdPaceLower: null, thresholdPaceUpper: null, thresholdHrLower: null, thresholdHrUpper: null,
-      intervalPaceLower: null, intervalPaceUpper: null
-    } });
-    const hrSteps = measuredHR.flatMap(day => day.structure?.blocks.flatMap(block => block.steps) ?? []);
-    assert.ok(hrSteps.length > 0);
-    assert.ok(hrSteps.every(step => step.alert?.kind === "heart_rate" && step.alert.lower === 130 && step.alert.upper === 145));
-    const completed = buildRunCoachWeek(plan, goals, { ...inputs, today: { ...inputs.today,
-      today: { ...inputs.today.today, workoutCount: 1, distanceKm: 3 }, week: { ...inputs.today.week, distanceKm: 3 } } });
-    assert.ok(completed.every(day => day.localDate !== "2026-10-06"));
-    assert.ok(completed.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 2);
-    const key = runCoachAdaptationKey(plan, inputs);
-    assert.equal(key, runCoachAdaptationKey({ ...plan, adaptedAt: "new", adaptationKey: key }, inputs));
-    assert.notEqual(key, runCoachAdaptationKey(plan, { ...inputs, today: { ...inputs.today, verdict: { ...inputs.today.verdict, tone: "red" } } }));
-  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
-});
-
-
-test("all race distances leave race day blank, including saved or locked legacy training", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
-  const root = mkdtempSync(join(tmpdir(), "rai-coach-race-day-"));
-  const path = join(root, "rai.sqlite");
-  (await RaiDatabase.open(path)).close();
-  const store = new MobileGoalsStore(root);
-  const read = new RaiReadStore(path);
-  try {
-    const numbers = plannedDayNumbers("easy", buildSessionStructure("easy", null, { targetDistanceKm: 3 }), 3, null);
-    for (const distance of [5, 10, 21.0975, 42.195, 50]) {
-      const racePlan: MobileRunCoachPlan = { ...plan, goal: "finish", startedOn: "2026-08-01",
-        raceDate: "2026-10-07", raceDistanceKm: distance, runningDays: [1, 3, 5], longRunDays: [5] };
-      const goals = { ...store.read(), runCoach: racePlan, raceTarget: runCoachRaceTarget(racePlan),
-        weekPlan: [{ localDate: "2026-10-07", kind: "easy" as const, distanceKm: numbers.distanceKm, structure: numbers.structure }],
-        weekPlanPreservedDate: "2026-10-07", lockedSession: {
-          localDate: "2026-10-07", verdictTone: "yellow" as const, lockedAt: "2026-10-07T01:00:00Z",
-          session: { ...numbers, kind: "easy" as const, title: "旧训练", reason: "已锁定",
-            paceSecondsPerKmLower: null, paceSecondsPerKmUpper: null, heartRateBpmLower: null, heartRateBpmUpper: null }
-        } };
-      const fresh = { ...goals, weekPlan: [], lockedSession: null, weekPlanPreservedDate: null };
-      const days = buildRunCoachWeek(racePlan, fresh, read.mobileWeeklyPlanInputs(fresh));
-      assert.equal(days.find(day => day.localDate === racePlan.raceDate)?.kind, "rest", `${distance} km generation`);
-      assert.equal(read.mobileToday(goals).nextSession.kind, "rest", `${distance} km saved race-day prescription`);
-      assert.ok(read.mobileWorkoutPlan(goals).days.every(day => !day.executable), `${distance} km race day and subsequent days`);
-      context.mock.timers.setTime(Date.parse("2026-10-06T04:00:00Z"));
-      assert.equal(read.mobileWorkoutPlan(goals).days.find(day => day.localDate === racePlan.raceDate)?.executable, false,
-        `${distance} km upcoming race-day export`);
-      context.mock.timers.setTime(Date.parse("2026-10-07T04:00:00Z"));
-    }
-  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
-});
-
-test("heart-rate preferences survive persistence, export validation, budget cuts and missing HR evidence", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
-  const root = mkdtempSync(join(tmpdir(), "rai-coach-hr-export-"));
-  const path = join(root, "rai.sqlite");
-  await seedRecentRunningWeeks(path, "2026-10-07", 50);
-  const store = new MobileGoalsStore(root);
-  const read = new RaiReadStore(path);
-  const profile = {
-    heartRateBands: [{ zone: "recovery", lowerBpm: 100, upperBpm: 130 },
-      { zone: "aerobic_base", lowerBpm: 130, upperBpm: 145 }, { zone: "lactate_threshold", lowerBpm: 155, upperBpm: 165 }],
-    paceBands: [{ zone: "easy", lowerSecondsPerKm: 360, upperSecondsPerKm: 450 },
-      { zone: "lactate_threshold", lowerSecondsPerKm: 270, upperSecondsPerKm: 300 },
-      { zone: "anaerobic_endurance", lowerSecondsPerKm: 240, upperSecondsPerKm: 265 }]
-  };
-  let zones = { profile } as unknown as TrainingZonesCurrentResponse;
-  context.mock.method(read, "trainingZonesCurrent", () => zones);
-  const steps = (structure: MobileSessionStructure | null | undefined) => structure ?
-    [structure.warmup, ...structure.blocks.flatMap(block => block.steps), structure.cooldown].filter(step => step != null) : [];
-  try {
-    const hrPlan: MobileRunCoachPlan = { ...plan, targetType: "heart_rate", runningDays: [1, 2, 3, 4, 5, 6, 7], longRunDays: [4] };
-    const goals = { ...store.read(), runCoach: hrPlan, qualitySessionCap: 2, easyDurationFloorFraction: 0.4 };
-    const initial = read.mobileWeeklyPlanInputs(goals);
-    const inputs = { ...initial, today: { ...initial.today, calibration: { ...initial.today.calibration, status: "completed" as const } } };
-    const days = buildRunCoachWeek(hrPlan, goals, inputs);
-    const interval = days.find(day => day.kind === "interval");
-    assert.ok(interval && interval.localDate > "2026-10-07", "fixture includes a future interval session");
-    assert.deepEqual(steps(interval.structure).filter(step => step.purpose === "work").map(step => step.alert),
-      [{ kind: "heart_rate", lower: 155, upper: 165 }]);
-    const written = store.write({ weekPlan: days, qualitySessionCap: 2, easyDurationFloorFraction: 0.4 },
-      { runCoach: hrPlan, prescription: inputs.prescription });
-    const today = read.mobileToday(written);
-    const exported = read.mobileWorkoutPlan(written);
-    assert.deepEqual(exported.days.find(day => day.localDate === interval.localDate)?.structure, interval.structure,
-      "the Watch executes the same interval targets as the stored programme");
-    assert.deepEqual(exported.days[0]?.structure, today.nextSession.structure);
-    assert.ok(steps(today.nextSession.structure).length > 0);
-    assert.ok(exported.days.flatMap(day => steps(day.structure)).every(step => step.alert?.kind === "heart_rate"));
-    const cut = constrainUpcomingPlan(days, { ...inputs, goals: written,
-      today: { ...inputs.today, week: { ...inputs.today.week, distanceKm: 45 } } });
-    const current = cut.filter(day => day.localDate <= inputs.today.week.periodEnd);
-    assert.ok(current.some(day => day.kind !== "rest"));
-    assert.ok(current.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 10);
-    assert.ok(cut.flatMap(day => steps(day.structure)).every(step => step.alert?.kind === "heart_rate"),
-      "structures rebuilt to fit the budget retain heart-rate targets");
-    zones = { profile: { ...profile, heartRateBands: [] } } as unknown as TrainingZonesCurrentResponse;
-    const noHr = read.mobileWorkoutPlan(written);
-    assert.ok(noHr.days.some(day => day.executable));
-    assert.ok(noHr.days.flatMap(day => steps(day.structure)).every(step => step.alert == null),
-      "missing HR evidence removes targets rather than silently selecting pace");
-  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
-});
-
-/** Half marathon 60 days out: the phase is `base` on both skeletons, so the two agree. */
 const raceConfig: MobileRunCoachConfig = { ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 21.0975 };
 const customConfig: MobileRunCoachConfig = { ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 42.195 };
 
@@ -344,16 +90,15 @@ test("coach confidence refuses to render absent evidence as zero and degrades an
   (await RaiDatabase.open(path)).close();
   const store = new MobileGoalsStore(root);
   const read = new RaiReadStore(path);
-  const app = Fastify();
-  registerRunCoachRoutes({ app, store, inputs: value => read.mobileWeeklyPlanInputs(value, store.planHistory()) });
-  const start = async (value: MobileRunCoachConfig) => app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-    payload: { expectedRevision: store.read().revision, action: "start", config: value } });
+  const programme = (value: MobileRunCoachConfig): MobileRunCoachPlan => ({ ...value, id: randomUUID(),
+    startedOn: "2026-10-07", status: "active", pausedOn: null, endedOn: null, adaptationKey: null, adaptedAt: null });
   try {
     // Cold start: no training facts at all. The prep score is undefined, not zero, and the
     // whole point of the gate is that the screen must not read `0` as "preparedness is zero".
-    const cold = await start(raceConfig);
-    assert.equal(cold.statusCode, 200, cold.body);
-    const confidence = cold.json().confidence;
+    const racePlan = programme(raceConfig);
+    const raceGoals = { ...store.read(), runCoach: racePlan, raceTarget: runCoachRaceTarget(racePlan) };
+    const raceInputs = read.mobileWeeklyPlanInputs(raceGoals);
+    const confidence = buildCoachConfidence(racePlan, raceInputs)!;
     assert.equal(confidence.status, "insufficient_data");
     assert.equal(confidence.value, null, "absent evidence must be null, never 0");
     assert.equal(confidence.band, null);
@@ -361,46 +106,27 @@ test("coach confidence refuses to render absent evidence as zero and degrades an
     assert.equal(confidence.basis, null);
     assert.ok(confidence.reasonCodes.includes("preparation_insufficient_evidence"));
     assert.ok(confidence.note.includes("不是达标概率"), "the note must deny being a goal probability");
-    assert.equal(store.read().runCoach?.raceDistanceKm, 21.0975);
 
     // Decision 1's regime, end to end: a cold start keeps the 5 km restart floor on every
-    // exit — the published budget, the band the today page prints, and the week it buys.
-    assert.equal(cold.json().weeklyCapacityKm, 5);
-    assert.equal(read.mobileWeeklyPlanInputs(store.read()).today.periodization!.current!.volumeBandKm.upper, 5);
-
-    // Every selected running weekday the week did not pay for, as codes rather than motives.
-    const unplanned = cold.json().unplannedDays as Array<{ localDate: string; code: string; detail: string }>;
-    assert.ok(unplanned.length > 0, "a cold-start week leaves runnable days empty");
-    const runnable = store.read().weekPlan.filter(day => raceConfig.runningDays.includes(runCoachWeekday(day.localDate)));
-    assert.equal(unplanned.length, runnable.filter(day => day.kind === "rest").length);
-    assert.ok(unplanned.every(row => row.code === "no_session_scheduled" || row.code === "pre_race_taper"));
-    assert.ok(unplanned.every(row => /未来7日窗口 \d+ 个可跑步日，排入 \d+ 次训练。/.test(row.detail)));
-
-    // The stored day used to answer every one of these with「恢复日。」— a recovery claim made
-    // with `recovery.state == "unknown"` and no recovery evidence in the payload at all. The
-    // day now states the fact; the code travels separately in `unplannedDays`.
-    assert.ok(store.read().weekPlan.every(day => !(day.reason ?? "").startsWith("恢复日")),
-      "the stored week must not assert a cause the read path never established");
-    assert.ok(store.read().weekPlan.filter(day => day.kind === "rest" && raceConfig.runningDays.includes(runCoachWeekday(day.localDate)))
-      .every(day => day.reason === "未来7日窗口未排课。"));
-    assert.equal(runCoachUnplannedDays(null, read.mobileWeeklyPlanInputs(store.read()), []).length, 0);
+    // exit — the published budget and the band the today page prints.
+    assert.equal(runCoachResponse(raceGoals, raceInputs).weeklyCapacityKm, 5);
+    assert.equal(raceInputs.today.periodization!.current!.volumeBandKm.upper, 5);
 
     // Decision 4: a distance outside the prediction chain keeps `runCoachRaceTarget === null`,
     // so it gets a stated absence instead of an empty ring or a zero.
-    assert.equal((await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
-      payload: { expectedRevision: store.read().revision, action: "end" } })).statusCode, 200);
-    const custom = await start(customConfig);
-    assert.equal(custom.statusCode, 200, custom.body);
-    assert.equal(store.read().runCoach?.raceDistanceKm, 42.195);
-    assert.equal(runCoachRaceTarget(store.read().runCoach!), null);
-    assert.equal(custom.json().confidence.status, "insufficient_data");
-    assert.equal(custom.json().confidence.value, null);
-    assert.ok(custom.json().confidence.reasonCodes.includes("unsupported_distance"));
+    const customPlan = programme(customConfig);
+    const customGoals = { ...store.read(), runCoach: customPlan, raceTarget: runCoachRaceTarget(customPlan) };
+    const customInputs = read.mobileWeeklyPlanInputs(customGoals);
+    assert.equal(runCoachRaceTarget(customPlan), null);
+    const customConfidence = buildCoachConfidence(customPlan, customInputs)!;
+    assert.equal(customConfidence.status, "insufficient_data");
+    assert.equal(customConfidence.value, null);
+    assert.ok(customConfidence.reasonCodes.includes("unsupported_distance"));
 
     // A fitness programme has no race, so it has no prep question to answer: null, not a shell.
-    const goals = { ...store.read(), runCoach: { ...plan, goal: "fitness" as const } };
-    assert.equal(buildCoachConfidence(goals.runCoach, read.mobileWeeklyPlanInputs(goals)), null);
-  } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+    const fitnessGoals = { ...store.read(), runCoach: { ...plan, goal: "fitness" as const } };
+    assert.equal(buildCoachConfidence(fitnessGoals.runCoach, read.mobileWeeklyPlanInputs(fitnessGoals)), null);
+  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
 test("coach confidence bands a preparation score and never lets uncalibrated evidence claim high", () => {
@@ -513,11 +239,6 @@ test("one weekly budget is published and spent, and matches the band the today p
     assert.equal(response.weeklyCapacityKm, budget, "the route must publish the week's budget");
     assert.equal(response.weeklyCapacityKm, band, "and the today page must print the same number");
     assert.notEqual(response.weeklyCapacityKm, inputs.weeklyVolumeBaselineKm);
-
-    const days = buildRunCoachWeek(goals.runCoach, goals, inputs);
-    const spent = days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
-    assert.ok(spent <= budget + 1e-9, `a week may not spend ${spent} km against a ${budget} km budget`);
-    assert.ok(days.some(day => day.kind !== "rest"), "the budget must still buy a session");
 
     // The athlete's own four weeks are the baseline here, so the budget is the band rather
     // than the race-target capacity: 30 × 1.05 = 31.5, not the 36.75 the read path used to publish.

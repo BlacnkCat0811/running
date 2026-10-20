@@ -10,6 +10,15 @@ final class TrainingPlanStore {
     private(set) var coach: MobileRunCoachResponse?
     private(set) var coachLoop: CoachLoopResponse?
     private(set) var metadata: TrainingPlanStateResponse.Metadata?
+    /// v2 统一训练状态（训练页唯一的计划状态）。与 `goals`/`today`/`workoutPlan`
+    /// 是两条独立的读：这条回答"现在是什么模式、可否执行、七日意图是什么"，
+    /// 那条回答"今天的可执行处方是什么"。**任何执行授权都不从这里产生**。
+    private(set) var unified: TrainingPlanStateResponseV2?
+    private(set) var unifiedIssue: PlanReadIssue?
+    /// 本次运行里这份统一状态是否被服务端确认过。false = 只是上次接受的参考。
+    private(set) var unifiedIsCurrent = false
+    private(set) var isRefreshingUnified = false
+    private(set) var unifiedCachedAt: Date?
     private(set) var availability: PlanAvailability = .unavailable
     private(set) var issue: PlanReadIssue?
     private(set) var minimumRevision = 0
@@ -21,9 +30,11 @@ final class TrainingPlanStore {
     private(set) var serviceReachable = false
     private var requestID = UUID()
     private var epoch = UUID()
+    private var unifiedRequestID = UUID()
     private let repository: TrainingPlanRepository
     private let now: () -> Date
     private(set) var scope: String
+    private static let unifiedCacheKey = "training-plan-state-v2"
     var legacyRetryCount = 2
     /// 2026-10-18（事故复盘 P0-3）：旧服务（无快照契约）的瞬态重试计划。
     ///
@@ -106,6 +117,7 @@ final class TrainingPlanStore {
         invalidate()
         if self.scope != scope || clear {
             goals = nil; today = nil; workoutPlan = nil; coach = nil; coachLoop = nil; metadata = nil
+            unified = nil; unifiedIssue = nil; unifiedIsCurrent = false; unifiedCachedAt = nil
             acknowledgement = nil; minimumRevision = 0; cachedAt = nil
             availability = .unavailable; issue = nil
         }
@@ -114,7 +126,9 @@ final class TrainingPlanStore {
     }
 
     func invalidate() {
-        epoch = UUID(); requestID = UUID(); isRefreshing = false; isCurrent = false
+        epoch = UUID(); requestID = UUID(); unifiedRequestID = UUID()
+        isRefreshing = false; isCurrent = false
+        isRefreshingUnified = false; unifiedIsCurrent = false
         metadata = nil
         availability = acknowledgement == nil ? .unavailable : .savedAwaitingRefresh
     }
@@ -173,6 +187,7 @@ final class TrainingPlanStore {
     func loadCache() {
         restoreSafety()
         guard !isCurrent else { return }
+        loadCachedUnifiedPlan()
         if let cached = repository.cached(CoachLoopResponse.self, scope: scope, key: "coach-loop").value,
            cached.value.settings != nil, cached.value.revision >= revision {
             coachLoop = cached.value; goals = cached.value.goals; minimumRevision = cached.value.revision
@@ -221,6 +236,74 @@ final class TrainingPlanStore {
         cachedAt = latestCacheAt
         availability = persistenceFailed ? .savedAwaitingRefresh : .cached(asOf: cachedAt)
         isCurrent = false
+    }
+
+    /// 上次接受的 v2 统一状态：**只作参考**，从不置为当前。
+    ///
+    /// 与 v1 快照的缓存路径同一条纪律：离线时能看上次的模式与七日意图，但
+    /// `unifiedIsCurrent` 保持 false，页面必须显示"上次参考，需联网确认"。
+    private func loadCachedUnifiedPlan() {
+        guard unified == nil else { return }
+        let result = repository.cached(TrainingPlanStateResponseV2.self, scope: scope, key: Self.unifiedCacheKey)
+        if result.isFailure {
+            unifiedIssue = .init(code: result.failureCode ?? .corruptPayload,
+                message: "上次统一训练状态无法读取；联网后必须重新确认。")
+        }
+        guard let cached = result.value else { return }
+        unified = cached.value
+        unifiedIsCurrent = false
+        unifiedCachedAt = cached.cachedAt
+    }
+
+    /// v2 统一训练状态的唯一读入口。
+    ///
+    /// 为什么与 `refresh` 分开：`refresh` 的成功标准是"可执行处方可确认"（今日建议、
+    /// 执行窗口、写确认水位），这条的成功标准是"模式/准入/七日意图可确认"。把两者
+    /// 合成一次读，任何一侧失败都会让另一侧冒充成功 —— 而"合同升级"与"今天没训练"
+    /// 恰好是最不能互相冒充的两件事。
+    ///
+    /// 身份/业务日/窗口/版本下限全部在 `TrainingPlanUnifiedPolicy.validate` 里校验；
+    /// 失败时保留上一份快照作为**参考**，但绝不把 `unifiedIsCurrent` 留在 true。
+    func refreshUnifiedPlan(baseURL: URL, token: String, handshake: RaiHandshake?, isValid: () -> Bool) async -> Bool {
+        let request = UUID()
+        unifiedRequestID = request
+        let mutation = epoch
+        let scope = self.scope
+        func valid() -> Bool {
+            unifiedRequestID == request && epoch == mutation && self.scope == scope && isValid() && !Task.isCancelled
+        }
+        isRefreshingUnified = true
+        defer { if unifiedRequestID == request { isRefreshingUnified = false } }
+        do {
+            let value = try await repository.readUnifiedPlan(baseURL: baseURL, token: token)
+            guard valid() else { return false }
+            serviceReachable = true
+            // 版本下限取**写确认**过的下限（`minimumRevision`），不是 `revision`：
+            // `revision` 会被另一条读的临时值抬高，用它当门槛会让两条读互相把对方
+            // 判成"陈旧"。这里也不把统一状态的 currentGoalsRevision 抬进下限 ——
+            // 下限是写确认的水位，读投影没有资格改动它。
+            try TrainingPlanUnifiedPolicy.validate(
+                value,
+                identity: handshake.map { .init(serverId: $0.serverId, athleteId: $0.athleteId, datasetEpoch: $0.datasetEpoch) },
+                minimumGoalsRevision: minimumRevision,
+                now: now()
+            )
+            unified = value
+            unifiedIsCurrent = true
+            unifiedIssue = nil
+            unifiedCachedAt = repository.persist(value, scope: scope, key: Self.unifiedCacheKey)
+            diagnostic("unified_snapshot_accepted")
+            return true
+        } catch {
+            guard valid() else { return false }
+            unifiedIsCurrent = false
+            let issue = PlanReadIssue.unified(error)
+            unifiedIssue = issue
+            // 服务端答复过（含 403/409/5xx）说明服务可达；一次合同拒绝不该被报成离线。
+            if issue.code != .offline, issue.code != .timeout { serviceReachable = true }
+            diagnostic("unified_snapshot_rejected", code: issue.code.rawValue)
+            return false
+        }
     }
 
     func refresh(baseURL: URL, token: String, handshake: RaiHandshake?, isValid: () -> Bool) async -> Bool {

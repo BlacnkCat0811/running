@@ -60,8 +60,14 @@ export interface CoachSessionDose {
   policyVersion: string;
   status: "feasible" | "not_feasible" | "not_assessable" | "not_applicable";
   estimateSource: "zone_pace_range" | "cold_start_policy" | "unavailable";
-  durationSeconds: { lower: number; upper: number } | null;
-  distanceKm: { lower: number; upper: number } | null;
+  /**
+   * Per-dimension bounds since dose policy v2: the easy pace band has no slow end
+   * by design, so an open bound leaves exactly one side unknown instead of
+   * discarding the whole range. `null` on a side means "not provable from pace
+   * evidence", never "zero" — consumers must fail closed when they need that side.
+   */
+  durationSeconds: { lower: number | null; upper: number | null } | null;
+  distanceKm: { lower: number | null; upper: number | null } | null;
   workSecondsLower: number | null;
   workMetersLower: number | null;
   workRepetitions: number;

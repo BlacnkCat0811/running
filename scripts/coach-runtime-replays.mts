@@ -97,7 +97,7 @@ const cases: Case[] = [
     check("AC0-06", out, () => {
       for (const row of out.days.filter(row => row.executable)) {
         const dose = assessSessionDose({ kind: row.day.kind, structure: row.day.structure ?? null, zones: f.facts.inputs.prescription });
-        assert.equal(dose.status, "feasible"); assert.ok(dose.durationSeconds!.lower >= 1800);
+        assert.equal(dose.status, "feasible"); assert.ok((dose.durationSeconds?.lower ?? Number.NaN) >= 1800);
       }
     });
   } },

@@ -25,6 +25,7 @@ export function coachRuntimeFixture() {
     executionSummary: coachQualityExecutionSummary({ asOf: input.asOf, prescriptions: [], observedDates: [], assessments: [] }), qualityDates: [],
     historyCoverageFrom: input.historyCoverageFrom, predictionIdentity: null, predictionSummary: null,
     inputs: { prescription: input.zones, recentWeeklyKm: 20, previousWeekDistanceKm: 20, weeklyVolumeBaselineKm: 20, preparation: null,
+      legacyHistory: { stableWeeklyKm: 0, observedRecentWeeks: 0 },
       today: { today: { localDate: "2026-10-08", workoutCount: 0 }, recoveryAssessment: { coverage: "none", assessment: "not_assessed" },
         recommendation: { basis: "training_load_and_plan" }, injuryFlags: [], calibration: { status: "completed" },
         sync: { status: "ok" }, verdict: { tone: "green" }, weekStructure: { easyDurationFraction: 1, qualitySessionCount: 0 },

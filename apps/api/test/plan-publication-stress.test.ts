@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -26,10 +25,11 @@ import {
  *    snapshot is allowed to be *detected* (that is the point of the marker), but
  *    never to be returned as consistent.
  * 2. A real API process: 10×20 readers of `GET /v1/mobile/training-plan-state`
- *    race 2×25 writers of `PUT /v1/mobile/goals`. Readers must only see 200 or
- *    503, every 503 must carry `Retry-After: 1`, every 200 must be internally
- *    consistent, and latency must stay bounded. The 503 ratio is reported, not
- *    asserted: forcing it low would make the test flaky without testing more.
+ *    race 2×25 requests to the retired `PUT /v1/mobile/goals` surface. The
+ *    retired surface must answer 410 and never publish, so the only publication
+ *    source is the separate cross-process publisher; readers must only see 200
+ *    or 503, every 503 must carry `Retry-After: 1`, every 200 must be internally
+ *    consistent, and latency must stay bounded.
  *
  *    A separate publisher process is required to make the 503 path reachable:
  *    one API process handles every request synchronously, so its own writers are
@@ -173,10 +173,6 @@ test("HTTP load: readers stay consistent, 503s are retryable, latency stays boun
   try {
     api = await startApi(runtimeRoot, databasePath);
     const app = api;
-    const handshake = await (await fetch(`${app.url}/v1/handshake`)).json() as
-      { serverId: string; athleteId: string; datasetEpoch: string };
-    const operationScope = { serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch };
-
     const baseline = await fetch(`${app.url}/v1/mobile/training-plan-state`);
     assert.equal(baseline.status, 200, `empty database must serve a plan snapshot: ${await baseline.text()}`);
 
@@ -226,15 +222,16 @@ test("HTTP load: readers stay consistent, 503s are retryable, latency stays boun
       }
       readerSamples.push({ status, retryAfter, code: typeof body?.code === "string" ? body.code : null, durationMs, problems });
     };
-    const writeRound = async (sequence: number): Promise<void> => {
+    const writeRound = async (): Promise<void> => {
       const started = performance.now();
       let response: Response;
       try {
+        // Retired surface: the answer must be 410 regardless of load, and it
+        // must never publish (the readers' 503s therefore come only from the
+        // genuinely concurrent publisher process).
         response = await fetch(`${app.url}/v1/mobile/goals`, {
           method: "PUT", headers: { "content-type": "application/json" },
-          // Metadata only: no `weekPlan`, so the write does not need the main
-          // database and every writer competes for the same control transaction.
-          body: JSON.stringify({ operationId: randomUUID(), operationScope, qualitySessionCap: sequence % 5 })
+          body: JSON.stringify({ qualitySessionCap: 1 })
         });
       } catch (error) {
         writerSamples.push({ status: 0, retryAfter: null, code: null,
@@ -251,8 +248,8 @@ test("HTTP load: readers stay consistent, 503s are retryable, latency stays boun
 
     // Writers start first so readers observe publications in flight rather than
     // an idle server; both run concurrently from then on.
-    const writers = Array.from({ length: WRITE_LOOPS }, async (_unused, writer) => {
-      for (let index = 0; index < WRITES_PER_LOOP; index += 1) await writeRound(writer * WRITES_PER_LOOP + index);
+    const writers = Array.from({ length: WRITE_LOOPS }, async () => {
+      for (let index = 0; index < WRITES_PER_LOOP; index += 1) await writeRound();
     });
     await new Promise<void>(done => setTimeout(done, 15));
     const readers = Array.from({ length: READ_LOOPS }, async () => {
@@ -267,7 +264,7 @@ test("HTTP load: readers stay consistent, 503s are retryable, latency stays boun
     const writerStatuses = countStatuses(writerSamples);
     const reader503 = readerSamples.filter(sample => sample.status === 503);
     const readerOther = readerSamples.filter(sample => sample.status !== 200 && sample.status !== 503);
-    const writerOther = writerSamples.filter(sample => ![200, 409, 503].includes(sample.status));
+    const writerOther = writerSamples.filter(sample => sample.status !== 410);
     const inconsistent = readerSamples.filter(sample => sample.problems.length > 0);
     const readerLatency = readerSamples.map(sample => sample.durationMs);
     const p50 = percentile(readerLatency, 0.5);
@@ -277,20 +274,18 @@ test("HTTP load: readers stay consistent, 503s are retryable, latency stays boun
     t.diagnostic(`HTTP readers n=${readerSamples.length}: 200=${readerStatuses[200] ?? 0} `
       + `503=${readerStatuses[503] ?? 0} p50=${p50.toFixed(1)}ms p95=${p95.toFixed(1)}ms `
       + `(200-only p95=${p95Success.toFixed(1)}ms) inconsistent_200=${inconsistent.length}`);
-    t.diagnostic(`HTTP writers n=${writerSamples.length}: 200=${writerStatuses[200] ?? 0} `
-      + `409=${writerStatuses[409] ?? 0} 503=${writerStatuses[503] ?? 0}`);
+    t.diagnostic(`HTTP retired writers n=${writerSamples.length}: 410=${writerStatuses[410] ?? 0}`);
     t.diagnostic(`reader 503 codes: ${JSON.stringify(errorCodes)}`);
     const firstProblems = inconsistent.slice(0, 3).map(sample => sample.problems);
     assert.equal(readerOther.length, 0, `readers must only see 200/503: ${JSON.stringify(readerOther.slice(0, 3))}`);
-    assert.equal(writerOther.length, 0, `writers must only see 200/409/503: ${JSON.stringify(writerOther.slice(0, 3))}`);
+    assert.equal(writerOther.length, 0, `retired writers must only see 410: ${JSON.stringify(writerOther.slice(0, 3))}`);
+    assert.ok(writerSamples.every(sample => sample.code === "legacy_surface_retired"),
+      "every retired write must carry the retirement code");
     assert.equal(inconsistent.length, 0, `mixed 200 snapshots: ${JSON.stringify(firstProblems)}`);
     assert.ok(reader503.every(sample => sample.retryAfter === "1"),
       `every 503 must carry Retry-After: 1: ${JSON.stringify(reader503.filter(sample => sample.retryAfter !== "1").slice(0, 3))}`);
-    assert.ok(writerSamples.filter(sample => sample.status === 503).every(sample => sample.retryAfter === "1"),
-      "writer 503s must be retryable too");
     assert.ok(reader503.length >= 1,
       `the scenario did not produce a single detected publication: ${JSON.stringify(readerStatuses)}`);
-    assert.ok(writerSamples.some(sample => sample.status === 200), "at least one metadata write must commit");
     assert.ok(p95 < 2000, `reader p95 ${p95.toFixed(1)}ms must stay under the 2000ms stress budget`);
   } finally {
     if (publisher !== null) await stopChild(publisher);

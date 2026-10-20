@@ -211,7 +211,7 @@ struct HealthSyncIntentJournalRegression {
         let dateKey = "legacy.intent.date-scope"
         let legacyDate = Date(timeIntervalSinceReferenceDate: 4242.5)
         legacyDefaults.set(legacyDate, forKey: dateKey)
-        _ = migratedReload.migrateLegacy(scope: "date-scope")
+        migratedReload.migrateLegacy(scope: "date-scope")
         check(migratedReload.observe(scope: "date-scope") != nil
                 && legacyDefaults.object(forKey: dateKey) == nil,
               "a legacy Date intent is migrated with a stable generation")

@@ -3,7 +3,6 @@
 set -u
 PORT=8791
 BASE="http://127.0.0.1:${PORT}"
-BEFORE_GOAL=""
 
 echo "== boot API (RAI_DATABASE=var/rai.sqlite) =="
 # Windows Node cannot resolve MSYS paths like /d/applerun; pwd -W yields D:/applerun
@@ -13,11 +12,6 @@ RAI_DATABASE="${SMOKE_ROOT}/var/rai.sqlite" RAI_API_PORT=$PORT RAI_LOG_LEVEL=war
 API_PID=$!
 
 cleanup() {
-  if [ -n "$BEFORE_GOAL" ]; then
-    curl -s -m 2 -X PUT "$BASE/v1/mobile/goals" \
-      -H "content-type: application/json" \
-      -d "$BEFORE_GOAL" >/dev/null || true
-  fi
   kill $API_PID 2>/dev/null
   wait $API_PID 2>/dev/null
 }
@@ -71,21 +65,37 @@ check "trends.weeks is 12 consecutive ISO weeks" var/smoke-trends.json "weeks"
 check "trends.records object" var/smoke-trends.json "records"
 check "trends.ability series" var/smoke-trends.json "ability"
 
-echo "== GET/PUT /v1/mobile/goals =="
-curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-before.json
-echo "before: $(cat var/smoke-goals-before.json)"
-HTTP=$(curl -s -o var/smoke-goals-put.json -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
-  -H "content-type: application/json" \
-  -d '{"easyDurationFloorFraction": 0.75}')
-echo "PUT http=$HTTP body=$(cat var/smoke-goals-put.json)"
-[ "$HTTP" = "200" ] && { echo "PASS: PUT returns 200"; pass=$((pass+1)); } || { echo "FAIL: PUT expected 200 got $HTTP"; fail=$((fail+1)); }
-curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-after.json
-node -e "const a=require('./var/smoke-goals-after.json'); console.log('after:', JSON.stringify(a)); process.exit(a.easyDurationFloorFraction === 0.75 ? 0 : 1)" && { echo "PASS: goals round-trip"; pass=$((pass+1)); } || { echo "FAIL: goals round-trip"; fail=$((fail+1)); }
+echo "== retired legacy plan routes answer 410 =="
+# Product decision 2026-10-20: the four old plan surfaces stay mounted but answer
+# 410 legacy_surface_retired. The smoke check asserts the metadata, not a 404.
+smoke_retired() { # name HTTP_STATUS FILE REPLACEMENT_PREFIX
+  local name="$1" http="$2" file="$3" prefix="$4"
+  if [ "$http" = "410" ] && node -e "
+    const d=require('./' + process.argv[1]);
+    process.exit(d.code === 'legacy_surface_retired' && typeof d.replacement === 'string' &&
+      d.replacement.startsWith(process.argv[2]) && d.message.includes(d.replacement) ? 0 : 1);
+  " "$file" "$prefix"; then
+    echo "PASS: $name -> 410 legacy_surface_retired"; pass=$((pass+1))
+  else
+    echo "FAIL: $name expected 410 legacy_surface_retired with replacement"; fail=$((fail+1))
+  fi
+}
 
-echo "== validation: PUT rejects out-of-range =="
-HTTP2=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
-  -H "content-type: application/json" -d '{"easyDurationFloorFraction": 9}')
-[ "$HTTP2" = "400" ] && { echo "PASS: floor 9 rejected with 400"; pass=$((pass+1)); } || { echo "FAIL: expected 400 got $HTTP2"; fail=$((fail+1)); }
+curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-get.json
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/v1/mobile/goals")
+smoke_retired "GET /v1/mobile/goals" "$HTTP" var/smoke-goals-get.json "/v1/mobile/training-plan"
+
+HTTP=$(curl -s -o var/smoke-goals-put.json -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
+  -H "content-type: application/json" -d '{"easyDurationFloorFraction": 0.75}')
+smoke_retired "PUT /v1/mobile/goals" "$HTTP" var/smoke-goals-put.json "/v1/mobile/training-plan"
+
+HTTP=$(curl -s -o var/smoke-preview.json -w "%{http_code}" -X POST "$BASE/v1/mobile/workout-plan/preview" \
+  -H "content-type: application/json" -d '{"expectedRevision": 0}')
+smoke_retired "POST /v1/mobile/workout-plan/preview" "$HTTP" var/smoke-preview.json "/v1/mobile/training-plan/commands/preview"
+
+HTTP=$(curl -s -o var/smoke-generate.json -w "%{http_code}" -X POST "$BASE/v1/mobile/workout-plan/generate" \
+  -H "content-type: application/json" -d '{}')
+smoke_retired "POST /v1/mobile/workout-plan/generate" "$HTTP" var/smoke-generate.json "/v1/mobile/training-plan/commands/refresh"
 
 echo ""
 echo "== RESULT: pass=$pass fail=$fail =="

@@ -1369,8 +1369,21 @@ export function buildRaceCard(input: CoachInput): MobileRaceCard {
 
 export function buildWeekPlan(input: CoachInput, next: MobileNextSession): MobileWeekPlanDay[] {
   const stored = new Map(input.storedWeekPlan.map((item) => [item.localDate, item]));
+  // Measured, not echoed: `/v1/mobile/workout-plan` renders the same stored day,
+  // and the two must not disagree about how far it is. Capped as well, because
+  // this store is read without a prescription — a structure written before the
+  // ceiling bound the write would otherwise reach the week card at full size.
+  const storedNumbers = (saved: MobilePlannedDay) => {
+    const bounded =
+      saved.structure == null ? null : capStructureToDayCeiling(saved.structure, saved.kind, input.zones);
+    return plannedDayNumbers(saved.kind, bounded, saved.distanceKm, input.zones);
+  };
   return input.weekDaily.map((day) => {
+    const intended = stored.get(day.localDate) ?? null;
     if (day.workoutCount > 0) {
+      // The observation owns the display kind; the prescription is reported
+      // beside it instead of being erased by "completed", so "ran easy instead
+      // of the planned interval" stays readable.
       return {
         localDate: day.localDate,
         kind: "completed" as const,
@@ -1379,19 +1392,46 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
         completedWorkoutId: day.workoutId,
         distanceKm: day.distanceKm,
         workoutCount: day.workoutCount,
-        structure: null
+        structure: null,
+        observation: "observed" as const,
+        intentKind: intended?.kind ?? null
       };
     }
     if (day.localDate < input.today) {
+      if (!intended) {
+        // Nothing was prescribed and nothing was recorded. Calling this "休息"
+        // asserted a rest nobody observed; a missing import and a rest day look
+        // the same in the data, so report the honest absence instead.
+        return {
+          localDate: day.localDate,
+          kind: "rest",
+          title: "未安排训练",
+          planned: false,
+          completedWorkoutId: null,
+          distanceKm: 0,
+          workoutCount: 0,
+          structure: null,
+          observation: "unknown" as const,
+          intentKind: null
+        };
+      }
+      // The stored prescription is the intent even though the observation is
+      // missing: a past interval with no import is "planned, unobserved", not a
+      // rest day. Feasibility is deliberately not re-litigated — the session no
+      // longer executes, and a historical row is a record of what was
+      // prescribed, not of what today's budget would allow.
+      const numbers = storedNumbers(intended);
       return {
         localDate: day.localDate,
-        kind: "rest",
-        title: "休息",
+        kind: intended.kind,
+        title: intentTitle(intended.kind),
         planned: true,
         completedWorkoutId: null,
-        distanceKm: 0,
+        distanceKm: numbers.distanceKm ?? 0,
         workoutCount: 0,
-        structure: null
+        structure: numbers.structure,
+        observation: "unknown" as const,
+        intentKind: intended.kind
       };
     }
     if (day.localDate === input.today) {
@@ -1410,26 +1450,18 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
         structure: numbers.structure
       };
     }
-    const saved = stored.get(day.localDate);
-    if (saved) {
-      // Measured, not echoed: `/v1/mobile/workout-plan` renders the same stored
-      // day, and the two must not disagree about how far it is. Capped as well,
-      // because this store is read without a prescription — a structure written
-      // before the ceiling bound the write would otherwise reach the week card at
-      // full size.
-      const bounded =
-        saved.structure == null ? null : capStructureToDayCeiling(saved.structure, saved.kind, input.zones);
-      const numbers = plannedDayNumbers(saved.kind, bounded, saved.distanceKm, input.zones);
-      if (input.storedPlanSource === "heuristic" && saved.kind !== "rest" &&
-        assessSessionDose({ kind: saved.kind, structure: numbers.structure, zones: input.zones,
+    if (intended) {
+      const numbers = storedNumbers(intended);
+      if (input.storedPlanSource === "heuristic" && intended.kind !== "rest" &&
+        assessSessionDose({ kind: intended.kind, structure: numbers.structure, zones: input.zones,
           allowColdStartEstimate: true }).status !== "feasible") {
         return { localDate: day.localDate, kind: "rest", title: "完整课不可行",
           planned: true, completedWorkoutId: null, distanceKm: 0, workoutCount: 0, structure: null };
       }
       return {
         localDate: day.localDate,
-        kind: saved.kind,
-        title: sessionTitle(saved.kind),
+        kind: intended.kind,
+        title: sessionTitle(intended.kind),
         planned: true,
         completedWorkoutId: null,
         distanceKm: numbers.distanceKm ?? 0,
@@ -1535,6 +1567,22 @@ function sessionTitle(kind: MobileSessionKind): string {
     case "long_run": return "长距离";
     case "tempo": return "节奏跑";
     case "interval": return "间歇跑";
+  }
+}
+
+/**
+ * The title for a past row whose prescription is only intent: there is nothing
+ * to show as an observation, so the row names the prescribed session and says
+ * the observation is missing instead of claiming a rest.
+ */
+function intentTitle(kind: MobileSessionKind): string {
+  switch (kind) {
+    case "rest": return "原计划休息";
+    case "recovery": return "原计划恢复跑／尚无训练观测";
+    case "easy": return "原计划轻松跑／尚无训练观测";
+    case "long_run": return "原计划长距离／尚无训练观测";
+    case "tempo": return "原计划节奏／尚无训练观测";
+    case "interval": return "原计划间歇／尚无训练观测";
   }
 }
 

@@ -8,6 +8,16 @@ struct TechCoachLoopSection: View {
     @State private var stopAction: String?
     @State private var stopRevision: Int?
     @State private var stopSession: String?
+
+    /// 上下文决定这里**是不是**训练入口。
+    ///
+    /// `.summary`（默认）：今日页/托管提示用，只读展示当前模式与今日课，不含创建、
+    /// 结束、偏好按钮。`.page`：训练页专用，是唯一可以创建/暂停/结束/改偏好的地方。
+    /// 默认值是 `.summary` 是刻意的：任何忘了传上下文的调用点都**不会**悄悄长出
+    /// 第二个创建入口。
+    enum Context { case page, summary }
+    var context: Context = .summary
+
     private enum Sheet: String, Identifiable {
         case preferences, feedback
         var id: String { rawValue }
@@ -16,6 +26,42 @@ struct TechCoachLoopSection: View {
 
     var body: some View {
         if let loop = native.coachLoop {
+            if context == .summary { summary(loop) } else { detail(loop) }
+        }
+    }
+
+    /// 摘要上下文（今日页/托管提示）：只展示当前模式与今日课，**不含创建/结束/偏好
+    /// 入口**。训练页才是唯一入口 —— 首页再放一份"明确选择模式"按钮，就是 PR5
+    /// 要消灭的第二个创建入口。
+    @ViewBuilder private func summary(_ loop: CoachLoopResponse) -> some View {
+        TechPanel(tint: TechColor.cyan) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(loop.settings?.mode == "race_preparation" ? "比赛备赛" : "持续训练")
+                    .font(.headline)
+                Text(loop.settings?.status == "active" ? "进行中" :
+                    loop.settings?.status == "paused" ? "已暂停" :
+                    loop.settings == nil ? "尚未配置训练模式" : "已结束")
+                    .font(.caption).foregroundStyle(TechColor.muted)
+                if native.trainingPlanStore.isCurrent {
+                    Text("\(nativeDay(loop.today.day.localDate)) · \(coachLoopTemplateName(loop.days.first?.templateId, kind: loop.today.day.kind))")
+                        .font(.subheadline.weight(.semibold))
+                    Text(loop.refreshRequired ? "事实已变化，需在训练页刷新后才能下发。" :
+                        loop.today.executable ? "今日课已发布。" : "今日无可执行跑课。")
+                        .font(.caption).foregroundStyle(TechColor.yellow)
+                } else {
+                    Text("上次参考安排；请联网后在训练页确认。").font(.caption).foregroundStyle(TechColor.yellow)
+                }
+                NavigationLink { TechPlanView() } label: {
+                    Label("打开训练页", systemImage: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .accessibilityIdentifier("coach.open-training")
+            }
+        }
+    }
+
+    /// 训练页的完整控制：唯一的创建/暂停/结束/偏好/反馈入口。
+    @ViewBuilder private func detail(_ loop: CoachLoopResponse) -> some View {
             TechPanel(tint: TechColor.cyan) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(loop.settings?.mode == "race_preparation" ? "每日自适应 · 比赛备赛" : "每日自适应 · 持续训练")
@@ -74,12 +120,14 @@ struct TechCoachLoopSection: View {
                             prepareStop(settings.status == "paused" ? "resume" : "pause", loop)
                         }.disabled(disabled || settings.status == "ended")
                         Button("结束当前模式", role: .destructive) { prepareStop("end", loop) }.disabled(disabled || settings.status == "ended")
-                        if settings.status == "ended" { Button("显式创建新模式") { sheet = .preferences }.disabled(disabled) }
+                        if settings.status == "ended" { Button("创建新的训练模式") { sheet = .preferences }.disabled(disabled) }
                         Button("更新预测摘要（独立命令）") { Task { await native.refreshCoachPrediction() } }.disabled(disabled)
                     } else {
-                        Text("新合同不会自动转换旧计划；旧系统排期须先撤回，普通自动跑课至少30分钟，安全或时间不足时休息。")
+                        // 唯一的创建入口：训练页上的一次配置决定模式（持续训练或比赛备赛），
+                        // 不再有"旧教练 / 新教练"两个创建按钮需要用户先选一边。
+                        Text("尚未配置训练模式。配置一次即可：有比赛目标时按比赛备赛，否则按持续训练；旧系统排期会先核验／撤回。")
                             .font(.caption).foregroundStyle(TechColor.muted)
-                        Button("明确选择新版教练模式") { sheet = .preferences }.disabled(disabled)
+                        Button("配置训练模式（持续训练 / 比赛备赛）") { sheet = .preferences }.disabled(disabled)
                     }
                     if let message = native.runCoachError { Text(message).font(.caption).foregroundStyle(TechColor.yellow) }
                     Button("重新读取（不改课）") { Task { await native.refreshPlanState() } }.disabled(native.isPlanBusy)
@@ -102,7 +150,6 @@ struct TechCoachLoopSection: View {
                 }
             }
             .onChange(of: native.feedbackSessionID) { _, _ in sheet = nil; stopAction = nil }
-        }
     }
 
     private func prepareStop(_ action: String, _ loop: CoachLoopResponse) {
@@ -120,7 +167,7 @@ private func coachLoopTemplateName(_ template: String?, kind: String) -> String 
     }
 }
 
-private struct TechCoachLoopPreferencesSheet: View {
+struct TechCoachLoopPreferencesSheet: View {
     @Environment(NativeAppModel.self) private var native
     @Environment(\.dismiss) private var dismiss
     let initial: CoachLoopResponse
@@ -165,7 +212,7 @@ private struct TechCoachLoopPreferencesSheet: View {
                         }.disabled(updating)
                         DatePicker("比赛日期", selection: $raceDate, in: updating ? Date.distantPast...Date.distantFuture : raceRange, displayedComponents: .date).disabled(updating)
                         if goal == "time" { TextField("目标分钟", value: $targetMinutes, format: .number).keyboardType(.decimalPad) }
-                        Text("新赛事需42–364天；更换模式、目标类别或赛事须先结束。").font(.caption)
+                        Text("新赛事需42–364天；同一时间只运行一个训练模式，模式或赛事变更需先结束当前模式，再在同一页面创建。").font(.caption)
                     }
                 }
                 Section("可跑日与可用时长") {
@@ -198,7 +245,7 @@ private struct TechCoachLoopPreferencesSheet: View {
                     if let error = native.runCoachError { Text(error).foregroundStyle(TechColor.yellow) }
                 }
             }
-            .navigationTitle("新版训练偏好")
+            .navigationTitle("训练模式与偏好")
             .environment(\.timeZone, calendar.timeZone)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }

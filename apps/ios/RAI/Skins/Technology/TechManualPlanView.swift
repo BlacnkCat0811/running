@@ -26,8 +26,11 @@ struct TechManualPlanView: View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
+                // 托管时这里**不再**渲染第二套教练控件：训练页是唯一入口，
+                // 手动周计划与手表排期也都由训练页/教练命令写入。这里只说明原因，
+                // 不再提供"另一套教练按钮"。
                 if native.isCoachLoopManaged {
-                    TechCoachLoopSection()
+                    managedPlanNotice
                 } else if editing {
                     if draftIsStale {
                         TechPanel(tint: TechColor.yellow) {
@@ -55,11 +58,12 @@ struct TechManualPlanView: View {
                         TechPlanExecutionPanel(days: days)
                     }
                 }
-                if let today = native.planPresentation.today {
-                    NavigationLink("成绩预测与依据") { TechBodyMetricsView(data: today) }
-                }
-                racePanel
-                if !editing {
+                if !native.isCoachLoopManaged {
+                    if let today = native.planPresentation.today {
+                        NavigationLink("成绩预测与依据") { TechBodyMetricsView(data: today) }
+                    }
+                    racePanel
+                    if !editing {
                     TechPrimaryButton(title: native.planPresentation.goals?.weekPlanReplanRequired == true ? "编辑训练设置" : "编辑周计划", isDisabled: native.planPresentation.goals == nil || native.isOffline || native.isPlanBusy) {
                         loadDraft()
                         editing = true
@@ -69,6 +73,7 @@ struct TechManualPlanView: View {
                             showingLock = true
                         }
                     }
+                }
                 }
                 if let saveMessage {
                     TechPanel(tint: saveSucceeded ? TechColor.green : TechColor.coral, fill: saveSucceeded ? TechColor.mint : TechColor.paleCoral) {
@@ -124,6 +129,23 @@ struct TechManualPlanView: View {
         }
         .onChange(of: native.feedbackSessionID) { _, _ in raceEditor = nil; selectedDay = nil; showingLock = false }
         }
+    }
+
+    /// 托管态说明：只有一个训练入口，手动周计划在托管期间是只读的。
+    ///
+    /// 之前这里渲染完整的 `TechCoachLoopSection`，于是手动页面成了**第二个**教练
+    /// 界面（用户可以在两个页面看到两套按钮）。现在托管说明只解释原因，不存在
+    /// 第二套创建/结束入口。
+    private var managedPlanNotice: some View {
+        TechPanel(tint: TechColor.cyan) {
+            VStack(alignment: .leading, spacing: 8) {
+                TechSectionHeader(title: "训练由统一训练页托管")
+                Text("当前训练模式、暂停/恢复、比赛目标与设备排程都在训练页统一管理。手动周计划在托管期间是只读的，不构成第二套写入。")
+                    .font(.footnote).foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityIdentifier("manual.managed-notice")
     }
 
     private var planOverview: some View {
@@ -210,7 +232,10 @@ struct TechManualPlanView: View {
 
     private func weekChipLabel(_ day: MobileWeekPlanDay) -> String {
         let distance = day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "无距离"
-        return "\(nativeWeekday(day.localDate))\(nativeDay(day.localDate))，\(nativeSessionName(day.kind))，\(distance)，查看训练详情"
+        // F03：过去一天"排了课但没有观测"不是休息。把观测状态念出来，避免
+        // VoiceOver 用户只听到一个可能被误读的课型。
+        let note = TrainingPlanUnifiedPolicy.observationNote(day).map { "，\($0)" } ?? ""
+        return "\(nativeWeekday(day.localDate))\(nativeDay(day.localDate))，\(nativeSessionName(day.kind))，\(distance)\(note)，查看训练详情"
     }
 
     private var watchPlanPanel: some View {
@@ -372,11 +397,21 @@ struct TechManualPlanView: View {
                                     .font(.caption).foregroundStyle(TechColor.muted)
                             }
                         }
-                        Button(goals.raceTarget == nil ? "设置比赛目标" : "编辑比赛目标") {
-                            raceEditor = RaceGoalEditorContext(goals: goals, editorSessionID: native.feedbackSessionID)
+                        if native.usesUnifiedTrainingPage {
+                            // 统一训练页已经存在时，比赛目标是**同一个**模式的输入，
+                            // 不再在手动页面另开一份独立目标编辑器；否则两个编辑器会
+                            // 各写一半（统一状态 vs 旧 goals.raceTarget），又回到 PR5
+                            // 要消灭的"两套开关"。
+                            Text("比赛目标在训练页统一调整（模式选“比赛备赛”）；这里不再单独编辑。")
+                                .font(.caption).foregroundStyle(TechColor.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Button(goals.raceTarget == nil ? "设置比赛目标" : "编辑比赛目标") {
+                                raceEditor = RaceGoalEditorContext(goals: goals, editorSessionID: native.feedbackSessionID)
+                            }
+                            .disabled(native.isOffline || editing || native.isPlanBusy)
+                            .accessibilityIdentifier("race-goal-edit")
                         }
-                        .disabled(native.isOffline || editing || native.isPlanBusy)
-                        .accessibilityIdentifier("race-goal-edit")
                         if let locked = goals.lockedSession {
                             Text("锁定课程：\(locked.session.title) · \(nativeDate(locked.lockedAt))")
                                 .font(.caption)
@@ -432,9 +467,12 @@ private struct TechPlanDaySheet: View {
     let isToday: Bool
 
     private var statusText: String {
+        // F03：观测字段优先。过去一天有原处方、没有观测时，页面必须说"尚无训练
+        // 观测"，而不是把"没有证据"印成"休息日"。
+        if let note = TrainingPlanUnifiedPolicy.observationNote(day) { return note }
         // The word is a statement about the data, so it lives next to the mapper's
         // other day judgments; only the colour below is a skin decision.
-        WorkoutPlanMapper.weekStripStatus(
+        return WorkoutPlanMapper.weekStripStatus(
             completed: day.completedWorkoutId != nil,
             isRest: day.kind == "rest",
             isToday: isToday

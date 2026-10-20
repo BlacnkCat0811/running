@@ -58,7 +58,7 @@ export async function isolatedCoachReplay(sourcePath: string, outputPath: string
             const dose = assessSessionDose({ kind: day.day.kind, structure: day.day.structure ?? null,
               zones: facts.inputs.prescription, allowColdStartEstimate: true });
             assert.equal(dose.status, "feasible", "AC0-06 isolated final dose");
-            assert.ok(dose.durationSeconds!.lower >= 1800);
+            assert.ok((dose.durationSeconds?.lower ?? Number.NaN) >= 1800);
           }
         }
         assert.equal(store.read().revision, revision, "real-facts GET must not write goals");

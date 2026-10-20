@@ -14,8 +14,14 @@ test("O4 templates have actual dose differences, minimum full sessions and mixed
   const { candidates } = coachTemplateCandidates(input);
   assert.equal(candidates.length, 7);
   const by = (id: string) => candidates.find(c => c.id === id)!;
-  assert.ok(by("aerobic_endurance").durationSeconds > by("easy").durationSeconds);
-  assert.ok(by("long_aerobic").durationSeconds > by("aerobic_endurance").durationSeconds);
+  /** Fixed zones, so every upper duration is provable; the helper keeps that explicit. */
+  const provenDuration = (id: string): number => {
+    const value = by(id).durationSeconds;
+    assert.notEqual(value, null, `${id} must have a provable upper duration with closed zones`);
+    return value!;
+  };
+  assert.ok(provenDuration("aerobic_endurance") > provenDuration("easy"));
+  assert.ok(provenDuration("long_aerobic") > provenDuration("aerobic_endurance"));
   assert.notDeepEqual(by("fartlek").structure, by("interval").structure);
   const hr = runCoachSessionTargets(by("fartlek"), { targetType: "heart_rate" }, zones);
   assert.equal(hr.structure.blocks[0]!.steps[0]!.alert?.upper, 175);

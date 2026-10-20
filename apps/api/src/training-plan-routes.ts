@@ -1,0 +1,254 @@
+import type {
+  TrainingPlanAdmissionState,
+  TrainingPlanCommandPreviewRequest,
+  TrainingPlanCommandRequest,
+  TrainingPlanRaceGoalView,
+  TrainingPlanScope,
+  TrainingPlanStateResponseV2
+} from "@rai/api-contracts";
+import { TRAINING_PLAN_CONTRACT_VERSION } from "@rai/api-contracts";
+import type { FastifyReply, FastifyRequest } from "fastify";
+
+import { shiftCoachDate } from "./coach-loop-facts.js";
+import { trainingPlanCommandError, type PreparedTrainingPlan, type TrainingPlanCommandService } from "./training-plan-commands.js";
+import { isValidLocalDate } from "./local-date.js";
+import {
+  admissionStateFor,
+  raceGoalSupport,
+  resolveTrainingMode,
+  trainingPlanContextDigest
+} from "./training-mode-policy.js";
+import type { TrainingPlanState, TrainingPlanStateRow } from "./training-plan-store.js";
+
+/**
+ * PR4-1: the negotiated unified read.
+ *
+ * Scope of this slice, deliberately narrow:
+ * - one read-only endpoint (`GET /v1/mobile/training-plan-state`) that answers the
+ *   migrated unified state when the client sends `X-RAI-Training-Contract: 2`;
+ * - every other request keeps the existing v1 payload, byte for byte;
+ * - no migration, no publication, no coordinator, no command reducer. The response
+ *   therefore carries `execution.permitted: false`: a mode is not a permission and
+ *   this slice has not evaluated facts freshness or device coordination yet.
+ *
+ * Version negotiation is explicit in both directions: an unknown version is a 409
+ * `training_contract_unsupported`, never a silent downgrade to v1.
+ */
+
+export type RequestedTrainingPlanContract =
+  | { version: 1; raw: null | "1" }
+  | { version: 2; raw: "2" }
+  | { version: "unsupported"; raw: string | null };
+
+const WEEK_DAYS = 7;
+
+/**
+ * Parse the contract header. Absent/`1` keeps the legacy payload; `2` selects the
+ * unified projection; anything else is rejected instead of guessed.
+ */
+export function requestedTrainingPlanContract(
+  headers: Record<string, string | string[] | undefined>
+): RequestedTrainingPlanContract {
+  const value = headers["x-rai-training-contract"];
+  const raw = Array.isArray(value) ? value.at(0) ?? null : value ?? null;
+  if (raw === null || raw === "") return { version: 1, raw: null };
+  const trimmed = raw.trim();
+  if (trimmed === "1") return { version: 1, raw: "1" };
+  if (trimmed === "2") return { version: 2, raw: "2" };
+  return { version: "unsupported", raw };
+}
+
+export class TrainingPlanReadError extends Error {
+  constructor(readonly code: string, readonly statusCode: 409 | 503, message: string) {
+    super(message);
+    this.name = "TrainingPlanReadError";
+  }
+}
+
+/**
+ * Build the v2 payload from a migrated state row.
+ *
+ * Throws `TrainingPlanReadError` when the stored payload cannot be trusted (the
+ * store's parser already rejects unknown schema versions) — the route answers a
+ * retryable failure rather than serving a mixed identity.
+ */
+export function buildTrainingPlanStateV2(input: {
+  scope: TrainingPlanScope;
+  businessDate: string;
+  row: TrainingPlanStateRow;
+  currentGoalsRevision: number;
+}): TrainingPlanStateResponseV2 {
+  const state: TrainingPlanState = input.row.state;
+  if (!isValidLocalDate(input.businessDate)) {
+    throw new TrainingPlanReadError("training_plan_business_date_invalid", 503,
+      "业务日期不可解析，不能生成统一快照。");
+  }
+  const mode = resolveTrainingMode({ raceGoal: state.raceGoal, businessDate: input.businessDate });
+  const windowEnd = shiftCoachDate(input.businessDate, WEEK_DAYS - 1);
+  // The stored weekly intent is the published plan for this slice; observation and
+  // effective-execution live in the existing read models until PR4-2.
+  const days = (state.weekPlan ?? [])
+    .filter((day) => day.localDate >= input.businessDate && day.localDate <= windowEnd)
+    .sort((left, right) => left.localDate.localeCompare(right.localDate));
+  const admission: TrainingPlanAdmissionState = state.sourceStatus === "ended"
+    ? "needs_confirmation"
+    : admissionStateFor({ raceGoal: state.raceGoal, runState: state.runState, preferencesComplete: state.preferencesComplete });
+  const raceGoal: TrainingPlanRaceGoalView | null = state.raceGoal === null ? null : {
+    ...state.raceGoal,
+    support: raceGoalSupport(state.raceGoal, input.businessDate)
+  };
+  return {
+    contractVersion: TRAINING_PLAN_CONTRACT_VERSION,
+    scope: input.scope,
+    businessDate: input.businessDate,
+    stateRevision: input.row.revision,
+    migratedAt: state.migratedAt,
+    migration: {
+      version: state.migrationVersion,
+      source: state.source,
+      sourceStatus: state.sourceStatus,
+      sourceDigest: state.sourceDigest
+    },
+    mode: mode.mode,
+    modeReason: mode.reason,
+    daysToRace: mode.daysToRace,
+    runState: state.runState,
+    admission,
+    raceGoal,
+    plan: {
+      goalsRevision: state.goalsRevision,
+      currentGoalsRevision: input.currentGoalsRevision,
+      // PR4-2: configuration and plan are published in separate steps for now, so a
+      // plan generated for an older configuration must read as NOT current. A legacy
+      // migration carries no context digest and falls back to the revision check.
+      current: state.goalsRevision === input.currentGoalsRevision &&
+        (state.planContextDigest === null ||
+          state.planContextDigest === trainingPlanContextDigest({ raceGoal: state.raceGoal, runState: state.runState })),
+      days,
+      lockedToday: state.lockedSession?.localDate === input.businessDate
+    },
+    execution: {
+      permitted: false,
+      reasonCodes: ["projection_only", "facts_freshness_not_evaluated", "device_coordination_not_evaluated"]
+    }
+  };
+}
+
+export interface TrainingPlanStateRouteDeps {
+  identity: () => TrainingPlanScope;
+  /** Shanghai business date; the only clock a mode may be derived from. */
+  businessDate: () => string;
+  /** Canonical scope key → migrated row, or `null` when this scope is not migrated. */
+  readUnifiedState: (scopeKey: string) => TrainingPlanStateRow | null;
+  readGoalsRevision: () => number;
+  /** The unchanged v1 handler; used for every non-v2 request. */
+  legacy: (request: FastifyRequest, reply: FastifyReply) => unknown | Promise<unknown>;
+}
+
+/** Fastify handler factory: one route, two wire contracts, explicit negotiation. */
+export function createTrainingPlanStateRoute(deps: TrainingPlanStateRouteDeps) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
+    reply.header("Cache-Control", "no-store");
+    const requested = requestedTrainingPlanContract(request.headers);
+    if (requested.version === "unsupported") {
+      reply.header("Vary", "X-RAI-Training-Contract");
+      return reply.code(409).send({
+        code: "training_contract_unsupported",
+        message: `训练读合同只支持 1 或 ${TRAINING_PLAN_CONTRACT_VERSION}；收到 ${JSON.stringify(requested.raw)}。`
+      });
+    }
+    if (requested.version === 1) return deps.legacy(request, reply);
+    reply.header("Vary", "X-RAI-Training-Contract");
+    const scope = deps.identity();
+    const scopeKey = JSON.stringify([scope.serverId, scope.athleteId, scope.datasetEpoch]);
+    let row: TrainingPlanStateRow | null;
+    try {
+      row = deps.readUnifiedState(scopeKey);
+    } catch {
+      // A damaged/partial unified store cannot be read: retryable, never a fallback
+      // to a different contract or a legacy projection.
+      return reply.code(503).send({
+        code: "training_plan_state_unavailable",
+        message: "统一训练状态暂不可读，请重试；不会回退到旧合同。"
+      });
+    }
+    if (row === null) {
+      return reply.code(409).send({
+        code: "training_plan_not_migrated",
+        message: "该数据域尚未迁移到统一训练状态；请先按迁移方案完成 dry-run 与 apply。"
+      });
+    }
+    try {
+      return buildTrainingPlanStateV2({
+        scope,
+        businessDate: deps.businessDate(),
+        row,
+        currentGoalsRevision: deps.readGoalsRevision()
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(503).send({ code: "training_plan_state_invalid", message });
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PR4-2 command routes
+// ---------------------------------------------------------------------------
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function commandRequestError(message: string): { statusCode: number; code: string; message: string } {
+  return { statusCode: 422, code: "training_command_invalid", message };
+}
+
+/**
+ * Preview and submit share one shape check: both must carry a v2 contract and the
+ * exact operation scope. Shape errors are 422 before any state is read.
+ */
+function parseCommandBody<T extends { operationScope?: unknown; action?: unknown }>(body: unknown): T {
+  if (!isRecord(body)) throw commandRequestError("命令体必须是 JSON 对象。");
+  if (!isRecord(body.operationScope)) throw commandRequestError("operationScope 必须声明服务、运动员与数据集。");
+  if (typeof body.action !== "string") throw commandRequestError("action 必须是 set_race_goal/clear_race_goal/pause/resume。");
+  return body as T;
+}
+
+export interface TrainingPlanPlanDeps {
+  prepare: (state: import("./training-plan-store.js").TrainingPlanState) => Promise<PreparedTrainingPlan>;
+  fingerprint: () => string;
+}
+
+export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandService, planDeps?: TrainingPlanPlanDeps) {
+  return {
+    preview: async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
+      try {
+        const body = parseCommandBody<TrainingPlanCommandPreviewRequest>(request.body);
+        return service.preview(body);
+      } catch (error) {
+        const mapped = error instanceof Error && error.message.includes("必须") && !(error as { statusCode?: number }).statusCode
+          ? commandRequestError(error.message) : trainingPlanCommandError(error);
+        return reply.code(mapped.statusCode).send({ code: mapped.code, message: mapped.message });
+      }
+    },
+    submit: async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
+      try {
+        const body = parseCommandBody<TrainingPlanCommandRequest>(request.body);
+        // PR4-4: configuration and plan publish in ONE operation. The candidate is
+        // generated outside the control transaction (plan §8.1) for the exact next
+        // configuration; `submit` re-derives it and verifies the configuration
+        // digest before the atomic write. A pause publishes no plan.
+        if (planDeps !== undefined && body.action !== "pause") {
+          const next = service.planFor(body);
+          const prepared = await planDeps.prepare(next.afterState);
+          return service.submit(body, { prepared, fingerprint: planDeps.fingerprint });
+        }
+        return service.submit(body);
+      } catch (error) {
+        const mapped = error instanceof Error && error.message.includes("必须") && !(error as { statusCode?: number }).statusCode
+          ? commandRequestError(error.message) : trainingPlanCommandError(error);
+        return reply.code(mapped.statusCode).send({ code: mapped.code, message: mapped.message });
+      }
+    }
+  };
+}

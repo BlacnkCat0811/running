@@ -4,6 +4,7 @@ import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileToda
 import { plannedDayNumbers, type CoachZonePrescription } from "./mobile-coach.js";
 import { currentPeriodizationWeek, periodizationWeekStart, type PeriodizationWeek } from "./plan-periodization.js";
 import { applyRacePlanPolicy, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { preRaceActivationFor } from "./pre-race-activation.js";
 import { buildCompleteCoachWeekPlan, enforceAutomaticSessionDose, fitCompleteSessionsToBudget } from "./coach-complete-plan.js";
 import { applyUnsupportedRacePlanPolicy } from "./race-plan-policy.js";
 
@@ -122,15 +123,21 @@ export async function generateWeeklyPlan(args: {
    * longer silently overridden to `true`.
    */
   automaticDosePolicy?: boolean;
+  /**
+   * Internal: allocation of complete doses happens inside the one constraint pass,
+   * per natural week, instead of upstream over the whole rolling window (F02).
+   * Only automatic generation sets it; every other caller keeps passing its own
+   * proposed days.
+   */
+  allocateCompleteDoses?: boolean;
 }): Promise<WeeklyPlanGenerationResult> {
   const generatedAt = (args.now ?? new Date()).toISOString();
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const warnings: string[] = [];
-  const injuryFlagCodes = args.today.injuryFlags.map((flag) => flag.code);
   const automaticDosePolicy = args.automaticDosePolicy ?? true;
   const counters: WeeklyPlanConstraintCounters = { rejectedCount: 0, clampedCount: 0 };
   const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(
-    proposed, { ...args, automaticDosePolicy }, warnings, counters);
+    proposed, { ...args, automaticDosePolicy, allocateCompleteDoses: true }, warnings, counters);
 
   if (allowedDates.length === 0) {
     return {
@@ -142,17 +149,8 @@ export async function generateWeeklyPlan(args: {
     };
   }
 
-  const days = buildCompleteCoachWeekPlan({
-    easyDurationFloorFraction: args.goals.easyDurationFloorFraction,
-    allowedDates,
-    prescription: args.prescription,
-    weeklyDistanceKm: args.weeklyVolumeBaselineKm,
-    qualitySessionCap: args.goals.qualitySessionCap,
-    injuryFlagCodes,
-    previousWeekDistanceKm: args.previousWeekDistanceKm ?? null
-  });
   return {
-    days: finish(days),
+    days: finish([]),
     audit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt },
     warnings,
     rejectedCount: counters.rejectedCount,
@@ -160,64 +158,123 @@ export async function generateWeeklyPlan(args: {
   };
 }
 
+/** One natural week's share of the rolling window, with its obligations already deducted. */
+interface NaturalWeekBudget {
+  dates: string[];
+  protectedToday: boolean;
+  reservedKm: number;
+  reservedQuality: number;
+  weekStart: string;
+  phase: PeriodizationWeek | null;
+  retainedKm: number;
+  retainedQuality: number;
+  ceilingKm: number;
+  remainingKm: number;
+  qualityCap: number;
+}
+
+/** The rolling window split at the current week's Sunday; at most two segments. */
+function splitNaturalWeeks(dates: string[], periodEnd: string): string[][] {
+  return [dates.filter((date) => date <= periodEnd), dates.filter((date) => date > periodEnd)]
+    .filter((segment) => segment.length > 0);
+}
+
 export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
-  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm" | "automaticDosePolicy">,
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm" | "automaticDosePolicy" | "allocateCompleteDoses">,
   warnings: string[] = [],
   counters?: WeeklyPlanConstraintCounters): MobilePlannedDay[] {
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
+  const replacementDates = new Set(allowedDates);
+  const segments = splitNaturalWeeks(allowedDates, args.today.week.periodEnd);
 
-  const safe = applyUnsupportedRacePlanPolicy(
-    applyRacePlanPolicy(proposed, args.goals.raceTarget, args.weeklyVolumeBaselineKm, args.prescription, warnings),
-    args.goals.runCoach?.raceDate, args.goals.raceTarget != null, warnings);
-  const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
-    { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
-  const replacementDates = new Set(complete.map(day => day.localDate));
-  const groups = [complete.filter(day => day.localDate <= args.today.week.periodEnd), complete.filter(day => day.localDate > args.today.week.periodEnd)];
-  return groups.flatMap((days, index) => {
-    if (!days.length) return [];
+  /**
+   * Per natural week: obligations first, then the week's own budget.
+   *
+   * A rolling seven-day window can straddle Sunday. Deducting this week's actual
+   * volume, the reserved today session and the prescriptions retained outside the
+   * window from *every* segment would let one segment's history consume the next
+   * week's budget; spending a single whole-window allocation would leave the next
+   * week's budget unspent. Both behaved as "all rest" once a complete dose no longer
+   * fit the first segment (F02).
+   */
+  const budgets: NaturalWeekBudget[] = segments.map((dates, index) => {
     const protectedToday = index === 0 && (args.today.today.workoutCount > 0 || args.today.lock.present ||
       args.goals.weekPlanReplanRequired === true || args.goals.weekPlanPreservedDate === args.today.today.localDate);
-    const adjustable = days.filter(day => !(protectedToday && day.localDate === args.today.today.localDate));
-    const reserved = protectedToday && args.today.today.workoutCount === 0 ? args.today.nextSession.distanceKm ?? 0 : 0;
-    const phase = phaseForPlanDate(args, days[0]!.localDate);
-    // A rolling window can leave the end of next calendar week untouched.
-    const weekStart = periodizationWeekStart(days[0]!.localDate);
+    const reservedKm = protectedToday && args.today.today.workoutCount === 0 ? args.today.nextSession.distanceKm ?? 0 : 0;
+    const reservedQuality = reservedKm > 0 && ["tempo", "interval", "race"].includes(args.today.nextSession.kind) ? 1 : 0;
+    const phase = phaseForPlanDate(args, dates[0]!);
+    const weekStart = periodizationWeekStart(dates[0]!);
     const retained = (args.goals.weekPlan ?? []).filter(day => day.localDate >= args.today.today.localDate &&
       periodizationWeekStart(day.localDate) === weekStart && !replacementDates.has(day.localDate));
     const retainedKm = retained.reduce((sum, day) => sum +
       (plannedDayNumbers(day.kind, day.structure, day.distanceKm, args.prescription).distanceKm ?? 0), 0);
     const retainedQuality = retained.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length;
-    const ceilingKm = Math.min(weeklyPlanVolumeCeiling(args.weeklyVolumeBaselineKm, index === 0 ? args.previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY);
-    const remainingKm = Math.max(0, ceilingKm - retainedKm - (index === 0 ? args.today.week.distanceKm + reserved : 0));
-    const reservedQuality = reserved > 0 && ["tempo", "interval", "race"].includes(args.today.nextSession.kind) ? 1 : 0;
-    const qualityCap = Math.max(0, Math.min(args.goals.qualitySessionCap, phase?.qualityDose ?? args.goals.qualitySessionCap) - retainedQuality - (index === 0 ? args.today.weekStructure.qualitySessionCount + reservedQuality : 0));
-    if (retainedKm > 0 || retainedQuality > 0) warnings.push(`${weekStart} 自然周已为窗口外保留课表预留 ${retainedKm.toFixed(1)} km、${retainedQuality} 堂质量课。`);
-    if (remainingKm <= 0) {
+    const ceilingKm = Math.min(weeklyPlanVolumeCeiling(args.weeklyVolumeBaselineKm, index === 0 ? args.previousWeekDistanceKm : null),
+      phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY);
+    const remainingKm = Math.max(0, ceilingKm - retainedKm - (index === 0 ? args.today.week.distanceKm + reservedKm : 0));
+    const qualityCap = Math.max(0, Math.min(args.goals.qualitySessionCap, phase?.qualityDose ?? args.goals.qualitySessionCap) -
+      retainedQuality - (index === 0 ? args.today.weekStructure.qualitySessionCount + reservedQuality : 0));
+    return { dates, protectedToday, reservedKm, reservedQuality, weekStart, phase, retainedKm, retainedQuality, ceilingKm, remainingKm, qualityCap };
+  });
+  for (const budget of budgets) {
+    if (budget.retainedKm > 0 || budget.retainedQuality > 0) {
+      warnings.push(`${budget.weekStart} 自然周已为窗口外保留课表预留 ${budget.retainedKm.toFixed(1)} km、${budget.retainedQuality} 堂质量课。`);
+    }
+  }
+
+  // One allocation per natural week, against that week's net budget. Every candidate
+  // is a complete dose; nothing is sliced to fit, and a week with no feasible
+  // complete dose says so instead of borrowing the next week's km.
+  const allocated = args.allocateCompleteDoses === true
+    ? budgets.flatMap((budget, index) => budget.remainingKm <= 0 ? [] : buildCompleteCoachWeekPlan({
+        // Today's protected session (an actual run, a lock, or a preserved draft) is
+        // not re-planned: it is already deducted from the budget, so allocating a
+        // session for it would waste one complete dose that then gets filtered out.
+        allowedDates: budget.protectedToday ? budget.dates.filter(date => date !== args.today.today.localDate) : budget.dates,
+        prescription: args.prescription,
+        weeklyDistanceKm: budget.remainingKm,
+        qualitySessionCap: budget.qualityCap,
+        easyDurationFloorFraction: args.goals.easyDurationFloorFraction,
+        injuryFlagCodes,
+        previousWeekDistanceKm: index === 0 ? args.previousWeekDistanceKm ?? null : null
+      }))
+    : proposed;
+
+  const safe = applyUnsupportedRacePlanPolicy(
+    applyRacePlanPolicy(allocated, args.goals.raceTarget, args.weeklyVolumeBaselineKm, args.prescription, warnings),
+    args.goals.runCoach?.raceDate, args.goals.raceTarget != null, warnings);
+  const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
+    { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
+  return budgets.flatMap((budget, index) => {
+    const days = complete.filter(day => budget.dates.includes(day.localDate));
+    if (!days.length) return [];
+    const adjustable = days.filter(day => !(budget.protectedToday && day.localDate === args.today.today.localDate));
+    if (budget.remainingKm <= 0) {
       warnings.push("自然周剩余预算已用完，未完成日期不再追加训练。");
       return adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null, reason: "本自然周预算已用完。" }));
     }
     const validation = { allowedDates, prescription: args.prescription,
-      weeklyDistanceKm: remainingKm, volumeCeilingKm: remainingKm, qualitySessionCap: qualityCap,
-      ...(phase ? { longRunCapKm: phase.longRunCapKm } : {}),
+      weeklyDistanceKm: budget.remainingKm, volumeCeilingKm: budget.remainingKm, qualitySessionCap: budget.qualityCap,
+      ...(budget.phase ? { longRunCapKm: budget.phase.longRunCapKm } : {}),
       easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes };
     const candidates = args.automaticDosePolicy
-      ? fitCompleteSessionsToBudget(adjustable, args.prescription, remainingKm, warnings) : adjustable;
+      ? fitCompleteSessionsToBudget(adjustable, args.prescription, budget.remainingKm, warnings) : adjustable;
     const result = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: candidates }) });
     if (counters) {
       counters.rejectedCount += result.rejected.length;
       counters.clampedCount += result.clamped.length;
     }
-    warnings.push(...result.rejected, ...result.clamped.map(message => phase ? `${phase.note} 阶段上限 ${ceilingKm.toFixed(1)} km：${message}` : message));
+    warnings.push(...result.rejected, ...result.clamped.map(message => budget.phase ? `${budget.phase.note} 阶段上限 ${budget.ceilingKm.toFixed(1)} km：${message}` : message));
     if (args.automaticDosePolicy) {
       let current = result.days;
       // Dropping a short easy day can alter the final intensity mix. Repeat the
       // same validator, not a second set of floor/quality/ramp rules.
       for (let pass = 0; pass <= WEEKLY_PLAN_DAYS; pass++) {
-        const complete = fitCompleteSessionsToBudget(
+        const completeAgain = fitCompleteSessionsToBudget(
           current.map(day => enforceAutomaticSessionDose(day, args.prescription, warnings)),
-          args.prescription, remainingKm, warnings);
-        const checked = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: complete }) });
+          args.prescription, budget.remainingKm, warnings);
+        const checked = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: completeAgain }) });
         if (counters) {
           counters.rejectedCount += checked.rejected.length;
           counters.clampedCount += checked.clamped.length;
@@ -232,5 +289,13 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
     }
     return result.days;
   }).map(day => runCoachSessionTargets(day, args.goals.runCoach, args.prescription))
-    .map(day => args.automaticDosePolicy ? enforceAutomaticSessionDose(day, args.prescription, warnings) : day);
+    .map(day => args.automaticDosePolicy ? enforceAutomaticSessionDose(day, args.prescription, warnings) : day)
+    // G01-B (signed 2026-10-20): a taper-forced rest day may become a short
+    // activation session. This runs last, after the ordinary dose gate, because it
+    // is an explicit policy exception — not a loosening of the 1800 s rule.
+    .map(day => preRaceActivationFor(day, {
+      raceTarget: args.goals.raceTarget,
+      prescription: args.prescription,
+      weeklyVolumeBaselineKm: args.weeklyVolumeBaselineKm
+    }));
 }

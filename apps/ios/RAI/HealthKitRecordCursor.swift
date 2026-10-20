@@ -190,7 +190,14 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
 /// 漏掉 `lateBackfillWindowStart` 会让补读每批重读同一页、漏掉 `historyCoverageFloor` 会让
 /// 历史段换谓词（旧锚点与下界不同源）。三个 helper 各自只接受**本通道明确要改的字段**，
 /// 其余字段在 helper 内部整体透传；以后加字段只需要改这里。
-extension HealthKitRecordCursor {
+///
+/// 🔴 `nonisolated` 不能省（2026-10-20）：本仓库用 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+/// 编译，而**扩展不继承类型声明上的 `nonisolated`** —— 类型体内的成员是 nonisolated，写在
+/// 扩展里的成员却按默认隔离变成 `@MainActor`。于是 `HealthKitExport`（`nonisolated enum`）
+/// 调用这四个 helper 时全变成"跨 actor 同步调用"：Swift 5 模式下 5 条 warning，Swift 6 模式
+/// 下直接是 error。同一条纪律也适用于其它 `nonisolated` 类型的扩展（见 `nonisolated
+/// extension DirectSyncBatchBudget` / `SyncStateCommitPlan.swift`）。
+nonisolated extension HealthKitRecordCursor {
     /// 旁路记账：窗口 pass 写完近 48h 后只推进 `recentWindowReadAt`。
     func settingRecentWindowReadAt(_ value: Date) -> HealthKitRecordCursor {
         var copy = self

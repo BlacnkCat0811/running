@@ -98,9 +98,18 @@ export function buildCompleteCoachWeekPlan(input: {
     const total = days.reduce((sum, day) => sum + seconds(day), 0);
     const easySeconds = days.filter(day => day.kind === "easy").reduce((sum, day) => sum + seconds(day), 0);
     if (qualityCount > 0 && total > 0 && easySeconds / total < input.easyDurationFloorFraction) continue;
+    // Explicit infeasibility instead of a silent rest: a complete dose is the unit,
+    // so when it does not fit the week's remaining km the plan says which bound
+    // failed. "No feasible course" is a result, not a training-status verdict.
+    // Easy days are selected by count, so their cost is only known after placement.
+    const easyPlaced = [...planned.values()].filter(day => day.kind === "easy").length;
+    const remainingKm = Math.max(0, ceiling - spent - (Number.isFinite(easyCost) ? easyPlaced * easyCost : 0));
+    const wholeWeekInfeasible = planned.size === 0;
+    const reason = wholeWeekInfeasible
+      ? `no_feasible_course：一堂完整常规课约 ${Number.isFinite(easyCost) ? `${easyCost.toFixed(1)} km` : "在当前配速与结构下无法评估"}，本自然周可用 ${ceiling.toFixed(1)} km；不切碎剂量、不虚构更慢配速。`
+      : `本自然周剩余 ${remainingKm.toFixed(1)} km 不足以再安排一堂完整课；不切碎剂量。`;
     return dates.map(localDate => planned.get(localDate) ?? {
-      localDate, kind: "rest", distanceKm: null, structure: null,
-      reason: "完整常规课预算不足；不切碎剩余建议量。受控追加尚未启用。"
+      localDate, kind: "rest", distanceKm: null, structure: null, reason
     });
   }
   return [];

@@ -390,7 +390,10 @@ test("an existing control database is migrated in place: canonical payload, deri
       assert.ok(indexes.includes("idx_mobile_plan_pushes_unscoped_idempotency"));
       assert.ok(!indexes.includes("idx_mobile_plan_pushes_idempotency"), "the global key index is replaced");
       const version = verify.prepare("SELECT MAX(version) AS version FROM mobile_control_schema").get() as { version: number };
-      assert.equal(version.version, 1);
+      // The ledger maximum moved to 2 with the PR3 unified training-plan tables
+      // (mobile_training_state / history / migration audit). This assertion pins the
+      // migration ledger having advanced, not the receipt/identity semantics below.
+      assert.equal(version.version, 2);
     } finally {
       verify.close();
     }

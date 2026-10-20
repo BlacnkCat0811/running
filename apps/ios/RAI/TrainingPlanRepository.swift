@@ -52,6 +52,16 @@ struct TrainingPlanRepository {
             throw TrainingPlanPartialReadError(goals: goals, today: today, plan: plan, cause: error)
         }
     }
+
+    /// v2 统一训练状态：训练页唯一的计划读。
+    ///
+    /// 刻意**不**参与 `read` 的 v1 三读/聚合分支：v2 不是"执行处方快照"的另一种
+    /// 包装，它没有今日建议和可执行处方。把它塞进 `TrainingPlanRead` 会迫使调用点
+    /// 在两个合同之间挑一个当"当前"，而 PR5 的规则是两者各管各的：
+    /// 执行授权只能来自执行快照，模式/准入/意图只能来自统一状态。
+    func readUnifiedPlan(baseURL: URL, token: String) async throws -> TrainingPlanStateResponseV2 {
+        try await api.trainingPlanStateV2(baseURL: baseURL, token: token)
+    }
 }
 
 extension PlanReadIssue {
@@ -76,5 +86,34 @@ extension PlanReadIssue {
         default: code = .serverUnavailable
         }
         return .init(code: code, message: error.localizedDescription)
+    }
+
+    /// v2 统一训练读的错误分类。
+    ///
+    /// 合同拒绝与"某份快照不可信"必须是两类：前者只有升级/迁移能解决，且绝不能
+    /// 退回旧合同；后者是这一次的数据有问题，重读可能恢复。网络与鉴权错误沿用
+    /// `network(_:)` 的既有分类，避免"连不上"被提示成"升级 App"。
+    static func unified(_ error: Error) -> Self {
+        switch error {
+        case RaiTrainingPlanContractError.contractUnsupported:
+            return .init(code: .upgradeRequired, message: error.localizedDescription)
+        case RaiTrainingPlanContractError.notMigrated:
+            return .init(code: .notMigrated, message: error.localizedDescription)
+        case RaiTrainingPlanContractError.unavailable:
+            return .init(code: .serverUnavailable, message: error.localizedDescription)
+        case let validation as TrainingPlanUnifiedValidationError:
+            switch validation {
+            case .unsupportedContractVersion:
+                return .init(code: .upgradeRequired, message: validation.localizedDescription)
+            case .staleGoalsRevision:
+                return .init(code: .revisionConflict, message: validation.localizedDescription)
+            default:
+                return .init(code: .snapshotValidationFailed, message: validation.localizedDescription)
+            }
+        case RaiAPIClientError.decoding:
+            return .init(code: .contractMismatch, message: error.localizedDescription)
+        default:
+            return network(error)
+        }
     }
 }

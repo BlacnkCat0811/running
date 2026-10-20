@@ -11,7 +11,8 @@ export interface CoachTemplateChoice {
   kind: MobileSessionKind;
   structure: MobileSessionStructure;
   distanceUpperKm: number;
-  durationSeconds: number;
+  /** Upper duration is unknown when a distance step's slow pace bound is open. */
+  durationSeconds: number | null;
   quality: boolean;
   reasons: string[];
 }
@@ -66,12 +67,19 @@ export function coachTemplateCandidates(input: {
     if (input.extension && template.id !== "easy") reasons.push("extension_easy_only");
     if (quality && (!input.calibrated || !input.qualityAllowed || input.phase === "base" && template.kind === "interval"))
       reasons.push("quality_not_eligible");
-    if (template.kind === "long_run" && (!input.calibrated || !input.longDay ||
-      !dose.distanceKm || dose.distanceKm.upper > Math.min(input.longRunCapKm, input.longestPreviousRunKm * 1.1)))
+    const distanceUpperKm = dose.distanceKm?.upper ?? null;
+    if (template.kind === "long_run" && (!input.calibrated || !input.longDay || distanceUpperKm === null ||
+      distanceUpperKm > Math.min(input.longRunCapKm, input.longestPreviousRunKm * 1.1)))
       reasons.push("long_run_history_or_cap");
+    // A candidate whose km cost cannot be proven is not offered: the weekly
+    // envelope, the long-run cap and the device reservation all spend km.
+    if (distanceUpperKm === null) {
+      rejected.push({ id: template.id, reasons: [...reasons, "dose_distance_upper_unproven"] });
+      continue;
+    }
     if (dose.status !== "feasible" || reasons.length) { rejected.push({ id: template.id, reasons }); continue; }
-    candidates.push({ ...template, quality, distanceUpperKm: dose.distanceKm!.upper,
-      durationSeconds: dose.durationSeconds!.upper, reasons: ["template_eligible", COACH_TEMPLATE_LIBRARY_VERSION] });
+    candidates.push({ ...template, quality, distanceUpperKm,
+      durationSeconds: dose.durationSeconds?.upper ?? null, reasons: ["template_eligible", COACH_TEMPLATE_LIBRARY_VERSION] });
   }
   const preferredQuality: CoachIntent = input.distance === "half_marathon" || input.distance === "ten_k" ? "threshold" :
     input.distance === "five_k" ? "interval" :
@@ -85,6 +93,10 @@ export function coachTemplateCandidates(input: {
 }
 
 export function templateDay(date: string, choice: CoachTemplateChoice): MobilePlannedDay {
+  // An open slow pace bound leaves the upper duration unknown; say so instead of
+  // turning the unknown into a made-up minute count.
+  const duration = choice.durationSeconds === null ? "整课时长上限未定（缺少慢端配速证据）" :
+    `整课 ${choice.durationSeconds / 60} 分钟`;
   return { localDate: date, kind: choice.kind, structure: choice.structure, distanceKm: choice.distanceUpperKm,
-    reason: `规则模板 ${choice.id}；整课 ${choice.durationSeconds / 60} 分钟。` };
+    reason: `规则模板 ${choice.id}；${duration}。` };
 }

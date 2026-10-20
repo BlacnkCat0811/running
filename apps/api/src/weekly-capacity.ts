@@ -52,7 +52,41 @@ export const RACE_WEEKLY_BASELINE_KM: Record<MobileRaceDistance, number> = {
  */
 export const NO_HISTORY_WEEKLY_KM = MINIMUM_BAND_KM;
 
-export type WeeklyCapacitySource = "race_target" | "recent_volume" | "no_history";
+export type WeeklyCapacitySource = "race_target" | "recent_volume" | "no_history" | "legacy_history";
+
+/** G02-C (signed 2026-10-20): decayed legacy-history restart. */
+export const CAPACITY_RESTART_POLICY_VERSION = "rai-capacity-restart-v2";
+/** Old stable volume is discounted by half before it may anchor a restart. */
+export const LEGACY_HISTORY_DECAY = 0.5;
+/** And never more than 70% of it (guards a future coefficient change). */
+export const LEGACY_HISTORY_CAP_FRACTION = 0.7;
+/** The stable window must end at least 28 days before today. */
+export const LEGACY_HISTORY_MIN_GAP_DAYS = 28;
+/** Consecutive complete weeks with an observation before a release is allowed. */
+export const LEGACY_HISTORY_RELEASE_WEEKS = 4;
+
+export interface LegacyHistoryCapacity {
+  /** Mean km of the four complete weeks ending at least 28 days ago. */
+  stableWeeklyKm: number;
+  /** Consecutive complete weeks with at least one observation, most recent first. */
+  observedRecentWeeks: number;
+}
+
+export function legacyRestartBaseline(input: LegacyHistoryCapacity): {
+  released: boolean;
+  baselineKm: number;
+  reasonCodes: string[];
+} {
+  if (!(input.stableWeeklyKm > 0)) {
+    return { released: false, baselineKm: 0, reasonCodes: ["legacy_history_absent"] };
+  }
+  if (input.observedRecentWeeks < LEGACY_HISTORY_RELEASE_WEEKS) {
+    return { released: false, baselineKm: 0, reasonCodes: ["legacy_history_not_released"] };
+  }
+  const baselineKm = Math.max(NO_HISTORY_WEEKLY_KM,
+    Math.min(input.stableWeeklyKm * LEGACY_HISTORY_DECAY, input.stableWeeklyKm * LEGACY_HISTORY_CAP_FRACTION));
+  return { released: true, baselineKm, reasonCodes: ["legacy_history_restart", `legacy_history_decay_${LEGACY_HISTORY_DECAY}`] };
+}
 
 export interface WeeklyCapacity {
   /** The baseline handed to `weeklyPlanVolumeCeiling(baselineKm, previousWeekDistanceKm)`. */
@@ -75,6 +109,8 @@ export function weeklyCapacity(input: {
   previousWeekDistanceKm?: number | null;
   /** Pre-resolved phase; pass explicitly to avoid re-deriving the skeleton. */
   phase?: PeriodizationPhase | null;
+  /** G02-C: old stable volume and recent observation, when available. */
+  legacyHistory?: LegacyHistoryCapacity | null;
 }): WeeklyCapacity {
   const reasonCodes: string[] = [];
   const recent = Number.isFinite(input.recentWeeklyKm) ? Math.max(0, input.recentWeeklyKm) : 0;
@@ -126,6 +162,14 @@ export function weeklyCapacity(input: {
   if (recent <= 0 && previous == null) {
     reasonCodes.push("no_recent_weekly_volume");
     if (race == null) reasonCodes.push("no_race_target");
+    // G02-C: a restart may anchor on the decayed *old* stable volume, but only after
+    // four consecutive observed weeks — the gap itself never raises the baseline.
+    const legacy = input.legacyHistory ? legacyRestartBaseline(input.legacyHistory) : null;
+    if (legacy?.released) {
+      return { baselineKm: legacy.baselineKm, phase, source: "legacy_history", coldStart: false,
+        reasonCodes: [...reasonCodes, ...legacy.reasonCodes] };
+    }
+    if (legacy) reasonCodes.push(...legacy.reasonCodes);
     return { baselineKm: NO_HISTORY_WEEKLY_KM, phase, source: "no_history", coldStart: true, reasonCodes };
   }
 

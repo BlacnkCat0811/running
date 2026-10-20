@@ -8,6 +8,20 @@
 
 > 状态口径（2026-10-18 修正）：本节报告可能**已提交**，也可能仍只存在于工作树；一律按文末「新产物约定」在下一轮并入 `PROJECT_REVIEW` 或删除，不能把本节标题读成"这些文件还没提交"。
 
+- [UNIFIED_TRAINING_PLAN_VERIFY_2026-10-20.md](UNIFIED_TRAINING_PLAN_VERIFY_2026-10-20.md)：
+  **统一训练排课方案的真实性核实与 PR1/F01 落地** —— 逐条核对方案文档的 E01–E15 与 F01–F06（F01–F06
+  全部复现），给出四处必须修正的表述（F02 机制与标准案例、F06 的 `end` 把未来窗口写成 rest、E07 的
+  guard 归属、iOS 入口数量），并记录本轮落地：`training-mode-policy.ts` 纯函数模式解析（16 条断言）、
+  剂量政策 `v1→v2` 的逐维度修复（5 条回归，质量课从不可评估恢复为可行、轻松课成本从伪造 5 km 改为
+  实测上界 5.217 km）、契约与受限脚本的失败关闭改造。**F02/F03 未修，PR3–PR7 未开始，G01–G03 仍阻断；
+  未迁移数据、未部署、未做真机验收。**
+
+- [IOS_DEVICE_LOG_TRIAGE_2026-10-20.md](IOS_DEVICE_LOG_TRIAGE_2026-10-20.md)：
+  **iOS 真机日志分诊（当轮）** —— 结论"未发现 P0 功能故障"：健康同步的两行通道计数是历史重放期
+  单批打满上限的正常指纹，`BGTaskScheduler` 注册与重排正常；按性价比给出 P1–P3 改进项（日志补
+  `source`/`anchorTypes`、`keep` 行窗口聚合、Chart overlay 顺序、键盘 toolbar 按需安装、高德 SDK
+  懒初始化等）。**修复项未实施；本文只记录分诊结论，真机复测未做。**
+
 - [IOS_SYNC_RELEASE_2026-10-20.md](IOS_SYNC_RELEASE_2026-10-20.md)：
   **R1–R6 发布记录（已提交 + 已部署）** —— `62f490b` 已推送 gitee，并经 `deploy/upgrade.sh --apply`
   部署到生产（`101.33.202.40`；无 schema 迁移，v46 不变）；记录本机全部发布判据（含三次 `npm test`

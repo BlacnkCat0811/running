@@ -68,6 +68,26 @@ final class NativeAppModel {
     private var usesCoachLoopContract: Bool { handshake?.coachLoopContractVersion != nil }
     private var usesAggregatePlanSnapshot: Bool { handshake?.planSnapshotContractVersion != nil }
     var usesIntegratedPlanContract: Bool { usesCoachLoopContract || usesAggregatePlanSnapshot }
+
+    /// 训练页只有一个入口，页面形态由**服务端能力**决定，不是用户选择。
+    ///
+    /// 宣告教练闭环合同的服务器使用统一模式页（持续训练/比赛备赛由模式派生）；
+    /// 老服务器继续用旧页面，否则它会既没有统一状态也没有可用的写入协议。这里
+    /// 没有"旧教练 vs 新教练"的选择器 —— 用户看不到两个引擎，也不会被要求
+    /// "先结束一个再创建另一个"。
+    var usesUnifiedTrainingPage: Bool { usesCoachLoopContract || isCoachLoopManaged }
+
+    /// 统一训练页的纯展示状态（判定全部在 `TrainingPlanUnifiedPolicy`）。
+    var trainingPlanUnifiedView: TrainingPlanUnifiedView {
+        TrainingPlanUnifiedPolicy.view(
+            snapshot: trainingPlanStore.unified,
+            issue: trainingPlanStore.unifiedIssue,
+            isRefreshing: trainingPlanStore.isRefreshingUnified,
+            isReferenceOnly: trainingPlanStore.unified != nil && !trainingPlanStore.unifiedIsCurrent,
+            deviceCoordinationPending: hasPendingPlanReceipts || hasInterruptedSchedule || scheduleStorageIssue,
+            now: now()
+        )
+    }
     private(set) var isLoadingRunCoach = false
     private(set) var isUpdatingRunCoach = false
     var runCoachError: String?
@@ -135,6 +155,13 @@ final class NativeAppModel {
     /// 计划代次变化时取消它并清句柄，避免旧 scope 的结果写回或被下一次刷新复用。
     private var planRefreshTask: Task<Bool, Never>?
     private var planRefreshID: UUID?
+    /// v2 统一训练状态读的单飞句柄（与执行快照读分开）。
+    ///
+    /// 两条读的成功标准不同（见 `TrainingPlanStore.refreshUnifiedPlan`），所以各自
+    /// 单飞、各自取消。页面可能同时触发 `.task` 与 `.refreshable`，复用同一份在飞
+    /// 结果，避免把一次页面出现放大成两条读。
+    private var unifiedRefreshTask: Task<Bool, Never>?
+    private var unifiedRefreshID: UUID?
     /// 训练列表读的"新请求取消旧请求"句柄与代次：旧任务被取消后既不写结果，
     /// 也不清 `isLoadingWorkouts`（见 `refreshWorkouts`）。
     private var workoutRefreshTask: Task<Bool, Never>?
@@ -1466,6 +1493,11 @@ final class NativeAppModel {
         planRefreshTask?.cancel()
         planRefreshTask = nil
         planRefreshID = nil
+        // 统一状态读与执行快照读共享同一批身份/代次前提，必须一起作废：
+        // 否则一次合同读会带着旧 scope 的结果回来，把页面从"需刷新"翻回"当前"。
+        unifiedRefreshTask?.cancel()
+        unifiedRefreshTask = nil
+        unifiedRefreshID = nil
     }
 
     /// 2026-10-18（事故复盘 P0-3）：让"在飞的训练列表读"失效并真正取消。
@@ -1518,6 +1550,45 @@ final class NativeAppModel {
         if planRefreshID == id {
             planRefreshTask = nil
             planRefreshID = nil
+        }
+        return result
+    }
+
+    /// v2 统一训练状态的读（训练页唯一的状态来源）。
+    ///
+    /// 刻意不改写 `workoutPlanError`/`availability`：那两个字段描述的是**执行快照**，
+    /// 而这条读回答的是"现在是什么模式、准入是否就绪、七日意图是什么"。合同升级
+    /// 提示只出现在统一页自己的状态里，不污染今日页的执行失败文案。
+    @discardableResult
+    func refreshUnifiedTrainingPlan() async -> Bool {
+        if let task = unifiedRefreshTask { return await task.value }
+        guard let baseURL = session.serverURL else { return false }
+        let configuration = configurationID
+        let token = session.apiToken
+        let id = UUID()
+        unifiedRefreshID = id
+        let task = Task { () -> Bool in
+            let complete = await self.trainingPlanStore.refreshUnifiedPlan(
+                baseURL: baseURL, token: token, handshake: self.handshake) {
+                configuration == self.configurationID && token == self.session.apiToken &&
+                    baseURL == self.session.serverURL
+            }
+            guard !Task.isCancelled, self.unifiedRefreshID == id,
+                  configuration == self.configurationID, token == self.session.apiToken,
+                  baseURL == self.session.serverURL else {
+                return false
+            }
+            if self.trainingPlanStore.serviceReachable {
+                self.isOffline = false
+                self.session.isReachable = true
+            }
+            return complete
+        }
+        unifiedRefreshTask = task
+        let result = await task.value
+        if unifiedRefreshID == id {
+            unifiedRefreshTask = nil
+            unifiedRefreshID = nil
         }
         return result
     }

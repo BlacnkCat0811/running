@@ -31,9 +31,10 @@ struct TechRunCoachView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
-                if native.isCoachLoopManaged {
-                    TechCoachLoopSection()
-                } else if let plan {
+                // 旧服务器（不宣告教练闭环合同）的兼容页面。统一训练页由
+                // `TechPlanView` 按服务端能力选择；这里不再渲染第二个教练入口 ——
+                // 一个用户能看见的训练入口只有训练页这一个。
+                if let plan {
                     if plan.status == "active", native.usesIntegratedPlanContract {
                         Button("按最新训练事实调整计划") { Task { await native.changeRunCoach(action: "refresh") } }
                             .disabled(controlsUnavailable)
@@ -155,11 +156,7 @@ struct TechRunCoachView: View {
                     TechCoachEmptyCard { createButton }
                 }
 
-                if !native.isCoachLoopManaged, native.handshake?.coachLoopContractVersion == 1 {
-                    TechCoachLoopSection()
-                }
-                TechPlanWatchSection(allowsSynchronization: native.isCoachLoopManaged ?
-                    native.coachLoop?.settings?.status == "active" : plan?.status == "active")
+                TechPlanWatchSection(allowsSynchronization: plan?.status == "active")
 
                 if native.isLoadingRunCoach { ProgressView("正在更新训练安排") }
                 if let message = native.runCoachError {
@@ -188,7 +185,7 @@ struct TechRunCoachView: View {
                         .font(.footnote)
                         .foregroundStyle(TechColor.yellow)
                 }
-                if !native.isCoachLoopManaged && (plan == nil || plan?.status == "ended") {
+                if plan == nil || plan?.status == "ended" {
                     NavigationLink { TechManualPlanView() } label: {
                         Label("手动课表", systemImage: "calendar.badge.clock")
                     }

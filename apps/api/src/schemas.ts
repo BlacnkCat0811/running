@@ -823,6 +823,24 @@ const operation = (
   summary: string,
   extras: Record<string, unknown> = {}
 ) => ({ tags, summary, responses: responses(summary), ...extras });
+
+/**
+ * Retired legacy surface (product decision 2026-10-20).
+ *
+ * The route stays in the document so write-route/route-table audits keep
+ * seeing it, but the only honest contract now is 410 `legacy_surface_retired`
+ * with a replacement. Deliberately no 200: a client generating from this
+ * document must not build a success path for a removed endpoint.
+ */
+const retiredOperation = (tags: string[], summary: string, replacement: string) => ({
+  tags,
+  summary: `${summary}（已退役）`,
+  deprecated: true,
+  description: `已退役（2026-10-20）：请求返回 410 legacy_surface_retired。替代面：${replacement}。`,
+  responses: {
+    "410": jsonResponse("旧接口已退役", { $ref: "#/components/schemas/LegacySurfaceRetired" })
+  }
+});
 /**
  * `GET /v1/mobile/plan-operations/:id` 的 summary **由共享状态表生成**。
  *
@@ -865,6 +883,14 @@ export const openapiDocument = {
         type: "object", required: ["message"], additionalProperties: true,
         properties: { code: { type: "string" }, message: { type: "string" } }
       },
+      LegacySurfaceRetired: {
+        type: "object", required: ["code", "message", "replacement"], additionalProperties: false,
+        properties: {
+          code: { const: "legacy_surface_retired" },
+          message: { type: "string" },
+          replacement: { type: "string", description: "替代的现行路由，例如 /v1/mobile/training-plan/commands" }
+        }
+      },
       ImportJobRequest: importJobBodySchema,
       ImportJobResponse: importJobResponseSchema,
       WorkoutOverride: overrideBodySchema,
@@ -888,6 +914,49 @@ export const openapiDocument = {
       })
     },
     "/v1/mobile/coach-execution": { get: operation(["Read"], "过去28日冻结处方的观测、剂量和刺激评价") },
+    "/v1/mobile/training-plan/commands/preview": {
+      post: operation(["Workouts"], "统一训练合同：预览赛事目标/暂停/恢复的配置转换；不写库、不发课表", {
+        requestBody: body({ type: "object", additionalProperties: false,
+          required: ["contractVersion", "operationScope", "action"],
+          properties: {
+            contractVersion: { const: 2 }, operationScope: planOperationScopeSchema,
+            action: { enum: ["set_race_goal", "clear_race_goal", "pause", "resume"] },
+            expectedStateRevision: { type: ["integer", "null"], minimum: 0 },
+            raceGoal: { type: ["object", "null"], additionalProperties: false, properties: {
+              date: { type: ["string", "null"] }, distanceKm: { type: ["number", "null"] },
+              goal: { enum: ["finish", "time", null] }, targetTimeSeconds: { type: ["integer", "null"] }
+            } }
+          } }, "合同版本、数据域、动作与目标草稿")
+      })
+    },
+    "/v1/mobile/training-plan/commands": {
+      post: operation(["Workouts"], "统一训练合同：提交配置命令；同一控制库事务写统一状态、历史、旧目标镜像与操作结果", {
+        requestBody: body({ type: "object", additionalProperties: false,
+          required: ["contractVersion", "operationId", "operationScope", "expectedStateRevision", "candidateId", "action"],
+          properties: {
+            contractVersion: { const: 2 }, operationId: { type: "string", format: "uuid" },
+            operationScope: planOperationScopeSchema,
+            expectedStateRevision: { type: "integer", minimum: 0 },
+            candidateId: { type: "string", minLength: 1, maxLength: 160 },
+            action: { enum: ["set_race_goal", "clear_race_goal", "pause", "resume"] },
+            raceGoal: { type: ["object", "null"], additionalProperties: false, properties: {
+              date: { type: ["string", "null"] }, distanceKm: { type: ["number", "null"] },
+              goal: { enum: ["finish", "time", null] }, targetTimeSeconds: { type: ["integer", "null"] }
+            } }
+          } }, "预览候选标识、CAS 版本与幂等操作键")
+      })
+    },
+    "/v1/mobile/training-plan/commands/refresh": {
+      post: operation(["Workouts"], "统一训练合同：事务外生成候选计划、事务内与统一状态一起发布；指纹变化即拒绝", {
+        requestBody: body({ type: "object", additionalProperties: false,
+          required: ["contractVersion", "operationId", "operationScope", "expectedStateRevision"],
+          properties: {
+            contractVersion: { const: 2 }, operationId: { type: "string", format: "uuid" },
+            operationScope: planOperationScopeSchema,
+            expectedStateRevision: { type: "integer", minimum: 0 }
+          } }, "当前统一状态 revision 与幂等操作键")
+      })
+    },
     "/v1/mobile/coach-loop/synced": { post: operation(["Workouts"], "核验今天新版教练授权的实际系统导出；保留失效回执与撤回账目，不代表手表收件", {
       requestBody: body(coachLoopSyncedBodySchema, "旧系统排期核验字段及新版规则/追加授权身份")
     }) },
@@ -978,16 +1047,12 @@ export const openapiDocument = {
     "/v1/mobile/statistics": { get: operation(["Read"], "iOS 统计页聚合：近 3 月分运动类型里程、滚动汇总与心率区间分布") },
     "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：能力曲线、12 周跑量、四周增幅、个人纪录与洞察") },
     "/v1/mobile/goals": {
-      get: operation(["Read"], "读取 iOS 周目标、结构目标与赛事目标"),
-      put: operation(["Workouts"], "更新 iOS 周目标、结构目标与赛事目标", {
-        requestBody: body({ $ref: "#/components/schemas/MobileGoalsUpdate" }, "周跑量、轻松占比、质量课上限与赛事目标")
-      })
+      get: retiredOperation(["Read"], "读取 iOS 周目标、结构目标与赛事目标", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"),
+      put: retiredOperation(["Workouts"], "更新 iOS 周目标、结构目标与赛事目标", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands")
     },
     "/v1/mobile/run-coach": {
-      get: operation(["Read"], "自适应跑步教练计划、阶段和补充力量安排"),
-      post: operation(["Workouts"], "创建、更新偏好、自适应刷新、暂停、恢复或结束跑步教练计划", {
-        requestBody: body(runCoachCommandSchema, "当前目标 revision 和教练命令；不支持逐日改期")
-      })
+      get: retiredOperation(["Read"], "自适应跑步教练计划、阶段和补充力量安排", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"),
+      post: retiredOperation(["Workouts"], "创建、更新偏好、自适应刷新、暂停、恢复或结束跑步教练计划", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands")
     },
     "/v1/mobile/lock": {
       post: operation(["Workouts"], "锁定或按新裁决重锁今天的课", {
@@ -998,32 +1063,13 @@ export const openapiDocument = {
       get: operation(["Read"], "iOS 可执行周课表：今日按闸门裁决，其后按已存计划逐日给出结构、距离与时长")
     },
     "/v1/mobile/workout-plan/generate": {
-      post: operation(["Workouts"], "规则教练生成并持久化未来七日课表；旧模型课表待确认时返回 409", {
-        // Every field is optional — the handler reads `expectedRevision` with a
-        // `?.` — so the body itself is not required, unlike the other writes.
-        deprecated: true,
-        requestBody: {
-          required: false,
-          description: "可选的期望 revision，用于并发保护",
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/MobileWeeklyPlanGenerate" } }
-          }
-        }
-      })
+      post: retiredOperation(["Workouts"], "规则教练生成并持久化未来七日课表", "/v1/mobile/training-plan/commands/refresh")
     },
     "/v1/mobile/workout-plan/preview": {
-      post: operation(["Workouts"], "规则教练生成未来七日候选课表；不保存、不推送手表，15 分钟过期", {
-        requestBody: body({ type: "object", additionalProperties: false, required: ["expectedRevision"], properties: {
-          expectedRevision: { type: "integer", minimum: 0 }
-        } }, "当前目标 revision")
-      })
+      post: retiredOperation(["Workouts"], "规则教练生成未来七日候选课表；不保存、不推送手表", "/v1/mobile/training-plan/commands/preview")
     },
     "/v1/mobile/workout-plan/confirm": {
-      post: operation(["Workouts"], "确认预览；校验目标版本与训练数据快照，支持重复确认幂等", {
-        requestBody: body({ type: "object", additionalProperties: false, required: ["candidateId", "expectedRevision"], properties: {
-          candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }, operationId: { type: "string", format: "uuid" }, operationScope: planOperationScopeSchema
-        } }, "候选标识及预览基准 revision")
-      })
+      post: retiredOperation(["Workouts"], "确认预览并发布课表；支持重复确认幂等", "/v1/mobile/training-plan/commands")
     },
     "/v1/mobile/workout-plan/synced": {
       post: operation(["Workouts"], "登记手机已把某天的课表推送到 Apple Watch，供训练详情按课表结构还原分段", {

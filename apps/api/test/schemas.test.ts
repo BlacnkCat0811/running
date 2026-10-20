@@ -381,16 +381,35 @@ test("every registered mutation route is documented in OpenAPI", () => {
   // The read-only week is deliberately absent from every registry, so it needs
   // its own assertion.
   assert.ok("/v1/mobile/workout-plan" in openapiDocument.paths);
-  assert.ok(
-    "requestBody" in openapiDocument.paths["/v1/mobile/workout-plan/generate"].post,
-    "generate 路由必须声明 requestBody"
-  );
-  const previewOperation = openapiDocument.paths["/v1/mobile/workout-plan/preview"].post;
-  assert.ok("requestBody" in previewOperation);
-  const previewSchema = (previewOperation.requestBody as {
-    content: { "application/json": { schema: { required?: string[] } } }
-  }).content["application/json"].schema;
-  assert.deepEqual(previewSchema.required, ["expectedRevision"]);
+
+  // Retired plan surfaces (product decision 2026-10-20) stay in the document so
+  // the route-table / write-registry audits keep enumerating them, but the only
+  // contract is 410 legacy_surface_retired with a replacement. A stale client
+  // generating from this document must not get a 200 branch.
+  const retiredOperations: ReadonlyArray<[string, string, string]> = [
+    ["get", "/v1/mobile/goals", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
+    ["put", "/v1/mobile/goals", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
+    ["get", "/v1/mobile/run-coach", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
+    ["post", "/v1/mobile/run-coach", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
+    ["post", "/v1/mobile/workout-plan/preview", "/v1/mobile/training-plan/commands/preview"],
+    ["post", "/v1/mobile/workout-plan/confirm", "/v1/mobile/training-plan/commands"],
+    ["post", "/v1/mobile/workout-plan/generate", "/v1/mobile/training-plan/commands/refresh"]
+  ];
+  for (const [method, path, replacement] of retiredOperations) {
+    const operation = (openapiDocument.paths as Record<string, Record<string, {
+      deprecated?: boolean; description?: string; responses?: Record<string, unknown>;
+    }>>)[path]?.[method];
+    assert.ok(operation, `${method.toUpperCase()} ${path} 必须保留在 OpenAPI 文档里（路由仍挂载）`);
+    assert.equal(operation.deprecated, true, `${method.toUpperCase()} ${path} 必须标 deprecated`);
+    assert.ok(operation.responses && "410" in operation.responses, `${method.toUpperCase()} ${path} 必须声明 410`);
+    assert.ok(operation.responses && !("200" in operation.responses), `${method.toUpperCase()} ${path} 不得再声明 200 成功契约`);
+    assert.match(operation.description ?? "", /已退役/);
+    assert.match(operation.description ?? "", /410 legacy_surface_retired/);
+    assert.ok((operation.description ?? "").includes(replacement), `${method.toUpperCase()} ${path} 必须写明替代面 ${replacement}`);
+  }
+  const retiredSchema = openapiDocument.components.schemas.LegacySurfaceRetired;
+  assert.deepEqual(retiredSchema.required, ["code", "message", "replacement"]);
+  assert.equal((retiredSchema.properties.code as { const: string }).const, "legacy_surface_retired");
 });
 
 test("a request that changes data is a route the router can see", () => {

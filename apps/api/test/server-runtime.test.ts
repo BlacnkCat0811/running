@@ -95,8 +95,8 @@ test("coach-loop opt-in uses real main/control stores, feedback changes the fact
   }
 });
 
-test("Run Coach routes enforce managed plans, CAS, pause exports and the return to manual planning", async () => {
-  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-run-coach-"));
+test("retired legacy plan routes answer 410 with replacements and never publish", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-retired-plan-"));
   const databasePath = join(runtimeRoot, "var/rai.sqlite");
   mkdirSync(join(runtimeRoot, "var"), { recursive: true });
   (await RaiDatabase.open(databasePath)).close();
@@ -112,107 +112,38 @@ test("Run Coach routes enforce managed plans, CAS, pause exports and the return 
   try {
     const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
-    const read = async (path: string) => (await fetch(url + path)).json();
-    const mutate = async (path: string, body: object, method = "POST") => fetch(url + path, {
-      method, headers: { "content-type": "application/json" }, body: JSON.stringify(body)
-    });
+    const snapshot = async () => await fetch(url + "/v1/mobile/training-plan-state")
+      .then(response => response.json()) as { metadata: { goalsRevision: number } };
+    const initial = await snapshot();
     const config = { goal: "fitness", raceDate: null, raceDistanceKm: null, targetTimeSeconds: null,
       runningDays: [1, 2, 4, 6, 7], longRunDays: [7], targetType: "pace", strengthTraining: false };
-    const goals = await read("/v1/mobile/goals");
-    const start = await mutate("/v1/mobile/run-coach", { expectedRevision: goals.revision, action: "start", config });
-    assert.equal(start.status, 200, await start.clone().text());
-    let coach = await start.json();
-    assert.equal(coach.plan.status, "active");
-    assert.equal((await mutate("/v1/mobile/goals", { expectedRevision: coach.revision, runCoach: null }, "PUT")).status, 400);
-    for (const path of ["/v1/mobile/workout-plan/generate", "/v1/mobile/workout-plan/preview"]) {
-      assert.equal((await mutate(path, { expectedRevision: coach.revision })).status, 409);
+    const retired: ReadonlyArray<[string, string, unknown]> = [
+      ["GET", "/v1/mobile/goals", undefined],
+      ["PUT", "/v1/mobile/goals", { qualitySessionCap: 1 }],
+      ["GET", "/v1/mobile/run-coach", undefined],
+      ["POST", "/v1/mobile/run-coach", { expectedRevision: 0, action: "start", config }],
+      ["POST", "/v1/mobile/workout-plan/preview", { expectedRevision: 0 }],
+      ["POST", "/v1/mobile/workout-plan/confirm", { candidateId: "candidate", expectedRevision: 0 }],
+      ["POST", "/v1/mobile/workout-plan/generate", { expectedRevision: 0 }]
+    ];
+    for (const [method, path, body] of retired) {
+      const response = await fetch(url + path, { method,
+        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
+      assert.equal(response.status, 410, `${method} ${path}: ${await response.clone().text()}`);
+      const payload = await response.json() as { code: string; message: string; replacement: string };
+      assert.equal(payload.code, "legacy_surface_retired", `${method} ${path}`);
+      assert.ok(payload.replacement.startsWith("/v1/mobile/training-plan"), `${method} ${path} replacement: ${payload.replacement}`);
+      assert.ok(payload.message.includes(payload.replacement), `${method} ${path} message must name the replacement`);
+      assert.equal(response.headers.get("cache-control"), "no-store");
     }
-    const manual = await mutate("/v1/mobile/goals", { expectedRevision: coach.revision, weekPlan: [] }, "PUT");
-    assert.equal(manual.status, 409);
-    assert.equal((await manual.json()).code, "run_coach_managed");
-    const pause = await mutate("/v1/mobile/run-coach", { expectedRevision: coach.revision, action: "pause" });
-    assert.equal(pause.status, 200); coach = await pause.json();
-    assert.equal((await read("/v1/mobile/today")).nextSession.kind, "rest");
-    assert.ok((await read("/v1/mobile/workout-plan")).days.every((day: { executable: boolean }) => !day.executable));
-    assert.equal((await mutate("/v1/mobile/run-coach", { expectedRevision: coach.revision - 1, action: "resume" })).status, 409);
-    const end = await mutate("/v1/mobile/run-coach", { expectedRevision: coach.revision, action: "end" });
-    assert.equal(end.status, 200); coach = await end.json();
-    const preview = await mutate("/v1/mobile/workout-plan/preview", { expectedRevision: coach.revision });
-    assert.equal(preview.status, 200, await preview.clone().text());
-    const candidate = await preview.json();
-    assert.ok(candidate.days.some((day: { kind: string }) => day.kind !== "rest"));
-    const confirm = await mutate("/v1/mobile/workout-plan/confirm", { candidateId: candidate.candidateId, expectedRevision: candidate.revision });
-    assert.equal(confirm.status, 200, await confirm.clone().text());
-    assert.equal((await read("/v1/mobile/goals")).runCoach, null);
-    assert.ok((await read("/v1/mobile/workout-plan")).days.some((day: { executable: boolean }) => day.executable));
-    const currentGoals = await read("/v1/mobile/goals");
-    const localDate = weeklyPlanDates(mobileLocalDate())[1]!;
-    const shortManualStructure = {
-      warmup: { purpose: "warmup", goal: { type: "time", seconds: 300 }, alert: null },
-      blocks: [{ iterations: 1, steps: [{ purpose: "work", goal: { type: "time", seconds: 600 }, alert: null }] }],
-      cooldown: { purpose: "cooldown", goal: { type: "time", seconds: 300 }, alert: null }
-    };
-    const shortManual = await mutate("/v1/mobile/goals", { expectedRevision: currentGoals.revision,
-      weekPlan: [
-        { localDate: mobileLocalDate(), kind: "rest", distanceKm: null, structure: null, reason: "explicit manual rest today" },
-        { localDate, kind: "easy", distanceKm: 3.3, structure: shortManualStructure, reason: "explicit manual short" }
-      ] }, "PUT");
-    assert.equal(shortManual.status, 200, await shortManual.clone().text());
-    assert.equal((await shortManual.json()).weekPlanAudit.generatedBy, "manual");
-    const manualExport = (await read("/v1/mobile/workout-plan")).days.find((day: { localDate: string }) => day.localDate === localDate);
-    assert.equal(manualExport?.source, "manual");
-    assert.equal(manualExport?.durationMinutes, 20);
-    assert.equal(manualExport?.executable, true, "the automatic-dose policy must not silently relabel a saved manual short session");
+    assert.equal((await snapshot()).metadata.goalsRevision, initial.metadata.goalsRevision,
+      "a retired write must never publish a goals revision");
+    assert.equal((await fetch(url + "/v1/mobile/today")).status, 200, "non-retired plan reads stay live");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
   }
 });
-
-test("manual plan validation derives capacity from the race target being saved", async () => {
-  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-candidate-capacity-"));
-  const databasePath = join(runtimeRoot, "var/rai.sqlite");
-  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
-  const today = mobileLocalDate();
-  await seedRecentRunningWeeks(databasePath, today, 30);
-  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
-    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
-      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
-    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
-  });
-  let output = "";
-  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  try {
-    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
-    await waitForApi(child, url, () => output);
-    const put = (body: object) => fetch(`${url}/v1/mobile/goals`, {
-      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
-    });
-    const dates = weeklyPlanDates(today, 98);
-    const raceTarget = { date: dates[90]!, distance: "five_k", targetPaceSecondsPerKm: null };
-    const targetSave = await put({ raceTarget });
-    assert.equal(targetSave.status, 200, await targetSave.clone().text());
-    let goals = await targetSave.json();
-    const nextMonday = dates.slice(1, 8).find(date => new Date(`${date}T00:00:00Z`).getUTCDay() === 1)!;
-    const weekPlan = weeklyPlanDates(nextMonday, 4).map(localDate => ({ localDate, kind: "easy", distanceKm: 5 }));
-    const removeRace = await put({ expectedRevision: goals.revision, raceTarget: null, weekPlan });
-    assert.equal(removeRace.status, 200, await removeRace.clone().text());
-    goals = await removeRace.json();
-    assert.equal(goals.raceTarget, null);
-    assert.equal(goals.weekPlan.reduce((sum: number, day: { distanceKm: number | null }) => sum + (day.distanceKm ?? 0), 0), 20);
-    const addRace = await put({ expectedRevision: goals.revision, raceTarget, weekPlan });
-    assert.equal(addRace.status, 422, await addRace.clone().text());
-    assert.equal((await addRace.json()).code, "plan_policy_violation");
-    const unchanged = await (await fetch(`${url}/v1/mobile/goals`)).json();
-    assert.equal(unchanged.revision, goals.revision, "a rejected candidate cannot partially persist its target");
-    assert.equal(unchanged.raceTarget, null);
-  } finally {
-    await stopApi(child).catch(() => child.kill("SIGKILL"));
-    await removeRuntimeRoot(runtimeRoot);
-  }
-});
-
 test("restore and deletion reject a committed import whose acknowledgement is still pending", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-pending-publication-"));
   const databasePath = join(runtimeRoot, "var/rai.sqlite");
@@ -870,32 +801,21 @@ test("database-backed writes cannot recreate a deleted database", async () => {
     assert.ok(deletionBody.preservation.backup?.name);
     assert.equal(existsSync(databasePath), false);
 
-    // P2-4: `weekPlan` needs the main database for its policy validation
-    // (capacity, injury limits, history freeze), so a no-database write must be
-    // a 409 rather than persisting an unvalidated week. Every other goals field
-    // is still a metadata-only write and must keep working.
-    const goalsBefore = await fetch(`${url}/v1/mobile/goals`).then(r => r.json()) as { revision: number };
-    const metadataEdit = await fetch(`${url}/v1/mobile/goals`, { method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: goalsBefore.revision, qualitySessionCap: 1 }) });
-    assert.equal(metadataEdit.status, 200, await metadataEdit.clone().text());
+    // The retired goals/generation surfaces are metadata-only 410s now: they must
+    // answer without opening the deleted database instead of recreating it.
+    for (const path of ["/v1/mobile/goals", "/v1/mobile/workout-plan/preview"]) {
+      const response = await fetch(`${url}${path}`, { method: path.endsWith("preview") ? "POST" : "GET",
+        headers: { "content-type": "application/json" }, ...(path.endsWith("preview") ? { body: "{}" } : {}) });
+      assert.equal(response.status, 410, path + ": " + await response.clone().text());
+      assert.equal((await response.json() as { code: string }).code, "legacy_surface_retired");
+    }
+    assert.equal(existsSync(databasePath), false, "retired plan routes must not recreate the database");
     const guardedRequests: Array<[string, RequestInit]> = [
       ["/v1/model-runs", { method: "POST" }],
-      ["/v1/mobile/goals", { method: "PUT", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ weekPlan: [] }) }],
       ["/v1/prediction-models/train", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}"
-      }],
-      // A metadata-only mutation: it deliberately does not take the main
-      // database lock (it writes the separate goals store), but it *reads* the
-      // main database, so an absent database must still surface as the same 409
-      // rather than as an internal error.
-      ["/v1/mobile/workout-plan/generate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({})
       }],
       ["/v1/training-zones/profile", {
         method: "PATCH",
@@ -995,7 +915,7 @@ test("startup foreign-key failure cannot be bypassed by the request hot-open pol
   }
 });
 
-test("weekly coach generation ignores legacy model settings and performs no upstream requests", async () => {
+test("retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-rule-plan-"));
   const databasePath = join(runtimeRoot, "var", "rai.sqlite");
   mkdirSync(join(runtimeRoot, "var"));
@@ -1026,34 +946,22 @@ test("weekly coach generation ignores legacy model settings and performs no upst
     await waitForApi(child, url, () => output);
     const post = (path: string, body: object) => fetch(url + path, { method: "POST",
       headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const goals = await fetch(url + "/v1/mobile/goals").then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
-    const first = await post("/v1/mobile/workout-plan/preview", { expectedRevision: goals.revision });
-    assert.equal(first.status, 200);
-    const preview = await first.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
-    const repeated = await post("/v1/mobile/workout-plan/preview", { expectedRevision: goals.revision });
-    assert.equal(repeated.status, 200);
-    const repeatedPreview = await repeated.json() as typeof preview;
-    assert.deepEqual(preview.days, repeatedPreview.days);
-    assert.equal(preview.audit.generatedBy, "heuristic");
-    assert.equal(preview.audit.model, null);
-    assert.equal(preview.audit.promptVersion, null);
-    assert.ok(preview.warnings.every(warning => !/模型|回退|RAI_LLM/.test(warning)));
-    assert.ok(preview.days.every(day => !/模型|回退/.test(day.reason ?? "")));
-    const confirmed = await post("/v1/mobile/workout-plan/confirm", { candidateId: preview.candidateId, expectedRevision: preview.revision });
-    assert.equal(confirmed.status, 200, await confirmed.text());
-    const legacy = await post("/v1/mobile/workout-plan/generate", { expectedRevision: goals.revision + 1 });
-    assert.equal(legacy.status, 200);
-    const generated = await legacy.json() as import("@rai/api-contracts").MobileWeeklyPlanGenerationResponse;
-    assert.equal(generated.audit.generatedBy, "heuristic");
-    assert.equal(generated.audit.model, null);
-    assert.equal(upstreamCalls, 0, "legacy model settings must never cause a network request");
+    for (const [path, body] of [
+      ["/v1/mobile/workout-plan/preview", { expectedRevision: 0 }],
+      ["/v1/mobile/workout-plan/confirm", { candidateId: "candidate", expectedRevision: 0 }],
+      ["/v1/mobile/workout-plan/generate", { expectedRevision: 0 }]
+    ] as const) {
+      const response = await post(path, body);
+      assert.equal(response.status, 410, `${path}: ${await response.clone().text()}`);
+      assert.equal((await response.json() as { code: string }).code, "legacy_surface_retired");
+    }
+    assert.equal(upstreamCalls, 0, "retired legacy model settings must never cause a network request");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await new Promise<void>(resolveClose => upstream.close(() => resolveClose()));
     await removeRuntimeRoot(runtimeRoot);
   }
 });
-
 test("startup retires legacy future plans and only preview confirmation enables them again", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-rule-plan-transition-http-"));
   const databasePath = join(runtimeRoot, "var/rai.sqlite");
@@ -1078,14 +986,15 @@ test("startup retires legacy future plans and only preview confirmation enables 
   try {
     const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
-    const getGoals = async () => await fetch(`${url}/v1/mobile/goals`).then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
-    const post = (path: string, body: object, method = "POST") => fetch(`${url}/v1/mobile/${path}`, {
-      method, headers: { "content-type": "application/json" }, body: JSON.stringify(body)
-    });
-    const pending = await getGoals();
+    // Startup's migration is observable through today / workout-plan, not the
+    // retired goals read. The pending confirmation state is inspected through the
+    // store the server actually wrote to (same control DB, WAL read).
+    const inspect = new MobileGoalsStore(runtimeRoot, controlPath);
+    const pending = inspect.read();
     assert.equal(pending.revision, original.revision + 1);
     assert.equal(pending.weekPlanReplanRequired, true);
     assert.deepEqual(pending.weekPlan, original.weekPlan.filter(day => day.localDate === today));
+    inspect.close();
     const plan = await fetch(`${url}/v1/mobile/workout-plan`).then(response => response.json()) as import("@rai/api-contracts").MobileWorkoutPlanResponse;
     const getToday = async () => await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
     const retainedToday = await getToday();
@@ -1093,57 +1002,28 @@ test("startup retires legacy future plans and only preview confirmation enables 
     assert.equal(plan.days[0]?.distanceKm, 8, "WorkoutKit must receive the same preserved prescription");
     assert.equal(plan.days[0]?.executable, true);
     assert.ok(plan.days.filter(day => day.localDate > today).every(day => !day.executable && day.structure === null));
+    const post = (path: string, body: object, method = "POST") => fetch(`${url}/v1/mobile/${path}`, {
+      method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     for (const [path, body, method] of [
       ["workout-plan/generate", { expectedRevision: pending.revision }, "POST"],
-      ["goals", { expectedRevision: pending.revision, weekPlan: original.weekPlan }, "PUT"]
+      ["goals", { expectedRevision: pending.revision, weekPlan: original.weekPlan }, "PUT"],
+      ["workout-plan/preview", { expectedRevision: pending.revision }, "POST"],
+      ["workout-plan/confirm", { candidateId: "candidate", expectedRevision: pending.revision }, "POST"]
     ] as const) {
       const blocked = await post(path, body, method);
-      assert.equal(blocked.status, 409);
-      assert.equal((await blocked.json() as { code: string }).code, "weekly_plan_confirmation_required");
+      assert.equal(blocked.status, 410, `${method} ${path}: ${await blocked.clone().text()}`);
+      assert.equal((await blocked.json() as { code: string }).code, "legacy_surface_retired");
     }
-    const spoof = await post("goals", { weekPlanReplanRequired: false }, "PUT");
-    assert.equal(spoof.status, 400, "migration state must not be writable by clients");
-    const spoofDate = await post("goals", { weekPlanPreservedDate: today }, "PUT");
-    assert.equal(spoofDate.status, 400, "today's preservation date must not be writable by clients");
-    const response = await post("workout-plan/preview", { expectedRevision: pending.revision });
-    assert.equal(response.status, 200);
-    const cancelled = await response.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
-    assert.ok(cancelled.days.every(day => day.localDate > today));
-    assert.deepEqual(await getGoals(), pending, "creating or abandoning a preview cannot clear pending state");
-    const edit = await post("goals", { expectedRevision: pending.revision,
-      easyDurationFloorFraction: 0.85, qualitySessionCap: 1 }, "PUT");
-    assert.equal(edit.status, 200, await edit.text());
-    const changed = await getGoals();
-    assert.equal(changed.weekPlanReplanRequired, true);
-    assert.equal((await post("workout-plan/confirm", { candidateId: cancelled.candidateId, expectedRevision: cancelled.revision })).status, 409);
-    assert.deepEqual(await getGoals(), changed);
-    const next = await post("workout-plan/preview", { expectedRevision: changed.revision });
-    assert.equal(next.status, 200);
-    const preview = await next.json() as typeof cancelled;
-    assert.equal(preview.audit.generatedBy, "heuristic");
-    const confirmBody = { candidateId: preview.candidateId, expectedRevision: preview.revision };
-    const confirmed = await post("workout-plan/confirm", confirmBody);
-    assert.equal(confirmed.status, 200, await confirmed.text());
-    const enabled = await getGoals();
-    assert.equal(enabled.revision, changed.revision + 1);
-    assert.equal(enabled.weekPlanReplanRequired, false);
-    assert.deepEqual(enabled.weekPlan.find(day => day.localDate === today), pending.weekPlan[0]);
-    assert.equal(enabled.weekPlanAudit?.generatedBy, "heuristic");
-    assert.equal((await getToday()).nextSession.distanceKm, 8, "confirmation must not end today's protection");
-    const enabledPlan = await fetch(`${url}/v1/mobile/workout-plan`).then(response => response.json()) as import("@rai/api-contracts").MobileWorkoutPlanResponse;
-    assert.equal(enabledPlan.days[0]?.distanceKm, 8);
-    assert.equal(enabledPlan.days[0]?.source, "llm", "the preserved legacy day must not be relabelled as rule generation");
-    assert.equal((await post("workout-plan/confirm", confirmBody)).status, 200);
-    assert.deepEqual(await getGoals(), enabled, "confirmation retry must not create another revision");
-    const manual = await post("goals", { expectedRevision: enabled.revision, weekPlan: enabled.weekPlan }, "PUT");
-    assert.equal(manual.status, 200, await manual.text());
-    const afterManual = await getGoals();
-    assert.equal((await post("workout-plan/generate", { expectedRevision: afterManual.revision })).status, 200);
+    const afterRetiredCalls = new MobileGoalsStore(runtimeRoot, controlPath);
+    try {
+      assert.deepEqual(afterRetiredCalls.read(), pending, "retired calls must not change the pending migration state");
+    } finally { afterRetiredCalls.close(); }
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
   }
 });
+
 
 test("dynamic-port startup reports readiness and workout overrides preserve service result", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-override-"));
@@ -1910,10 +1790,8 @@ test("mobile lock confirms a session when today has no recovery record", async (
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "lock", expectedRevision: today.recommendationRevision })
     });
-    assert.equal(locked.status, 200, await locked.text());
-    const afterLock = await (await fetch(`${url}/v1/mobile/goals`)).json() as {
-      lockedSession: { localDate: string } | null;
-    };
+    assert.equal(locked.status, 200, await locked.clone().text());
+    const afterLock = await locked.json() as { lockedSession: { localDate: string } | null };
     assert.equal(afterLock.lockedSession?.localDate, today.today.localDate);
 
     // The stale-revision gate itself is untouched: an out-of-date revision is still
@@ -2027,9 +1905,8 @@ test("every mounted write route is classified, whatever the source looks like", 
         url + " 同时出现在 publicReadRoutes 与 tokenRequiredReadRoutes 里"
       );
       // Sharing a path with a write route is legal and expected — `/v1/model-runs`
-      // reads the list and creates a run, `/v1/mobile/goals` reads and replaces
-      // the goals — because the hook dispatches on the method: the GET opens,
-      // the POST/PUT still needs the token. What must hold is that the path is
+      // reads the list and creates a run — because the hook dispatches on the
+      // method: the GET opens, the POST/PUT still needs the token. What must hold is that the path is
       // really mounted as a read; `local-request-security.test.ts` covers the
       // write half of the same path.
       assert.ok(
@@ -2069,81 +1946,32 @@ test("every mounted write route is classified, whatever the source looks like", 
   }
 });
 
-test("plan preview/confirm HTTP flow is non-mutating, idempotent and revision safe", async () => {
-  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-plan-preview-http-"));
-  const databasePath = join(runtimeRoot, "var/rai.sqlite");
-  mkdirSync(join(runtimeRoot, "var"));
-  const database = await RaiDatabase.open(databasePath);
-  database.close();
-  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
-    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath, RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_LLM_API_KEY: "" },
-    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
-  });
-  let output = "";
-  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  try {
-    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
-    await waitForApi(child, url, () => output);
-    const getGoals = async () => await fetch(`${url}/v1/mobile/goals`).then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
-    // P3-1: every plan read is a safety-relevant snapshot, not a cacheable
-    // representation. This covers the routes that used to omit the header.
-    for (const path of ["/v1/mobile/goals", "/v1/mobile/today", "/v1/mobile/workout-plan"]) {
-      const response = await fetch(`${url}${path}`);
-      assert.equal(response.status, 200, `${path}: ${await response.clone().text()}`);
-      assert.equal(response.headers.get("cache-control"), "no-store", `${path} must not be cacheable`);
-    }
-    const post = (path: string, body: object, method = "POST") => fetch(`${url}/v1/mobile/${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const initial = await getGoals();
-    const missingRevision = await post("workout-plan/preview", {});
-    assert.equal(missingRevision.status, 400, await missingRevision.text());
-    const response = await post("workout-plan/preview", { expectedRevision: initial.revision });
-    assert.equal(response.status, 200);
-    const preview = await response.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
-    assert.ok(preview.candidateId);
-    assert.equal((await getGoals()).revision, initial.revision, "preview must not write");
-    const confirmBody = { candidateId: preview.candidateId, expectedRevision: preview.revision };
-    const confirmed = await post("workout-plan/confirm", confirmBody);
-    assert.equal(confirmed.status, 200, await confirmed.text());
-    const committed = await getGoals();
-    assert.equal(committed.revision, initial.revision + 1);
-    assert.equal((await post("workout-plan/confirm", confirmBody)).status, 200);
-    assert.equal((await getGoals()).revision, committed.revision, "lost acknowledgement retry is not another write");
-    const stale = await (await post("workout-plan/preview", { expectedRevision: committed.revision })).json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
-    const today = await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
-    const edit = await post("goals", { expectedRevision: committed.revision, raceTarget: { date: today.today.localDate, distance: "ten_k", targetPaceSecondsPerKm: 330 } }, "PUT");
-    assert.equal(edit.status, 200, await edit.text());
-    const changed = await getGoals();
-    assert.equal((await post("workout-plan/confirm", { candidateId: stale.candidateId, expectedRevision: stale.revision })).status, 409);
-    assert.equal((await getGoals()).revision, changed.revision);
-    const invalid = await post("goals", { expectedRevision: changed.revision, qualitySessionCap: 0, weekPlan: [{ localDate: today.today.localDate, kind: "tempo", distanceKm: 10 }] }, "PUT");
-    assert.equal(invalid.status, 200, await invalid.text());
-    const safelyRewritten = await getGoals();
-    assert.equal(safelyRewritten.revision, changed.revision + 1);
-    assert.equal(safelyRewritten.weekPlan[0]?.kind, "rest", "race-day manual edits are rewritten to rest");
-    for (const action of ["lock", "relock"]) {
-      const current = await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
-      const locked = await post("lock", { action, expectedRevision: current.recommendationRevision });
-      assert.equal(locked.status, 200, await locked.text());
-    }
-    const plan = await fetch(`${url}/v1/mobile/workout-plan`).then(response => response.json()) as import("@rai/api-contracts").MobileWorkoutPlanResponse;
-    assert.equal(plan.days.length, 7);
-    assert.equal(plan.days[0]!.executable, false, "race day never adds another workout");
-  } finally {
-    await stopApi(child).catch(() => child.kill("SIGKILL"));
-    await removeRuntimeRoot(runtimeRoot);
-  }
-});
-
-test("snapshot capabilities, durable confirm restart and receipt lifecycle work through the production router", async () => {
+test("snapshot capabilities and receipt lifecycle work through the production router", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-plan-state-http-"));
   const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  const controlPath = join(runtimeRoot, "var/rai-control.sqlite");
   mkdirSync(join(runtimeRoot, "var"));
   (await RaiDatabase.open(databasePath)).close();
+  // Seed a published manual week before the server starts: preview/confirm are
+  // retired, so this is the remaining way to give the still-live
+  // /workout-plan/synced receipt route a real published prescription to bind to.
+  const today = mobileLocalDate();
+  const structure: import("@rai/api-contracts").MobileSessionStructure = {
+    warmup: { purpose: "warmup", goal: { type: "time", seconds: 300 }, alert: null },
+    blocks: [{ iterations: 1, steps: [{ purpose: "work", goal: { type: "time", seconds: 900 }, alert: null }] }],
+    cooldown: { purpose: "cooldown", goal: { type: "time", seconds: 300 }, alert: null }
+  };
+  const seed = new MobileGoalsStore(runtimeRoot, controlPath);
+  seed.write({
+    weekPlan: weeklyPlanDates(today, 7).map(localDate => ({ localDate, kind: "easy" as const,
+      distanceKm: 5, structure, reason: "seeded published week" })),
+    weekPlanAudit: { generatedBy: "manual", model: null, promptVersion: null, generatedAt: null }
+  }, { prescription: null });
+  seed.close();
   const launch = async () => {
     const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
       cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
-        RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_LLM_API_KEY: "" },
+        RAI_CONTROL_DATABASE: controlPath, RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_LLM_API_KEY: "" },
       windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
     let output = "";
@@ -2155,7 +1983,7 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
       return { child, url };
     } catch (error) { await stopApi(child).catch(() => child.kill("SIGKILL")); throw error; }
   };
-  let server = await launch();
+  const server = await launch();
   const post = (path: string, body: object) => fetch(server.url + path, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
   });
@@ -2166,36 +1994,9 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
     assert.equal(handshake.planSnapshotContractVersion, 1);
     assert.equal(handshake.planPublicationContractVersion, 1);
     assert.equal(handshake.planReceiptContractVersion, 2);
-    const initial = await snapshot();
-    const previewResponse = await post("/v1/mobile/workout-plan/preview", { expectedRevision: initial.metadata.goalsRevision });
-    assert.equal(previewResponse.status, 200, await previewResponse.clone().text());
-    const preview = await previewResponse.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
-    const operationId = randomUUID();
-    const operationScope = { serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch };
-    const input = { candidateId: preview.candidateId, expectedRevision: preview.revision, operationId, operationScope };
-    const response = await post("/v1/mobile/workout-plan/confirm", input);
-    assert.equal(response.status, 200, await response.clone().text());
-    const committed = await response.json();
-    await stopApi(server.child);
-    server = await launch();
-    const retry = await post("/v1/mobile/workout-plan/confirm", input);
-    assert.equal(retry.status, 200, await retry.clone().text());
-    assert.deepEqual(await retry.json(), committed, "durable result bypasses missing process-local preview after restart");
-    const queried = await fetch(server.url + "/v1/mobile/plan-operations/" + operationId).then(reply => reply.json()) as { status: string; result: unknown };
-    assert.equal(queried.status, "committed"); assert.deepEqual(queried.result, committed);
-    const changedKey = await post("/v1/mobile/workout-plan/confirm", { ...input, candidateId: "different" });
-    assert.equal(changedKey.status, 409);
-    assert.equal((await changedKey.json() as { code: string }).code, "plan_operation_key_conflict");
-    const unknownOldIntent = await post("/v1/mobile/workout-plan/confirm", { ...input, operationId: randomUUID(),
-      operationScope: { ...operationScope, datasetEpoch: "old-dataset" } });
-    assert.equal(unknownOldIntent.status, 409);
-    assert.equal((await unknownOldIntent.json() as { code: string }).code, "plan_operation_scope_mismatch",
-      "even a never-committed old intent cannot be applied to a replacement dataset");
     const current = await snapshot();
-    assert.equal(current.metadata.goalsRevision, initial.metadata.goalsRevision + 1);
-    assert.equal(current.today.recommendation.planRevision, current.workoutPlan.planRevision);
     const day = current.workoutPlan.days.find(item => item.executable && item.structure)!;
-    assert.ok(day, "fixture must have a genuine executable prescription");
+    assert.ok(day, "seeded fixture must have a genuine executable prescription");
     const workoutID = randomUUID();
     const receipt = { contractVersion: 2, scope: { serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch },
       operationId: randomUUID(), coherenceToken: current.metadata.coherenceToken, verifiedAt: new Date().toISOString(),
@@ -2208,7 +2009,7 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
     assert.equal(first.matchesCurrent, true);
     // P2-2: `matchesCurrent` and the receipt write share one guarded control
     // transaction, so the guard epoch advances and no pending marker is left.
-    const control = new DatabaseSync(join(runtimeRoot, "var/rai-control.sqlite"));
+    const control = new DatabaseSync(controlPath);
     try {
       const guard = control.prepare("SELECT epoch, pending_since FROM mobile_publication_guard WHERE id = 1")
         .get() as { epoch: number; pending_since: string | null };
@@ -2221,11 +2022,6 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
     // The real iOS client sends Swift's synthesized Codable shape: nil optional
     // keys are omitted rather than written as null. That shape must be accepted
     // and canonicalized, not 422'd or crashed (review report P1-1).
-    // Swift's synthesized Codable only omits *nil* optionals. This fixture's
-    // warmup/cooldown are real blocks (300 s each), so a faithful wire shape
-    // keeps them and omits only the null step alerts. Deleting the non-nil
-    // blocks would describe a different prescription — which the provenance
-    // check must reject (P3-7), so this test would no longer be about P1-1.
     const swiftStructure = JSON.parse(JSON.stringify(day.structure)) as Record<string, unknown>;
     if (swiftStructure.warmup == null) delete swiftStructure.warmup;
     if (swiftStructure.cooldown == null) delete swiftStructure.cooldown;
@@ -2246,8 +2042,6 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
     assert.equal(mismatched.status, 422);
     assert.equal((await mismatched.json() as { code: string }).code, "plan_receipt_evidence_mismatch");
     // P3-7: a `verified` receipt must link to a real published goals revision.
-    // A self-declared revision that never existed is rejected instead of being
-    // recorded as device evidence.
     const fabricated = await post("/v1/mobile/workout-plan/synced", { ...receipt, revision: current.metadata.goalsRevision + 1 });
     assert.equal(fabricated.status, 422, await fabricated.clone().text());
     assert.equal((await fabricated.json() as { code: string }).code, "plan_receipt_unknown_prescription");
@@ -2264,6 +2058,8 @@ test("snapshot capabilities, durable confirm restart and receipt lifecycle work 
   } finally { await stopApi(server.child).catch(() => server.child.kill("SIGKILL")); await removeRuntimeRoot(runtimeRoot); }
 });
 
+/**
+ * P3-01
 /**
  * P3-01：`/v1/mobile/today` 与 `/v1/mobile/workout-plan` 走稳定快照（control + facts）
  *

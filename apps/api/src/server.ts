@@ -23,7 +23,6 @@ import type {
   SyncCoverageResponse,
   TrainPredictionModelRequest,
   TrainingStatisticsGranularity,
-  UpdateMobileGoalsInput,
   UpdateTrainingZoneProfileInput
 } from "@rai/api-contracts";
 import {
@@ -42,6 +41,7 @@ import {
 } from "@rai/application";
 import { ModelRunActivationError, PendingMigrationsError, SqliteModelReleaseRepository, RaiDatabase, SqliteModelRunRepository, acquireDatabasePublicationLock, recordModelReleaseRefusal } from "@rai/storage-sqlite";
 import Fastify from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { RestoreRecoveryRequiredError } from "./restore-journal.js";
 import { apiErrorPayload, ClientRequestError, retryAfterSeconds } from "./api-error.js";
@@ -82,11 +82,8 @@ import {
   backupParamsSchema,
   deleteBodySchema,
   identifierParamsSchema,
-  mobileGoalsBodySchema,
   mobileLockBodySchema,
   mobilePlanSyncedBodySchema,
-  mobileWeeklyPlanGenerateBodySchema,
-  mobileWeeklyPlanPreviewBodySchema,
   modelComparisonQuerySchema,
   openapiDocument,
   overrideBodySchema,
@@ -108,12 +105,13 @@ import {
 import { TaskAdmissionScheduler } from "./task-admission.js";
 import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from "./training-zone-backfill.js";
 import { TryAcquireGate } from "./try-acquire-gate.js";
-import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, shouldGenerateWeeklyPlan, weeklyPlanDates } from "./weekly-plan-service.js";
-import { WeeklyPlanPreviews, PlanPreviewError } from "./weekly-plan-preview.js";
-import { validateManualPlan, ManualPlanPolicyError, manualPlanWriteInput } from "./manual-plan-policy.js";
-import { registerRunCoachRoutes } from "./run-coach.js";
-import { CoachLoopRuntime, type CoachRuntimeReceipt } from "./coach-loop-runtime.js";
+import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, shouldGenerateWeeklyPlan } from "./weekly-plan-service.js";
+import { CoachLoopRuntime, coachLoopReceiptManaged, type CoachRuntimeReceipt } from "./coach-loop-runtime.js";
 import { registerCoachLoopRoutes } from "./coach-loop-routes.js";
+import { createTrainingPlanCommandHandlers, createTrainingPlanStateRoute } from "./training-plan-routes.js";
+import { TrainingPlanCommandService, legacyRaceTargetMirror, trainingPlanCommandError } from "./training-plan-commands.js";
+import { TrainingPlanCoordinator } from "./training-plan-coordinator.js";
+import type { TrainingPlanRefreshRequest } from "@rai/api-contracts";
 import { PlanPublicationService, PlanOperationError } from "./plan-publication.js";
 import { prescriptionDigest } from "./plan-digest.js";
 import { normalizePlanReceiptV2 } from "./plan-receipt.js";
@@ -122,7 +120,6 @@ import type { MobilePlanReceiptInput } from "@rai/api-contracts";
 import type { MobilePlanOperationScope } from "@rai/api-contracts";
 import { planOperationScopeSchema } from "./schemas.js";
 import { isValidLocalDate } from "./local-date.js";
-import { weeklyCapacity } from "./weekly-capacity.js";
 import {
   ImportWorker,
   PredictionModelWorker,
@@ -358,13 +355,20 @@ const metadataOnlyMutationRoutes = new Set([
   "/v1/mobile/workout-plan/generate",
   "/v1/mobile/workout-plan/preview",
   "/v1/mobile/workout-plan/confirm",
-  "/v1/mobile/workout-plan/synced"
+  "/v1/mobile/workout-plan/synced",
+  // Unified training-plan contract: preview writes nothing, submit writes only the
+  // control store (unified state + legacy goals mirror).
+  "/v1/mobile/training-plan/commands/preview",
+  "/v1/mobile/training-plan/commands"
 ]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/mobile/coach-loop",
   "/v1/mobile/coach-loop/synced",
   "/v1/mobile/coach-feedback",
   "/v1/mobile/coach-prediction-refresh",
+  // Reads main-database facts to generate the candidate plan, then commits the plan
+  // and the unified state together.
+  "/v1/mobile/training-plan/commands/refresh",
   "/v1/workouts/:id/override",
   "/v1/training-zones/profile",
   "/v1/privacy-zones",
@@ -405,6 +409,41 @@ export const lockOnlyMutationRoutes = new Set([
   "/v1/backups/:name",
   "/v1/backups/:name/restore"
 ]);
+
+/**
+ * Routes retired by product decision (2026-10-20). They stay mounted so the
+ * route-table/OpenAPI audits keep enumerating them and a stale client gets a
+ * machine-readable answer instead of a 404, but no handler may reach the old
+ * implementation: each one answers 410 `legacy_surface_retired` with the
+ * replacement surface.
+ *
+ * Kept as one set because three separate boundaries must agree: the mounted
+ * route list, the managed-dataset 409 gate below (retirement wins over "this
+ * dataset is managed"), and `legacy-surface-retirement.test.ts`. A retired
+ * route is not a write any more, so it lives in `metadataOnlyMutationRoutes`
+ * for the source/route-table classification checks (no mutation lock, no
+ * database-readiness gate, no import/restore side effects).
+ */
+export const retiredLegacyRoutes = new Set([
+  "/v1/mobile/goals",
+  "/v1/mobile/run-coach",
+  "/v1/mobile/workout-plan/confirm",
+  "/v1/mobile/workout-plan/generate",
+  "/v1/mobile/workout-plan/preview"
+]);
+
+/**
+ * One shape for every retirement: the old surface is gone, the replacement is a
+ * real route, and the answer is 410 rather than 404 so a stale client can tell
+ * "removed on purpose" from "wrong URL/version".
+ */
+function retiredLegacySurface(replacement: string) {
+  return (_request: FastifyRequest, reply: FastifyReply) => reply.code(410).send({
+    code: "legacy_surface_retired",
+    message: `该旧接口已退役，不再执行旧协议；请改用 ${replacement}。`,
+    replacement
+  });
+}
 const mutationCoordinator = new MutationCoordinator();
 const sourceMutations = new MutationCoordinator();
 const taskAdmission = new TaskAdmissionScheduler(mutationCoordinator);
@@ -444,12 +483,15 @@ installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
   const routeUrl = request.routeOptions.url;
   if (routeUrl?.startsWith("/v1/mobile/") &&
+    // Retirement answers 410 for every dataset: a managed / ended / recovering
+    // dataset must not turn a deliberately-removed surface into a different 409.
+    !(routeUrl !== undefined && retiredLegacyRoutes.has(routeUrl)) &&
     !["/v1/mobile/coach-loop", "/v1/mobile/coach-loop/synced", "/v1/mobile/coach-execution", "/v1/mobile/coach-feedback",
       "/v1/mobile/coach-prediction-refresh", "/v1/mobile/plan-operations/:id"].includes(routeUrl)) {
     const managed = coachLoopManaged();
     if (managed &&
-      ["/v1/mobile/today","/v1/mobile/run-coach","/v1/mobile/training-plan-state","/v1/mobile/workout-plan",
-        "/v1/mobile/goals","/v1/mobile/lock"].some(prefix => routeUrl === prefix || routeUrl.startsWith(`${prefix}/`))) {
+      ["/v1/mobile/today","/v1/mobile/training-plan-state","/v1/mobile/workout-plan","/v1/mobile/lock"]
+        .some(prefix => routeUrl === prefix || routeUrl.startsWith(`${prefix}/`))) {
       return reply.code(409).send({ code: "coach_loop_contract_required",
         message: "当前课表由新版教练合同管理，请使用 /v1/mobile/coach-loop；旧协议不能执行追加课。" });
     }
@@ -503,9 +545,16 @@ const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
  * when this is true the old plan reads answer 409 by design, so advertising
  * `planSnapshotContractVersion` at the same time would tell a client to call a
  * route that cannot succeed (review P3-3).
+ *
+ * The receipt row is append-only and `end` never deletes it (F06), so the
+ * presence of a receipt only proves the dataset *once* opted in. Management is
+ * therefore status-aware: an ended receipt releases the legacy reads and the
+ * snapshot capability again, while a missing/malformed settings payload stays
+ * managed (fail closed). The predicate itself is a pure helper in
+ * `coach-loop-runtime.ts` so this decision is unit-testable without a server.
  */
 const coachLoopManaged = (): boolean =>
-  mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch })) !== null;
+  coachLoopReceiptManaged(mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch })));
 const planPublication = new PlanPublicationService(mobileGoalsStore, () => JSON.stringify([serverId, athleteId, datasetEpoch]),
   () => ({ serverId, athleteId, datasetEpoch }));
 mobileGoalsStore.retireLegacyModelPlan(mobileLocalDate());
@@ -582,7 +631,6 @@ const changeDatasetEpoch = (epoch: string): void => {
   const scope = JSON.stringify([serverId, athleteId, datasetEpoch]);
   commandQueue.setScope(scope);
   importWorker.setScope(scope);
-  weeklyPlanPreviews.clear();
 };
 const maintenance = new DatabaseMaintenance(
   databasePath,
@@ -938,7 +986,17 @@ app.addHook("onClose", async () => {
  * retried the same day, and never regenerates once the week is already planned.
  */
 async function ensureWeeklyPlan(): Promise<void> {
-  if (mobileGoalsStore.coachLoopState(JSON.stringify({ serverId, athleteId, datasetEpoch }))) return;
+  // Managed means an ACTIVE/PAUSED coach-loop, not "a receipt exists": an ended
+  // programme must hand the legacy weekly generator back (F06). The status-aware
+  // predicate is shared with the route gate so the two cannot disagree.
+  if (coachLoopManaged()) return;
+  // A migrated scope is refreshed by the one unified coordinator (PR4 remaining):
+  // the decision lives in training-plan-coordinator.ts, the write goes through the
+  // same refresh command (generate outside the transaction, commit inside).
+  if (mobileGoalsStore.trainingPlanStateRow(JSON.stringify([serverId, athleteId, datasetEpoch])) !== null) {
+    await trainingPlanCoordinator.tick();
+    return;
+  }
   const today = mobileLocalDate();
   const goals = mobileGoalsStore.read();
   if (!shouldGenerateWeeklyPlan(today, goals)) return;
@@ -1498,17 +1556,107 @@ app.get("/v1/mobile/today", async () => stablePlanRead(
   (control) => withReadStore((store) => store.mobileTodayWithViews(control.goals, control.history))
 ));
 
-app.get("/v1/mobile/training-plan-state", async (_request, reply) => {
-  reply.header("Cache-Control", "no-store");
-  return withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })));
-});
+// PR4-1: one path, two wire contracts. `X-RAI-Training-Contract: 2` answers the
+// migrated unified state; every other request keeps the v1 payload unchanged.
+// v1 reads stay on the stable-snapshot path; v2 reads only the control store and
+// never migrates, publishes or falls back to a different contract.
+app.get("/v1/mobile/training-plan-state", createTrainingPlanStateRoute({
+  identity: () => ({ serverId, athleteId, datasetEpoch }),
+  businessDate: () => mobileLocalDate(),
+  readUnifiedState: scopeKey => mobileGoalsStore.trainingPlanStateRow(scopeKey),
+  readGoalsRevision: () => mobileGoalsStore.read().revision,
+  legacy: () => withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })))
+}));
 
 app.get<{ Params: { id: string } }>("/v1/mobile/plan-operations/:id", { schema: { params: identifierParamsSchema } },
   async request => planPublication.result(request.params.id));
 
-registerRunCoachRoutes({ app, store: mobileGoalsStore, scope: () => JSON.stringify([serverId, athleteId, datasetEpoch]),
-  identity: () => ({ serverId, athleteId, datasetEpoch }),
-  inputs: goals => withReadStore(store => store.mobileWeeklyPlanInputs(goals, mobileGoalsStore.planHistory(200))) });
+// PR4-2: configuration commands over the unified state. The publication service
+// runs each action inside the control-database publication transaction, so the
+// unified state write, its history row, the legacy goals mirror and the operation
+// result commit or roll back together. The published plan is not regenerated in
+// this slice; both responses say `planRefreshRequired: true`.
+const trainingPlanCommands = (() => {
+  const service = new TrainingPlanCommandService(mobileGoalsStore,
+    () => JSON.stringify([serverId, athleteId, datasetEpoch]),
+    () => ({ serverId, athleteId, datasetEpoch }),
+    () => mobileLocalDate());
+  // One candidate generator for both the single-command path (PR4-4) and the
+  // refresh path: read the stable snapshot, generate outside the control write
+  // transaction, return the fingerprint that the commit re-verifies.
+  /**
+   * Cross-store barrier (PR4 remaining): generation reads the main database, the
+   * commit writes the control database. There is no cross-file transaction, so the
+   * fingerprint includes the main database's `data_version`: an import/restore that
+   * completes between generation and commit changes it and the operation is
+   * rejected instead of pairing new facts with a plan generated from the old ones.
+   */
+  const mainDataVersion = () => readStores.dataVersionFingerprint();
+  const generationFingerprint = () => `${weeklyPlanSnapshot().fingerprint}:${mainDataVersion()}`;
+  const prepareTrainingPlan = async (state: import("./training-plan-store.js").TrainingPlanState) => {
+    const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
+    const mirror = legacyRaceTargetMirror(state);
+    const result = await generateWeeklyPlan({
+      today: inputs.today,
+      goals: { ...goals, runCoach: null, raceTarget: mirror === undefined ? null : mirror },
+      prescription: inputs.prescription,
+      weeklyVolumeBaselineKm: inputs.weeklyVolumeBaselineKm,
+      recentWeeklyKm: inputs.recentWeeklyKm,
+      previousWeekDistanceKm: inputs.previousWeekDistanceKm
+    });
+    if (!result.days.length) {
+      throw new PlanOperationError("training_plan_empty", "未生成有效课表；原计划保持不变。", 422);
+    }
+    return { days: result.days, audit: result.audit, warnings: result.warnings,
+      prescription: inputs.prescription, fingerprint: `${fingerprint}:${mainDataVersion()}` };
+  };
+  const planDeps = { prepare: prepareTrainingPlan, fingerprint: generationFingerprint };
+  const handlers = createTrainingPlanCommandHandlers(service, planDeps);
+  return {
+    preview: async (request: FastifyRequest, reply: FastifyReply) => handlers.preview(request, reply),
+    submit: async (request: FastifyRequest, reply: FastifyReply) => handlers.submit(request, reply),
+    // PR4-3: generate outside the control write transaction, then commit the plan
+    // and the unified state together after re-verifying the frozen input fingerprint.
+    refresh: async (body: TrainingPlanRefreshRequest) => service.refresh(body, planDeps)
+  };
+})();
+/** PR4 remaining: the only automatic path for a migrated scope. */
+const trainingPlanCoordinator = new TrainingPlanCoordinator({
+  scopeKey: () => JSON.stringify([serverId, athleteId, datasetEpoch]),
+  readState: () => mobileGoalsStore.trainingPlanStateRow(JSON.stringify([serverId, athleteId, datasetEpoch])),
+  businessDate: () => mobileLocalDate(),
+  refresh: input => trainingPlanCommands.refresh({
+    contractVersion: 2,
+    operationId: input.operationId,
+    operationScope: { serverId, athleteId, datasetEpoch },
+    expectedStateRevision: input.stateRevision
+  })
+});
+
+app.post("/v1/mobile/training-plan/commands/preview", trainingPlanCommands.preview);
+app.post("/v1/mobile/training-plan/commands", trainingPlanCommands.submit);
+app.post("/v1/mobile/training-plan/commands/refresh", async (request, reply) => {
+  const release = weeklyPlanGenerationGate.tryAcquire();
+  if (!release) {
+    return reply.code(409).send({ code: "weekly_plan_generation_busy", message: "课表正在生成，请稍后重试" });
+  }
+  try {
+    return await trainingPlanCommands.refresh(request.body as TrainingPlanRefreshRequest);
+  } catch (error) {
+    const mapped = trainingPlanCommandError(error);
+    return reply.code(mapped.statusCode).send({ code: mapped.code, message: mapped.message });
+  } finally {
+    release();
+  }
+});
+
+// Retired by product decision (2026-10-20): reads were the legacy adaptive
+// coach response, writes the legacy start/update/refresh/pause/resume/end
+// command. The replacement is the unified v2 read plus the configuration
+// command endpoints; both stay mounted and answer 410 so a stale client gets a
+// machine-readable retirement instead of a 404.
+app.get("/v1/mobile/run-coach", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
+app.post("/v1/mobile/run-coach", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
 
 const coachLoopRuntime = new CoachLoopRuntime(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch }),
   (goals, history) => withReadStore(store => store.coachLoopFacts(goals, history, { athleteId, datasetEpoch })),
@@ -1530,11 +1678,11 @@ app.get("/v1/mobile/workout-plan", async () => stablePlanRead(
 
 /** Legacy and Monday-only deterministic generation, without bypassing migration confirmation. */
 async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<MobileWeeklyPlanGenerationResponse> {
-  const managed = mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch }));
-  if (managed) throw new PlanPreviewError("新版教练由显式刷新命令管理，旧生成器不能覆盖课表。");
+  // Ended programmes no longer own the schedule; active/paused ones still do.
+  if (coachLoopManaged()) throw new PlanOperationError("weekly_plan_generation_blocked", "新版教练由显式刷新命令管理，旧生成器不能覆盖课表。");
   const generationEpoch = datasetEpoch;
   const goals = mobileGoalsStore.read();
-  if (goals.runCoach?.status === "active" || goals.runCoach?.status === "paused") throw new PlanPreviewError("自适应教练管理当前课表，请在教练计划中调整偏好。");
+  if (goals.runCoach?.status === "active" || goals.runCoach?.status === "paused") throw new PlanOperationError("weekly_plan_generation_blocked", "自适应教练管理当前课表，请在教练计划中调整偏好。");
   if (expectedRevision != null && expectedRevision !== goals.revision) {
     throw new MobileGoalsRevisionConflictError(goals.revision);
   }
@@ -1551,7 +1699,7 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
     recentWeeklyKm: inputs.recentWeeklyKm,
     previousWeekDistanceKm: inputs.previousWeekDistanceKm
   });
-  if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanPreviewError("数据集已在生成期间更换，请重新生成；原课表未修改。");
+  if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanOperationError("weekly_plan_generation_stale", "数据集已在生成期间更换，请重新生成；原课表未修改。");
   // A goal CAS alone cannot detect imported training or changed zones.
   const latestGoals = mobileGoalsStore.read();
   if (latestGoals.revision !== goals.revision) throw new MobileGoalsRevisionConflictError(latestGoals.revision);
@@ -1560,7 +1708,7 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
       JSON.stringify(latestInputs.prescription) !== JSON.stringify(inputs.prescription) ||
       latestInputs.previousWeekDistanceKm !== inputs.previousWeekDistanceKm ||
       JSON.stringify(latestInputs.today.week) !== JSON.stringify(inputs.today.week)) {
-    throw new PlanPreviewError("训练数据已在生成期间变化，请重新生成；原课表未修改。");
+    throw new PlanOperationError("weekly_plan_generation_stale", "训练数据已在生成期间变化，请重新生成；原课表未修改。");
   }
   // An empty result means the date window itself could not be built, not that
   // the runner should have a blank week. Writing it would erase the stored plan,
@@ -1597,7 +1745,6 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
 }
 
 const weeklyPlanGenerationGate = new TryAcquireGate();
-const weeklyPlanPreviews = new WeeklyPlanPreviews();
 
 function weeklyPlanSnapshot() {
   const goals = mobileGoalsStore.read(planPrescription());
@@ -1613,87 +1760,13 @@ function weeklyPlanSnapshot() {
   return { goals, inputs, fingerprint };
 }
 
-app.post<{ Body: { expectedRevision: number } }>("/v1/mobile/workout-plan/preview",
-  { schema: { body: mobileWeeklyPlanPreviewBodySchema } }, async (request, reply) => {
-    const release = weeklyPlanGenerationGate.tryAcquire();
-    if (!release) return reply.code(409).send({ code: "weekly_plan_generation_busy", message: "课表正在生成，请稍后重试" });
-    try {
-      const generationEpoch = datasetEpoch;
-      const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
-      if (goals.runCoach?.status === "active" || goals.runCoach?.status === "paused") throw new PlanPreviewError("自适应教练不支持手工改期或重排，请调整跑步日偏好。");
-      if (request.body?.expectedRevision !== goals.revision) return reply.code(409).send({ code: "mobile_goals_revision_conflict", message: "目标版本已变化，请刷新后生成" });
-      const result = await generateWeeklyPlan({ today: inputs.today, goals, prescription: inputs.prescription, weeklyVolumeBaselineKm: inputs.weeklyVolumeBaselineKm, recentWeeklyKm: inputs.recentWeeklyKm, previousWeekDistanceKm: inputs.previousWeekDistanceKm });
-      if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanPreviewError("数据集已在预览期间更换，请重新生成；原课表未修改。");
-      if (!result.days.length) return reply.code(422).send({ message: "未生成有效课表；原课表保持不变。" });
-      // Finished and locked dates remain immutable even if the generator proposes them.
-      const dates = weeklyPlanDates(inputs.today.today.localDate);
-      const days = result.days.filter(day => day.localDate !== inputs.today.today.localDate ||
-        (!goals.weekPlanReplanRequired && goals.weekPlanPreservedDate !== inputs.today.today.localDate &&
-          !inputs.today.lock.present && inputs.today.today.workoutCount === 0));
-      const replacedDates = goals.weekPlan.filter(old => {
-        const next = days.find(day => day.localDate === old.localDate);
-        return next && JSON.stringify([old.kind, old.distanceKm, old.structure, old.reason]) !== JSON.stringify([next.kind, next.distanceKm, next.structure, next.reason]);
-      }).map(day => day.localDate);
-      return weeklyPlanPreviews.create({ generatedAt: result.audit.generatedAt ?? new Date().toISOString(), revision: goals.revision,
-        audit: result.audit, days, warnings: [...(replacedDates.length ? [`确认后将替换 ${replacedDates.length} 天既有分段与说明；取消不会改动课表。`] : []), ...result.warnings],
-        replacedDates, previousDays: goals.weekPlan.filter(day => dates.includes(day.localDate)), windowStart: dates[0]!, windowEnd: dates.at(-1)! }, fingerprint);
-    } finally { release(); }
-  });
-
-app.post<{ Body: { candidateId: string; expectedRevision: number; operationId?: string; operationScope?: MobilePlanOperationScope } }>("/v1/mobile/workout-plan/confirm", {
-  schema: { body: { type: "object", additionalProperties: false, required: ["candidateId", "expectedRevision"], properties: {
-    candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }, operationId: { type: "string", format: "uuid" }, operationScope: planOperationScopeSchema
-  } } }
-}, async (request, reply) => {
-  try {
-    return planPublication.publish("preview-confirm", request.body, () => {
-    const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
-    return weeklyPlanPreviews.confirm(request.body.candidateId, request.body.expectedRevision, fingerprint, preview => {
-      const written = mobileGoalsStore.write({ expectedRevision: preview.revision,
-        weekPlan: mergePlanWindow(goals.weekPlan, preview.days, inputs.today.today.localDate),
-        weekPlanAudit: preview.audit }, { prescription: inputs.prescription, confirmCoachPlan: true,
-        ...(goals.runCoach?.status === "ended" ? { runCoach: null } : {}) });
-      return { generatedAt: preview.generatedAt, revision: written.revision, audit: preview.audit, days: preview.days, warnings: preview.warnings };
-    // Always remember the committed result. The previous argument was inverted
-    // (`operationId === undefined`), so a confirm that *did* carry an
-    // operationId forgot its result and a lost acknowledgement was answered
-    // "预览已过期" instead of the frozen revision (review P3-6). This memory is
-    // process-local and expires with the preview window either way.
-    }, true);
-    });
-  } catch (error) {
-    if (error instanceof PlanPreviewError || error instanceof MobileGoalsRevisionConflictError) return reply.code(409).send({ code: error.code, message: error.message });
-    throw error;
-  }
-});
-
-app.post<{ Body: { expectedRevision?: number } }>(
-  "/v1/mobile/workout-plan/generate",
-  // Legacy compatibility only; current clients use preview + confirm.
-  { schema: { body: mobileWeeklyPlanGenerateBodySchema } },
-  async (request, reply) => {
-    const release = weeklyPlanGenerationGate.tryAcquire();
-    if (!release) {
-      return reply.code(409).send({
-        code: "weekly_plan_generation_busy",
-        message: "课表正在生成，请稍后重试"
-      });
-    }
-    try {
-      reply.header("Deprecation", "@1790553600");
-      return await runWeeklyPlanGeneration(request.body?.expectedRevision);
-    } catch (error) {
-      if (error instanceof WeeklyPlanConfirmationRequiredError) return reply.code(409).send({ code: error.code, message: error.message });
-      if (error instanceof PlanPreviewError) return reply.code(409).send({ code: error.code, message: error.message });
-      if (error instanceof MobileGoalsRevisionConflictError) {
-        return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
-      }
-      throw error;
-    } finally {
-      release();
-    }
-  }
-);
+// Preview/confirm/generate are retired by product decision (2026-10-20). The
+// preview/confirm candidate machinery was process-local + a second plan write
+// path; the unified command endpoints own candidate generation and the atomic
+// plan/state commit now. These mounts stay for route-table and OpenAPI audits.
+app.post("/v1/mobile/workout-plan/preview", retiredLegacySurface("/v1/mobile/training-plan/commands/preview"));
+app.post("/v1/mobile/workout-plan/confirm", retiredLegacySurface("/v1/mobile/training-plan/commands"));
+app.post("/v1/mobile/workout-plan/generate", retiredLegacySurface("/v1/mobile/training-plan/commands/refresh"));
 
 app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
 
@@ -1714,68 +1787,11 @@ app.get<{ Querystring: { days?: string } }>(
 const planPrescription = (): PlanMergeOptions =>
   databaseIsReady() ? { prescription: withReadStore((store) => store.mobilePlanPrescription()) } : {};
 
-app.get("/v1/mobile/goals", async () => mobileGoalsStore.read(planPrescription()));
-
-app.put<{ Body: UpdateMobileGoalsInput }>(
-  "/v1/mobile/goals",
-  { schema: { body: mobileGoalsBodySchema } },
-  async (request, reply) => {
-    // `weekPlan` confirmation is not a metadata-only write: the manual-plan
-    // policy needs the main database (capacity baseline, injury limits, history
-    // freeze). Without it `validateManualPlan` cannot run at all, so accepting
-    // the write would persist an unvalidated week that `planHistory` later
-    // presents as "the plan at that time" (review P2-4). Every other goals
-    // field stays writable without a database.
-    if (request.body.weekPlan !== undefined && !databaseIsReady()) {
-      return reply.code(409).send({
-        code: "database_not_ready",
-        message: "本地 RAI 数据库尚未就绪，周计划无法完成策略校验；请先导入或恢复数据，其余目标仍可保存"
-      });
-    }
-    try {
-      return planPublication.publish("goals", request.body, () => {
-      // Re-measured with the live zone prescription so a distance typed into
-      // the goals editor cannot outlive the structure it contradicts. The key
-      // is omitted — not set to null — when the read database is unavailable:
-      // there are no zones and no plan views in that state, and `null` would
-      // silently substitute the default paces for the runner's own.
-      const options = planPrescription();
-      const managedGoals = mobileGoalsStore.read(options);
-      if (managedGoals.runCoach && managedGoals.runCoach.status !== "ended" &&
-          (request.body.weekPlan !== undefined || request.body.raceTarget !== undefined)) {
-        throw new PlanOperationError("run_coach_managed", "当前目标和课表由自适应教练管理，请在教练计划中修改。");
-      }
-      if (managedGoals.runCoach?.status === "ended" && request.body.weekPlan !== undefined) options.runCoach = null;
-      if (request.body.weekPlan !== undefined && databaseIsReady()) {
-        const current = mobileGoalsStore.read(options);
-        const inputs = withReadStore(store => store.mobileWeeklyPlanInputs(options.runCoach === null ? { ...current, runCoach: null } : current));
-        options.validate = candidate => validateManualPlan({
-          goals: candidate,
-          today: inputs.today,
-          prescription: inputs.prescription,
-          // The same write may change the race target; reserve existing facts
-          // and locks, but derive the capacity from the candidate configuration.
-          weeklyVolumeBaselineKm: weeklyCapacity({
-            today: inputs.today.today.localDate, raceTarget: candidate.raceTarget, runCoach: candidate.runCoach ?? null,
-            recentWeeklyKm: inputs.recentWeeklyKm, previousWeekDistanceKm: inputs.previousWeekDistanceKm
-          }).baselineKm,
-          recentWeeklyKm: inputs.recentWeeklyKm,
-          previousWeekDistanceKm: inputs.previousWeekDistanceKm,
-          previous: current
-        });
-      }
-      return mobileGoalsStore.write(manualPlanWriteInput(request.body, new Date().toISOString()), options);
-      });
-    } catch (error) {
-      if (error instanceof WeeklyPlanConfirmationRequiredError) return reply.code(409).send({ code: error.code, message: error.message });
-      if (error instanceof ManualPlanPolicyError) return reply.code(422).send({ code: error.code, message: error.message });
-      if (error instanceof MobileGoalsRevisionConflictError) {
-        return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
-      }
-      throw error;
-    }
-  }
-);
+// Goals read/write is retired by product decision (2026-10-20). The unified
+// training-plan state is the read surface and configuration changes go through
+// the contract-v2 command endpoints; the store API stays internal.
+app.get("/v1/mobile/goals", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
+app.put("/v1/mobile/goals", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
 
 app.post<{ Body: LockMobileSessionInput }>(
   "/v1/mobile/lock",
