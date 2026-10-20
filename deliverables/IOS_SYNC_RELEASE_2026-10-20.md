@@ -98,9 +98,15 @@ sudo systemctl restart rai-api
 `deploy/upgrade.sh` 只做 `--ff-only` 快进，不能用于回滚。
 
 - iOS：窗口分页开关默认关闭，旧任务按原路径跑完；本次未安装新 App 构建。
-- 备份责任（运维）：本批**未创建**新冷备（runtime 12 G、磁盘剩余 11 G，不足以在保留历史备份的前提下再冷备一份；
-  删除旧备份属于运维决定）。服务器已有 `2026-10-14`（8.4 G）与 `2026-10-18`（9.1 G）两套 `/srv/rai-backups` 冷备。
-  本批无迁移，因此这些备份只作为代码/数据整体回退的兜底。
+- 备份责任（运维）：本批**未创建**新冷备。**2026-10-20 08:27 按用户要求删除了服务器上全部备份**：
+  `/srv/rai-backups` 两套 runtime 冷备（8.4 G + 9.1 G）与 `/var/lib/rai/var/backups` 四个迁移前备份
+  （`before-v37/v38/v45/v46`，约 9.0 G），合计约 26.5 G；磁盘占用 78% → 23%（37 G 可用）。
+  只保留**在用数据库**：`/var/lib/rai/var/rai.sqlite`（2.4 G）及 `rai-control.sqlite`、`runtime.sqlite`
+  等运行时状态；`/srv/rai-backups` 与 `/var/lib/rai/var/backups` 保留为空目录供将来备份使用。
+  删除后复核：服务 active、`/v1/health` `status=ok` 且 `databaseReady=true`、`/v1/workouts` 200、
+  journal 无 error。
+  ⇒ **当前没有任何数据回滚副本**；回滚仅限代码级（`checkout 33f79fe` + 重启），
+  若需要数据级回退必须先建立新备份。
 
 ## 6. CI 现实
 
