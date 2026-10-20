@@ -10,6 +10,13 @@
 | 本轮交付 | 核实与勘误；PR1 模式解析；PR2 的 F01/F02/F03 修复；F04/F06 修复；PR3 统一状态+迁移工具；PR4-1/2/3（v2 只读、预览+命令、事务内计划发布）；PR5 iOS 单入口+v2 客户端；PR6 Watch 切换撤回协议；PR7 唯一写者门禁 + G01–G03 评审材料 |
 | 明确未做 | 真实用户迁移、部署、真机验收；独立临床/教练领域复核。旧接口退役与旧排课代码删除已于 2026-10-20 执行（§4.17、附录 D） |
 
+> **发布状态更新（2026-10-20 18:46–18:58 CST）**：本工作树已提交为 `2f5f2b8` 并推送 gitee、经
+> `deploy/upgrade.sh --apply` 部署到生产；控制库 `mobile_training_state` 数据迁移已执行
+> （`sourceDigest` `38549b1c…`），协调器随后自动刷新到 `stateRevision=2`。本文表格中的"未提交/
+> 未部署/未迁移"是核实时的时点结论；发布后的实测、行为变化与新增缺口见
+> [发布记录](UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)。工作树既有 6 个 iOS health-sync 改动
+> 也已随 `2f5f2b8` 一并提交（见发布记录 §1）。
+
 ---
 
 ## 0. 结论摘要
@@ -661,16 +668,9 @@ warnings: ["2026-10-20 减量预算不足以支撑完整课表，改为休息", 
 | `run-coach.test.ts` 的旧路由/模板测试 | 删除（8 条保留纯函数与读取投影测试） | 这些行为随代码一起删除，不再声称可用 |
 | 旧 goal/lock 路由 | `/goals` 退役；`/lock` 保留（仍被生产路径使用） | 410 矩阵 + lock HTTP 测试 |
 
-剩余风险：后台旧周生成（非迁移 scope）仍是独立写路径，但只在 `training-plan-state` 未迁移时运行，
-且不新增 HTTP 面；统一状态迁移与自动协调器仍是后续步骤。
-
---- | --- | --- |
-| `run-coach.ts` 生命周期与模板分配 | `POST /v1/mobile/run-coach` 仍对外；旧客户端未升级；`runCoachRaceTarget` 仍被 F04 镜像与读取使用 | 路由注册与 `coach-manual-compatibility`/`run-coach` 测试 |
-| `generateWeeklyPlan` 旧周生成 | `/v1/mobile/workout-plan/preview|confirm|generate` 仍被旧流程使用（统一入口是新合同，但旧合同必须安全） | 这些路由的测试仍全绿 |
-| 旧 goal/lock 路由 | 未托管数据集仍依赖它们；F06 修复后结束节目会交还 | 409 门控 + mobile 测试 |
-| `coach-loop-runtime` 旧状态机 | 旧闭环客户端仍在使用；新合同已能读取其迁移结果 | `coach-loop*` 测试 |
-
-因此本轮交付的是**唯一写者结构门禁**（R1–R5）而不是删除：一旦有第二个排课/第二个迁移写入口出现，
-门禁立即变红。真正删除需要先把旧 `/v1` 合同映射到统一命令/读取（会改变旧客户端行为），属于需要
-单独产品决策的一步；本记录不把它伪装成已完成。
+> **2026-10-20 发布校正**：上方表格是执行证据；下方旧版「剩余风险」表（"`POST /v1/mobile/run-coach`
+> 仍对外"等）与退役后的实测相反，已删除。生产实测（[发布记录](UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)）：
+> `GET /v1/mobile/goals`、`GET/POST /v1/mobile/run-coach`、`POST /v1/mobile/workout-plan/{preview,confirm,generate}`
+> 均为 410 `legacy_surface_retired`；`/lock` 保留。仅 `coach-loop-runtime` 旧状态机作为旧闭环客户端合同
+> 保留，由结构门禁 R1–R5 守唯一写者。统一状态迁移、自动协调器与生产部署已完成。
 

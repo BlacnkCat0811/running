@@ -8,13 +8,21 @@
 
 > 状态口径（2026-10-18 修正）：本节报告可能**已提交**，也可能仍只存在于工作树；一律按文末「新产物约定」在下一轮并入 `PROJECT_REVIEW` 或删除，不能把本节标题读成"这些文件还没提交"。
 
+- [UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md](UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)：
+  **统一训练排课 v2 发布记录（已提交 + 已部署）** —— `2f5f2b8` 已推送 gitee，并经
+  `deploy/upgrade.sh --apply` 部署到生产；控制库 `mobile_control_schema` v1→v2（加表，主库仍 v46）
+  与 `mobile_training_state` 数据迁移已执行（dry-run → digest 校验 → apply → 协调器自动刷新到
+  stateRevision 2），记录本机全量判据（2224 tests / 0 fail / 13 skip、iOS 门禁、single-writer 门禁）、
+  生产 410/v2 读写矩阵、备份路径与代码/数据回滚边界；并单列已知缺口（旧 iOS 构建无法编辑计划、
+  手动课表入口仍指向 410 的旧写入、策略评审文档状态与代码不一致、未做真机/Simulator 验收）。
+
 - [UNIFIED_TRAINING_PLAN_VERIFY_2026-10-20.md](UNIFIED_TRAINING_PLAN_VERIFY_2026-10-20.md)：
   **统一训练排课方案的真实性核实与 PR1/F01 落地** —— 逐条核对方案文档的 E01–E15 与 F01–F06（F01–F06
   全部复现），给出四处必须修正的表述（F02 机制与标准案例、F06 的 `end` 把未来窗口写成 rest、E07 的
   guard 归属、iOS 入口数量），并记录本轮落地：`training-mode-policy.ts` 纯函数模式解析（16 条断言）、
   剂量政策 `v1→v2` 的逐维度修复（5 条回归，质量课从不可评估恢复为可行、轻松课成本从伪造 5 km 改为
-  实测上界 5.217 km）、契约与受限脚本的失败关闭改造。**F02/F03 未修，PR3–PR7 未开始，G01–G03 仍阻断；
-  未迁移数据、未部署、未做真机验收。**
+  实测上界 5.217 km）、契约与受限脚本的失败关闭改造。**F01–F06 已修、PR3–PR7 已落地、旧接口已按
+  所有者决定退役；数据迁移与生产部署见同日的发布记录。**
 
 - [IOS_DEVICE_LOG_TRIAGE_2026-10-20.md](IOS_DEVICE_LOG_TRIAGE_2026-10-20.md)：
   **iOS 真机日志分诊（当轮）** —— 结论"未发现 P0 功能故障"：健康同步的两行通道计数是历史重放期

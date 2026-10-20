@@ -164,6 +164,12 @@ if ! git diff --cached --quiet --diff-filter=ACMRD -- $PLAN_GATE_PATHS; then
   fi
 fi
 
+# PR7 唯一写者结构门禁（R1–R5）。它此前只存在于 `package.json` 的 npm script 里，
+# 没有任何提交/CI 执行 —— 又一次"判据存在 ≠ 判据被执行"。它只做源码形状核对
+# （不到 1 s），所以不做触发面收窄：写入入口的回归可以从任何一次提交进来。
+echo "pre-commit: 跑训练计划唯一写者结构门禁"
+node scripts/check-training-plan-single-writer.mjs
+
 # §7.7-5 / §13.4 的依赖约束。这条不变量今天成立，但此前**没有任何东西在守**：
 # workspace 依赖允许写 "@/rai/readiness": "*"，一旦有人加上，编译照过、测试照绿，
 # 而"恢复不再影响 Fitness"这条 P0 不变量已经被悄悄破坏。
