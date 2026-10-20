@@ -75,6 +75,13 @@ struct RAIApp: App {
                             // R1（2026-10-15）：回到前台也接手"未覆盖的代次 / 未读完的页"
                             //（此前只有观察者与解锁两个入口有这条收尾）。
                             await RaiStartup.handOffUncoveredGenerations(healthSync: model.healthSync, session: model.session)
+                            // B1（2026-10-19 复核）：冷启动/回到前台的有界分析终态对账。
+                            // 它不读 HealthKit、不触发上传：槽里已有终态时只恢复文案，
+                            // 需要终态时最多问一次 GET /v1/jobs/:id。
+                            await model.healthSync.reconcileAnalysisOnEntry(
+                                to: model.session.serverURL,
+                                apiToken: model.session.apiToken
+                            )
                         }
                     } else {
                         if phase == .background {

@@ -292,6 +292,87 @@ struct HealthSyncBackgroundRecoveryRegression {
         )
         try? FileManager.default.removeItem(at: temporary)
 
+        // --- R1（2026-10-19 复核）：窗口探针的三态与过期结算 ---------------------------
+        //
+        // 旧形态只有"现在有没有到期窗口"一个布尔：未来的复查时刻与超过 7 天的死窗口
+        // 都落进 `false`，前者没人安排下一次唤醒，后者永远不落 `expired` 终态。
+        // 这里在**真实 SQLite 库**上逐项钉住三件事：到期/未来/过期分开报、过期结算
+        // 落盘且可读回、重复结算幂等。
+        let windowDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rai-window-probe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: windowDirectory) }
+        let windowStore = SyncTaskStore(directory: windowDirectory)
+        check(windowStore.isAvailable, "the window probe test journal is available")
+        let probeNow = Date(timeIntervalSince1970: 1_790_000_000)
+        func window(
+            _ uuid: String,
+            createdAt: Date,
+            nextCheckAt: Date,
+            completedAt: Date? = nil,
+            outcome: WorkoutBackfillPassOutcome? = .settled
+        ) -> WorkoutBackfillWindow {
+            WorkoutBackfillWindow(
+                workoutUUID: uuid,
+                windowStart: createdAt.addingTimeInterval(-30 * 60),
+                windowEnd: createdAt.addingTimeInterval(30 * 60),
+                createdAt: createdAt,
+                nextCheckAt: nextCheckAt,
+                attemptCount: completedAt == nil ? 1 : 2,
+                lastSampleCount: 1,
+                stableCount: 0,
+                types: ["HKQuantityTypeIdentifierHeartRate": TypeProgress(observed: 1, delivered: 1)],
+                lastPassOutcome: outcome,
+                completedAt: completedAt
+            )
+        }
+        let dueWindow = window("w-due", createdAt: probeNow.addingTimeInterval(-3600),
+                               nextCheckAt: probeNow.addingTimeInterval(-60))
+        let futureWindow = window("w-future", createdAt: probeNow.addingTimeInterval(-3600),
+                                  nextCheckAt: probeNow.addingTimeInterval(15 * 60))
+        let expiredWindow = window("w-expired", createdAt: probeNow.addingTimeInterval(-8 * 24 * 3600),
+                                   nextCheckAt: probeNow.addingTimeInterval(-8 * 24 * 3600 + 60 * 60),
+                                   completedAt: nil, outcome: .budgetBlocked)
+        let completedWindow = window("w-completed", createdAt: probeNow.addingTimeInterval(-3600),
+                                     nextCheckAt: probeNow, completedAt: probeNow.addingTimeInterval(-120))
+        check(
+            windowStore.upsertWorkoutBackfillWindows(
+                [dueWindow, futureWindow, expiredWindow, completedWindow], scope: "scope-a"
+            ),
+            "the window probe fixtures were persisted"
+        )
+        let probe = windowStore.probeWorkoutWindowWork(scope: "scope-a", now: probeNow)
+        check(probe?.dueProbeCount == 1, "exactly one due workout window is reported")
+        check(probe?.nextProbeAt == futureWindow.nextCheckAt,
+              "the earliest future check time is reported separately from due work")
+        check(probe?.expiredWindowCount == 1, "the 7-day expired window is reported for settlement")
+        check(probe?.immediatePageCount == 0, "no paging work is invented before R3 creates rows")
+        check(
+            windowStore.probeWorkoutWindowWork(scope: "scope-b", now: probeNow)?.dueProbeCount == 0,
+            "another scope cannot see this scope's windows"
+        )
+
+        let settledCount = windowStore.settleExpiredWorkoutWindows(scope: "scope-a", now: probeNow)
+        check(settledCount == 1, "the expired window was settled in one short transaction")
+        let afterSettle = windowStore.loadWorkoutBackfillWindows(scope: "scope-a")
+        check(afterSettle["w-expired"]?.isCompleted == true,
+              "the settled window has a persistent completed timestamp")
+        check(afterSettle["w-expired"]?.lastPassOutcome == .expired,
+              "the settled window records why it stopped (expired)")
+        check(WorkoutBackfillScheduler.completionReason(afterSettle["w-expired"]!) == "expired",
+              "the settled window reads back as expired, not blocked")
+        check(afterSettle["w-due"]?.isCompleted == false && afterSettle["w-future"]?.isCompleted == false,
+              "settling expired windows does not touch live ones")
+        let afterProbe = windowStore.probeWorkoutWindowWork(scope: "scope-a", now: probeNow)
+        check(afterProbe?.expiredWindowCount == 0 && afterProbe?.dueProbeCount == 1,
+              "a settled window disappears from both due and expired counts")
+        check(windowStore.settleExpiredWorkoutWindows(scope: "scope-a", now: probeNow) == 0,
+              "settling expired windows is idempotent")
+        check(
+            SyncTaskStore(directory: URL(fileURLWithPath: "/dev/null/not-a-directory"))
+                .probeWorkoutWindowWork(scope: "scope-a", now: probeNow) == nil,
+            "an unreadable journal reports unknown instead of an empty window queue"
+        )
+
         print("\(checks) background recovery regression checks passed")
     }
 }

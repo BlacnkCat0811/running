@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { parseAppleHealthXml } from "../src/apple-health-parser.js";
 import { RaiDatabase } from "../src/database.js";
-import { nativeBinary } from "../src/native-worker.js";
+import { nativeBinary, nativeWorkerAvailability } from "../src/native-worker.js";
 import { readHealthSyncManifest } from "../src/sync-manifest.js";
 import { stableId } from "../src/utils.js";
 
+const nativeArtifact = nativeWorkerAvailability();
 const hrv = "HKQuantityTypeIdentifierHeartRateVariabilitySDNN";
 const sleep = "HKCategoryTypeIdentifierSleepAnalysis";
 const a = "00000000-0000-0000-0000-00000000000a";
@@ -338,7 +339,7 @@ test("manifest v2 parses typed deletions while v1/XML stay compatible; unsupport
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Rust XML parsing uses the same v2 UUID mapping/deletion contract", { skip: !existsSync(nativeBinary()) }, async () => {
+test("Rust XML parsing uses the same v2 UUID mapping/deletion contract", { skip: nativeArtifact.ready ? false : (nativeArtifact.reason ?? true) }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-hk-native-"));
   const path = join(root, "export.xml");
   const database = join(root, `rai.sqlite.importing.${randomUUID()}`);

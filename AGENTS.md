@@ -54,9 +54,15 @@ Choose checks proportionate to the change. For ordinary API / package work:
 For iOS work under `apps/ios`, use:
 
 - `npm run test:ios` — type-checks every iOS source and runs the pure-logic
-  regressions. On a host without Xcode it skips loudly ("no iOS source was
+  regressions, including the 10 cross-platform `apps/ios/tests/check-*.py`
+  source gates. On a host without Xcode it skips loudly ("no iOS source was
   checked") instead of passing quietly. The pre-commit hook runs it whenever
   paths under `apps/ios/` are staged.
+- `npm run check:ios-gates` — runs the cross-platform source gates directly
+  (no Xcode needed, so it works on Windows/Linux too). It also fails when a
+  non-excluded gate is not referenced by any `apps/ios/tests/run-*.sh`
+  ("judgement exists ≠ judgement executes"). The pre-commit hook runs it when
+  `apps/ios`, `packages/api-contracts`, or `packages/contracts` changes.
 - Simulator-bound acceptance (`apps/ios/tests/run-visual-tests.sh`) and the AMap
   coordinate cross-check stay manual; they need a booted Simulator and, for the
   former, `var/rai.sqlite`.

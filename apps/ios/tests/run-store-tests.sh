@@ -37,6 +37,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/RAI/SQLiteSupport.swift \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/RAI/DirectSyncBatchBudget.swift \

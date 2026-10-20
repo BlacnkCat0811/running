@@ -66,6 +66,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/DirectSyncReceiptState.swift \
   apps/ios/RAI/SyncTaskState.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/tests/SyncTaskMigrationRegression.swift \
   -o "$tmp/sync-task-migration-tests"
@@ -92,9 +93,50 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/BackgroundSyncPolicy.swift \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
+  apps/ios/RAI/HealthSyncWorkPlanner.swift \
   apps/ios/tests/BackgroundSyncPolicyRegression.swift \
   -o "$tmp/background-sync-policy-tests"
 "$tmp/background-sync-policy-tests"
+
+# R2（2026-10-19 复核）：观察者意图的**原子存储边界**（HealthSyncIntentJournal）。
+#
+# 旧实现在 UserDefaults 上做"读 current → 比较 → removeObject"三步：observer 在 HealthKit
+# 队列写、确认在 MainActor 删，三步之间没有任何原子性 ⇒ 旧确认可以删掉刚写入的新代次。
+# 这里用**真实 SQLite 文件**逐条执行两种交错顺序、并发记录/确认、跨连接重开、失败分类与
+# 旧键迁移。判据的全部意义是"跨线程 + 跨连接"，替身会把它绕过去，所以必须用真库。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
+  apps/ios/RAI/HealthSyncIntentJournal.swift \
+  apps/ios/RAI/SQLiteSupport.swift \
+  apps/ios/tests/HealthSyncIntentJournalRegression.swift \
+  -lsqlite3 \
+  -o "$tmp/health-sync-intent-journal-tests"
+
+# R3（2026-10-19 复核）：训练窗口 anchored 分页的**纯状态机**（rev/EOF/轮转/CAS 前驱）。
+# 判据全部是"改错了照样编译通过"的形态：满页当 EOF、缺锚点仍推进、窗口扩宽后复用旧锚。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
+  apps/ios/tests/WorkoutWindowPagingRegression.swift \
+  -o "$tmp/workout-window-paging-tests"
+"$tmp/workout-window-paging-tests"
+
+# R3 的**落盘**一侧：分页候选只在 commitSuccess 的同一事务里提交，且带前驱锚点 CAS。
+# 与既有的单事务提交回归同一手法：`SyncTaskStore(directory:)` 注入临时目录，
+# 跑的是真实 SQLite 文件，不是替身。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/SyncStateCommitPlan.swift \
+  apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/DirectSyncBatchBudget.swift \
+  apps/ios/RAI/SQLiteSupport.swift \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
+  apps/ios/tests/WorkoutWindowPagingStoreRegression.swift \
+  -o "$tmp/workout-window-paging-store-tests"
+"$tmp/workout-window-paging-store-tests"
+"$tmp/health-sync-intent-journal-tests"
 
 # 后台冷启动的恢复/意图确认时序。生产接线在 `HealthKitSync.swift`，但 URL/HealthKit/UIKit
 # 依赖使它不能进入纯逻辑可执行；因此“陈旧 epoch 不接纳”“失败不消费”“任务落盘才消费”
@@ -103,6 +145,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/RAI/SQLiteSupport.swift \
@@ -136,6 +179,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/RAI/SQLiteSupport.swift \
@@ -185,6 +229,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/RAI/SQLiteSupport.swift \

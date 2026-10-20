@@ -702,6 +702,58 @@ import Foundation
         )
         check(!uncommittedRecord.needsReconcile, "an uncommitted record does not get reconciled")
 
+        // MARK: B1（2026-10-19 复核）：冷启动/前台分析终态对账的触发与发布判据
+        //
+        // 失效方向都是静默的：少了触发 ⇒ 服务端算完后重启的用户永远停在“分析更新中”；
+        // 少了发布判据 ⇒ 旧目标的终态会盖掉新同步刚写下的文案。
+        let terminalRecord = DirectSyncAnalysisReconcile(
+            receiptId: "job-10", ingestStatus: .committed, analysisStatus: .published,
+            analysisJobId: "recompute-10", observedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let pendingRecord = DirectSyncAnalysisReconcile(
+            receiptId: "job-11", ingestStatus: .committed, analysisStatus: .queued,
+            analysisJobId: "recompute-11", observedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        check(AnalysisReconcileEntryPolicy.usesPersistedTerminal(terminalRecord),
+              "a persisted terminal analysis restores display without any network request")
+        check(!AnalysisReconcileEntryPolicy.usesPersistedTerminal(pendingRecord),
+              "a committed + queued slot still needs the one bounded reconcile request")
+        check(AnalysisReconcileEntryPolicy.shouldAttempt(
+                hasPendingSlot: true, isBusy: false, hasServer: true, hasToken: true),
+              "a pending slot with a bound target and token is attemptable")
+        check(!AnalysisReconcileEntryPolicy.shouldAttempt(
+                hasPendingSlot: false, isBusy: false, hasServer: true, hasToken: true),
+              "no pending slot means zero requests (foreground entries must be free)")
+        check(!AnalysisReconcileEntryPolicy.shouldAttempt(
+                hasPendingSlot: true, isBusy: true, hasServer: true, hasToken: true),
+              "a running sync owns the conclusion; the entry reconcile must not race it")
+        check(!AnalysisReconcileEntryPolicy.shouldAttempt(
+                hasPendingSlot: true, isBusy: false, hasServer: true, hasToken: false),
+              "without a token the reconcile cannot authenticate; it must not fire")
+        check(AnalysisReconcileEntryPolicy.canPublishMessage(
+                isBusy: false, activeServerStillMatches: true),
+              "an idle, unchanged target may publish the reconciled copy")
+        check(!AnalysisReconcileEntryPolicy.canPublishMessage(
+                isBusy: true, activeServerStillMatches: true),
+              "a sync that started during the await keeps its own copy")
+        check(!AnalysisReconcileEntryPolicy.canPublishMessage(
+                isBusy: false, activeServerStillMatches: false),
+              "a switched target/identity must not receive the old target's conclusion")
+        let slotObserved = Date(timeIntervalSince1970: 1_700_000_100)
+        check(AnalysisReconcileEntryPolicy.canReplaceCurrentMessage(
+                pendingObservedAt: slotObserved, lastSyncAt: nil, messageIsEmpty: false),
+              "without a later sync the persisted conclusion may replace the current message")
+        check(!AnalysisReconcileEntryPolicy.canReplaceCurrentMessage(
+                pendingObservedAt: slotObserved,
+                lastSyncAt: slotObserved.addingTimeInterval(60),
+                messageIsEmpty: false),
+              "a sync that ran after the slot wrote its conclusion must keep its newer message")
+        check(AnalysisReconcileEntryPolicy.canReplaceCurrentMessage(
+                pendingObservedAt: slotObserved,
+                lastSyncAt: slotObserved.addingTimeInterval(60),
+                messageIsEmpty: true),
+              "a cold-start empty message may always be restored from the persisted slot")
+
         if failures > 0 {
             print("\(failures) direct sync receipt check(s) failed.")
             exit(1)

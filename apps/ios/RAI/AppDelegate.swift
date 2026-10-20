@@ -88,7 +88,8 @@ enum RaiStartup {
         }
     }
 
-    /// 一轮同步收工后，把"**这一轮没有覆盖到的那一代**"与"**没读完的页**"接过去。
+    /// 一轮同步收工后，把"**这一轮没有覆盖到的那一代**"、"**没读完的页**"与
+    /// "**workout 窗口的到期探测/未读页**"接过去。
     ///
     /// 为什么必须有这一步：代次确认只负责把导出起点之后到达的通知**留下**（不被本轮吞掉），
     /// 不负责找人来跑它。少接这一手，那条通知会一直躺在盘上，直到下一次切后台或下一次投递
@@ -103,10 +104,19 @@ enum RaiStartup {
     /// "读得完多少"绑死在点击次数上。**没有新增任何后台机制**：额度用尽照旧走
     /// `submitBackgroundRun(after:)`。
     ///
+    /// 🔴 R1（2026-10-19 复核）：到期窗口 / 已确认页之后的下一页也走**续读预算**，
+    /// 不扣"新代次"额度 —— 它不是一条新通知，而是"自己的活没读完"/"窗口到点复查"。
+    /// 少了这一支，前台用户点了同步、窗口却没人执行（只有后台会被派发，而那条路径
+    /// 直到本轮修复前也不执行它）。
+    ///
     /// 🔴 进度判据用 `healthSync.dataUpdatedGeneration`：它在 `markSuccess` 里每成功提交一批
     /// 才 +1（服务端 job 还在算的那一轮不算）。"这一轮一批都没提交成功"必须**立刻收手** ——
     /// 否则一次 5xx/断网会被 60 秒预算放大成反复重放同一个失败请求，而每次重放都是一轮
     /// GB 级 HealthKit 导出。没有这条，预算越大越伤。
+    ///
+    /// 窗口通道的进度另算：一次纯空查询（把 `nextCheckAt` 推到未来）不会提交批次、也不该
+    /// 让 `dataUpdatedGeneration` 变化；这里用"窗口的立即工作是否消失"补上那一半，
+    /// 否则一次成功的探测会被当成"没进展"立刻收手（下一轮又从头再来）。
     ///
     /// ⚠️ 这里读的是**这一轮自己按目标现读的快照**（`probePendingWork`），不是
     /// `lastError` / `phase` 这类展示字段：单飞被拒的那一次什么都没跑，拿它的落点判断
@@ -126,15 +136,20 @@ enum RaiStartup {
             let pending = healthSync.probePendingWork(for: serverURL)
             let hasUncoveredGeneration = pending?.hasUncoveredGeneration ?? true
             let hasPendingContinuation = pending?.hasPendingContinuation ?? false
+            let hasWorkoutWork = pending?.hasDueWorkoutWindow ?? false
             let isForeground = UIApplication.shared.applicationState == .active
             switch SyncFollowUp.handoff(
                 hasUncoveredGeneration: hasUncoveredGeneration,
                 hasPendingContinuation: hasPendingContinuation,
+                hasWorkoutWork: hasWorkoutWork,
                 isForeground: isForeground,
                 foregroundRoundsLeft: roundsLeft,
                 continuationBudgetLeft: budget.allows(now: Date())
             ) {
             case .nothing:
+                // 没有立即工作，但可能还有**未来**的窗口复查：只安排既有 BGTask，
+                // 不立即执行（§8.3）。没有它就等于"窗口在 15 分钟后到点却没人再来"。
+                scheduleNextBackgroundRequest(for: pending)
                 return
             case .scheduleBackground:
                 submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
@@ -142,8 +157,10 @@ enum RaiStartup {
             case .runAgain:
                 // 按**本轮实际的挂起类型**扣预算 —— 扣账口径必须与 `handoff` 的判定
                 // 逐条对齐（两者同时挂起时,handoff 走"新代次"分支，这里同样优先扣新代次额度）。
+                // 窗口页/探测与待续页同属续读预算：它不是新通知。
                 if hasUncoveredGeneration { roundsLeft -= 1 } else { budget.recordRound() }
                 let generationBefore = healthSync.dataUpdatedGeneration
+                let windowWorkBefore = pending?.workoutWindow
                 await healthSync.syncIfNeeded(
                     to: serverURL,
                     apiToken: session.apiToken,
@@ -151,13 +168,29 @@ enum RaiStartup {
                     // 前台的 15 分钟节流挡掉（那正是它被留下来的原因）。
                     force: true
                 )
+                let workAfter = healthSync.probePendingWork(for: serverURL)?.workoutWindow
+                let windowMadeProgress = (windowWorkBefore?.hasDueWork ?? false)
+                    && !(workAfter?.hasDueWork ?? false)
                 let madeProgress = healthSync.dataUpdatedGeneration != generationBefore
+                    || windowMadeProgress
                 if SyncFollowUp.shouldStopWave(budget: budget, now: Date(), madeProgress: madeProgress) {
                     submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
                     return
                 }
             }
         }
+    }
+
+    /// R1（2026-10-19 复核）：按快照安排**下一次**后台请求（唯一的时刻来源）。
+    ///
+    /// 现在有活 ⇒ 既有 backoff；只有未来窗口探测 ⇒ `nextProbeAt`；都没有 ⇒ 不排空任务。
+    /// `BGTaskScheduler` 不保证 `earliestBeginDate` 真的执行，但它保证"没有请求 = 一定不再跑"。
+    @MainActor
+    static func scheduleNextBackgroundRequest(for pending: HealthSyncBackgroundRecovery.PendingWork?) {
+        guard let pending,
+              let request = BackgroundRunPolicy.nextBackgroundRequest(now: Date(), pending: pending)
+        else { return }
+        submitBackgroundRun(after: max(0, request.earliestBeginDate.timeIntervalSinceNow))
     }
 
     /// 设备解锁时，把"因为锁屏而停下的同步"重新推一次（文档 §3.4）。
@@ -248,22 +281,43 @@ enum RaiStartup {
     ///
     /// 同一 identifier 只保留**一个**待发请求（新的覆盖旧的），所以这条路可以被多处调用
     /// 而不会堆积 —— 切后台时排一次、后台跑完再排一次，是安全的。
+    ///
+    /// 🔴 R1（2026-10-19 复核）：**更早的待发请求不能被更晚的重排推迟。** `submit` 会覆盖
+    /// 同 identifier 的待发请求；"后台跑完按 15 分钟重排"若发生在"切后台时排的立刻执行"
+    /// 之后，就会把那次请求推到 15 分钟后。所以先查同 identifier 的待发请求，只在
+    /// `proposed` 确实更早时才提交（判据 `BackgroundRunPolicy.shouldReplacePendingRequest`
+    /// 是纯函数、有回归）。
     nonisolated static func submitBackgroundRun(after delay: TimeInterval = 0) {
-        let request = BGProcessingTaskRequest(identifier: RaiBackgroundSync.taskIdentifier)
-        // 没有网就什么都做不了；让系统等到有网再派活，省一次注定失败的唤醒。
-        request.requiresNetworkConnectivity = true
-        // 刻意不要求外接电源：跑步数据晚几小时到不影响正确性，但"必须插着电"会把
-        // 绝大多数手机排除在外 —— 那等于这个机制在真实使用里从不生效。
-        request.requiresExternalPower = false
-        request.earliestBeginDate = Date().addingTimeInterval(delay)
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            // `delay=0` 是「切后台时排的那一次」，`delay=900` 是「后台跑完自己重排的那一次」
-            // （`BackgroundRunPolicy.resubmitDelay`）。两者必须能在控制台里分开 ——
-            // 「请求是一次性的」这件事的可见后果就是"这一行只出现在切后台那一刻"。
-            RaiStartup.report("BGTaskScheduler.submit ok (delay=\(Int(delay))s)")
-        } catch {
-            RaiStartup.report("BGTaskScheduler.submit failed: \(String(describing: error))")
+        let earliestBeginDate = Date().addingTimeInterval(delay)
+        BGTaskScheduler.shared.getPendingTaskRequests { requests in
+            let existingEarliest = requests
+                .first { $0.identifier == RaiBackgroundSync.taskIdentifier }?
+                .earliestBeginDate
+            guard BackgroundRunPolicy.shouldReplacePendingRequest(
+                existingEarliest: existingEarliest,
+                proposed: earliestBeginDate
+            ) else {
+                // 已有请求更早：保留它（系统手上那张"票"比这次重排更值钱）。
+                RaiStartup.report("BGTaskScheduler.keep earlier pending request")
+                return
+            }
+            let request = BGProcessingTaskRequest(identifier: RaiBackgroundSync.taskIdentifier)
+            // 没有网就什么都做不了；让系统等到有网再派活，省一次注定失败的唤醒。
+            request.requiresNetworkConnectivity = true
+            // 刻意不要求外接电源：跑步数据晚几小时到不影响正确性，但"必须插着电"会把
+            // 绝大多数手机排除在外 —— 那等于这个机制在真实使用里从不生效。
+            request.requiresExternalPower = false
+            request.earliestBeginDate = earliestBeginDate
+            do {
+                try BGTaskScheduler.shared.submit(request)
+                // `delay=0` 是「切后台/新窗口到点时排的那一次」，`delay=900` 是「后台跑完自己
+                // 重排的那一次」；两者必须能在控制台里分开（见 `BackgroundRunPolicy.resubmitDelay`）。
+                RaiStartup.report(
+                    "BGTaskScheduler.submit ok (delay=\(Int(max(0, earliestBeginDate.timeIntervalSinceNow)))s)"
+                )
+            } catch {
+                RaiStartup.report("BGTaskScheduler.submit failed: \(String(describing: error))")
+            }
         }
     }
 
@@ -298,8 +352,16 @@ enum RaiStartup {
             // （服务端 job 还在算），而 `BGTaskScheduler` 的请求是**一次性**的、
             // 系统不会自动重试。漏掉这一步的可见后果是"后台跑过一次，之后再没人管"，
             // 直到用户下次手动打开 App —— 那等于三机制白装。
-            if let pending, BackgroundRunPolicy.shouldResubmit(pending) {
-                submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
+            //
+            // R1（2026-10-19 复核）：还有立即工作 ⇒ 既有 backoff；只有**未来**窗口复查 ⇒
+            // 按 `nextProbeAt` 安排（这一轮仍可如实报成功）。两条都由
+            // `BackgroundRunPolicy.nextBackgroundRequest` 给出，调用方不另算一份。
+            if let pending {
+                if BackgroundRunPolicy.shouldResubmit(pending) {
+                    submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
+                } else if let request = BackgroundRunPolicy.nextBackgroundRequest(now: Date(), pending: pending) {
+                    submitBackgroundRun(after: max(0, request.earliestBeginDate.timeIntervalSinceNow))
+                }
             }
             // 报成功与否看"收工时盘上还有没有没走完的工作"，**不看**"这一轮跑没跑起来"。
             // 快照为 `nil`（压根没绑定服务端 ⇒ 构造不出来）时保守报**失败**：宁可让系统遥测
@@ -390,9 +452,16 @@ final class RaiAppDelegate: NSObject, UIApplicationDelegate {
     func applicationDidEnterBackground(_ application: UIApplication) {
         Task { @MainActor in
             let model = AppModel.shared
-            guard let pending = model.healthSync.probePendingWork(for: model.session.serverURL),
-                  BackgroundRunPolicy.shouldResubmit(pending) else { return }
-            RaiStartup.submitBackgroundRun()
+            guard let pending = model.healthSync.probePendingWork(for: model.session.serverURL) else {
+                return
+            }
+            // R1：立即工作照旧；只有未来窗口复查时也要排一次 —— 否则切后台那一刻之后
+            // "15 分钟后该探一次"没有任何人再来。没有可排的工作（空快照）才真的不排。
+            let hasImmediateWork = BackgroundRunPolicy.shouldResubmit(pending)
+            guard hasImmediateWork || pending.workoutWindow.hasFutureProbe else { return }
+            if let request = BackgroundRunPolicy.nextBackgroundRequest(now: Date(), pending: pending) {
+                RaiStartup.submitBackgroundRun(after: max(0, request.earliestBeginDate.timeIntervalSinceNow))
+            }
         }
     }
 }

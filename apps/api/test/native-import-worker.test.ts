@@ -3,14 +3,18 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { nativeBinary, NATIVE_VERSION } from "@rai/health-export-parser";
+import { nativeBinary, nativeWorkerAvailability, NATIVE_VERSION } from "@rai/health-export-parser";
 import { createImportJobId, ImportWorker } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
-const available = existsSync(nativeBinary());
-if (process.env.RAI_REQUIRE_RUST_TESTS === "1" && !available) throw new Error("Rust binary required");
+const artifact = nativeWorkerAvailability();
+const available = artifact.ready;
+const skipReason: string | boolean = available ? false : (artifact.reason ?? true);
+if (process.env.RAI_REQUIRE_RUST_TESTS === "1" && !available) {
+  throw new Error(`Rust worker required: ${artifact.reason ?? "unknown"}`);
+}
 
-test("Rust jobs keep their engine across restart but the import path refuses them explicitly (engine_rust)", { skip: !available }, async () => {
+test("Rust jobs keep their engine across restart but the import path refuses them explicitly (engine_rust)", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-native-live-"));
   const input = join(root, "export"); mkdirSync(input);
   mkdirSync(join(input, "workout-routes"));
@@ -86,7 +90,7 @@ test("abandoned native spool cleanup preserves pending attempts and unrelated di
   } finally { release(); await worker.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("engine mismatch is refused explicitly instead of silently switching engines", { skip: !available }, async () => {
+test("engine mismatch is refused explicitly instead of silently switching engines", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-native-version-"));
   const input = join(root, "export"); mkdirSync(input);
   writeFileSync(join(input, "export.xml"), "<HealthData/>");

@@ -58,7 +58,7 @@ struct BackgroundSyncPolicyRegression {
         hasIntent: Bool = false,
         hasRecoveryRequest: Bool = false,
         hasPendingContinuation: Bool = false,
-        hasDueWorkoutWindow: Bool = false
+        workoutWindow: WorkoutWindowWork = .none
     ) -> HealthSyncBackgroundRecovery.PendingWork {
         HealthSyncBackgroundRecovery.PendingWork(
             serverURL: "http://127.0.0.1:8787",
@@ -68,7 +68,7 @@ struct BackgroundSyncPolicyRegression {
             hasIntent: hasIntent,
             hasRecoveryRequest: hasRecoveryRequest,
             hasPendingContinuation: hasPendingContinuation,
-            hasDueWorkoutWindow: hasDueWorkoutWindow
+            workoutWindow: workoutWindow
         )
     }
 
@@ -95,6 +95,10 @@ struct BackgroundSyncPolicyRegression {
         try successIsReportedFromTheRemainingWork()
         try unfinishedWorkResubmitsItself()
         try uncoveredGenerationsAreHandedOff()
+        // R1（2026-10-19）：统一待办计划 + 后台请求时刻。放在调度判据之后、A8 之前：
+        // 它们与上面的 `action` 表共享"什么算待办"的输入，被改坏时红在这里才指得准。
+        try workoutWindowWorkDrivesTheSamePlanForExecutionAndRescheduling()
+        try backgroundRequestComesFromTheSnapshot()
         try pendingContinuationGetsItsOwnBudget()
         try foregroundContinuationWaveIsTimeBounded()
         try identifiersAreStableAndDistinct()
@@ -552,7 +556,7 @@ struct BackgroundSyncPolicyRegression {
         // A4：到期未读的窗口 = 这一轮还没干完，不能报成功（否则系统不再排下一轮）。
         try require(
             BackgroundRunPolicy.reportedSuccess(
-                pending(verdict: .empty, hasDueWorkoutWindow: true)) == false,
+                pending(verdict: .empty, workoutWindow: WorkoutWindowWork(dueProbeCount: 1))) == false,
             "a run that left a due workout backfill window reported success"
         )
         try require(
@@ -585,7 +589,7 @@ struct BackgroundSyncPolicyRegression {
         // A4（2026-10-19）：到期窗口也是"还有活"。缺这一条时，anchor 追平 + 无意图时
         // 探针会回答"没事可做"，而窗口的 nextCheckAt 就躺在库里没人执行。
         try require(
-            BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty, hasDueWorkoutWindow: true)),
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty, workoutWindow: WorkoutWindowWork(dueProbeCount: 1))),
             "a due workout backfill window did not schedule the next round"
         )
         try require(
@@ -672,6 +676,185 @@ struct BackgroundSyncPolicyRegression {
         try require(
             pending(verdict: .pending).needsAnotherRound && pending(verdict: .unknown).needsAnotherRound,
             "the resubmit judgement lost its unfinished-batch or unreadable-journal case"
+        )
+    }
+
+    /// R1（2026-10-19 复核）：**同一份待办快照**必须同时决定"执行什么"与"何时重排"。
+    ///
+    /// 旧形态的活锁指纹：到期窗口让 `needsAnotherRound == true`（于是系统不断派活），
+    /// 却没有驱动 `action` 的导出分支（于是每轮 `nothingToDo`、只再排一次）。修复的判据
+    /// 不是"源码里出现了某个字段"，而是**给定这份快照，计划必须是一个可执行的导出**。
+    private static func workoutWindowWorkDrivesTheSamePlanForExecutionAndRescheduling() throws {
+        // ① 只有到期窗口：必须执行窗口探测，而不是 idle / nothingToDo。
+        let dueWindow = pending(
+            verdict: .empty,
+            workoutWindow: WorkoutWindowWork(dueProbeCount: 1)
+        )
+        try require(
+            HealthSyncWorkPlanner.plan(pending: dueWindow, hasTask: false, isBlocked: false, now: now)
+                == .export(.workoutProbe),
+            "a due workout window was counted as pending work but did not produce an export plan"
+        )
+        try require(
+            BackgroundRunPolicy.action(
+                jobId: nil, hasTask: false, hasBackgroundUploadTask: false,
+                plan: .export(.workoutProbe)
+            ) == .runWorkoutWindowPass,
+            "a due workout window became nothingToDo in the background action"
+        )
+        // ② 已确认页之后的下一页属于**立即续批**，优先于到期探测。
+        let page = pending(
+            verdict: .empty,
+            workoutWindow: WorkoutWindowWork(immediatePageCount: 1, dueProbeCount: 1)
+        )
+        try require(
+            HealthSyncWorkPlanner.plan(pending: page, hasTask: false, isBlocked: false, now: now)
+                == .export(.workoutPage),
+            "an unread training-window page did not outrank a due probe"
+        )
+        // ③ 只有未来探测：现在不导出，但要保留确切时刻（不是 idle）。
+        let nextProbe = now.addingTimeInterval(15 * 60)
+        let future = pending(
+            verdict: .empty,
+            workoutWindow: WorkoutWindowWork(nextProbeAt: nextProbe)
+        )
+        try require(
+            HealthSyncWorkPlanner.plan(pending: future, hasTask: false, isBlocked: false, now: now)
+                == .deferUntil(nextProbe),
+            "a future workout probe was executed immediately instead of being deferred"
+        )
+        try require(
+            !future.needsAnotherRound && future.reportsSuccess,
+            "a future-only probe was reported as unfinished work"
+        )
+        // ④ 空快照才是 idle；未来探测不能被当成"现在有活"。
+        try require(
+            HealthSyncWorkPlanner.plan(
+                pending: pending(verdict: .empty), hasTask: false, isBlocked: false, now: now
+            ) == .idle,
+            "a confirmed empty snapshot was not idle"
+        )
+        // ⑤ 已有任务行 ⇒ 原任务接续（重新导出会换 batchId）。
+        try require(
+            HealthSyncWorkPlanner.plan(
+                pending: pending(verdict: .pending), hasTask: true, isBlocked: false, now: now
+            ) == .resumeExistingTask,
+            "an existing task row was not resumed"
+        )
+        // ⑥ 阻塞态不做注定失败的导出，但**不丢待办**。
+        try require(
+            HealthSyncWorkPlanner.plan(
+                pending: dueWindow, hasTask: false, isBlocked: true, now: now
+            ) == .blocked,
+            "a blocked round was planned as an export"
+        )
+        // ⑦ 读盘失败 = unknown，不能退化成"空队列"。
+        let unreadableWindow = pending(
+            verdict: .empty,
+            workoutWindow: WorkoutWindowWork(readFailed: true)
+        )
+        try require(
+            HealthSyncWorkPlanner.plan(
+                pending: unreadableWindow, hasTask: false, isBlocked: false, now: now
+            ) == .export(.newDelivery),
+            "an unreadable window table was treated as an empty queue"
+        )
+        try require(
+            unreadableWindow.needsAnotherRound && !unreadableWindow.reportsSuccess,
+            "an unreadable window table still reported success"
+        )
+        // ⑧ 新代次优先于窗口工作（两者都要求导出，但扣的是不同额度）。
+        let generationAndWindow = pending(
+            verdict: .empty, hasIntent: true,
+            workoutWindow: WorkoutWindowWork(dueProbeCount: 1)
+        )
+        try require(
+            HealthSyncWorkPlanner.plan(
+                pending: generationAndWindow, hasTask: false, isBlocked: false, now: now
+            ) == .export(.newDelivery),
+            "a delivery covered by a due window lost its new-generation priority"
+        )
+        // ⑨ 前台接手：窗口工作走续读预算（不扣新代次额度），且必须能在前台执行。
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: false, hasPendingContinuation: false,
+                hasWorkoutWork: true, isForeground: true,
+                foregroundRoundsLeft: 0, continuationBudgetLeft: true
+            ) == .runAgain,
+            "the foreground handoff did not pick up due workout-window work"
+        )
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: false, hasPendingContinuation: false,
+                hasWorkoutWork: true, isForeground: true,
+                foregroundRoundsLeft: 0, continuationBudgetLeft: false
+            ) == .scheduleBackground,
+            "workout-window work ignored the continuation budget"
+        )
+    }
+
+    /// R1（2026-10-19 复核）：后台请求的**时刻**只能来自快照。
+    ///
+    /// 三态：立即工作 ⇒ 既有 backoff；只有未来探测 ⇒ `nextProbeAt`；都没有 ⇒ 不创建空任务。
+    /// 另外钉"更早的待发请求不能被更晚的重排推迟" —— `BGTaskScheduler` 同 identifier
+    /// 后提交会覆盖先提交的 `earliestBeginDate`。
+    private static func backgroundRequestComesFromTheSnapshot() throws {
+        let immediate = pending(
+            verdict: .empty,
+            workoutWindow: WorkoutWindowWork(dueProbeCount: 1)
+        )
+        try require(
+            BackgroundRunPolicy.nextBackgroundRequest(now: now, pending: immediate)
+                == .init(
+                    earliestBeginDate: now.addingTimeInterval(BackgroundRunPolicy.resubmitDelay),
+                    reason: .pendingWork
+                ),
+            "immediate work did not schedule the existing backoff"
+        )
+        let nextProbe = now.addingTimeInterval(15 * 60)
+        let future = pending(
+            verdict: .empty,
+            workoutWindow: WorkoutWindowWork(nextProbeAt: nextProbe)
+        )
+        try require(
+            BackgroundRunPolicy.nextBackgroundRequest(now: now, pending: future)
+                == .init(earliestBeginDate: nextProbe, reason: .futureWorkoutProbe),
+            "a future probe was not scheduled at its own earliest time"
+        )
+        try require(
+            BackgroundRunPolicy.nextBackgroundRequest(now: now, pending: pending(verdict: .empty)) == nil,
+            "an empty snapshot still created a background request (an empty wake-up)"
+        )
+        // 未来探测可以报成功，但重排仍必须存在：两个结论来自同一份快照。
+        try require(
+            future.reportsSuccess
+                && BackgroundRunPolicy.nextBackgroundRequest(now: now, pending: future) != nil,
+            "a future-only probe reported success and then dropped its next run"
+        )
+        // 保留更早的待发请求。
+        try require(
+            BackgroundRunPolicy.shouldReplacePendingRequest(
+                existingEarliest: nil, proposed: now
+            ),
+            "a first request was rejected"
+        )
+        try require(
+            !BackgroundRunPolicy.shouldReplacePendingRequest(
+                existingEarliest: now.addingTimeInterval(60), proposed: now.addingTimeInterval(900)
+            ),
+            "a later resubmit postponed an earlier pending request"
+        )
+        try require(
+            BackgroundRunPolicy.shouldReplacePendingRequest(
+                existingEarliest: now.addingTimeInterval(900), proposed: now.addingTimeInterval(60)
+            ),
+            "a genuinely earlier request did not replace the pending one"
+        )
+        try require(
+            !BackgroundRunPolicy.shouldReplacePendingRequest(
+                existingEarliest: now, proposed: now
+            ),
+            "an equal request was treated as earlier"
         )
     }
 

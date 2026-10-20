@@ -24,6 +24,7 @@ struct SyncTaskMigrationRegression {
         try legacyNamedArtifactsAreDetectedAsAbsent()
         try corruptRouteCommitDegradesToNil()
         try exportCountsDecodeAndDegradeSafely()
+        try pendingWorkoutPagesSurviveARoundTrip()
         print("Sync task migration regression tests passed")
     }
 
@@ -261,6 +262,54 @@ struct SyncTaskMigrationRegression {
     /// 让它抛出去，整份任务会被当成"没有任务" ⇒ 升级后首次同步重导整个窗口。
     /// 正确方向是把它降级为 `nil`（这一轮不结算、待办保留），**不是**牺牲任务行。
     ///
+    /// R3（2026-10-19 复核）：分页候选必须跨进程恢复，且旧 payload/损坏形态**降级为 nil**
+    /// 而不是让整份任务解不开。
+    ///
+    /// 这是"服务端已提交、本地页进度未提交"那一窗口的唯一恢复依据：丢了候选只是下一批
+    /// 重读一页；丢了整份任务会让升级后的首次同步重导整个窗口（`SyncTaskState` 头部的兼容
+    /// 纪律），所以这里对损坏形态取"降级"而不是"抛错"。
+    private static func pendingWorkoutPagesSurviveARoundTrip() throws {
+        let key = WorkoutWindowPageKey(
+            scope: "scope-a", workoutUUID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            windowRevision: 42, recordType: "HKQuantityTypeIdentifierHeartRate"
+        )
+        let commit = WorkoutWindowPageCommit(
+            key: key,
+            predicateJSON: "{\"version\":1}",
+            expectedAnchor: Data([0x01]),
+            committedAnchor: Data([0x02]),
+            state: .paging,
+            nextCheckAt: Date(timeIntervalSinceReferenceDate: 500),
+            servedAt: Date(timeIntervalSinceReferenceDate: 400),
+            eofObservedAt: nil,
+            lastErrorCode: nil
+        )
+        let original = SyncTaskState(
+            target: "http://127.0.0.1:8787",
+            phase: SyncPhase.exported.rawValue,
+            payloadHash: String(repeating: "b", count: 64),
+            workoutCount: 1,
+            pendingWorkoutPages: [commit]
+        )
+        let data = try JSONEncoder().encode(original)
+        let restored = try JSONDecoder().decode(SyncTaskState.self, from: data)
+        try require(restored.pendingWorkoutPages == [commit],
+                    "the pending workout page candidates were lost across a round trip")
+        var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        object.removeValue(forKey: "pendingWorkoutPages")
+        let legacy = try JSONDecoder().decode(
+            SyncTaskState.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        try require(legacy.pendingWorkoutPages == nil,
+                    "a pre-R3 payload must resume with no page candidates, not fail to decode")
+        object["pendingWorkoutPages"] = [["not": "a page commit"]]
+        let corrupted = try JSONDecoder().decode(
+            SyncTaskState.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+        try require(corrupted.pendingWorkoutPages == nil,
+                    "a corrupt page candidate must degrade to nil instead of killing the whole task")
+    }
+
     /// 反向的失败形态也在判据里：这条不能靠"没有 routeCommit 键"通过 —— 那个用例
     /// 被 `legacyPayloadDecodesWithNewFieldsNil` 覆盖；这里必须给一个**存在但损坏**的键。
     private static func corruptRouteCommitDegradesToNil() throws {

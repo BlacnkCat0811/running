@@ -324,3 +324,52 @@ nonisolated struct DirectSyncAnalysisReconcile: Codable, Equatable, Sendable {
         return true
     }
 }
+
+/// B1（2026-10-19 复核）：冷启动/前台**分析终态对账**的纯触发/发布判据。
+///
+/// 为什么需要独立的入口：对账此前只挂在 `performSync` 的 `settled` 分支上 —— 服务端先算完、
+/// App 后重启时，恰好没有任何同步轮次会收尾，于是"分析已更新"要等用户再触发一次同步。
+/// 对账槽（`sync_analysis_reconcile`）已经把 `receiptId` / `analysisJobId` 都持久化了，
+/// 缺的只是一个**不读 HealthKit、不触发上传**的入口。
+///
+/// 三条判据（都可纯函数执行）：
+/// 1. 只有"事实已 committed + 有 jobId + 未到终态"的槽才发请求；
+/// 2. 槽里已经是终态 ⇒ 直接恢复展示，**不联网**；
+/// 3. `await` 之后只有"没有新一轮同步在跑、目标/身份没切换"才允许改展示文案 ——
+///    否则旧目标的终态会盖掉新同步的文案（§14.2 A17 的边界）。
+nonisolated enum AnalysisReconcileEntryPolicy {
+    static func shouldAttempt(
+        hasPendingSlot: Bool,
+        isBusy: Bool,
+        hasServer: Bool,
+        hasToken: Bool
+    ) -> Bool {
+        hasPendingSlot && !isBusy && hasServer && hasToken
+    }
+
+    /// 槽里是终态（或永久不需要对账）⇒ 用持久结论恢复展示，不再发网络请求。
+    static func usesPersistedTerminal(_ pending: DirectSyncAnalysisReconcile) -> Bool {
+        !pending.needsReconcile
+    }
+
+    /// 网络返回后能不能改文案。`activeServerStillMatches` 同时包含"服务端没切"与
+    /// "落盘 scope 仍是当前权威 scope"两层（调用方合并成一个布尔）。
+    static func canPublishMessage(isBusy: Bool, activeServerStillMatches: Bool) -> Bool {
+        !isBusy && activeServerStillMatches
+    }
+
+    /// 当前界面已经有一句**更新**的结论时，旧槽不得把它盖回去。
+    ///
+    /// 场景：用户回到前台 → 对账拿到旧槽终态；而在这之前已经完成过一轮同步（`lastSyncAt`
+    /// 晚于槽的 `observedAt`），那轮同步的文案才是当前事实。没有这条，重启/前后台切换会
+    /// 周期性地把"已是最新"改回旧批次的"分析已更新"。
+    static func canReplaceCurrentMessage(
+        pendingObservedAt: Date,
+        lastSyncAt: Date?,
+        messageIsEmpty: Bool
+    ) -> Bool {
+        if messageIsEmpty { return true }
+        guard let lastSyncAt else { return true }
+        return pendingObservedAt >= lastSyncAt
+    }
+}

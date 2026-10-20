@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -78,6 +78,108 @@ export function nativeBinary(): string {
   return process.env.RAI_RUST_BINARY ?? fileURLToPath(
     new URL(`../../../target/release/rai-data-worker${process.platform === "win32" ? ".exe" : ""}`, import.meta.url)
   );
+}
+
+/**
+ * 本机 Rust worker 是否可用于 parity 验证 / `RAI_IMPORT_ENGINE=rust`。
+ *
+ * ## 为什么需要它（2026-10-19）
+ *
+ * 仓库不提交 `target/`。一个旧的 debug/release 产物可能**早于** Rust 源码的 parity 修复
+ * 存在（本机实测：产物 10-16，`c644c49`（10-18）才修好 TS↔Rust 账本差异）。此时
+ * `native-worker.test.ts` 会把"产物过期"报成"产品 parity 坏了"，而机器上没有 cargo
+ * 又无法重建 —— 失败信息指向错误方向。
+ *
+ * 判据：产物存在 + **不早于** Rust 源文件/Cargo 清单的最新 mtime。源码树不存在（打包部署
+ * 只带二进制）时无法判断新旧，按"可用"处理（不制造假跳过）。
+ */
+export interface NativeWorkerAvailability {
+  binary: string;
+  exists: boolean;
+  stale: boolean;
+  ready: boolean;
+  /** 不可用原因（`ready=false` 时必为非空，供测试 skip/异常消息使用）。 */
+  reason: string | null;
+}
+
+/** Rust 源文件/清单的最新 mtime；源码树不存在 ⇒ `null`（打包部署）。 */
+export function newestNativeSourceMtimeMs(root?: string): number | null {
+  const projectRoot = root ?? fileURLToPath(new URL("../../../", import.meta.url));
+  const candidates = [
+    join(projectRoot, "Cargo.toml"),
+    join(projectRoot, "Cargo.lock"),
+    join(projectRoot, "crates", "rai-data-worker", "Cargo.toml")
+  ];
+  let newest: number | null = null;
+  const consider = (path: string) => {
+    try {
+      const stat = statSync(path);
+      if (stat.isFile()) newest = Math.max(newest ?? 0, stat.mtimeMs);
+    } catch {
+      // 不存在/不可读：源码树可能没随部署包分发。
+    }
+  };
+  for (const candidate of candidates) consider(candidate);
+  const walk = (directory: string) => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && entry.name.endsWith(".rs")) consider(path);
+    }
+  };
+  walk(join(projectRoot, "crates", "rai-data-worker", "src"));
+  return newest;
+}
+
+/** 纯判据：产物是否存在、是否早于源码。`newestSourceMtimeMs == null` ⇒ 不判过期。 */
+export function nativeArtifactState(
+  binary: string,
+  newestSourceMtimeMs: number | null
+): { exists: boolean; stale: boolean; reason: string | null } {
+  if (!existsSync(binary)) {
+    return {
+      exists: false,
+      stale: false,
+      reason: "Rust worker binary is not built; run npm run rust:build (cargo build --release)"
+    };
+  }
+  if (newestSourceMtimeMs !== null) {
+    try {
+      const binaryMtime = statSync(binary).mtimeMs;
+      if (binaryMtime < newestSourceMtimeMs) {
+        return {
+          exists: true,
+          stale: true,
+          reason: "Rust worker binary is older than its Rust sources; rebuild with npm run rust:build "
+            + "(a stale binary reports the pre-parity-fix behaviour as a product failure)"
+        };
+      }
+    } catch {
+      // stat 失败按"无法判断"处理（不制造假跳过）。
+    }
+  }
+  return { exists: true, stale: false, reason: null };
+}
+
+export function nativeWorkerAvailability(
+  env: NodeJS.ProcessEnv = process.env,
+  projectRoot?: string
+): NativeWorkerAvailability {
+  const binary = env.RAI_RUST_BINARY ?? nativeBinary();
+  const state = nativeArtifactState(binary, newestNativeSourceMtimeMs(projectRoot));
+  return {
+    binary,
+    exists: state.exists,
+    stale: state.stale,
+    ready: state.exists && !state.stale,
+    reason: state.reason
+  };
 }
 export class NativeWorkerError extends Error {
   constructor(readonly code: string) { super(`Rust data worker: ${code}`); }

@@ -21,8 +21,12 @@
 纯文本、只读、显式 UTF-8、退出码 0/1、失败逐条打印。**不执行 Swift、不连数据库。**
 """
 
+from __future__ import annotations
+
+import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -38,7 +42,16 @@ CONTRACTS = "packages/api-contracts/src/index.ts"
 # 所以形状不能留在 API 层）。`api-contracts` 只做转发。判据因此必须**两个文件都扫**，
 # 而且要把"同名接口在两处各声明一次"当成失败 —— 那正是本次搬迁最容易留下的形态。
 SHARED_VIEWS = "packages/contracts/src/facts-analysis-view.ts"
-BASELINE = "var/reports/pr5-c9-baseline-keys.json"
+# 🔴 基线必须**入库**（2026-10-19 修复）：旧路径 `var/reports/pr5-c9-baseline-keys.json`
+# 被 `.gitignore` 的 `var/` 忽略，于是干净树永远缺基线 ⇒ 这支判据从未在干净树上绿过，
+# 还被当成"预存在失败"。基线是判据的输入，输入不入库等于判据不存在。
+# 重新生成用同一支脚本（不要手改）：`python3 apps/ios/tests/check-pr5-facts-analysis.py --write-baseline`
+BASELINE = "apps/ios/tests/fixtures/pr5-c9-baseline-keys.json"
+
+# C9 覆盖的三个响应（`docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md` §4 C9）：
+# today / workouts / training-plan-state。清单写死在脚本里，基线缺一个 interface 就是失败 ——
+# 否则"删掉一条基线"就能把 C9 静默削弱。
+C9_INTERFACES = ("WorkoutListResponse", "TrainingPlanStateResponse", "MobileTodayResponse")
 SERVER = "apps/api/src/server.ts"
 DATA = "apps/api/src/data.ts"
 
@@ -121,6 +134,64 @@ def top_level_fields(body: str | None) -> list[tuple[str, bool]]:
     return fields
 
 
+def fields_digest(fields: dict) -> str:
+    """基线字段表的内容摘要。
+
+    为什么需要它：C9 的循环只检查"基线里的字段在源码里还在" —— **从基线里删一行**
+    就等于静默减少覆盖（本脚本第一版实测：删掉 `WorkoutListResponse.limit` 后仍然全绿）。
+    `fieldsSha256` 让"手工删字段"与"重建基线"可区分：重建会重算摘要，手删不会。
+    """
+    canonical = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def write_baseline() -> None:
+    """用**已提交**的契约重建基线（唯一合法来源，不手工编辑 JSON）。
+
+    记录的 `commit` 回答"这份基线来自哪个 revision"，`contractsSha256` 回答"它冻结的是哪份
+    TS 字节"——两者都是溯源信息，**不是**每次运行都要相等的判据（合法的新增字段会改字节，
+    C9 只允许"加"、不允许"删/改可选性"）。`fieldsSha256` 是**完整性**判据：每次运行都会核对，
+    防止"删掉基线里一行"这种静默弱化。
+    """
+    contracts_path = ROOT / CONTRACTS
+    if not contracts_path.is_file():
+        sys.exit(f"无法生成基线：找不到 {CONTRACTS}")
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain", "--", CONTRACTS],
+        cwd=ROOT, capture_output=True, text=True,
+    ).stdout.strip()
+    if dirty:
+        sys.exit(f"无法生成基线：{CONTRACTS} 有未提交改动（{dirty}）—— 先提交再生成，"
+                 f"否则基线记录的 commit 与内容不符")
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True
+    ).stdout.strip()
+    if not revision:
+        sys.exit("无法生成基线：`git rev-parse HEAD` 失败 —— C9 基线必须来自已提交的 revision")
+    text = contracts_path.read_text(encoding="utf-8")
+    fields: dict = {}
+    for name in C9_INTERFACES:
+        body = interface_body(text, name)
+        if body is None:
+            sys.exit(f"无法生成基线：{CONTRACTS} 里找不到 {name}")
+        fields[name] = [[field, optional] for field, optional in top_level_fields(body)]
+    payload = {
+        "commit": revision,
+        "contractsSha256": hashlib.sha256(contracts_path.read_bytes()).hexdigest(),
+        "fieldsSha256": fields_digest(fields),
+        "fields": fields,
+    }
+    target = ROOT / BASELINE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"已写入 {BASELINE} @ {revision}（{len(fields)} 个 interface：{', '.join(sorted(fields))}）")
+
+
+if "--write-baseline" in sys.argv[1:]:
+    write_baseline()
+    sys.exit(0)
+
+
 # --- 1. C9：旧字段的键集**与可选性**都必须与基线一致 ---------------------------
 
 baseline_text = read_source(BASELINE)
@@ -134,9 +205,26 @@ if baseline_text:
 contracts_text = read_source(CONTRACTS)
 views_text = read_source(SHARED_VIEWS)
 baseline_fields: dict = baseline.get("fields", {}) if isinstance(baseline, dict) else {}
+if not isinstance(baseline_fields, dict):
+    # 坏 JSON 形状要**说出来**，不能让后面的 `.items()` 直接抛栈（栈追踪读起来像脚本坏了，
+    # 而不是像"基线坏了"）。
+    failures.append(f"{BASELINE} 的 fields 必须是对象（实际是 {type(baseline_fields).__name__}）")
+    baseline_fields = {}
 check(
     bool(baseline_fields),
     f"{BASELINE} carries no baseline fields; regenerate it before trusting C9",
+)
+# 基线缺一条 interface 就等于 C9 少覆盖一个端点 —— 删基线比删判据更容易被忽略。
+check(
+    set(C9_INTERFACES) <= set(baseline_fields),
+    f"{BASELINE} 缺少 C9 必须覆盖的 interface：{sorted(set(C9_INTERFACES) - set(baseline_fields))}",
+)
+# 基线被**手工删一行**与"重建基线"必须可区分：前者只是静默减少覆盖，本脚本第一版
+# 实测删掉 `WorkoutListResponse.limit` 后仍然全绿。重建（`--write-baseline`）会重算摘要。
+check(
+    isinstance(baseline, dict) and baseline.get("fieldsSha256") == fields_digest(baseline_fields),
+    f"{BASELINE} 的 fieldsSha256 不匹配 —— 基线被手工改过（删字段/改可选性会静默削弱 C9）。"
+    f"用 `python3 apps/ios/tests/check-pr5-facts-analysis.py --write-baseline` 重建",
 )
 
 for interface_name, expected in sorted(baseline_fields.items()):

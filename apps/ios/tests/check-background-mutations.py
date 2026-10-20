@@ -1261,8 +1261,8 @@ MUTATIONS = [
         "[export] 结构门禁: manifest 的 deletedSourceIds 去掉排序 => 查询返回序漏进 ZIP",
         lambda: edit(
             HEALTH_EXPORT,
-            '            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString }.sorted(),\n',
-            '            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString },\n',
+            '            "deletedSourceIds": (stashWorkoutIds + keptWorkoutIds).sorted(),\n',
+            '            "deletedSourceIds": stashWorkoutIds + keptWorkoutIds,\n',
         ),
         EXPORT_GATE,
         "is written unsorted",
@@ -1312,8 +1312,8 @@ MUTATIONS = [
         "[S2] 结构门禁: continuationNeeded 的 hasMorePages 写回恒假 => 预算截断的待续标记永远不写",
         lambda: edit(
             SYNC,
-            "            hasMorePages: hasMorePages,\n",
-            "            hasMorePages: false,\n",
+            "            hasMorePages: hasMorePages,\n            receipt: receipt,\n",
+            "            hasMorePages: false,\n            receipt: receipt,\n",
         ),
         SWIFT_GATE,
         "the real hasMorePages must reach continuationNeeded",
@@ -1325,8 +1325,8 @@ MUTATIONS = [
         # 本批按当前文本重锚；本突变的意图不变（拿掉待续标记的写入）。
         lambda: edit(
             SYNC,
-            "recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation) },",
-            "recordCursors: recordCursors, pendingDeletions: pendingDeletions) },",
+            "recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation, routeSettlement: routeSettlement, routeSettlementBatchId: routeCommit?.batchId ?? \"\", workoutPageCommits: workoutPageCommits) },",
+            "recordCursors: recordCursors, pendingDeletions: pendingDeletions, routeSettlement: routeSettlement, routeSettlementBatchId: routeCommit?.batchId ?? \"\", workoutPageCommits: workoutPageCommits) },",
         ),
         SWIFT_GATE,
         "markSuccess must persist the continuation flag through commitSuccess",
@@ -1448,7 +1448,7 @@ MUTATIONS = [
         lambda: edit(
             HEALTH_EXPORT,
             "            let queryDecision = RouteQueryPolicy.decide(",
-            "            _ = routeEntries\n            let queryDecision = RouteQueryPolicy.decide(",
+            "            _ = try await routeEntries(for: workout, store: store, directory: pageStaging, warnings: warnings, budget: budget, usedRouteBytes: routeBytes + pageRouteBytes, usedRouteFiles: routeCount + pageRouteCount)\n            let queryDecision = RouteQueryPolicy.decide(",
         ),
         PY_GATE,
         "the route query happens BEFORE the final gate is consulted",

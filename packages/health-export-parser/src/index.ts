@@ -15,8 +15,10 @@ export {
 } from "./sync-manifest.js";
 export {
   prepareNative, nativeElevationGains, importEngine, nativeFallback, nativeBinary, NativeWorkerError,
+  nativeWorkerAvailability, nativeArtifactState, newestNativeSourceMtimeMs,
   NATIVE_PROTOCOL, NATIVE_VERSION, NATIVE_OPERATIONS,
-  type ImportEngine, type NativeOptions, type NativeMetrics, type NativeOperation
+  type ImportEngine, type NativeOptions, type NativeMetrics, type NativeOperation,
+  type NativeWorkerAvailability
 } from "./native-worker.js";
 export {
   ABSENT_REMOVAL_GUARD_MAX_RATIO,

@@ -1273,10 +1273,11 @@ check(
     "stability it did not earn or lose the 'blocked' settlement reason (A3)",
 )
 check(
-    "observed: samples.count" in workout_window_loop
+    "observed: result.added.count" in workout_window_loop
     and "pageLimit: pageLimit" in workout_window_loop,
-    "the per-type observation must carry the returned count AND the page limit actually queried; "
-    "without the limit a full page looks like EOF (A2 pagination is not implemented yet)",
+    "R3（2026-10-19）：the per-type observation must carry the anchored page's returned count AND "
+    "the page limit actually queried; without the limit a full page still looks like EOF even "
+    "though the cursor now advances page by page",
 )
 check(
     "unauthorized: true" in workout_window_loop,
@@ -2156,6 +2157,180 @@ check(
     "syncIfNeeded lets the 15-minute throttle swallow a `.waitJob` resume: the app would stop "
     "reconciling a job the server already finished, and the banner would stay at 'not finished'",
 )
+# --- 15e. R1（2026-10-19 复核）：同一份待办快照决定"执行"与"重排" ------------------
+#     旧形态的活锁指纹：到期窗口让 `needsAnotherRound` 为真（系统不断派活），却没有进入
+#     `action` 的执行分支（每轮 `nothingToDo`、只再排一次）。判据不是"源码里出现了某个字段"，
+#     而是探针、计划、action、重排、过期结算这五处**都接在同一个源上**。
+probe_body_r1 = tail_after(sync, "func probePendingWork(", "probePendingWork(").split("\n    func ")[0]
+check(
+    "probeWorkoutWindowWork(" in probe_body_r1,
+    "probePendingWork no longer reads the structured workout-window snapshot — the old single "
+    "hasDueWorkoutWindow boolean would come back and the due/future/expired states collapse again (R1)",
+)
+check(
+    "WorkoutWindowWork(readFailed: true)" in probe_body_r1,
+    "a failed window-table read must surface as readFailed (unknown), never as an empty queue (R1)",
+)
+background_pass_r1 = tail_after(sync, "private func performBackgroundPass(", "performBackgroundPass(").split("\n    private func ")[0]
+check(
+    "HealthSyncWorkPlanner.plan(" in background_pass_r1 and "plan: plan" in background_pass_r1,
+    "the background pass no longer consumes the single work plan: due window work could be counted "
+    "as pending yet never executed (R1 live-lock)",
+)
+check(
+    "BackgroundRunPolicy.action(" in background_pass_r1
+    and "hasBackgroundUploadTask: systemUploadInFlight(" in background_pass_r1,
+    "the background pass stopped routing through the pure action policy (system-owned uploads would "
+    "be touched again) or stopped feeding it the real upload signal",
+)
+check(
+    ".runWorkoutWindowPass:" in background_pass_r1,
+    "a plan that says 'workout window work is executable' no longer has an action branch: the batch "
+    "would report nothingToDo and be resubmitted forever (R1)",
+)
+check(
+    "settleExpiredWorkoutWindows(" in background_pass_r1
+    and "settleExpiredWorkoutWindows(" in tail_after(sync, "func performSync(", "performSync("),
+    "expired windows are no longer settled by a short transaction before selection — rows would keep "
+    "completed_at NULL and the probe would see them forever (R1)",
+)
+check(
+    "BackgroundRunPolicy.nextBackgroundRequest(" in app_delegate
+    and "BackgroundRunPolicy.shouldReplacePendingRequest(" in app_delegate
+    and "getPendingTaskRequests" in app_delegate,
+    "background scheduling no longer comes from the snapshot's earliest-begin decision, or no longer "
+    "checks the pending request first: a later resubmit could postpone an earlier wake-up (R1 §8.3)",
+)
+handoff_r1 = tail_after(policy, "static func handoff(", "handoff(").split("\n    static func ")[0]
+check(
+    "hasWorkoutWork" in handoff_r1 and "hasWorkoutWork:" in app_delegate,
+    "SyncFollowUp.handoff no longer carries workout-window work, or AppDelegate no longer passes it: "
+    "the foreground handoff would drop the only executable path for a due window (R1)",
+)
+check(
+    "func settleExpiredWorkoutWindows(" in window_store
+    and "WorkoutBackfillScheduler.expiredWindows(" in window_store,
+    "the journal no longer has the short expiry-settlement transaction (R1 §8.4)",
+)
+check(
+    "HealthSyncWorkPlanner.swift" in runner,
+    "run-health-sync-tests.sh does not compile HealthSyncWorkPlanner.swift — the plan's assertions "
+    "would never be executed (same pairing defect as §14i)",
+)
+
+# --- 15f. R2（2026-10-19 复核）：观察者意图的原子存储边界 --------------------------
+#     旧实现：observer 在 HealthKit 队列写 UserDefaults、确认在 MainActor 读+删，三步之间
+#     没有原子性 ⇒ 旧确认可以删掉刚写入的新代次。现在写入与确认共用同一个 SQLite journal，
+#     确认是**条件删除**。判据必须同时覆盖"生产接线"与"原子 SQL 本身"。
+intent_journal = read(RAI / "HealthSyncIntentJournal.swift")
+check(
+    "HealthSyncIntentJournal(" in sync
+    and "backgroundIntentJournal.recordInBackground(" in sync,
+    "HealthKitSync no longer writes observer intents through HealthSyncIntentJournal (the "
+    "UserDefaults three-step read/delete shape would come back)",
+)
+check(
+    "backgroundIntentStore.record(" not in sync and "backgroundIntentStore.acknowledge(" not in sync,
+    "HealthKitSync still uses the UserDefaults intent store on a production path: observer writes and "
+    "MainActor acknowledgements would again be split across two non-atomic boundaries (R2)",
+)
+check(
+    "DELETE FROM sync_observer_intents WHERE url_scope = ?1 AND generation = ?2" in intent_journal,
+    "the intent acknowledgement is no longer a conditional delete: an older observation could delete "
+    "the newer generation (R2)",
+)
+check(
+    "BEGIN IMMEDIATE" in intent_journal and "busy_timeout" in intent_journal,
+    "the intent journal lost its bounded transaction boundary / busy timeout: a completion callback "
+    "could block unbounded, or a write could interleave without a transaction (R2 §9.2)",
+)
+check(
+    "migrateLegacyLocked(" in intent_journal and "INSERT OR IGNORE" in intent_journal,
+    "legacy UserDefaults intents are no longer migrated atomically (import → read back → COMMIT → "
+    "delete old key); an old key must not be deleted before the SQLite row exists (R2 §9.5)",
+)
+check(
+    "CREATE TABLE IF NOT EXISTS sync_observer_intents" in window_store,
+    "the sync journal schema lost sync_observer_intents — the journal would create its own table on a "
+    "different file than the task rows (R2 §9.1)",
+)
+for required in (
+    "HealthSyncIntentJournal.swift",
+    "HealthSyncIntentJournalRegression.swift",
+):
+    check(required in runner, "run-health-sync-tests.sh is missing %s" % required)
+
+# --- 15g. R3（2026-10-19 复核）：独立 anchored 分页 --------------------------------
+check(
+    "HKAnchoredObjectQuery(" in health_export and "anchoredWindowPage(" in health_export,
+    "the workout window channel no longer uses an anchored page query — a fixed recentSamples prefix "
+    "would be reread every batch and dense windows could never converge (R3)",
+)
+window_loop_r3 = tail_after(
+    health_export,
+    "for window in WorkoutBackfillScheduler.due(",
+    "workout backfill window loop",
+).split("\n        /// 跑一趟补读")[0]
+check(
+    "WorkoutWindowPaging.serviceOrder(pages, now: now)" in window_loop_r3
+    and "descriptorIndexByType" in window_loop_r3,
+    "R3/A2: the production loop must consume serviceOrder and map recordType back to the descriptor "
+    "— sorting pages but pairing by the old index would silently cross record types, and never "
+    "calling serviceOrder leaves fairness test-only",
+)
+check(
+    "WorkoutWindowPaging.afterAcceptedPage(" in window_loop_r3
+    and "WorkoutWindowPaging.afterEmptyPage(" in window_loop_r3,
+    "the window loop no longer derives page candidates from the pure paging machine (R3)",
+)
+check(
+    "pageLimit: pageLimit" in window_loop_r3 and "result.added.count" in window_loop_r3,
+    "the window loop lost the per-page limit/returned count: a full anchored page would look like EOF",
+)
+check(
+    "commitEmptyWorkoutPageObservations(" in sync and "exported.workoutPageEmptyCommits" in sync,
+    "empty anchored queries are no longer persisted through the narrow transaction — the EOF evidence "
+    "would be lost, or an empty ZIP would be uploaded (R3 §10.4)",
+)
+check(
+    "workoutPageCommits: exported.workoutPageCandidates" in sync
+    and "workoutPageCommits: restored.pendingWorkoutPages" in sync,
+    "page candidates no longer flow into commitSuccess from both the export branch and the recovery "
+    "branches: a crash between server COMMIT and local commit would lose the page (R3 §10.4)",
+)
+check(
+    "workoutPageCommits: workoutPageCommits" in sync
+    and "workoutPageCommits: [WorkoutWindowPageCommit]? = nil" in sync,
+    "markSuccess no longer passes page candidates to the single commit transaction (R3)",
+)
+check(
+    "pendingWorkoutPages: exported.workoutPageCandidates.isEmpty" in sync,
+    "the task row no longer persists pendingWorkoutPages before upload (R3 §10.4)",
+)
+check(
+    "func loadWorkoutWindowPages(" in window_store
+    and "func commitEmptyWorkoutPageObservations(" in window_store
+    and "applyWorkoutPageCommitsLocked(" in window_store,
+    "the sync journal lost the page cursor load/commit pair (R3)",
+)
+check(
+    "CREATE TABLE IF NOT EXISTS sync_workout_type_pages" in window_store
+    and "page.state == .ready || page.state == .paging" in window_store,
+    "the page cursor table or the revision-aware immediate-work count is missing from the sync "
+    "journal (R3; stale-revision/expired rows must not keep the probe reporting work)",
+)
+check(
+    "pendingWorkoutPages" in read(RAI / "SyncTaskState.swift")
+    and "decodeIfPresent" in read(RAI / "SyncTaskState.swift"),
+    "SyncTaskState no longer carries pendingWorkoutPages with an explicit compatibility decode (R3)",
+)
+for required in (
+    "WorkoutWindowPaging.swift",
+    "WorkoutWindowPagingRegression.swift",
+    "WorkoutWindowPagingStoreRegression.swift",
+):
+    check(required in runner, "run-health-sync-tests.sh is missing %s" % required)
+
 # 2026-10-09 再补（投递的「记」与「跑」必须分开 ⇒ P1 可达性缺陷）：+4 条（§15c 的 4 条）。
 # 2026-10-09 二次修正（未提交改动审查 🟡2）：同一批改动的最终态实测打印 **269** 条，而地板
 #   还停在 255 ⇒ 差 14，违反本文件自己写的"零容忍"，那 13 条新增结构判据（§14h-3：rediscovery
@@ -2183,7 +2358,10 @@ check(
 # 🟡 2026-10-19（P3-4/A8）：新增 3 条（冷启动目标投影先于注册 / recordThenComplete 接线 /
 #   publishObserverTarget 存在）后**现跑现设**：实测打印 **310** ⇒ 按"打印总数 − 1"重设为 **309**。
 #   判据：删掉这三条里任意一条 `check(...)` 必须变红。
-MIN_CHECKS = 309
+# 🟡 2026-10-19（R1/R2/R3 实施）：新增统一待办计划、意图原子边界、anchored 分页与公平轮转
+#   接线的结构判据后**现跑现设**：实测打印 **342** ⇒ 按"打印总数 − 1"重设为 **341**。
+#   判据：删掉 §15e/§15f/§15g 里任意一条 `check(...)` 必须变红。
+MIN_CHECKS = 341
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

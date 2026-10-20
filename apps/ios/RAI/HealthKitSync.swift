@@ -155,6 +155,8 @@ final class HealthKitSync {
     var phase: String = "idle"
     var dataUpdatedGeneration = 0
     private var activeToken = ""
+    /// B1：冷启动/前台对账的单飞闸门（与同步的 `isBusy` 分开：本入口不占同步所有权）。
+    private var analysisReconcileEntryInFlight = false
     private var activeScope = "unbound"
     private var activeServerURL: URL?
     private var activeIdentity: RaiHandshake?
@@ -300,9 +302,16 @@ final class HealthKitSync {
     /// 这个名字只为**读老 payload** 留着。
     private static let legacyZipName = "upload.zip"
 
-    private var backgroundIntentStore: HealthSyncBackgroundIntentStore {
-        HealthSyncBackgroundIntentStore(baseKey: Self.backgroundIntentKey)
-    }
+    /// R2（2026-10-19 复核）：健康数据通知意图的**唯一真源**。
+    ///
+    /// 旧实现每次访问都 new 一个 `UserDefaults` 存储器：observer 回调与 MainActor 确认
+    /// 各自读删，三步（读 current → 比较 → removeObject）不是原子的 ⇒ 旧确认能删掉刚写入的
+    /// 新代次。现在观察者写入与 MainActor 确认都经 `HealthSyncIntentJournal` 的同一条
+    /// 串行队列 + 同一条 SQLite 连接，确认是**条件删除**（比较与删除在同一条 SQL 里）。
+    ///
+    /// ⚠️ 它与 `backgroundRecoveryStore`（scope 恢复请求）是**两个成因两个槽**，不能合并：
+    /// 旧 scope 的导出成功一旦能确认掉"新 scope 还没有批次"，新 scope 就再也没人重开。
+    private let backgroundIntentJournal: HealthSyncIntentJournal
 
     private var backgroundRecoveryStore: HealthSyncScopeRecoveryStore {
         HealthSyncScopeRecoveryStore(baseKey: Self.backgroundRecoveryKey)
@@ -480,10 +489,22 @@ final class HealthKitSync {
     init() {
         lastSyncAt = nil
         lastWorkoutCount = nil
+        // R2：意图库与任务行同库（`sync.sqlite`），但用**自己那条受控连接**。
+        // 初始化顺序刻意在观察者通道之前：回调的 record 闭包必须捕获到已经打开好的 journal，
+        // 否则后台冷启动的第一次投递会落到一个未初始化的边界上。
+        let intentJournal = HealthSyncIntentJournal(
+            databaseURL: SyncTaskStore.defaultDatabaseURL(),
+            legacyBaseKey: Self.backgroundIntentKey
+        )
+        backgroundIntentJournal = intentJournal
+        if let mode = intentJournal.journalMode, mode.lowercased() != "wal" {
+            // WAL 配置失败不伪装成功：意图日志的并发承诺依赖它，诊断必须可见。
+            HealthKitSync.report("intent journal is not in WAL mode (\(mode))")
+        }
         // 写失败走 `[RAI]` 诊断通道（与 `enableBackgroundDelivery` 失败同一条路）：
         // 观察者回调没有返回值，这条日志是"这次唤醒的耐久痕迹没落地"的唯一线索。
         observerIntentChannel = HealthSyncObserverIntentChannel(
-            baseKey: Self.backgroundIntentKey,
+            record: { intentJournal.record(scope: $0) },
             report: { message in HealthKitSync.report(message) }
         )
     }
@@ -804,7 +825,12 @@ final class HealthKitSync {
     /// 的意图（一次白读 HealthKit 的全量导出正是该函数注释里点名的代价）。
     func publishObserverTarget(for serverURL: URL?) {
         guard let url = serverURL ?? activeServerURL else { return }
-        observerIntentChannel.publish(scope: Self.urlScope(for: url))
+        let scope = Self.urlScope(for: url)
+        // R2 §9.5：启动/切换目标时把该 scope 的旧 UserDefaults 意图显式迁进 SQLite。
+        // 惰性迁移（`observe`）也能完成同一件事，但启动期先做一次能让"观察者先写、确认后读"
+        // 不再依赖首次读取的发生时机。
+        backgroundIntentJournal.migrateLegacyInBackground(scope: scope)
+        observerIntentChannel.publish(scope: scope)
     }
 
     /// 记下"健康数据变了，等后台有机会就跑一次"。
@@ -819,13 +845,14 @@ final class HealthKitSync {
         // 观察者回调在 `completion()` 之前写的是同一个 urlScope，两处不可能分叉。
         observerIntentChannel.publish(scope: scope)
         // 写失败不许静默：这条意图是"数据变了、等后台跑一轮"的唯一依据（`record` 会回读校验）。
-        if !backgroundIntentStore.record(scope: scope) {
-            Self.report("background intent write was not verified for scope \(scope)")
-        }
+        // R2/A1（2026-10-19 复核）：MainActor 路径只入队，不等 SQLite 写事务 ——
+        // 观察者回调路径仍走同步 record（completion 前必须耐久），那里有 250ms 上界。
+        // 入队失败（磁盘不可写）由 journal 自己记诊断；意图没落地的下一轮会再投递。
+        backgroundIntentJournal.recordInBackground(scope: scope)
     }
 
     private func backgroundIntentObservation(for serverURL: URL) -> HealthSyncBackgroundRecovery.IntentObservation? {
-        backgroundIntentStore.observe(scope: Self.urlScope(for: serverURL))
+        backgroundIntentJournal.observe(scope: Self.urlScope(for: serverURL))
     }
 
     private func backgroundRecoveryObservation(for serverURL: URL) -> HealthSyncScopeRecoveryStore.Observation? {
@@ -852,7 +879,11 @@ final class HealthKitSync {
     private func acknowledgeBackgroundIntent(
         checkpoint: HealthSyncBackgroundRecovery.DurableCheckpoint
     ) {
-        _ = backgroundIntentStore.acknowledge(backgroundIntentInFlight, checkpoint: checkpoint)
+        // 条件删除与旧代次保护不变；MainActor 只入队，不等写事务（A1：审查实测过
+        // 另一连接持锁时同步确认等待可达 6.2s 的形态）。失败由 journal 记诊断。
+        backgroundIntentJournal.acknowledgeInBackground(
+            backgroundIntentInFlight, checkpoint: checkpoint
+        )
         _ = backgroundRecoveryStore.acknowledge(
             backgroundRecoveryInFlight, targetScope: activeScope, checkpoint: checkpoint
         )
@@ -903,6 +934,26 @@ final class HealthKitSync {
             case .none: readFailed = true
             }
         }
+        // R1（2026-10-19 复核）：workout 定向补齐通道的**结构化**待办。
+        // 旧实现只有一个 `hasDueWorkoutWindow` Bool，把"已确认页之后还有页"、"现在到点要探"、
+        // "15 分钟后才该探"、"超过 7 天该结算"压成同一个布尔；这里让存储层一次遍历给出计数
+        // 与最早未来时刻，探针自身仍然**只读**（过期结算由执行入口的短事务负责）。
+        let windowProbe = taskStore.probeWorkoutWindowWork(
+            scope: authoritativeScope ?? urlScope, now: Date()
+        )
+        let windowWork: WorkoutWindowWork
+        if let windowProbe {
+            windowWork = WorkoutWindowWork(
+                immediatePageCount: windowProbe.immediatePageCount,
+                dueProbeCount: windowProbe.dueProbeCount,
+                nextProbeAt: windowProbe.nextProbeAt,
+                expiredWindowCount: windowProbe.expiredWindowCount
+            )
+        } else {
+            // 读不出来是 unknown，不是"没有窗口"。`readFailed` 会让 `needsAnotherRound` 为真、
+            // 计划走 `.export(.newDelivery)`（多跑一轮），而不是静默收工。
+            windowWork = WorkoutWindowWork(readFailed: true)
+        }
         return HealthSyncBackgroundRecovery.PendingWork(
             serverURL: serverURL.absoluteString,
             urlScope: urlScope,
@@ -913,19 +964,13 @@ final class HealthKitSync {
                 storesAnyTask: storesAnyTask,
                 readFailed: readFailed
             ),
-            hasIntent: backgroundIntentStore.hasIntent(scope: urlScope),
+            hasIntent: backgroundIntentJournal.hasIntent(scope: urlScope),
             hasRecoveryRequest: backgroundRecoveryStore.hasRequest(urlScope: urlScope),
             // 待续页槽（S2.3）：读失败按"没有待续"处理 —— 后果只是前台少续几轮
             // （后台路径由"意图"与 `needsAnotherRound` 兜底），不是数据正确性问题。
             // scope 口径与 `loadRecordCursors` 一致（权威 scope 优先）。
             hasPendingContinuation: taskStore.loadContinuation(scope: authoritativeScope ?? urlScope) != nil,
-            // A4（2026-10-19 复核）：到期窗口也是"下一轮该干的活"。
-            // 判据本身在 `WorkoutBackfillScheduler.hasDueWindow`（纯函数，回归钉着）：
-            // 未收口 + 未过期 + 已到期，三条缺一不可。
-            hasDueWorkoutWindow: WorkoutBackfillScheduler.hasDueWindow(
-                taskStore.loadWorkoutBackfillWindows(scope: authoritativeScope ?? urlScope),
-                now: Date()
-            )
+            workoutWindow: windowWork
         )
     }
 
@@ -971,6 +1016,12 @@ final class HealthKitSync {
             message = nil
             phase = SyncPhase.failed.rawValue
             return false
+        }
+        // R2（2026-10-19 复核）：意图库与任务行同库、但连接独立；任务库恢复不等于意图库一定
+        // 已恢复。失败不阻断同步（任务行仍可用），但必须留诊断 —— 否则观察者交接会持续
+        // `writeNotVerified`，而同步看起来一切正常。
+        if !backgroundIntentJournal.reopenIfUnavailable() {
+            Self.report("intent journal is still unavailable; observer handoffs stay unverified")
         }
         return true
     }
@@ -1028,38 +1079,49 @@ final class HealthKitSync {
         // （见 `performSync` 里的 `recordBackgroundRecoveryRequest`），因为只有握手才知道
         // 权威身份。已有的意图/恢复请求也不在这里消费 —— 确认点只有一个，就在导出起点。
         //
-        // 两个成因一起决定 `wantsFreshSync`（都表示"这个目标需要跑一轮"），而**有没有任务行**
-        // 决定跑的是哪一段：有任务行 ⇒ `runAtomicUnit` / `resumeJob`。
+        // 🔴 R1（2026-10-19 复核）：执行决策**不再由这里拼 `wantsFreshSync` / `wantsContinuation`
+        // 两个布尔**，而是消费 `HealthSyncWorkPlanner` 的统一计划。旧形态里到期窗口只进了
+        // `needsAnotherRound`（要重排），没进 `wantsFreshSync`（要执行）⇒ 后台被派发后
+        // `nothingToDo`、只再次重排，直到窗口过期或别的入口打破条件（R1 活锁）。
+        //
+        // 过期窗口必须在**选取之前**用短事务明确落 `expired`：旧实现只是把过期行从 `due()`
+        // 里过滤掉，行本身仍 `completedAt == nil`，探针永远看得见它。
+        let now = Date()
+        if let expiredSettled = taskStore.settleExpiredWorkoutWindows(scope: activeScope, now: now),
+           expiredSettled > 0 {
+            Self.report("background pass: settled \(expiredSettled) expired workout window(s)")
+        }
+        // 两个成因位仍然现读（判据与快照同源），快照是这一轮唯一的执行依据。
         let hasNotification = backgroundIntentObservation(for: serverURL) != nil
         let hasRecoveryRequest = backgroundRecoveryStore.hasRequest(urlScope: Self.urlScope(for: serverURL))
-        let wantsFresh = task == nil && (hasNotification || hasRecoveryRequest)
-        // 🔴 R1（2026-10-15）：没有任务行时，"待续页"也必须能驱动一轮。待续页产生于一次
-        // **成功提交之后**（`commitSuccess` 删掉任务行、同时写 `sync_continuation` 槽），
-        // 形态恰好是"无任务行 + 无通知/恢复请求 + 有续页"。旧实现只认通知/恢复请求 ⇒
-        // `.nothingToDo` 收工，而 `needsAnotherRound` 又因待续标记持续为真 ⇒ BGTask 反复
-        // 重排却不推进（活锁）。scope 与 `loadTask()` 同口径（`activeScope`）。
-        let wantsContinuation = task == nil
-            && taskStore.loadContinuation(scope: activeScope) != nil
-        let action = BackgroundRunPolicy.action(
+        guard let snapshot = probePendingWork(for: serverURL) else { return }
+        let plan = HealthSyncWorkPlanner.plan(
+            pending: snapshot,
             hasTask: task != nil,
+            isBlocked: persistedPhase.isBlocked,
+            now: now
+        )
+        let action = BackgroundRunPolicy.action(
             jobId: task?.jobId,
+            hasTask: task != nil,
             // 只认"本进程还在等它结局"的那些。用词要准：这个入参喂的是 `.awaitSystemUpload`
             // （"一根手指都不许碰"），而唯一该不碰的情形是**另一次同步正挂在那个 continuation 上**
             // （后台一轮撞见前台同步在传）。刚盘点出来的孤儿**不是**不碰的理由 —— 它们已经被取消，
             // 这一轮该做的是用盘上的字节重传，让服务端幂等命中同一份来源。
             hasBackgroundUploadTask: systemUploadInFlight(payloadHash: task?.payloadHash),
-            wantsFreshSync: wantsFresh,
-            wantsContinuation: wantsContinuation
+            plan: plan
         )
         // 后台一轮「被派发了但什么都没做」与「压根没被派发」在服务端看是同一件事（都没有请求）。
         // 这一行把它们分开，也是排查活锁（每轮唤醒都落在 `.awaitSystemUpload`）的唯一入口。
-        Self.report("background pass: action=\(String(describing: action))")
+        Self.report("background pass: action=\(String(describing: action)) plan=\(plan) notification=\(hasNotification) recovery=\(hasRecoveryRequest)")
         switch action {
         case .nothingToDo, .awaitSystemUpload:
-            // `.nothingToDo`：没有待办 ⇒ 立刻收工，报成功。
+            // `.nothingToDo`：现在没有可执行的工作 ⇒ 立刻收工。若只有未来窗口探测，
+            // `probePendingWork` 里的 `nextProbeAt` 会让调用方按那个时刻安排下一次请求
+            // （`BackgroundRunPolicy.nextBackgroundRequest`），所以报成功不等于丢复查。
             // `.awaitSystemUpload`：字节归系统 ⇒ 一根手指都不许碰，连 `inspect` 都不做。
             return
-        case .runAtomicUnit, .resumeJob, .startFreshSync, .resumeContinuation:
+        case .runAtomicUnit, .resumeJob, .startFreshSync, .resumeContinuation, .runWorkoutWindowPass:
             // 观察点不在这里：通知只在**导出起点**被认领（`performSync` 里那条
             // `observeBackgroundIntentsForExportStart`）。放在这里等于让两条"不重新读 HealthKit"
             // 的恢复分支替通知背书 —— 它们用的是早于通知生成的字节。
@@ -1318,6 +1380,8 @@ final class HealthKitSync {
                     // WP-12（O03）：恢复轮的提交必须把任务行里那份删除余量解析出来 ——
                     // 遗漏它是 R3b 的两处缺陷之一（同内容的批次在其它分支会写槽、这里不会）。
                     pendingDeletions: try Self.restoredCommitDeletions(from: restored),
+                    // R3：恢复轮透传分页候选（同 `.inspect` 分支）。
+                    workoutPageCommits: restored.pendingWorkoutPages,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1385,6 +1449,9 @@ final class HealthKitSync {
                         routeCommit: restored.routeCommit,
                         // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
                         pendingDeletions: try Self.restoredCommitDeletions(from: restored),
+                        // R3：恢复轮必须透传任务行里的分页候选 —— 缺了它，崩在
+                        // "服务端已提交、本地未提交"之间时，页进度会永远丢掉（下批重读整页）。
+                        workoutPageCommits: restored.pendingWorkoutPages,
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
                         // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
@@ -1420,6 +1487,8 @@ final class HealthKitSync {
                     routeCommit: restored.routeCommit,
                     // WP-12（O03）：与 `.waitJob` 分支同一处补漏 —— 恢复轮必须透传余量。
                     pendingDeletions: try Self.restoredCommitDeletions(from: restored),
+                    // R3：恢复轮透传分页候选（同 `.inspect` 分支）。
+                    workoutPageCommits: restored.pendingWorkoutPages,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1522,6 +1591,9 @@ final class HealthKitSync {
                         routeCommit: restored.routeCommit,
                         // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
                         pendingDeletions: try Self.restoredCommitDeletions(from: restored),
+                        // R3：恢复轮必须透传任务行里的分页候选 —— 缺了它，崩在
+                        // "服务端已提交、本地未提交"之间时，页进度会永远丢掉（下批重读整页）。
+                        workoutPageCommits: restored.pendingWorkoutPages,
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
                         // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
@@ -1553,6 +1625,9 @@ final class HealthKitSync {
                         routeCommit: restored.routeCommit,
                         // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
                         pendingDeletions: try Self.restoredCommitDeletions(from: restored),
+                        // R3：恢复轮必须透传任务行里的分页候选 —— 缺了它，崩在
+                        // "服务端已提交、本地未提交"之间时，页进度会永远丢掉（下批重读整页）。
+                        workoutPageCommits: restored.pendingWorkoutPages,
                         receipt: finished.summary?.directSync,
                         // 同上：`.upload` 恢复分支也真的等了一个 `jobId` 的终态。
                         requiresReceipt: directSyncNegotiated,
@@ -1669,7 +1744,23 @@ final class HealthKitSync {
             // 与 routeStates 同一条理由在导出**开始前**整批读出（导出跑在脱离主线程的上下文，
             // 碰不了 `@MainActor` 的 store）；读失败时为空 ⇒ 本批不补窗口，方向安全
             // （窗口待办留在表里，下一批再读）。
+            //
+            // R1（2026-10-19 复核）：在**选取之前**把超过 7 天上限的窗口明确结算成 `expired`。
+            // 旧实现只靠 `due()` 里的 `isExpired` 过滤，行本身仍 `completedAt == nil`
+            // ⇒ 探针永远看得见它；而"过期"没有持久终态。结算失败不阻断同步（窗口不是事实
+            // 数据），但要留诊断、下一批会重试。
+            if let expiredSettled = taskStore.settleExpiredWorkoutWindows(scope: activeScope, now: Date()),
+               expiredSettled > 0 {
+                NSLog("[RAI] 已结算 %d 条过期 workout 补齐窗口", expiredSettled)
+            } else if taskStore.lastError != nil {
+                NSLog("[RAI] 过期 workout 窗口结算失败（下批重试）：%@",
+                      taskStore.lastError ?? "unknown")
+            }
             let workoutBackfillWindows = taskStore.loadWorkoutBackfillWindows(scope: activeScope)
+            if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
+            // R3（2026-10-19 复核）：训练窗口的 anchored 分页游标（上一批已确认的快照）。
+            // 与窗口行同一条理由在导出**开始前**整批读出：导出跑在脱离主线程的上下文。
+            let workoutWindowPages = taskStore.loadWorkoutWindowPages(scope: activeScope)
             if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
             // P1-1（2026-10-18 同步诊断）：服务端覆盖探测。
             //
@@ -1731,6 +1822,9 @@ final class HealthKitSync {
             // 同一个量级重导 —— 收敛档位存在 `budgetConvergenceKey` 里，活过 `clearTask()`。
             let baseBudget = loadBudgetConvergence()
                 .apply(to: DirectSyncBatchBudget.from(bounds: identity.directSyncBounds))
+            // R3：分页快照必须在进入 `runDetached` 之前冻结成不可变值（闭包是 `@Sendable`）。
+            let workoutPagesSnapshot = Array(workoutWindowPages.values)
+            let workoutPageScopeSnapshot = activeScope
             let exported = try await HealthSyncCancellation.runDetached(
                 priority: .userInitiated,
                 onCancelledResult: { result in
@@ -1764,6 +1858,9 @@ final class HealthKitSync {
                         pendingRouteTodos: Array(pendingRouteTodos.values),
                         // P0-4：到期窗口（导出在迟到补读/48h 窗口/历史重放之前先查它们）。
                         workoutBackfillWindows: Array(workoutBackfillWindows.values),
+                        // R3：分页快照 + scope（导出层不认识会话身份，但创建初始页要用 scope）。
+                        workoutWindowPages: workoutPagesSnapshot,
+                        workoutPageScope: workoutPageScopeSnapshot,
                         // P1-1：覆盖表（空 = 回落全量重放）。
                         coverage: coverageSnapshot,
                         // B2：类型轮转起点（上一批读到的位置；让历史重放无类型饿死）。
@@ -1797,6 +1894,18 @@ final class HealthKitSync {
             try checkCancellation()
             // P2-3：本批通道计数只进日志（**只写计数**，不含样本值/UUID/日期）。
             Self.logExportCounts(exported.channelCounts, scope: activeScope)
+            // R3（2026-10-19 复核）：**纯空查询/页被拒**的分页观察立即用窄事务落盘。
+            //
+            // 这些页没有新增载荷，不必等 upload 回执（等它就等于为一次只有 manifest 的
+            // 空批次白付一次上传）。CAS 校验前驱锚点：有更新的进度先落盘时只跳过、不倒退。
+            // 写失败不让同步变红（下一批重查一次，方向安全），但必须留诊断。
+            if !exported.workoutPageEmptyCommits.isEmpty,
+               !taskStore.commitEmptyWorkoutPageObservations(
+                   exported.workoutPageEmptyCommits, scope: activeScope
+               ) {
+                NSLog("[RAI] 训练窗口空观察未能落盘（下批重查）：%@",
+                      taskStore.lastError ?? "unknown")
+            }
             // P0-4：窗口的**超前登记**（先表后锚）—— 与路线待办同一条纪律：崩在随后任何一步
             // 只会让窗口早到（下批多查一次，幂等），绝不会丢；锚的提交链在任务行与回执之后。
             guard taskStore.upsertWorkoutBackfillWindows(
@@ -1870,7 +1979,11 @@ final class HealthKitSync {
                 ),
                 // P2-3：本批通道计数随任务行落盘 —— 恢复轮把它原样带进日志与摘要，
                 // 于是"崩在提交前的一批带来了什么"不必重读 HealthKit 才能回答。
-                lastExportCounts: exported.channelCounts
+                lastExportCounts: exported.channelCounts,
+                // R3：分页候选在**上传之前**随任务行落盘。恢复轮凭它续交同一候选；
+                // 空数组写成 nil（不是"清空分页表"），老任务缺键同样按 nil 处理。
+                pendingWorkoutPages: exported.workoutPageCandidates.isEmpty
+                    ? nil : exported.workoutPageCandidates
             ))
             // B2：轮转起点在**导出成功之后**立刻落盘（与任务行同批；即使随后上传失败，
             // 下一轮从新起点继续 —— 起点只影响"从哪个类型先读"，多走一步无害）。
@@ -1918,6 +2031,8 @@ final class HealthKitSync {
                     pendingDeletions: exported.pendingDeletions,
                     // P0-4：本批窗口的整窗查询记账（成功后才结算）。
                     workoutWindowUpdates: exported.workoutWindowUpdates,
+                    // R3：分页候选与任务行删除同一事务提交（等 committed 回执之后）。
+                    workoutPageCommits: exported.workoutPageCandidates,
                     // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
                     requiresReceipt: false
                 )
@@ -1947,6 +2062,8 @@ final class HealthKitSync {
                     pendingDeletions: exported.pendingDeletions,
                     // P0-4：本批窗口的整窗查询记账（成功后才结算）。
                     workoutWindowUpdates: exported.workoutWindowUpdates,
+                    // R3：分页候选与任务行删除同一事务提交（等 committed 回执之后）。
+                    workoutPageCommits: exported.workoutPageCandidates,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -2033,7 +2150,10 @@ final class HealthKitSync {
         // 意图，也会在后台额度紧张时抢时间（能省则省，而这一句结论下一轮照样会有）。
         if settled, !Task.isCancelled, !cursorHoldThisRound,
            let serverURL = activeServerURL, !activeToken.isEmpty {
-            await reconcilePendingAnalysis(serverURL: serverURL, apiToken: activeToken)
+            await reconcilePendingAnalysis(
+                serverURL: serverURL, apiToken: activeToken,
+                scope: activeScope, publish: .ownSync
+            )
         }
         #else
         lastError = "读取 Apple 健康只能在 iPhone 上进行"
@@ -2174,6 +2294,12 @@ final class HealthKitSync {
         // 🔴 写入时机必须在 `commitSuccess` **之后**（与路线待办同一条"成功后才结算"）：
         // 上传/导入失败的批次不能留下"已经补齐了"的证据。
         workoutWindowUpdates: [WorkoutBackfillWindow] = [],
+        // R3（2026-10-19 复核）：本批已交付、待 committed 回执的分页候选。
+        //
+        // 与 `workoutWindowUpdates` 的默认空数组不同，这里**给默认 nil** 是语义的一部分：
+        // `nil` = 本轮没有分页候选（恢复轮/老任务），**不是**"清空分页表"。写进
+        // `commitSuccess` 的同一事务；CAS 不匹配只跳过、绝不倒退已确认锚点。
+        workoutPageCommits: [WorkoutWindowPageCommit]? = nil,
         // O02/WP-11 + R03：本批已成功交付、可从待办队列移除的 UUID。
         // 🔴 只有**完整观测**（`RouteFetch.Outcome.observation`，含合法零点）才会成为
         // 候选 —— 读取失败（`.unreadable`）绝不进这里（2026-10-16 复查：旧实现对
@@ -2302,7 +2428,7 @@ final class HealthKitSync {
         let routeSettlement = routeCommit.flatMap { try? JSONEncoder().encode($0) }
         let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .syncCommitted,
-            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation, routeSettlement: routeSettlement, routeSettlementBatchId: routeCommit?.batchId ?? "") },
+            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation, routeSettlement: routeSettlement, routeSettlementBatchId: routeCommit?.batchId ?? "", workoutPageCommits: workoutPageCommits) },
             acknowledge: { checkpoint in
                 // §10.2「连续分页尚未 drain 完时，不清空后台待办意图」：认领了它，用户不打开
                 // App 就再也没人接着发下一批。`persistThenAcknowledge` 因此**不再**无条件确认，
@@ -2548,15 +2674,89 @@ final class HealthKitSync {
     /// （它是 `@Observable` 的 runtime 字段），所以"重启后接着对账"要等**下一次同步收尾**
     /// 才会把结论重新说给用户听。对账槽已经把 `receiptId` / `analysisJobId` 存下来了，
     /// 那一步需要的全部信息都在；今天缺的只是一个"冷启动主动对账"的触发点。
-    private func reconcilePendingAnalysis(serverURL: URL, apiToken: String) async {
-        guard let data = taskStore.loadAnalysisReconcile(scope: activeScope),
-              let pending = try? JSONDecoder().decode(DirectSyncAnalysisReconcile.self, from: data),
-              pending.needsReconcile, let jobId = pending.analysisJobId else { return }
-        // 回执本体没有落盘（`SyncTaskState` 那一行已经随任务清掉了），所以这里按对账槽的
-        // 事实重建一份**只用于判据**的回执。它只喂给 `reconcileAnalysis`，不写回任何地方 ——
-        // §8.5 说的"消费者不得改写回执"因此仍然成立：我们改的是**副本**。
-        // `publishedReleaseId` / `parentBatchId` 用不上（它们不参与分析终态判据），如实填 `nil`。
-        let receipt = DirectSyncReceipt(
+    /// B1（2026-10-19 复核）：对账结论的发布方式。
+    ///
+    /// `.ownSync`：本次同步自己写的回执，message 属于这一轮，直接改；
+    /// `.foregroundEntry`：冷启动/前台补对账，await 期间可能已经有新一轮同步 ——
+    /// 只有它没跑、目标/身份没切换时才允许改文案（否则旧目标的终态会盖掉新同步的结论）。
+    private enum AnalysisReconcilePublish {
+        case ownSync
+        case foregroundEntry
+    }
+
+    /// 对账槽的 scope：优先离线握手宣告的权威 `syncScope`；没有缓存时回退 URL scope。
+    ///
+    /// 与 `probePendingWork` / `restoreBackgroundContext` 同一口径：离线身份只用于**定位**，
+    /// 不改 `active*`；真正对账前不需要（也不应该）为它发一次握手。
+    private func analysisReconcileScope(for serverURL: URL) -> String {
+        #if os(iOS)
+        if let identity = CacheStore.loadHandshake(baseURL: serverURL) {
+            return Self.syncScope(for: serverURL, identity: identity)
+        }
+        #endif
+        return Self.urlScope(for: serverURL)
+    }
+
+    /// B1：冷启动 / 回到前台的**有界**分析终态对账。
+    ///
+    /// 不读 HealthKit、不触发上传、不改回执与已提交 anchor：
+    ///   - 槽里已是终态 ⇒ 用持久结论恢复展示，**不联网**；
+    ///   - 槽需要终态且拿到了 token ⇒ 只问 `GET /v1/jobs/:id` 一次；
+    ///   - 单飞进行中 ⇒ 直接返回（下一次同步收尾/下一次前台会再触发），不排队、不并发。
+    ///
+    /// 触发点：`RAIApp` 的 scenePhase `.active`（冷启动与回到前台都经过它）。调用方
+    /// 不需要先做一次同步 —— "服务端先算完、App 后重启"正是本入口要覆盖的形态。
+    func reconcileAnalysisOnEntry(to serverURL: URL?, apiToken: String) async {
+        guard let serverURL else { return }
+        let scope = analysisReconcileScope(for: serverURL)
+        guard let data = taskStore.loadAnalysisReconcile(scope: scope),
+              let pending = try? JSONDecoder().decode(DirectSyncAnalysisReconcile.self, from: data)
+        else { return }
+        if AnalysisReconcileEntryPolicy.usesPersistedTerminal(pending) {
+            publishPersistedAnalysisMessage(pending, serverURL: serverURL, scope: scope)
+            return
+        }
+        guard !analysisReconcileEntryInFlight,
+              AnalysisReconcileEntryPolicy.shouldAttempt(
+                  hasPendingSlot: true,
+                  isBusy: isBusy,
+                  hasServer: true,
+                  hasToken: !apiToken.isEmpty
+              )
+        else { return }
+        analysisReconcileEntryInFlight = true
+        defer { analysisReconcileEntryInFlight = false }
+        await reconcilePendingAnalysis(
+            serverURL: serverURL, apiToken: apiToken, scope: scope,
+            publish: .foregroundEntry
+        )
+    }
+
+    /// 把槽里的持久结论恢复成界面文案（**不联网**）。只在"没有新一轮同步"且目标未切换时。
+    private func publishPersistedAnalysisMessage(
+        _ pending: DirectSyncAnalysisReconcile,
+        serverURL: URL,
+        scope: String
+    ) {
+        guard let base = directSyncCompletionBase(
+            receipt: analysisReconcileReceipt(from: pending),
+            reconciledAnalysisStatus: pending.analysisStatus
+        ) else { return }
+        guard canPublishAnalysisMessage(serverURL: serverURL, scope: scope) else { return }
+        guard AnalysisReconcileEntryPolicy.canReplaceCurrentMessage(
+            pendingObservedAt: pending.observedAt,
+            lastSyncAt: lastSyncAt,
+            messageIsEmpty: message == nil
+        ) else { return }
+        message = base
+    }
+
+    /// 回执本体没有落盘（任务行已随提交删除），按对账槽重建一份**只读副本**；
+    /// `publishedReleaseId` / `parentBatchId` 不参与分析终态判据，如实填 `nil`。
+    private func analysisReconcileReceipt(
+        from pending: DirectSyncAnalysisReconcile
+    ) -> DirectSyncReceipt {
+        DirectSyncReceipt(
             ingestStatus: pending.ingestStatus,
             receiptId: pending.receiptId,
             analysisStatus: pending.analysisStatus,
@@ -2564,39 +2764,96 @@ final class HealthKitSync {
             publishedReleaseId: nil,
             parentBatchId: nil
         )
+    }
+
+    /// `await` 之后能不能发布文案：没有新一轮同步、服务端没切、权威 scope 没切。
+    private func canPublishAnalysisMessage(serverURL: URL, scope: String) -> Bool {
+        let serverStillMatches: Bool
+        if let activeServerURL {
+            serverStillMatches = Self.urlScope(for: activeServerURL) == Self.urlScope(for: serverURL)
+        } else {
+            serverStillMatches = true
+        }
+        let scopeStillMatches = activeScope == "unbound" || activeScope == scope
+        return AnalysisReconcileEntryPolicy.canPublishMessage(
+            isBusy: isBusy,
+            activeServerStillMatches: serverStillMatches && scopeStillMatches
+        )
+    }
+
+    /// 收尾之后**一次**有界的分析终态对账：问一次 `GET /v1/jobs/:id`，把终态落到对账槽并按它改口。
+    ///
+    /// ## 它为什么是现在这个样子
+    ///
+    /// * **一次调用最多一次请求，失败即放弃，不重试、不阻塞**。所以这里没有循环、
+    ///   没有 `withRetry`：一个跑不动的对账不该拖住用户的下一次同步，也不该把一次
+    ///   成功的同步拖成超时。
+    /// * **任何失败都不置 `phase` / `lastError`**：对账拿不到终态的正确表现是"这句结论
+    ///   暂时维持不变"，而不是"同步失败"。
+    /// * **不改写回执**（§8.5）：回执没有被碰过，这里改的只是对账槽与自己重算的 `message`。
+    /// * B1：`publish == .foregroundEntry` 时，写槽/改口前还要过"目标/身份/单飞"判据。
+    private func reconcilePendingAnalysis(
+        serverURL: URL,
+        apiToken: String,
+        scope: String,
+        publish: AnalysisReconcilePublish
+    ) async {
+        guard let data = taskStore.loadAnalysisReconcile(scope: scope),
+              let pending = try? JSONDecoder().decode(DirectSyncAnalysisReconcile.self, from: data),
+              pending.needsReconcile, let jobId = pending.analysisJobId else { return }
+        let receipt = analysisReconcileReceipt(from: pending)
         let status: NativeJobStatus
         do {
             status = try await api.job(id: jobId, baseURL: serverURL, token: apiToken)
         } catch {
             // 拿不到就**什么都不做**：不写槽、不改口、不报错。日志留一条是为了将来
             // "为什么一直停在分析更新中"能查到是网络还是任务真的还在跑。
-            // `startedAtMs` 之类的诊断信息这里刻意不打：日志不该出现任务 id 之外的载荷。
             NSLog("[RAI] analysis reconcile request failed (job %@): %@", jobId, String(describing: error))
             return
         }
-        // `jobFailed` 的来源：服务端在读侧对失败任务给 `error.code = "task_failed"`
-        // （`apps/api/src/data.ts` 的 `mapJobFromDomain`）。**不能**只用 `status == "failed"` 推：
-        // 「用户取消」与「执行失败」在服务端都是任务停下来了，而 §10.1 只允许把后者说成
-        // "分析更新失败，可重试分析"。
+        // `jobFailed` 的来源：服务端在读侧对失败任务给 `error.code = "task_failed"`。
+        // **不能**只用 `status == "failed"` 推：用户取消与执行失败需要分开。
         let jobFailed = status.error?.code == "task_failed"
         guard let reconciled = DirectSyncCursorPolicy.reconcileAnalysis(
             receipt: receipt, jobStatus: status.status, jobFailed: jobFailed
         ) else { return }
+
+        // B1：入口对账在 await 期间可能有新一轮同步开始/切换目标 —— 终态本身仍写回
+        // **捕获的 scope**（那是它所属的槽），但不允许改当前界面的文案。
+        if publish == .foregroundEntry,
+           !canPublishAnalysisMessage(serverURL: serverURL, scope: scope) {
+            // 只写槽：结论留给下一次进入前台/同步收尾使用。
+            var updated = pending
+            updated.analysisStatus = reconciled
+            updated.observedAt = Date()
+            if let encoded = try? JSONEncoder().encode(updated),
+               !taskStore.saveAnalysisReconcile(encoded, scope: scope) {
+                NSLog("[RAI] analysis reconcile slot update failed: %@", taskStore.lastError ?? "unknown")
+            }
+            return
+        }
 
         var updated = pending
         updated.analysisStatus = reconciled
         updated.observedAt = Date()
         if let encoded = try? JSONEncoder().encode(updated) {
             // 写失败只是"下次还要再问一遍"，同样不许影响这次同步的结论。
-            if !taskStore.saveAnalysisReconcile(encoded, scope: activeScope) {
+            if !taskStore.saveAnalysisReconcile(encoded, scope: scope) {
                 NSLog("[RAI] analysis reconcile slot update failed: %@", taskStore.lastError ?? "unknown")
             }
         }
-        // 重新算那句话：`markSuccess` 传进来的是**提交前**算好的那一句（当时只能看到
-        // `queued`），终态到达之后它必须改成 §10.3 的后两句之一。走**同一个**入口
-        // （`directSyncCompletionBase` → `DirectSyncCursorPolicy.notice(for:)` → `DirectSyncCopy`），
-        // 所以"哪种回执说什么话"仍然只有一份判据，这里不另写映射。
+        // 重新算那句话：走**同一个**入口（`directSyncCompletionBase` → `DirectSyncCursorPolicy.notice`），
+        // 所以"哪种回执说什么话"仍然只有一份判据。
         if let base = directSyncCompletionBase(receipt: receipt, reconciledAnalysisStatus: reconciled) {
+            // B1：入口对账不允许把"更新的一轮同步"的文案改回旧批次；同步自己的收尾不受此限。
+            if publish == .foregroundEntry,
+               !AnalysisReconcileEntryPolicy.canReplaceCurrentMessage(
+                   pendingObservedAt: updated.observedAt,
+                   lastSyncAt: lastSyncAt,
+                   messageIsEmpty: message == nil
+               ) {
+                return
+            }
             message = base
         }
     }

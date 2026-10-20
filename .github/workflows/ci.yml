@@ -55,6 +55,13 @@ jobs:
         run: |
           export DEVELOPER_DIR="$(xcode-select -p)"
           npm run test:ios
+      - name: Run cross-platform source gates
+        # 结构门禁（python，10 支）的跨平台入口。macOS 上 `npm run test:ios` 的聚合链
+        # （`run-model-tests.sh`）已经跑过同一批；这里显式再跑一次，是为了让 CI 与
+        # "Windows/Linux 开发者手跑"走**同一条命令**，而不是依赖 macOS 聚合链的间接覆盖。
+        # `check-pr5-facts-analysis.py` 曾因只挂在这个入口、而入口不在 CI/pre-commit，
+        # 连续 6 天没有执行者（见 `.githooks/pre-commit` 同名注释）。
+        run: npm run check:ios-gates
       - name: Cache CocoaPods
         # The AMap pod is a large binary download; the cache key follows Podfile.lock.
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0

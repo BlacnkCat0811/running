@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,11 +9,15 @@ import { parseAppleHealthXml } from "../src/apple-health-parser.js";
 import { importGpxRoutes } from "../src/gpx-parser.js";
 import { RaiDatabase } from "../src/database.js";
 import { canonicalizeRunningWorkouts } from "../src/canonicalize.js";
-import { prepareNative, nativeBinary, nativeElevationGains } from "../src/native-worker.js";
+import { prepareNative, nativeBinary, nativeElevationGains, nativeWorkerAvailability } from "../src/native-worker.js";
 import { NativeRecordWriter } from "../src/native-record-writer.js";
 
-const available = existsSync(nativeBinary());
-if (process.env.RAI_REQUIRE_RUST_TESTS === "1" && !available) throw new Error("Rust verification requires the compiled release worker");
+const artifact = nativeWorkerAvailability();
+const available = artifact.ready;
+const skipReason: string | boolean = available ? false : (artifact.reason ?? true);
+if (process.env.RAI_REQUIRE_RUST_TESTS === "1" && !available) {
+  throw new Error(`Rust verification requires a current compiled release worker: ${artifact.reason ?? "unknown"}`);
+}
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE HealthData [<!ELEMENT HealthData ANY>]>
 <h:HealthData xmlns:h="fixture">
@@ -44,7 +48,7 @@ const gpx = `<?xml version="1.0"?><gpx><trk><trkseg>
  <trkpt lat="bad" lon="121.3"><ele>30</ele></trkpt>
 </trkseg></trk></gpx>`;
 
-test("Rust decoded data preserves TS stable IDs, metadata, routes, updates, and tombstones", { skip: !available }, async () => {
+test("Rust decoded data preserves TS stable IDs, metadata, routes, updates, and tombstones", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-parity-"));
   const stores: RaiDatabase[] = [];
   const databasePath = (engine: string) => join(root, engine === "rust"
@@ -131,7 +135,7 @@ test("Rust decoded data preserves TS stable IDs, metadata, routes, updates, and 
   } finally { stores.forEach((store) => store.close()); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("native worker refuses existing outputs, protocol mismatches and malformed XML without modifying data", { skip: !available }, async () => {
+test("native worker refuses existing outputs, protocol mismatches and malformed XML without modifying data", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-invalid-"));
   try {
     const path = join(root, "export.xml");
@@ -153,7 +157,7 @@ test("native worker refuses existing outputs, protocol mismatches and malformed 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("even a valid permit cannot authorize native writes to an active-database filename", { skip: !available }, async () => {
+test("even a valid permit cannot authorize native writes to an active-database filename", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-main-guard-"));
   const path = join(root, "rai.sqlite");
   const store = await RaiDatabase.open(path);
@@ -168,7 +172,7 @@ test("even a valid permit cannot authorize native writes to an active-database f
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("native resource limits cannot be bypassed by fallback and active cancellation removes its spool", { skip: !available }, async () => {
+test("native resource limits cannot be bypassed by fallback and active cancellation removes its spool", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-limits-"));
   try {
     const path = join(root, "export.xml");
@@ -183,7 +187,7 @@ test("native resource limits cannot be bypassed by fallback and active cancellat
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("native GPX unsupported timestamps fall back only before points are applied", { skip: !available }, async () => {
+test("native GPX unsupported timestamps fall back only before points are applied", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-gpx-fallback-"));
   try {
     const path = join(root, "route.gpx");
@@ -193,7 +197,7 @@ test("native GPX unsupported timestamps fall back only before points are applied
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("native aggregate matches elevation spike filtering and leaves ambiguous multi-route ordering to TS", { skip: !available }, async () => {
+test("native aggregate matches elevation spike filtering and leaves ambiguous multi-route ordering to TS", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-aggregate-"));
   const path = join(root, "db.sqlite");
   const store = await RaiDatabase.open(path);
@@ -216,7 +220,7 @@ test("native aggregate matches elevation spike filtering and leaves ambiguous mu
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a record id carried twice keeps the last occurrence and does not trip the write sample check", { skip: !available }, async () => {
+test("a record id carried twice keeps the last occurrence and does not trip the write sample check", { skip: skipReason }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-rust-duplicate-id-"));
   const databasePath = join(root, "duplicate.sqlite.importing.00000000-0000-0000-0000-000000000002");
   const store = await RaiDatabase.open(databasePath);

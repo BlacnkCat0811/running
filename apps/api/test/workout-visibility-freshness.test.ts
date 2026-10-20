@@ -502,7 +502,13 @@ test("HTTP：pending 详情返回 200，freshness/coverage 端点与 handshake �
     publishAnalysis(databasePath);
     backdateFixtureAnalysisJob(databasePath);
     addAnalysisBearingBatch(databasePath, {
-      batchId: "batch_http_a6_late", completedAt: "2026-10-18T13:10:00.000Z",
+      batchId: "batch_http_a6_late",
+      // ⏰ 这条批次要表达"**刚**有新批次"（下面断言 `stabilityState=settling`）。HTTP 端点用
+      // **真实墙钟**判 24h 静默窗口（`data.ts` 的 `workoutFreshness(id, now = new Date())`），
+      // 所以这里不能写死 `2026-10-18T13:10:00.000Z`：那会让断言在 2026-10-19T13:10Z 之后
+      // 按日历自行变红（2026-10-20 实测 not ok 1032：`settling` 变 `stable`），而产品代码没有变。
+      // 用"当下 − 1 分钟"保住原意，也让这条判据与运行日期无关。
+      completedAt: new Date(Date.now() - 60_000).toISOString(),
       rawGeneration: 3, dependencyGeneration: 1, jobId: "recompute_job_http_a6_late",
       jobStatus: "queued", recordEffectiveAt: "2026-10-18T11:51:00.000Z"
     });
@@ -855,6 +861,96 @@ test("A6/P2-2：没有绑定行的老 release 也不能把旧评估当最新（�
     await withReadStore(path, (read) => {
       assertAnalysisVisibility(read, { status: "pending", available: true });
       assert.equal(read.workout(SESSION_ID)?.workout.currentAbility, 61.5, "旧分析仍可读");
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("R4/P2：路线-only 批次（workout XML 未变，只有持久脏证据指向本训练）⇒ 三入口一致 pending", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-r4-route-only-"));
+  try {
+    const path = await createPendingFixture(root);
+    seedModernGenerationEvidence(path);
+    publishAnalysis(path, { capturedDependencyGeneration: 1 });
+    backdateFixtureAnalysisJob(path);
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "published", available: true });
+    });
+
+    // 形态 = 复查 R4 的第一个真实复现：新路线批次代次 2、queued 任务；
+    // workout XML 内容未变 ⇒ 账本里**没有这一批的任何行**（接收方本来就不写无变化的 workout）。
+    // 唯一能证明"它动过本训练"的是 v45 `analysis_dirty_plan_json` 里的路线条目。
+    addAnalysisBearingBatch(path, {
+      batchId: "batch_r4_route_only", completedAt: "2026-10-18T13:00:00.000Z",
+      rawGeneration: 4, dependencyGeneration: 2, targetDependencyGeneration: 2,
+      jobId: "recompute_job_r4_route_only", recordEffectiveAt: STARTED_AT
+    });
+    const database = new DatabaseSync(path);
+    try {
+      database.prepare("DELETE FROM import_entity_changes WHERE batch_id = ?").run("batch_r4_route_only");
+      database.prepare("UPDATE import_batches SET analysis_dirty_plan_json = ? WHERE id = ?").run(JSON.stringify({
+        version: 1, full: false, dirtyFromAt: STARTED_AT,
+        domains: { features: STARTED_AT, fitness: STARTED_AT, readiness: STARTED_AT },
+        routeDirtyTimes: [STARTED_AT], recoveryBoundaries: [], reasons: ["route_changed"]
+      }), "batch_r4_route_only");
+    } finally {
+      database.close();
+    }
+
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "pending", available: true });
+      const freshness = read.workoutFreshness(SESSION_ID, new Date("2026-10-18T13:01:00.000Z"));
+      assert.ok(freshness);
+      // `jobId` 仍是"最近一次登记给本训练**事实批次**"的任务：路线-only 批次没有账本行，
+      // 所以它不在这条关联里（R4 只改发布状态判据，不改 jobId 的关联键）。
+      assert.equal(freshness.analysis.jobId, ANALYSIS_JOB);
+      assert.equal(freshness.analysis.publishedAt, "2026-10-18T12:31:21.265Z",
+        "旧分析的发布时刻仍是可读证据");
+      assert.equal(read.workout(SESSION_ID)?.workout.currentAbility, 61.5, "旧分析仍可读（A6）");
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("R4/P2：记录从窗口内更正到窗口外（previous_effective_at 仍在窗口内）⇒ 三入口一致 pending", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-r4-moved-record-"));
+  try {
+    const path = await createPendingFixture(root);
+    seedModernGenerationEvidence(path);
+    publishAnalysis(path, { capturedDependencyGeneration: 1 });
+    backdateFixtureAnalysisJob(path);
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "published", available: true });
+    });
+
+    // 当前 effective_at 已移出窗口（14:00），更新前区间 [11:50, 11:51] 仍在训练内。
+    addAnalysisBearingBatch(path, {
+      batchId: "batch_r4_moved_out", completedAt: "2026-10-18T13:10:00.000Z",
+      rawGeneration: 5, dependencyGeneration: 3, targetDependencyGeneration: 3,
+      jobId: "recompute_job_r4_moved_out", recordEffectiveAt: "2026-10-18T14:00:00.000Z"
+    });
+    const database = new DatabaseSync(path);
+    try {
+      database.prepare(`UPDATE import_entity_changes SET change_type = 'updated',
+        previous_effective_at = ?, previous_end_at = ?, previous_type = ?
+        WHERE batch_id = ?`).run(
+        "2026-10-18T11:50:00.000Z", "2026-10-18T11:51:00.000Z",
+        "HKQuantityTypeIdentifierHeartRate", "batch_r4_moved_out");
+      // 写侧（v45）会把边界回退到相交训练的开始时刻；这里逐字照抄，不与账本自相矛盾。
+      database.prepare("UPDATE import_batches SET analysis_dirty_plan_json = ? WHERE id = ?").run(JSON.stringify({
+        version: 1, full: false, dirtyFromAt: STARTED_AT,
+        domains: { features: STARTED_AT, fitness: STARTED_AT, readiness: STARTED_AT },
+        routeDirtyTimes: [], recoveryBoundaries: [], reasons: ["bounded_health_change"]
+      }), "batch_r4_moved_out");
+    } finally {
+      database.close();
+    }
+
+    await withReadStore(path, (read) => {
+      assertAnalysisVisibility(read, { status: "pending", available: true });
+      assert.equal(read.workout(SESSION_ID)?.workout.currentAbility, 61.5, "旧分析仍可读（A6）");
     });
   } finally {
     rmSync(root, { recursive: true, force: true });

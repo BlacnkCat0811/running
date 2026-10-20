@@ -116,18 +116,33 @@ npm run test:ios
 它等价于 `node scripts/run-ios.mjs gates` → `bash apps/ios/tests/run-ios-gates.sh`：
 `typecheck-ios.sh`（除 3 个高德依赖文件外的全部 `RAI/**` 源码做真实类型检查）+
 `run-model-tests.sh`（纯逻辑回归聚合：模型/DTO、Keychain、坐标转换、课表映射、会话探测、
-健康同步取消、缓存与续传日志、Tech 展示层与对比度、今日页版式）。非 macOS 或没装 Xcode 时它会
+健康同步取消、缓存与续传日志、Tech 展示层与对比度、今日页版式，以及 **10 支跨平台
+`check-*.py` 结构门禁**）。非 macOS 或没装 Xcode 时它会
 **显式跳过并打印"本次没有检查任何 iOS 源码"**，不假装通过；`.githooks/pre-commit` 在
-`apps/ios/` 有改动时自动跑它。
+`apps/ios/`（或门禁读的 `packages/api-contracts`、`packages/contracts`）有改动时自动跑
+`npm run test:ios` 与 `npm run check:ios-gates`。
 
 iOS 家族统一走同一个 Node 包装，四条命令都是"非 macOS ⇒ 显式跳过 + 退出 0"：
 
 | 命令 | 实际执行 | 何时跑 |
 |---|---|---|
-| `npm run test:ios` | `apps/ios/tests/run-ios-gates.sh` | 每次改动（pre-commit 自动） |
+| `npm run test:ios` | `apps/ios/tests/run-ios-gates.sh`（含 10 支 python 结构门禁） | 每次改动（pre-commit 自动） |
+| `npm run check:ios-gates` | `apps/ios/tests/check-*.py` **全部跨平台结构门禁**（不需要 Xcode；含 `check-pr5-facts-analysis.py`） | 每次改动（pre-commit 自动；非 macOS 上它是唯一会跑的 iOS 判据） |
 | `npm run test:ios:live` | `check-export-determinism-live.py`（探针装进模拟器，跨进程比对导出字节） | 手工验收 |
 | `npm run test:ios:mutation` | `check-background-mutations.py`（逐条改坏源码再跑门禁，十几分钟） | 判据本身被改动时 |
 | `npm run test:ios:mutation:scope` | 同上，`RAI_MUTATION_FOR=git` 按改动范围裁剪 | 日常 |
+
+`check:ios-gates` 在自动发现之外还有一条**执行者自检**：每支非排除门禁必须出现在某个
+`apps/ios/tests/run-*.sh` 里，否则整支入口直接红 —— 2026-10-13 引入的
+`check-pr5-facts-analysis.py` 曾只挂在这个入口、而入口不在 pre-commit/CI，连续 6 天一条判据
+都没执行，还因为基线放在 gitignored 的 `var/` 里被误记成"预存在失败"。它的 C9 基线现在入库在
+`apps/ios/tests/fixtures/pr5-c9-baseline-keys.json`，重建用
+`python3 apps/ios/tests/check-pr5-facts-analysis.py --write-baseline`（要求工作树的契约文件是干净的，
+基线会记录来源 commit）。
+
+`check:ios-gates` 的解释器下限是 **Python 3.9**（与 `run-ios-gates.sh` 的 `3.[0-8]` 拒绝口径一致；
+探测逻辑里两处必须同时改）。**找不到合格解释器时它按失败处理，不是跳过** —— 这台机器本该能跑
+文本判据却没跑成，静默放行会把"没有执行者"重新制造出来。用 `RAI_PYTHON=<解释器路径>` 指定版本。
 
 `RAI_MUTATION_FOR` 由 Node 通过 `spawnSync` 的 `env` 传给子进程（原来写在 npm script 正文里的
 `RAI_MUTATION_FOR=git …` 是 POSIX 专属，cmd 会把 `RAI_MUTATION_FOR=git` 当成程序名）。

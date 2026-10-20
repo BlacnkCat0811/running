@@ -8,6 +8,51 @@ import Foundation
 /// 1. 离线握手只能恢复“候选 scope”，让后台知道盘上可能有事；真正执行前仍要在线握手；
 /// 2. 任务的服务端、运动员、数据集 epoch、协议版本必须逐项匹配，陈旧身份不能冒充当前任务；
 /// 3. 后台意图只在任务成功落盘或同步成功提交后确认，并且只确认本轮观察到的代次。
+/// R1（2026-10-19 复核）：workout 定向补齐通道的**结构化待办快照**。
+///
+/// 旧快照只有一个 `hasDueWorkoutWindow: Bool`，于是"已确认分页游标之后还有页要读"、
+/// "现在到点要探一次"、"15 分钟后才该探"、"已经超过 7 天该结算"这四种**处置完全不同**的
+/// 事实被压成同一个布尔。调用方只能各自再从布尔猜一遍，猜错的方向都是静默的：
+///   - 把"未来复查"当成"现在就跑" ⇒ 前台每轮空转；
+///   - 把"到期窗口"只接到重排、没接到执行 ⇒ 后台被派发后 `nothingToDo`，反复重排（活锁）；
+///   - 把"已到期"当成"没有待办" ⇒ 过期窗口永远不落终态。
+///
+/// 因此这里拆成计数与显式时刻。`readFailed` 与计数分开：读盘失败是 `unknown`，
+/// **不是**"没有待办"（否则盘上那几条窗口再也没人管）。
+nonisolated struct WorkoutWindowWork: Equatable, Sendable {
+    /// 已确认分页游标之后尚未读完的窗口类型页（`sync_workout_type_pages` 里
+    /// `ready/paging` 的行数）。它们属于**立即续批**，不需要等下一次探测。
+    var immediatePageCount: Int = 0
+    /// 已到期、未过期、需要现在探一次迟样本的窗口数。
+    var dueProbeCount: Int = 0
+    /// 未过期窗口里**最早**的未来检查时刻。它不是"现在就要跑" —— 只用于安排既有
+    /// `BGProcessingTask` 的下一次 `earliestBeginDate`。
+    var nextProbeAt: Date?
+    /// 已过 7 天上限、需要在执行入口用短事务明确落 `expired` 的窗口数。
+    var expiredWindowCount: Int = 0
+    /// 读盘失败。`true` 时调用方不得把本结构当成"空队列"。
+    var readFailed: Bool = false
+
+    static let none = WorkoutWindowWork()
+
+    /// 现在就有活要干（页或到期探测）。
+    var hasDueWork: Bool { immediatePageCount > 0 || dueProbeCount > 0 }
+
+    /// 有未来复查要安排 —— 它与"现在有活"必须分开：后者决定这一轮做什么，
+    /// 前者只决定下一次何时请求系统（§8.3）。
+    var hasFutureProbe: Bool { nextProbeAt != nil }
+
+    /// 合并两个来源里**更早**的那个未来时刻（多 scope / 多查询并集时用）。
+    mutating func mergeNextProbe(_ date: Date?) {
+        guard let date else { return }
+        if let current = nextProbeAt {
+            nextProbeAt = min(current, date)
+        } else {
+            nextProbeAt = date
+        }
+    }
+}
+
 nonisolated enum HealthSyncBackgroundRecovery {
     struct Identity: Equatable, Sendable {
         let serverId: String
@@ -88,16 +133,26 @@ nonisolated enum HealthSyncBackgroundRecovery {
         /// 全被甩给后台；反过来若把"有待续页"也算新代次，大批导入期间的前台自旋护栏就失效了。
         /// 见 `SyncFollowUp.handoff`。
         let hasPendingContinuation: Bool
-        /// 该 scope 上是否有**现在就该查**的 workout 定向补齐窗口（A4，2026-10-19 复核）。
+        /// workout 定向补齐通道的**结构化待办**（R1，2026-10-19 复核）。
+        ///
+        /// 旧字段只有一个 `hasDueWorkoutWindow: Bool`，把"已确认页之后还有页"、
+        /// "现在到点要探"、"15 分钟后才该探"、"超过 7 天该结算"压成同一个布尔，
+        /// 调用方只能各自猜 —— 猜错的方向都是静默活锁（见 `WorkoutWindowWork` 的说明）。
+        ///
+        /// ⚠️ `readFailed == true` **不等于**"没有窗口"：它表示读不出来，调用方必须保守处理。
+        var workoutWindow: WorkoutWindowWork = .none
+
+        /// 该 scope 上是否有**现在就该查**的 workout 定向补齐窗口。
         ///
         /// 与 `hasPendingContinuation` 是两件事：后者是"上一批导出被预算截断的续页"，
-        /// 本字段是"盘上登记了一个到期未收口的窗口"。缺了它，普通 anchor 已追平、通知已确认、
-        /// 没有在途批次时，探针会回答"没有下一轮" —— 而窗口的 `nextCheckAt` 就躺在库里，
-        /// 没人执行它。用户看到的现象就是"得再点一次同步"。
+        /// 本属性是"盘上登记了一个到期未收口的窗口，或确认位置之后还有页"。
+        /// 缺了它，普通 anchor 已追平、通知已确认、没有在途批次时，探针会回答"没有下一轮"
+        /// —— 而窗口的 `nextCheckAt` 就躺在库里，没人执行它。用户看到的现象就是"得再点一次同步"。
         ///
-        /// ⚠️ **只算"已到期且未过期"**：未来的 `nextCheckAt` 不算活儿（否则前台每轮都会
-        /// 立刻重跑），超过 7 天上限的也不算（那是 `WorkoutBackfillScheduler.isExpired`）。
-        var hasDueWorkoutWindow: Bool = false
+        /// ⚠️ **只算"现在就可执行"**：未来的 `nextCheckAt` 不算活儿（否则前台每轮都会
+        /// 立刻重跑），超过 7 天上限的也不算（那是 `WorkoutBackfillScheduler.isExpired`，
+        /// 由执行入口的短事务结算成 `expired`）。未来时刻走 `workoutWindow.nextProbeAt`。
+        var hasDueWorkoutWindow: Bool { workoutWindow.hasDueWork }
 
         /// 盘上可能还有没走完的活儿。`unknown` 算"有" —— 保守方向是"多排一轮"，
         /// 而不是"报个成功然后没人再管"。
@@ -118,9 +173,15 @@ nonisolated enum HealthSyncBackgroundRecovery {
         ///
         /// 含 `hasPendingContinuation`：还有页没读完 = 还有活（分层上是"自己的活"，
         /// 但对"要不要再排一轮"的回答与另两种成因一致）。
+        ///
+        /// R1（2026-10-19 复核）：含 `workoutWindow.hasDueWork`（到期的窗口页/探测）与
+        /// `workoutWindow.readFailed`（读不出来 = unknown，不许报成功）。**刻意不含**
+        /// `nextProbeAt`：那是"未来要复查"，这一轮可以如实报成功，同时由
+        /// `BackgroundRunPolicy.nextBackgroundRequest` 安排下一次请求 —— 把未来工作算进
+        /// "没做完"会让每一次后台收工都报失败，系统遥测里再也分不清"失败"与"预约"。
         var needsAnotherRound: Bool {
             hasUnfinishedWork || hasIntent || hasRecoveryRequest || hasPendingContinuation
-                || hasDueWorkoutWindow
+                || workoutWindow.hasDueWork || workoutWindow.readFailed
         }
 
         /// 这一轮能不能向系统报"成功"。判据就是"收工时还有没有事情没做完"（`needsAnotherRound`）。

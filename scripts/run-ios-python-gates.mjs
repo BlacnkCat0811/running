@@ -21,14 +21,24 @@
  *     排除是**声明**，不是静默：新出现的门禁若没人排除就会被执行 —— 失败开放。
  *   - **红就是红**：任何一支非 0 退出即整体非 0，并打印是哪一支、退出码多少。
  *   - 非 macOS 上**不跳过**（这正是本入口存在的理由）；但解释器缺失是失败，不是跳过。
+ *   - **执行者自检**（2026-10-19）：每支非排除门禁必须出现在某个
+ *     `apps/ios/tests/run-*.sh` 里。`check-pr5-facts-analysis.py` 曾只挂在本入口、
+ *     而本入口不在 pre-commit / CI ⇒ 它连续 6 天一条判据都没执行。孤儿现在直接失败。
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const GATE_DIR = "apps/ios/tests";
+
+/**
+ * 解释器版本下限。与 `run-ios-gates.sh` 的 `3.[0-8]` 拒绝口径**必须一致**：
+ * 一份判据严格、一份宽松，等于没有地板。3.9 是 macOS 自带 `/usr/bin/python3`，
+ * 也是本仓 PEP 604 兼容修复（`from __future__ import annotations`）的目标下限。
+ */
+export const PYTHON_VERSION_FLOOR = [3, 9];
 
 /**
  * 需要外部条件、**不能**在普通开发机上跑的门禁。
@@ -59,26 +69,80 @@ export function discoverGateFiles(readDir = readdirSync, dir = join(root, GATE_D
     .sort();
 }
 
-/** `python3` 优先，退回 `python`：老 macOS 的 `/usr/bin/python` 是 2.7，必须验证 major == 3。 */
+/**
+ * 被某个 `run-*.sh` 引用到的门禁文件名集合 —— "这支判据有没有执行者"的判据来源。
+ *
+ * 只认 `run-*.sh`：npm 目标（`run-ios.mjs`）、手工命令、文档里的示例都不算执行者，
+ * 因为本项目的历史失效形态正是"门禁写好了、文档也写了、但没有任何自动入口会跑它"。
+ *
+ * 🔴 **整行注释先剥掉**：这些脚本的注释里大量提到 `check-*.py`（用来解释历史教训），
+ * 不剥就会把"注释里提过"当成"有执行者"——那正是 pr5 失效时的形态。
+ */
+export function referencedGateFiles(readDir = readdirSync, readText = readFileSync, dir = join(root, GATE_DIR)) {
+  const referenced = new Set();
+  for (const name of readDir(dir)) {
+    if (!name.startsWith("run-") || !name.endsWith(".sh")) continue;
+    let body;
+    try {
+      body = readText(join(dir, name), "utf8");
+    } catch {
+      continue;
+    }
+    const code = body.split(/\r?\n/)
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    for (const match of code.matchAll(/check-[A-Za-z0-9._-]+\.py/g)) referenced.add(match[0]);
+  }
+  return referenced;
+}
+
+/** 纯函数：可执行门禁 − 有执行者的门禁 = 孤儿。 */
+export function findOrphanGates(runnable, referenced) {
+  return runnable.filter((name) => !referenced.has(name));
+}
+
+/** `python3` 优先，退回 `python`：老 macOS 的 `/usr/bin/python` 是 2.7，必须验证版本。 */
 export function resolvePython(env = process.env, probe = () => false) {
   if (env.RAI_PYTHON) return env.RAI_PYTHON;
   return ["python3", "python"].find((command) => probe(command)) ?? null;
 }
 
 export function probePython(command) {
-  const probe = spawnSync(command, ["-c", "import sys; assert sys.version_info[0] == 3"], { stdio: "ignore" });
+  const probe = spawnSync(
+    command,
+    ["-c", `import sys; assert sys.version_info[:2] >= (${PYTHON_VERSION_FLOOR.join(", ")}), sys.version`],
+    { stdio: "ignore" }
+  );
   return !probe.error && probe.status === 0;
+}
+
+/** 解释器版本自述（失败原因里必须带上是哪个 python、什么版本）。 */
+export function describePython(command) {
+  const result = spawnSync(
+    command,
+    ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
+    { encoding: "utf8" }
+  );
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.trim() || null;
 }
 
 /**
  * 纯函数：目录内容 + 解释器 ⇒ 要跑什么。不读环境、不起进程（probe 由调用方注入），
  * 免得测试变成"校验我这台机器此刻的配置"而不是代码。
+ *
+ * `orphans` 是"会被执行、但没有任何 `run-*.sh` 引用"的门禁；`runGates` 对它直接判红。
  */
 export function planGates(context = {}) {
-  const { files = discoverGateFiles(), excluded = excludedGateFiles(), python = null } = context;
+  const {
+    files = discoverGateFiles(),
+    excluded = excludedGateFiles(),
+    referenced = referencedGateFiles(),
+    python = null
+  } = context;
   const runnable = files.filter((name) => !excluded.has(name));
   const skipped = files.filter((name) => excluded.has(name));
-  return { runnable, skipped, python };
+  return { runnable, skipped, orphans: findOrphanGates(runnable, referenced), python };
 }
 
 export function runGates(plan, spawn = spawnSync, cwd = root) {
@@ -111,6 +175,13 @@ export function runGates(plan, spawn = spawnSync, cwd = root) {
   for (const name of plan.skipped) {
     console.log(`\n⏭️  跳过 ${GATE_DIR}/${name}：${EXCLUDED[name]}`);
   }
+  // 孤儿必须比"某支失败"更响：失败至少说明判据在跑，孤儿是**根本没跑**。
+  if (plan.orphans && plan.orphans.length > 0) {
+    console.error(`\n❌ 这些结构门禁没有任何执行者（不在 ${GATE_DIR}/run-*.sh 里）：${plan.orphans.join("、")}`);
+    console.error("   判据存在 ≠ 判据被执行 —— 挂进对应的 run-*.sh；确实只能在别处跑的，");
+    console.error("   写进本文件的 EXCLUDED 并逐条说明原因（排除是声明，不是静默）。");
+    return 1;
+  }
   if (failed > 0) {
     console.error(`\niOS 结构门禁：${plan.runnable.length} 支里 ${failed} 支失败。`);
     return 1;
@@ -120,7 +191,12 @@ export function runGates(plan, spawn = spawnSync, cwd = root) {
 }
 
 export function main(env = process.env) {
-  const plan = planGates({ python: resolvePython(env, probePython) });
+  const python = resolvePython(env, probePython);
+  const plan = planGates({ python });
+  if (python) {
+    const version = describePython(python);
+    console.log(`iOS 结构门禁解释器：${python}${version ? ` ${version}` : ""}（要求 ≥ ${PYTHON_VERSION_FLOOR.join(".")}）`);
+  }
   return runGates(plan);
 }
 

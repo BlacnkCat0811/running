@@ -20,6 +20,54 @@ struct HealthKitRecordCursorRegression {
         check(replaying.needsHistoryRead(), "an interrupted history replay must resume")
         check(!HealthKitRecordCursor(anchor: Data([9]), historyReadAt: now).needsHistoryRead(),
               "a cursor without a replay phase stays incremental")
+        // B2（2026-10-19 复核）：游标更新集中化 —— 三条更新路径以**所有字段非默认**的
+        // 游标为输入，逐字段验证"只有预期字段变化"（漏带任一旁路字段的旧缺陷就是从这里来的）。
+        let fullyPopulated = HealthKitRecordCursor(
+            anchor: Data([1, 2, 3]),
+            historyReadAt: now.addingTimeInterval(-10),
+            historyReplayPhase: .history,
+            recentWindowReadAt: now.addingTimeInterval(-20),
+            lateBackfillAt: now.addingTimeInterval(-30),
+            lateBackfillBefore: now.addingTimeInterval(-40),
+            lateBackfillWindowStart: now.addingTimeInterval(-50),
+            historyCoverageFloor: now.addingTimeInterval(-60)
+        )
+        let recentOnly = fullyPopulated.settingRecentWindowReadAt(now)
+        check(recentOnly.recentWindowReadAt == now
+              && recentOnly.anchor == fullyPopulated.anchor
+              && recentOnly.historyReadAt == fullyPopulated.historyReadAt
+              && recentOnly.historyReplayPhase == fullyPopulated.historyReplayPhase
+              && recentOnly.lateBackfillAt == fullyPopulated.lateBackfillAt
+              && recentOnly.lateBackfillBefore == fullyPopulated.lateBackfillBefore
+              && recentOnly.lateBackfillWindowStart == fullyPopulated.lateBackfillWindowStart
+              && recentOnly.historyCoverageFloor == fullyPopulated.historyCoverageFloor,
+              "recentWindowReadAt update preserves every other channel")
+        let lateOnly = fullyPopulated.settingLateBackfill(
+            at: now, before: nil, windowStart: now.addingTimeInterval(-70))
+        check(lateOnly.lateBackfillAt == now
+              && lateOnly.lateBackfillBefore == nil
+              && lateOnly.lateBackfillWindowStart == now.addingTimeInterval(-70)
+              && lateOnly.anchor == fullyPopulated.anchor
+              && lateOnly.historyReadAt == fullyPopulated.historyReadAt
+              && lateOnly.recentWindowReadAt == fullyPopulated.recentWindowReadAt
+              && lateOnly.historyCoverageFloor == fullyPopulated.historyCoverageFloor,
+              "late-backfill pagination update preserves anchor/history/window channels")
+        let advanced = fullyPopulated.advancingAnchor(
+            anchor: Data([4, 5]), historyReadAt: now,
+            historyReplayPhase: nil, historyCoverageFloor: nil)
+        check(advanced.anchor == Data([4, 5]) && advanced.historyReadAt == now
+              && advanced.historyReplayPhase == nil && advanced.historyCoverageFloor == nil
+              && advanced.recentWindowReadAt == fullyPopulated.recentWindowReadAt
+              && advanced.lateBackfillAt == fullyPopulated.lateBackfillAt
+              && advanced.lateBackfillBefore == fullyPopulated.lateBackfillBefore
+              && advanced.lateBackfillWindowStart == fullyPopulated.lateBackfillWindowStart,
+              "anchor advance preserves every side-channel cursor field")
+        let established = HealthKitRecordCursor.established(
+            anchor: Data([6]), historyReadAt: now, historyReplayPhase: nil,
+            historyCoverageFloor: nil)
+        check(established.recentWindowReadAt == nil && established.lateBackfillAt == nil
+              && established.lateBackfillBefore == nil && established.lateBackfillWindowStart == nil,
+              "a first cursor explicitly initializes side channels to nil (no inherited value)")
         let cursors = ["sleep": cursor, "hrv": cursor, "steps": replaying]
         let decoded = try JSONDecoder().decode([String: HealthKitRecordCursor].self,
                                                from: JSONEncoder().encode(cursors))
@@ -418,18 +466,30 @@ struct HealthKitRecordCursorRegression {
         let incrementalCursor = HealthKitRecordCursor(anchor: Data([2]), historyReadAt: now)
         check(SyncCoveragePolicy.needsCoverageQuery(
                 cursors: [:],
-                types: ["HKQuantityTypeIdentifierHeartRate"]),
-              "no cursor at all means 'needs a coverage query' (first install / repaired cursor)")
+                types: ["HKQuantityTypeIdentifierHeartRate"],
+                allowSkip: true),
+              "no cursor at all means 'needs a coverage query' when history skipping is enabled")
         check(SyncCoveragePolicy.needsCoverageQuery(
                 cursors: ["HKQuantityTypeIdentifierHeartRate": replaying],
-                types: ["HKQuantityTypeIdentifierHeartRate"]),
-              "an interrupted history replay still asks for coverage")
+                types: ["HKQuantityTypeIdentifierHeartRate"],
+                allowSkip: true),
+              "an interrupted history replay still asks for coverage when skipping is enabled")
         check(!SyncCoveragePolicy.needsCoverageQuery(
                 cursors: ["HKQuantityTypeIdentifierHeartRate": incrementalCursor],
-                types: ["HKQuantityTypeIdentifierHeartRate"]),
+                types: ["HKQuantityTypeIdentifierHeartRate"],
+                allowSkip: true),
               "steady-state incremental sync does not spend a coverage request")
         check(!SyncCoveragePolicy.needsCoverageQuery(cursors: [:], types: []),
               "an empty type list needs no request")
+        // R6/A3：默认（生产）开关关闭 ⇒ 连缺游标/历史续读都不发覆盖请求。
+        check(!SyncCoveragePolicy.needsCoverageQuery(
+                cursors: [:],
+                types: ["HKQuantityTypeIdentifierHeartRate"]),
+              "with history skipping disabled, a missing cursor must not trigger a coverage request")
+        check(!SyncCoveragePolicy.needsCoverageQuery(
+                cursors: ["HKQuantityTypeIdentifierHeartRate": replaying],
+                types: ["HKQuantityTypeIdentifierHeartRate"]),
+              "with history skipping disabled, an interrupted replay must not trigger a coverage request")
 
         // historyFloor 的算术夹具：knownUntil − 24h；四种"不知道/不可用"一律 nil。
         let coverageNow = Date(timeIntervalSince1970: 1_792_326_526)  // 2026-10-18T12:28:46Z
@@ -487,6 +547,32 @@ struct HealthKitRecordCursorRegression {
                 floor: clamped),
               "a replay that already carries a floor resumes (restarting would loop at the page head)")
 
+        // R6（2026-10-19 复核）：开关关闭时仍带 floor 的游标 = 来源不可信，必须逐类型
+        // **从 nil 重放一次**清除它（不能只丢 floor 复用旧 anchor，也不能清空其它游标）。
+        let floorCursor = HealthKitRecordCursor(
+            anchor: Data([7]), historyReadAt: now,
+            recentWindowReadAt: now.addingTimeInterval(-60),
+            lateBackfillAt: now.addingTimeInterval(-120),
+            historyCoverageFloor: now.addingTimeInterval(-3_600)
+        )
+        check(SyncCoveragePolicy.hasDisabledCoverageFloor(floorCursor),
+              "a stored coverage floor is reported when the skip gate is closed")
+        check(!SyncCoveragePolicy.hasDisabledCoverageFloor(cursor),
+              "a normal cursor without a floor is not a repair candidate")
+        check(!SyncCoveragePolicy.hasDisabledCoverageFloor(nil),
+              "a missing cursor is not a repair candidate")
+        // 修复轮把 decodedAnchor 置 nil（见 HealthKitExport）⇒ 段计划只能是从头重放，
+        // 不能是 `.historyResume`（那会带着旧谓词建出来的锚点继续读）。
+        check(RecordReplayPlan.segments(
+                decodedAvailable: false, history: true, resumingHistoryPhase: false)
+              == [.historyFromScratch],
+              "the disabled-floor repair replays the type from nil, never resumes the old anchor")
+        check(RecordReplayPlan.segments(
+                decodedAvailable: false, history: true, resumingHistoryPhase: true)
+              == [.historyFromScratch],
+              "an interrupted repair also restarts from nil instead of resuming a filtered anchor")
+
+        // RecordReplayPlan × coverageRestart：旧续读重启 vs 带下界续读续段。
         // RecordReplayPlan × coverageRestart：旧续读重启 vs 带下界续读续段。
         check(RecordReplayPlan.segments(
                 decodedAvailable: true, history: true, resumingHistoryPhase: true,

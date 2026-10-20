@@ -41,8 +41,13 @@ ROOT = Path(__file__).resolve().parents[3]
 SYNC_FILE = "apps/ios/RAI/HealthKitSync.swift"
 POLICY_FILE = "apps/ios/RAI/DirectSyncCursorPolicy.swift"
 STORE_FILE = "apps/ios/RAI/SyncTaskStore.swift"
+APP_FILE = "apps/ios/RAI/RAIApp.swift"
 AGGREGATOR_FILE = "apps/ios/tests/run-model-tests.sh"
 SELF_REFERENCE = "apps/ios/tests/check-direct-sync-analysis-reconcile.py"
+
+# 冷启动/回到前台的入口。`RAIApp.swift` 被 `typecheck-ios.sh` 排除（高德依赖），
+# 所以这个调用点**只能在源码门禁里钉** —— 删掉/写错签名不会有任何编译或回归变红。
+RECONCILE_ENTRY = "reconcileAnalysisOnEntry("
 
 # 游标提交：`markSuccess` 里那一次 `commitSuccess`。判据 ①的锚点。
 # 取**调用点**而不是第一次出现标识符：本文件里 `commitSuccess` 还在注释与日志里被提过。
@@ -225,9 +230,21 @@ check(reconcile_call_at != -1,
 check(RECONCILE_DEF in sync,
       f"{SYNC_FILE} 里没有 {RECONCILE_DEF} 的定义")
 if commit_at != -1 and reconcile_call_at != -1:
+    # B1（2026-10-19 复核）：合法的请求点从 1 个变成 2 个 ——「同步收尾」与
+    # 「冷启动/前台入口」。两者都必须是**有界一次**：同步收尾一次；入口受单飞与槽判据
+    # 约束（`AnalysisReconcileEntryPolicy`）。这里同时钉住入口确实存在、且不是裸调用。
     calls = sync.count(RECONCILE_CALL)
-    check(calls == 2,  # 定义一次 + 调用一次；多出来的调用点会让"一次同步最多一次请求"失效
-          f"对账入口出现 {calls} 次（应为「定义 1 + 调用 1」）—— 每多一个调用点就多一次请求")
+    check(calls == 3,  # 定义 1 + 同步收尾调用 1 + 前台/冷启动入口调用 1
+          f"对账入口出现 {calls} 次（应为「定义 1 + 同步收尾 1 + 启动/前台入口 1」）"
+          "—— 每多一个未加判据的调用点就会多一次请求")
+    entry_body = declaration_body(sync, "func reconcileAnalysisOnEntry(") or ""
+    check("await reconcilePendingAnalysis(" in entry_body,
+          "启动/前台入口没有调用对账 —— B1 的入口存在但没有执行者")
+    check("analysisReconcileEntryInFlight" in entry_body
+          and "AnalysisReconcileEntryPolicy.shouldAttempt(" in entry_body,
+          "启动/前台入口缺少单飞闸门或触发判据 —— 多次进入前台会退化成热轮询")
+    check("AnalysisReconcileEntryPolicy.usesPersistedTerminal(" in entry_body,
+          "启动/前台入口没有走「已持久终态直接恢复展示、不联网」的分支")
     mark_success_body = declaration_body(sync, "private func markSuccess(") or ""
     check(COMMIT_CALL_SITE in mark_success_body,
           f"游标提交不在 `markSuccess` 体内 —— 判据 ① 的两半对不上")
@@ -308,7 +325,47 @@ if guard_line != -1:
 check(settled_line != -1 and guard_line != -1,
       "收尾判据与对账守卫没有同时取到 —— 门禁的锚点失效，先修门禁再谈结论")
 
-# --- 6. 本门禁不得是孤儿：必须被聚合入口真实调用 ----------------------------------
+# --- 6. 冷启动/回到前台的触发点（RAIApp.swift —— 类型检查之外） ---------------------
+# 🔴 为什么单独钉：`RAIApp.swift` 被 `typecheck-ios.sh` **排除**（依赖高德 SDK 头文件），
+# 所以"入口被删/签名写错"在类型检查与任何 Swift 回归里都看不见；而 B1 的修复正是挂在
+# `.active` 的那个 Task 里。没有这条判据，`reconcileAnalysisOnEntry` 会退化成"定义了但
+# 没有前台执行者"—— 服务端先算完、App 后重启时，界面会一直停在旧结论。
+app = strip_swift_comments(read_source(APP_FILE))
+app_lines = app.splitlines()
+
+
+def app_line_of(needle: str) -> int:
+    for index, line in enumerate(app_lines, start=1):
+        if needle in line:
+            return index
+    return -1
+
+
+check(bool(app.strip()), f"{APP_FILE} 读不到 —— 前台对账入口没有任何执行者")
+check("onChange(of: scenePhase)" in app,
+      f"{APP_FILE} 里找不到 scenePhase 监听 —— 冷启动/回到前台不再触发对账（B1 入口失效）")
+entry_lines = [
+    index for index, line in enumerate(app_lines, start=1)
+    if RECONCILE_ENTRY in line and "func " not in line
+]
+check(len(entry_lines) == 1,
+      f"{APP_FILE} 里 `{RECONCILE_ENTRY}` 出现 {len(entry_lines)} 次（应为 1）—— "
+      f"每多一个调用点就多一次请求；少一个就没有前台执行者")
+active_line = app_line_of("phase == .active")
+task_line = app_line_of("Task {")
+sync_line = app_line_of("syncIfNeeded(")
+handoff_line = app_line_of("handOffUncoveredGenerations(")
+entry_line = entry_lines[0] if len(entry_lines) == 1 else -1
+check(active_line != -1 and active_line < entry_line,
+      "前台对账入口不在 `.active` 分支里 —— 冷启动/回到前台之外的状态也会去问终态")
+check(task_line != -1 and task_line < entry_line,
+      "前台对账入口不在 Task 里 —— 它会把主线程绑在一次网络等待上")
+check(sync_line != -1 and handoff_line != -1
+      and sync_line < handoff_line < entry_line,
+      "前台对账入口没有排在 `syncIfNeeded` / `handOffUncoveredGenerations` 之后 —— "
+      "先收尾同步再对账，反过来会让对账抢在同步收尾之前")
+
+# --- 7. 本门禁不得是孤儿：必须被聚合入口真实调用 ----------------------------------
 aggregator = aggregator_raw.replace("\\", "/")
 check(bool(aggregator), f"聚合入口 {AGGREGATOR_FILE} 读不到")
 check(SELF_REFERENCE in aggregator,

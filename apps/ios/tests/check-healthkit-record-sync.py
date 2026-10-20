@@ -110,8 +110,13 @@ check("timeIntervalSince" not in history_policy and "force" not in history_polic
       and "historyReplayPhase != nil" in history_policy,
       "an established record cursor may only replay because an earlier replay was interrupted — "
       "neither elapsed time nor an explicit force may reset it")
-check("previous == nil || decoded != nil else" in records,
-      "a corrupt stored anchor must not silently trigger automatic history replay")
+# 坏锚点的**唯一**放宽是 A9 的"旧覆盖下界修复"（那正是清掉不可信行的唯一路径）：
+# 修复判定必须先于可解码性检查，且只有 `disabledFloorRepair` 能把 decodedAnchor 置 nil。
+# 换句话说：普通坏锚点仍然整批失败，不得静默重放；被放宽的只是"锚点坏了 **且** 来源不可信"。
+check("previous == nil || decoded != nil || disabledFloorRepair else" in records
+      and "let decodedAnchor = disabledFloorRepair ? nil : decoded" in records,
+      "a corrupt stored anchor must not silently trigger automatic history replay — the sole "
+      "exception is the untrusted-coverage-floor repair (A9), which drops the anchor on purpose")
 # 2026-10-16（WP-10）重锚点：校验从 `runningWorkouts` 移入 `exportArchive`（查询页改造），
 # 变量随之为 `workoutAnchor` / `storedWorkoutAnchor`；不变量不变（损坏的存储锚必须显式报错，
 # 不得静默重置成"全量从零重查"）。
@@ -180,6 +185,10 @@ check(ordered(parser, "store.removeHealthKitRecords", "if (atomic) store.commitA
 # 行为断言在 macOS 的纯逻辑回归（HealthKitRecordCursorRegression /
 # BackgroundSyncPolicyRegression）里跑；这里钉**接线与常量**，本机（Windows）即可执行。
 budget = (root / "apps/ios/RAI/DirectSyncBatchBudget.swift").read_text(encoding="utf-8")
+# B6（2026-10-19）：把**实现格式**从契约里去掉 —— 先删除全部空白再匹配公式。
+# 旧写法要求换行与缩进逐字一致，一次正常排版（哪怕是 `min(` 后换行）就会误报；
+# 压平后只留语义。（真实漂移仍会红：把 480 改 500 或 0.9 改 0.8 —— 已实测。）
+budget_flat = "".join(budget.split())
 
 # S2.5（2026-10-14）：预算判定必须在**提交之前**、用**渲染后的整页字节**做。
 # 旧判据要求"停在页末尾（consume 之后）"，那正是 524 KB 超额的成因：服务端按字节判上界，
@@ -219,8 +228,12 @@ check("recentWindowLookback" in export and "recentWindowLimit" in export
 check("budget.accepts(" in export and "budget.shrinkLimit(" in export,
       "writeGlobalRecords must decide before committing the page (accepts) and be able to shrink it")
 # S2.3：待续标记必须过 commitSuccess 的事务；探测点必须读它；前台分额度接线必须都到位。
-check("hasMorePages: hasMorePages" in sync,
-      "the real hasMorePages must reach continuationNeeded (a hard-coded false drops the flag)")
+check(
+    "hasMorePages: hasMorePages,\n            receipt: receipt," in sync,
+    "the real hasMorePages must reach continuationNeeded (a hard-coded false drops the flag). "
+    "The match includes the next argument so the identical line in `ExportSummary.withReceiptCounts` "
+    "cannot satisfy this judgement — otherwise the mutation stays green while every gate passes",
+)
 check("continuationPending: needsContinuation" in sync,
       "markSuccess must persist the continuation flag through commitSuccess")
 check("loadContinuation(scope:" in sync,
@@ -288,10 +301,12 @@ check("lateBackfillAt" in cursor and "lateBackfillBefore" in cursor
       "the running-dynamics late backfill must key off the per-type cursor bookkeeping "
       "(otherwise every batch re-reads 14 days, or nothing runs at all)")
 check("LateDynamicsBackfill.pageOutcome(" in export
-      and "lateBackfillBefore: previous?.lateBackfillBefore" in export
-      and "lateBackfillBefore: previousWindow.lateBackfillBefore" in export,
-      "the paged backfill must decide through pageOutcome and pass the paging bound through "
-      "BOTH cursor rebuilds (a rebuild that drops it re-reads the same page every batch)")
+      and export.count("settingLateBackfill(") == 2
+      and "func settingLateBackfill(" in cursor
+      and "copy.lateBackfillBefore = before" in cursor,
+      "the paged backfill must decide through pageOutcome and route BOTH cursor rebuilds through "
+      "the centralized late-backfill helper (a rebuild that drops the paging bound re-reads the "
+      "same page every batch; B2 removed the hand-copied field lists)")
 check("RecentWindowAccounting.nextMark(" in export
       and "written: windowWritten ? recent.count : 0" in export,
       "the empty-window watermark rule must go through the shared judgement AND feed it 0 when "
@@ -331,11 +346,13 @@ check("DirectSyncBatchBudget.shareLimitedPageSize(" in export
       "page can never fit the 642-record share, so the share gate ALONE would freeze the backfill "
       "at zero progress forever — the page limit and the truncation judgement must follow it")
 check("LateDynamicsBackfill.windowStart(cursor: before, now: now)" in export
-      and "lateBackfillWindowStart: windowStart" in export
-      and "lateBackfillWindowStart: previousWindow.lateBackfillWindowStart" in export
-      and "lateBackfillWindowStart: previous?.lateBackfillWindowStart" in export,
-      "the backfill window start must be persisted and passed through BOTH cursor rebuilds "
-      "(P3-22: a rebuild that drops it re-derives now-14d and the leading edge drifts)")
+      and "windowStart: windowStart" in export
+      and "func settingLateBackfill(" in cursor
+      and "copy.lateBackfillWindowStart = windowStart" in cursor
+      and "lateBackfillWindowStart: lateBackfillWindowStart" in cursor,
+      "the backfill window start must be persisted and passed through every cursor rebuild "
+      "(P3-22: a rebuild that drops it re-derives now-14d and the leading edge drifts; the "
+      "centralized helpers are now the only construction points)")
 check("now.addingTimeInterval(-LateDynamicsBackfill.lookback)" not in export,
       "the drifting per-batch window start is back — every batch would move the leading edge "
       "forward and the oldest slice would never be read (P3-22)")
@@ -348,6 +365,21 @@ check("LateDynamicsBackfill.steadyStateGapDiagnostics(writtenTypes: writtenTypes
       "diagnostic (P3-24: the user warning only reaches the replay/first-install state)")
 check("lateBackfillWindowStart" in cursor,
       "the cursor must carry the fixed backfill window start (P3-22), else paging re-derives it")
+
+# B2（2026-10-19 复核）：游标更新的**集中构造点** —— 生产代码里不许再手抄字段重建。
+# 🔴 为什么钉：手抄 8 个字段的 `HealthKitRecordCursor(...)` **编译与类型检查都照样通过**，
+# 漏带一个通道字段是静默行为（`lateBackfillWindowStart` 漏带曾让补读每批重读同一页、
+# `historyCoverageFloor` 漏带会让历史段换谓词）。B2 把 4 处重建收敛到 helper 之后，
+# 这里钉"生产路径零直接构造 + 每个 helper 都被真实调用"，防止后续改动绕回去。
+check("HealthKitRecordCursor(" not in export,
+      "B2: HealthKitExport rebuilds a record cursor by hand — every rebuild must go through "
+      "settingRecentWindowReadAt / settingLateBackfill / advancingAnchor / established "
+      "(a hand-copied field list silently drops newly added channel fields)")
+check(export.count("advancingAnchor(") == 1
+      and export.count("HealthKitRecordCursor.established(") == 1
+      and export.count("settingRecentWindowReadAt(") == 1,
+      "B2: the cursor rebuilds must stay on the centralized helpers — expected exactly one anchor "
+      "advance, one first-install initialization and one window-watermark advance")
 
 # O02/WP-11：待办路线队列的落盘与接线判据。
 check("CREATE TABLE IF NOT EXISTS sync_pending_routes" in store
@@ -424,6 +456,36 @@ check("SyncCoveragePolicy.needsCoverageQuery(" in sync
       and "SyncCoveragePolicy.historyFloor(" in export,
       "P1-1: the client must ask /v1/sync/coverage before replaying history and turn knownUntil "
       "into a history start floor (otherwise a lost cursor replays ~53万 records again)")
+check(
+    "SyncCoveragePolicy.hasDisabledCoverageFloor(" in export,
+    "R6: a cursor that still carries a coverage floor while the skip gate is closed must be "
+    "detected and repaired per type (dropping the floor but reusing the anchor would keep the "
+    "old predicate mismatch and silently miss the pre-floor history)",
+)
+# 🔴 A8（2026-10-19 复核）：修复轮必须把**修复后的起点**（`decodedAnchor`，修复轮恒为 nil）
+# 交给段计划，不能交"旧锚点能不能解码"。交 `decoded != nil` 时 decodedAvailable 恒为 true
+# ⇒ 段计划是 `[.incremental, .historyFromScratch]`，而 `.incremental` 的起点同样是 nil
+# （`starts` 的映射）⇒ 同一类型历史被**从头读两遍**，且增量段看不到旧锚点之后的删除事件。
+# 纯判据只测了 `decodedAvailable: false` 这一格 —— 那个输入在旧接线里永远不会出现，
+# 所以接线本身必须在这里钉住（"纯判据绿、接线错"的典型形态）。
+check(
+    "decodedAvailable: decodedAnchor != nil" in export
+    and "decodedAvailable: decoded != nil" not in export,
+    "R6: the disabled-floor repair must feed RecordReplayPlan the POST-REPAIR start "
+    "(decodedAnchor != nil, which is false in the repair round), not the decodable old anchor "
+    "(`decoded != nil`): the two-segment plan would replay the type's history twice and still "
+    "could not preserve the deletions the .incremental segment exists for",
+)
+# 🔴 A9（2026-10-19 二次复核）：修复判定必须排在"锚点可解码"检查**之前**。
+# 坏锚点 + 旧 floor 正是修复最该覆盖的行；先抛 `invalidRecordAnchor` 会让它永远修不好。
+repair_at = export.find("hasDisabledCoverageFloor(previous)")
+anchor_guard_at = export.find("guard previous == nil || decoded != nil || disabledFloorRepair else")
+check(
+    repair_at != -1 and anchor_guard_at != -1 and repair_at < anchor_guard_at,
+    "R6: the disabled-floor repair must be detected BEFORE the anchor-decodability guard — "
+    "otherwise a corrupt anchor carrying an old floor fails the whole type with "
+    "invalidRecordAnchor instead of being repaired (the only path that can clear it)",
+)
 check("if (identity.syncCoverageVersion ?? 0) >= 1" in sync,
       "P1-1: the coverage probe must be gated on the handshake capability (old servers keep replaying)")
 check("NSLog(\"[RAI] 覆盖探测失败，回落全量历史重放" in sync,
@@ -455,11 +517,61 @@ check("RouteDeliveredContent.shouldIncludeGPX(" in export
 check("deliveredHash: record.deliveredHash" in store,
       "P1-3: the canonical record rebuild in upsertRouteStates must carry deliveredHash (a field "
       "dropped here would silently resend every GPX forever)")
-# P1-4：记录条数按字节驱动（常量门禁在 DirectSyncBatchBudgetTests，这里只钉形态）。
-check("min(12_000, max(4_500, xmlBytesBudget / 480))" in budget,
+# P1-4：记录条数按字节驱动。🔴 B6（2026-10-19）：公式仍然要钉（本机/Windows 上
+# `DirectSyncBatchBudgetTests` 的 Swift 行为断言跑不了，文本是跨平台那一半的覆盖），
+# 但**不再对空白敏感** —— 先把连续空白压成一个空格再匹配。旧写法要求换行与缩进逐字一致，
+# 一次正常的排版调整就会误报；这不是"判据更严"，只是把实现格式也当成了契约。
+# （真实漂移仍会红：把 480 改 500 或 0.9 改 0.8，这里与 macOS 行为断言会同时失败 —— 已实测。）
+check("min(12_000,max(4_500,xmlBytesBudget/480))" in budget_flat,
       "P1-4: the record budget must be byte-driven min(12_000, max(4_500, xmlBytesBudget / 480))")
-check("Int(Double(bounds.maxRecords) * 0.9)" in budget,
+check("Int(Double(bounds.maxRecords)*0.9)" in budget_flat,
       "P1-4: the deletion quota must stay bounds.maxRecords × 0.9 (the server only limits deletions)")
+check("DirectSyncBatchBudget.from(bounds: " in sync,
+      "P1-4: the handshake bounds must be converted into the byte-driven batch budget")
+
+# --- R3（2026-10-19 复核）：训练窗口的独立 anchored 分页 --------------------------
+#     旧窗口通道每批对每个类型都用 `recentSamples` 读第一页：高密度窗口反复读同一个前缀，
+#     进程重启后没有任何断点。现在每个 (scope, workout, revision, type) 有自己的 anchor。
+check(
+    "func anchoredWindowPage(" in export and "HKAnchoredObjectQuery(" in export,
+    "R3: the workout window channel must page with an anchored query (a fixed recentSamples prefix "
+    "cannot converge when one type exceeds the page size)",
+)
+check(
+    "WorkoutWindowPaging.afterAcceptedPage(" in export
+    and "WorkoutWindowPaging.afterEmptyPage(" in export,
+    "R3: page candidates must be derived by the pure paging machine (page accepted / empty EOF)",
+)
+check(
+    "func loadWorkoutWindowPages(" in store
+    and "func commitEmptyWorkoutPageObservations(" in store
+    and "CREATE TABLE IF NOT EXISTS sync_workout_type_pages" in store,
+    "R3: the sync journal needs the page cursor table plus its load and narrow-commit entry points",
+)
+check(
+    "workoutPageCandidates: [WorkoutWindowPageCommit]" in export
+    and "workoutPageEmptyCommits: [WorkoutWindowPageCommit]" in export,
+    "R3: page candidates (wait for receipt) and empty observations (narrow transaction) must be two "
+    "separate outputs — one array cannot express the two commit timings",
+)
+state_source = (root / "apps/ios/RAI/SyncTaskState.swift").read_text(encoding="utf-8")
+check(
+    "pendingWorkoutPages" in state_source and "WorkoutWindowPageCommit" in state_source,
+    "R3: SyncTaskState must carry the page candidates across a process restart",
+)
+runner_text = (root / "apps/ios/tests/run-health-sync-tests.sh").read_text(encoding="utf-8")
+check(
+    "WorkoutWindowPaging.swift" in runner_text,
+    "R3: the paging state machine is not compiled by run-health-sync-tests.sh (no executor)",
+)
+check(
+    "WorkoutWindowPagingRegression.swift" in runner_text,
+    "R3: the paging pure regression is not compiled by run-health-sync-tests.sh",
+)
+check(
+    "WorkoutWindowPagingStoreRegression.swift" in runner_text,
+    "R3: the paging store regression is not compiled by run-health-sync-tests.sh",
+)
 
 # --- 判据注册表：自报常数 ⇒ **行为断言**（2026-10-18 深度审查 P3-29） -----------
 # 旧写法是文件末尾一个常量 `MIN_CHECKS = 77`，历史上每加一条判据就要手工重设一次。

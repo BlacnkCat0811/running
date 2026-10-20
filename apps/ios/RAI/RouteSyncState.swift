@@ -513,6 +513,28 @@ nonisolated enum WorkoutBackfillPassOutcome: String, Codable, Sendable {
     case budgetBlocked = "blocked"
     /// 本趟有类型因授权失败而**没读到**（不是空，是不知道）。
     case unauthorized
+    /// R1（2026-10-19 复核）：7 天上限到期，由执行入口的**短事务**明确结算。
+    ///
+    /// 旧实现只是把过期窗口从 `due()` 里过滤掉，行本身仍 `completedAt == nil`、
+    /// `lastPassOutcome == blocked` —— "过期"没有持久终态，探针永远看得见它。
+    case expired
+}
+
+/// R1（2026-10-19 复核）：一组补窗口的**只读探针结论**（纯值、可回归）。
+///
+/// 与 `hasDueWindow` 的分工：那个只回答"现在有没有活"；本类型同时给出"最早何时复查"
+/// 与"有几条该结算过期"，让调度器不必自己遍历第二遍、也不必再发明一份条件。
+nonisolated struct WorkoutBackfillProbe: Equatable, Sendable {
+    /// 已到期、未过期、现在就该探的窗口数。
+    var dueCount: Int = 0
+    /// 未过期窗口里最早的未来检查时刻。
+    var nextCheckAt: Date?
+    /// 已过 7 天上限、尚未收口的窗口数（执行入口要把它结算成 `expired`）。
+    var expiredCount: Int = 0
+
+    static let none = WorkoutBackfillProbe()
+
+    var hasDueWork: Bool { dueCount > 0 }
 }
 
 /// P0-4（2026-10-18 同步诊断）：一条「刚完成的训练」的**定向补齐窗口**。
@@ -756,6 +778,41 @@ nonisolated enum WorkoutBackfillScheduler {
         }
     }
 
+    /// R1（2026-10-19 复核）：一次遍历得出**执行 / 未来复查 / 过期结算**三件事。
+    ///
+    /// 旧探针只判断"现在有没有到期窗口"，于是"15 分钟后该复查"与"已经过了 7 天"都落在
+    /// 同一个 `false` 里：前者没人安排下一次唤醒，后者永远不落终态。本函数把三种事实
+    /// 分开报出来，**不写盘**（探针必须只读；过期结算由执行入口的短事务负责）。
+    static func probe(
+        _ windows: [String: WorkoutBackfillWindow],
+        now: Date
+    ) -> WorkoutBackfillProbe {
+        var probe = WorkoutBackfillProbe()
+        for window in windows.values {
+            guard !window.isCompleted else { continue }
+            if isExpired(window, now: now) {
+                probe.expiredCount += 1
+                continue
+            }
+            if window.nextCheckAt <= now {
+                probe.dueCount += 1
+            } else if probe.nextCheckAt == nil || window.nextCheckAt < probe.nextCheckAt! {
+                probe.nextCheckAt = window.nextCheckAt
+            }
+        }
+        return probe
+    }
+
+    /// 已过期、尚未收口的窗口（执行入口的短事务结算输入；顺序稳定便于回归）。
+    static func expiredWindows(
+        _ windows: [String: WorkoutBackfillWindow],
+        now: Date
+    ) -> [WorkoutBackfillWindow] {
+        windows.values
+            .filter { !$0.isCompleted && isExpired($0, now: now) }
+            .sorted { $0.workoutUUID < $1.workoutUUID }
+    }
+
     /// 本批要处理的窗口（到期、未收口；有界 + 公平序）。
     static func due(
         _ windows: [WorkoutBackfillWindow],
@@ -941,6 +998,7 @@ nonisolated enum WorkoutBackfillScheduler {
         switch window.lastPassOutcome {
         case .budgetBlocked: return reasonBlocked
         case .unauthorized: return reasonUnauthorized
+        case .expired: return reasonExpired
         case .settled, nil: return reasonPending
         }
     }

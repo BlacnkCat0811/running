@@ -1,6 +1,20 @@
 import Foundation
 import SQLite3
 
+/// R1（2026-10-19 复核）：`SyncTaskStore.probeWorkoutWindowWork` 的只读结论。
+///
+/// 与 `HealthSyncBackgroundRecovery.WorkoutWindowWork` 的分工：本类型是**存储层**的
+/// 原始计数（不知道"导出能做什么"）；后者是探针快照里的执行视图（由 `HealthKitSync`
+/// 映射）。两层分开，存储层不必依赖后台策略，纯回归也就能各自钉自己的判据。
+nonisolated struct SyncWorkoutWindowProbe: Equatable, Sendable {
+    var immediatePageCount: Int = 0
+    var dueProbeCount: Int = 0
+    var nextProbeAt: Date?
+    var expiredWindowCount: Int = 0
+
+    static let none = SyncWorkoutWindowProbe()
+}
+
 @MainActor
 final class SyncTaskStore {
     /// 同步日志库的 schema 版本（`PRAGMA user_version`）。
@@ -12,7 +26,11 @@ final class SyncTaskStore {
     /// - 4（P2-1/A3，2026-10-19）：`sync_pending_workout_windows.types_json`（逐类型补齐进度）。
     ///   老行没有这一列 ⇒ 读侧按"全部 unknown ⇒ 未完成"处理（见 `loadWorkoutBackfillWindows`），
     ///   方向是"多查一次"，绝不把没读过类型的行读成已完整。
-    private static let schemaVersion = 4
+    /// - 5（R2/R3，2026-10-19 复核）：两张**纯追加**表：
+    ///   `sync_observer_intents`（跨线程观察者意图的原子确认边界，`HealthSyncIntentJournal`
+    ///   使用同文件另一条受控连接）与 `sync_workout_type_pages`（训练窗口的独立 anchored
+    ///   分页游标）。新表不依赖旧数据；老任务按原路径先跑完。
+    private static let schemaVersion = 5
     private var database: OpaquePointer?
     /// 受控重开需要它：`open()` 可能被调用不止一次（见 `reopenIfUnavailable()`）。
     private let directory: URL
@@ -122,6 +140,35 @@ final class SyncTaskStore {
                 payload BLOB NOT NULL,
                 created_at REAL NOT NULL
             );
+            -- R2（2026-10-19 复核）：观察者意图的**原子确认边界**。
+            -- 为什么不能继续只放 UserDefaults：observer 回调在 HealthKit 队列写、确认在
+            -- MainActor 读+删，读与删之间没有原子性 ⇒ 旧代次的确认会删掉刚写入的新代次。
+            -- 这张表由 `HealthSyncIntentJournal` 用同文件另一条受控连接访问，条件删除
+            -- （`WHERE url_scope = ? AND generation = ?`）就是原子比较删除。
+            CREATE TABLE IF NOT EXISTS sync_observer_intents (
+                url_scope TEXT PRIMARY KEY,
+                generation TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            -- R3（2026-10-19 复核）：训练窗口的**独立 anchored 分页游标**。
+            -- 每个键 = (scope, workout, window_revision, record_type)；它与正式全局记录
+            -- 游标完全分离，窗口扩宽时 revision +1（旧在途 revision 仍可结算）。
+            CREATE TABLE IF NOT EXISTS sync_workout_type_pages (
+                scope TEXT NOT NULL,
+                workout_uuid TEXT NOT NULL,
+                window_revision INTEGER NOT NULL,
+                record_type TEXT NOT NULL,
+                predicate_json TEXT NOT NULL,
+                committed_anchor BLOB,
+                state TEXT NOT NULL,
+                next_check_at REAL,
+                last_served_at REAL,
+                eof_observed_at REAL,
+                last_error_code TEXT,
+                PRIMARY KEY (scope, workout_uuid, window_revision, record_type)
+            );
+            CREATE INDEX IF NOT EXISTS idx_workout_type_pages_service
+                ON sync_workout_type_pages(scope, state, last_served_at);
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
@@ -192,6 +239,7 @@ final class SyncTaskStore {
             return ensureRouteStateSchema(database: database)
                 && ensurePendingWorkoutWindowsTable(database: database)
                 && ensureWorkoutWindowTypesColumn(database: database)
+                && ensureObserverIntentAndWorkoutPageSchema(database: database)
         }
         // v1 → v2：`sync_route_state` 改用 `(scope, workout_uuid)` 复合主键。旧行不归属于
         // 任意新 scope，安全丢弃（下一次每个 workout 都会按 UNKNOWN 首查）。
@@ -205,6 +253,8 @@ final class SyncTaskStore {
         }
         // v3 → v4（P2-1/A3）：窗口逐类型进度列。纯追加、可空。
         guard migrateToVersion4(database: database) else { return false }
+        // v4 → v5（R2/R3，2026-10-19 复核）：观察者意图表 + 训练窗口分页表。纯追加。
+        guard migrateToVersion5(database: database) else { return false }
         return true
     }
 
@@ -285,6 +335,52 @@ final class SyncTaskStore {
         guard SQLiteSupport.execute("COMMIT", database: database) else { return false }
         committed = true
         return true
+    }
+
+    /// v4 → v5（R2/R3，2026-10-19 复核）：观察者意图表 + 训练窗口分页表。
+    ///
+    /// 两张都是**纯追加、无回填**：意图表只服务新写入（旧 UserDefaults 键按 scope 惰性
+    /// 迁移，见 `HealthSyncIntentJournal`）；分页表由新导出通道创建行，老任务按原路径
+    /// 先跑完。失败整段回滚，`PRAGMA user_version` 不会被推上去（下一次打开重试）。
+    private func migrateToVersion5(database: OpaquePointer) -> Bool {
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard ensureObserverIntentAndWorkoutPageSchema(database: database) else { return false }
+        guard SQLiteSupport.execute("PRAGMA user_version = 5", database: database) else { return false }
+        guard SQLiteSupport.execute("COMMIT", database: database) else { return false }
+        committed = true
+        return true
+    }
+
+    /// v5 的两张纯追加表。幂等：`CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`
+    /// —— 老库可能只缺其中一张（手改/半迁移），逐张补齐，不假设"版本号到了就两张都在"。
+    private func ensureObserverIntentAndWorkoutPageSchema(database: OpaquePointer) -> Bool {
+        SQLiteSupport.execute("""
+            CREATE TABLE IF NOT EXISTS sync_observer_intents (
+                url_scope TEXT PRIMARY KEY,
+                generation TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sync_workout_type_pages (
+                scope TEXT NOT NULL,
+                workout_uuid TEXT NOT NULL,
+                window_revision INTEGER NOT NULL,
+                record_type TEXT NOT NULL,
+                predicate_json TEXT NOT NULL,
+                committed_anchor BLOB,
+                state TEXT NOT NULL,
+                next_check_at REAL,
+                last_served_at REAL,
+                eof_observed_at REAL,
+                last_error_code TEXT,
+                PRIMARY KEY (scope, workout_uuid, window_revision, record_type)
+            );
+            CREATE INDEX IF NOT EXISTS idx_workout_type_pages_service
+                ON sync_workout_type_pages(scope, state, last_served_at);
+            """, database: database)
     }
 
     private func ensureRouteStateSchema(database: OpaquePointer) -> Bool {
@@ -640,7 +736,7 @@ final class SyncTaskStore {
     ///   拆开就会出现"游标已提交、待续标记没写上"的窗口，而那个窗口里没人会去读剩下的页。
     ///   默认 `false`：既有的调用点（恢复/无导出轮次）不产生新的待续，且会**清掉**完成后的旧标记。
     @discardableResult
-    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, pendingDeletions: DirectSyncPendingDeletions? = nil, continuationPending: Bool = false, routeSettlement: Data? = nil, routeSettlementBatchId: String = "") -> Bool {
+    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, pendingDeletions: DirectSyncPendingDeletions? = nil, continuationPending: Bool = false, routeSettlement: Data? = nil, routeSettlementBatchId: String = "", workoutPageCommits: [WorkoutWindowPageCommit]? = nil) -> Bool {
         guard isAvailable, let database else { fail("commit"); return false }
         lastError = nil
         // 🔴 写入前先把时间点吸附到 REAL 列能逐位往返的那一个值上（`Date.canonicalForREAL`）。
@@ -710,6 +806,21 @@ final class SyncTaskStore {
         guard writeContinuation((continuationPending || deletionsStillPending) ? Self.continuationPendingSentinel : nil, scope: scope) else {
             lastError = "待续标记写入失败，本次提交已回滚。"
             return false
+        }
+        // R3（2026-10-19 复核）：训练窗口分页游标与"任务行删除"**同一事务**提交。
+        // 这是页进度唯一的合法提交点：只有服务端已 committed 的回执才能把候选锚点落库，
+        // 否则崩在上传前会把"没交付的页"记成已读（迟到样本永久缺失）。
+        // 语义：`nil` = 本轮没有分页候选；非空 = 逐行 CAS（前驱不一致只跳过、不倒退）。
+        if let workoutPageCommits, !workoutPageCommits.isEmpty {
+            guard let applied = applyWorkoutPageCommitsLocked(
+                workoutPageCommits, scope: scope
+            ) else { return false }
+            guard verifyWorkoutPageCommitsLocked(applied.applied, scope: scope) else { return false }
+            if applied.skipped > 0 {
+                SQLiteSupport.report(
+                    "skipped \(applied.skipped) stale workout page commit(s)", database: database
+                )
+            }
         }
         // 🔴 B01（2026-10-17）：路线结算候选与"任务行删除"**同一事务**写入。
         //
@@ -1656,6 +1767,351 @@ final class SyncTaskStore {
         }
     }
 
+    /// R1（2026-10-19 复核）：workout 补齐通道的**只读探针**（不回写、不重开数据库）。
+    ///
+    /// 与 `loadWorkoutBackfillWindows` 的区别：返回 `nil` 表示**读不出来**（`unknown`），
+    /// 而不是"没有窗口"。`HealthKitSync.probePendingWork` 必须把两者分开 —— 前者保守多排
+    /// 一轮，后者才能说"没有待办"。
+    ///
+    /// `immediatePageCount` 来自 R3 的 `sync_workout_type_pages`：已确认分页游标之后还有
+    /// 页要读的窗口类型数。它在 C3 接线前恒为 0，但**字段与查询现在就要有**，否则探针又
+    /// 退化成"只看到期布尔"。
+    func probeWorkoutWindowWork(scope: String, now: Date) -> SyncWorkoutWindowProbe? {
+        guard isAvailable else {
+            lastError = "同步进度数据库暂不可用，无法读取 workout 补齐窗口。"
+            return nil
+        }
+        let windows = loadWorkoutBackfillWindows(scope: scope)
+        guard lastError == nil else { return nil }
+        let schedulerProbe = WorkoutBackfillScheduler.probe(windows, now: now)
+        // R3：只统计**仍活着且 revision 与当前窗口一致**的分页行。旧 revision 的行是窗口
+        // 扩宽前的残留（`upsertWorkoutBackfillWindows` 会清掉，但升级/手改库可能留下）；
+        // 已过期/已收口窗口的行也不再有人查询 —— 把它们算成"立即工作"会让探针永远为真、
+        // 后台反复空转（与 R1 要治的活锁同形）。
+        let pages = loadWorkoutWindowPages(scope: scope)
+        guard lastError == nil else { return nil }
+        var liveRevisions: [String: Int] = [:]
+        for window in windows.values
+            where !window.isCompleted && !WorkoutBackfillScheduler.isExpired(window, now: now) {
+            liveRevisions[window.workoutUUID] = WorkoutWindowPaging.windowRevision(window)
+        }
+        let immediatePageCount = pages.values.reduce(0) { partial, page in
+            guard page.state == .ready || page.state == .paging,
+                  liveRevisions[page.key.workoutUUID] == page.key.windowRevision else {
+                return partial
+            }
+            return partial + 1
+        }
+        return SyncWorkoutWindowProbe(
+            immediatePageCount: immediatePageCount,
+            dueProbeCount: schedulerProbe.dueCount,
+            nextProbeAt: schedulerProbe.nextCheckAt,
+            expiredWindowCount: schedulerProbe.expiredCount
+        )
+    }
+
+    /// R1（2026-10-19 复核）：把超过 7 天上限的窗口**明确结算成 `expired`**。
+    ///
+    /// 旧实现只在 `due()` 里用 `isExpired` 过滤：行仍 `completedAt == nil`、
+    /// `lastPassOutcome == blocked` ⇒ 探针永远看得见它，而"过期"没有任何持久终态。
+    /// 这里在执行入口（`performSync` / `performBackgroundPass`）用**一个短事务**落账：
+    ///   - `completed_at = now`、`next_check_at = now`、`lastPassOutcome = .expired`；
+    ///   - `types_json` **同事务重编码**：读侧用 `payload.completedAt == 列值` 对账，
+    ///     只改列不改 JSON 会被读成"被旧写入者改过"⇒ 又变回 unknown/未完成（R1 的行原地复活）。
+    ///   - 未交付类型保留在 `types` 里（诊断可读），但不再主动查询。
+    ///
+    /// 返回结算的行数；`nil` = 读写失败（调用方只记诊断，不阻断同步 —— 窗口不是事实数据）。
+    /// 不删除任何正式游标、不删除在途任务引用（过期不允许覆盖它们）。
+    @discardableResult
+    func settleExpiredWorkoutWindows(scope: String, now: Date) -> Int? {
+        guard isAvailable, let database else {
+            lastError = "同步进度数据库暂不可用，无法结算过期的 workout 补齐窗口。"
+            return nil
+        }
+        let windows = loadWorkoutBackfillWindows(scope: scope)
+        guard lastError == nil else { return nil }
+        let expired = WorkoutBackfillScheduler.expiredWindows(windows, now: now)
+        guard !expired.isEmpty else { return 0 }
+        lastError = nil
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
+            fail("settle expired windows begin")
+            return nil
+        }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard let statement = prepare("""
+            UPDATE sync_pending_workout_windows
+            SET completed_at = ?3, next_check_at = ?4, types_json = ?5
+            WHERE scope = ?1 AND workout_uuid = ?2 AND completed_at IS NULL
+            """) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        // R3：过期窗口退出主动补齐 ⇒ 它的分页游标不再有人查询。同事务删除，避免探针把
+        // 遗留的 `paging/ready` 行当成永久"立即工作"（R1 活锁的另一个入口）。
+        // 不删除任何正式游标、不删除任务行、不丢已入库事实。
+        guard let prunePages = prepare("""
+            DELETE FROM sync_workout_type_pages WHERE scope = ?1 AND workout_uuid = ?2
+            """) else { return nil }
+        defer { sqlite3_finalize(prunePages) }
+        let settledAt = now.canonicalForREAL
+        var normalized: [WorkoutBackfillWindow] = []
+        for var window in expired {
+            window.completedAt = settledAt
+            window.nextCheckAt = settledAt
+            window.lastPassOutcome = .expired
+            guard let encoded = WorkoutBackfillScheduler.encodeProgress(window),
+                  let typesJSON = String(data: encoded, encoding: .utf8) else {
+                lastError = "过期窗口的逐类型进度无法编码，本次结算已回滚。"
+                return nil
+            }
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            guard SQLiteSupport.bind(scope, to: statement, at: 1),
+                  SQLiteSupport.bind(window.workoutUUID, to: statement, at: 2),
+                  sqlite3_bind_double(statement, 3, settledAt.timeIntervalSince1970) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 4, settledAt.timeIntervalSince1970) == SQLITE_OK,
+                  SQLiteSupport.bind(typesJSON, to: statement, at: 5) else {
+                fail("settle expired windows bind")
+                return nil
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                fail("settle expired windows update")
+                return nil
+            }
+            let touched = Int(sqlite3_changes(database))
+            guard touched == 1 else {
+                lastError = "过期窗口未能结算（可能已被另一条路径结算），本次回滚。"
+                return nil
+            }
+            sqlite3_reset(prunePages)
+            sqlite3_clear_bindings(prunePages)
+            guard SQLiteSupport.bind(scope, to: prunePages, at: 1),
+                  SQLiteSupport.bind(window.workoutUUID, to: prunePages, at: 2),
+                  sqlite3_step(prunePages) == SQLITE_DONE else {
+                fail("prune expired workout pages")
+                return nil
+            }
+            normalized.append(window)
+        }
+        // 提交前回读：`loadWorkoutBackfillWindows` 会按 `payload.completedAt == 列值` 对账，
+        // 于是这次回读同时验证了"JSON 与列值同源"这条纪律。
+        let written = loadWorkoutBackfillWindows(scope: scope)
+        guard lastError == nil else { return nil }
+        for window in normalized {
+            guard written[window.workoutUUID] == window else {
+                lastError = "过期窗口结算后无法读回一致的值，本次提交已回滚。"
+                return nil
+            }
+        }
+        guard SQLiteSupport.execute("COMMIT", database: database) else {
+            fail("settle expired windows commit")
+            return nil
+        }
+        committed = true
+        return normalized.count
+    }
+
+    // MARK: - 训练窗口的独立 anchored 分页（R3，2026-10-19 复核）
+
+    /// 读本 scope 的**全部分页游标**（键 = `(workout, revision, type)`）。
+    ///
+    /// 与窗口行同一条理由在导出开始前整批读出（导出跑在脱离主线程的上下文，
+    /// 碰不了 `@MainActor` 的 store）。表很小（每条窗口 × 类型一行，7 天后收口）。
+    func loadWorkoutWindowPages(scope: String) -> [WorkoutWindowPageKey: WorkoutWindowPage] {
+        guard isAvailable else { return [:] }
+        guard let statement = prepare("""
+            SELECT workout_uuid, window_revision, record_type, predicate_json,
+                   committed_anchor, state, next_check_at, last_served_at,
+                   eof_observed_at, last_error_code
+            FROM sync_workout_type_pages WHERE scope = ?
+            """) else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        var result: [WorkoutWindowPageKey: WorkoutWindowPage] = [:]
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return result }
+            guard step == SQLITE_ROW else { fail("read workout pages"); return result }
+            guard let uuidPointer = sqlite3_column_text(statement, 0),
+                  let typePointer = sqlite3_column_text(statement, 2),
+                  let predicatePointer = sqlite3_column_text(statement, 3),
+                  let statePointer = sqlite3_column_text(statement, 5) else { continue }
+            let revision = Int(sqlite3_column_int64(statement, 1))
+            let key = WorkoutWindowPageKey(
+                scope: scope,
+                workoutUUID: String(cString: uuidPointer),
+                windowRevision: revision,
+                recordType: String(cString: typePointer)
+            )
+            let anchor: Data?
+            if sqlite3_column_type(statement, 4) == SQLITE_NULL {
+                anchor = nil
+            } else if let pointer = sqlite3_column_blob(statement, 4) {
+                anchor = Data(bytes: pointer, count: Int(sqlite3_column_bytes(statement, 4)))
+            } else {
+                anchor = nil
+            }
+            result[key] = WorkoutWindowPage(
+                key: key,
+                predicateJSON: String(cString: predicatePointer),
+                committedAnchor: anchor,
+                state: WorkoutWindowPageState(rawValue: String(cString: statePointer)) ?? .blocked,
+                nextCheckAt: sqlite3_column_type(statement, 6) == SQLITE_NULL
+                    ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
+                lastServedAt: sqlite3_column_type(statement, 7) == SQLITE_NULL
+                    ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 7)),
+                eofObservedAt: sqlite3_column_type(statement, 8) == SQLITE_NULL
+                    ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 8)),
+                lastErrorCode: sqlite3_column_type(statement, 9) == SQLITE_NULL
+                    ? nil : String(cString: sqlite3_column_text(statement, 9)!)
+            )
+        }
+    }
+
+    /// **纯空查询/页被拒**之后的分页进度提交（R3 §10.4）。
+    ///
+    /// 这些页没有新增载荷，不能等"批次被服务端接受"（那会凭空生成一次只含 manifest 的空
+    /// ZIP）；它们只需要一个**窄事务**：校验前驱锚点（CAS）→ 写 EOF/退避状态 → 提交前回读。
+    ///
+    /// 不推进正式全局记录游标、不删除任何任务行。CAS 不匹配（有更早/更新的提交先落盘）
+    /// 只跳过该行，不覆盖较新的进度 —— 于是"陈旧候选"不会把分页游标倒退。
+    @discardableResult
+    func commitEmptyWorkoutPageObservations(
+        _ commits: [WorkoutWindowPageCommit], scope: String
+    ) -> Bool {
+        guard !commits.isEmpty else { return true }
+        guard isAvailable, let database else { fail("workout page observations"); return false }
+        lastError = nil
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
+            fail("workout page observations begin")
+            return false
+        }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard let applied = applyWorkoutPageCommitsLocked(commits, scope: scope) else { return false }
+        guard verifyWorkoutPageCommitsLocked(applied.applied, scope: scope) else { return false }
+        guard SQLiteSupport.execute("COMMIT", database: database) else {
+            fail("workout page observations commit")
+            return false
+        }
+        committed = true
+        if applied.skipped > 0 {
+            SQLiteSupport.report("skipped \(applied.skipped) stale workout page observation(s)", database: database)
+        }
+        return true
+    }
+
+    /// 在**已开启的事务**里应用分页候选。返回 (`applied`, `skipped`)。
+    ///
+    /// `skipped` = 当前已确认锚点与候选的 `expectedAnchor` 不一致（有更新的进度先落盘）。
+    /// 这里**绝不覆盖**较新进度：跳过该行，让下一次导出从更新的锚点继续读。
+    private func applyWorkoutPageCommitsLocked(
+        _ commits: [WorkoutWindowPageCommit], scope: String
+    ) -> (applied: [WorkoutWindowPageCommit], skipped: Int)? {
+        let current = loadWorkoutWindowPages(scope: scope)
+        guard lastError == nil else { return nil }
+        guard let statement = prepare("""
+            INSERT INTO sync_workout_type_pages(
+                scope, workout_uuid, window_revision, record_type, predicate_json,
+                committed_anchor, state, next_check_at, last_served_at, eof_observed_at,
+                last_error_code
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ON CONFLICT(scope, workout_uuid, window_revision, record_type) DO UPDATE SET
+                predicate_json = excluded.predicate_json,
+                committed_anchor = excluded.committed_anchor,
+                state = excluded.state,
+                next_check_at = excluded.next_check_at,
+                last_served_at = excluded.last_served_at,
+                eof_observed_at = excluded.eof_observed_at,
+                last_error_code = excluded.last_error_code
+            """) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        var applied: [WorkoutWindowPageCommit] = []
+        var skipped = 0
+        for commit in commits {
+            // 前驱锚点必须与盘上一致（包括"盘上没有行且候选也期望 nil"）。任何不一致都
+            // 说明有更新的进度先落盘 —— 跳过，绝不倒退。
+            if current[commit.key]?.committedAnchor != commit.expectedAnchor {
+                skipped += 1
+                continue
+            }
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            let predicate = commit.predicateJSON
+            let state = commit.state.rawValue
+            let nextCheck = commit.nextCheckAt?.canonicalForREAL
+            let servedAt = commit.servedAt?.canonicalForREAL
+            let eofObserved = commit.eofObservedAt?.canonicalForREAL
+            var bound = SQLiteSupport.bind(scope, to: statement, at: 1)
+            bound = bound && SQLiteSupport.bind(commit.key.workoutUUID, to: statement, at: 2)
+            bound = bound && sqlite3_bind_int64(statement, 3, Int64(commit.key.windowRevision)) == SQLITE_OK
+            bound = bound && SQLiteSupport.bind(commit.key.recordType, to: statement, at: 4)
+            bound = bound && SQLiteSupport.bind(predicate, to: statement, at: 5)
+            bound = bound && bindOptionalBlob(commit.committedAnchor, to: statement, at: 6)
+            bound = bound && SQLiteSupport.bind(state, to: statement, at: 7)
+            bound = bound && bindOptionalReal(nextCheck, to: statement, at: 8)
+            bound = bound && bindOptionalReal(servedAt, to: statement, at: 9)
+            bound = bound && bindOptionalReal(eofObserved, to: statement, at: 10)
+            bound = bound && bindOptionalText(commit.lastErrorCode, to: statement, at: 11)
+            guard bound else {
+                fail("workout page commit bind")
+                return nil
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                fail("workout page commit")
+                return nil
+            }
+            let touched = Int(sqlite3_changes(database))
+            guard touched == 1 else {
+                lastError = "分页游标未能写入，本次提交已回滚。"
+                return nil
+            }
+            applied.append(commit)
+        }
+        return (applied, skipped)
+    }
+
+    /// 提交前回读：只验证本次**实际应用**的行。跳过的陈旧候选不参与回读
+    /// （它们本来就不该改动盘上更新的进度）。
+    private func verifyWorkoutPageCommitsLocked(
+        _ commits: [WorkoutWindowPageCommit], scope: String
+    ) -> Bool {
+        guard !commits.isEmpty else { return true }
+        let written = loadWorkoutWindowPages(scope: scope)
+        guard lastError == nil else { return false }
+        for commit in commits {
+            guard let page = written[commit.key],
+                  page.committedAnchor == commit.committedAnchor,
+                  page.state == commit.state else {
+                lastError = "分页游标写入后无法读回一致的值，本次提交已回滚。"
+                return false
+            }
+        }
+        return true
+    }
+
+    private func bindOptionalBlob(_ value: Data?, to statement: OpaquePointer, at index: Int32) -> Bool {
+        guard let value else { return sqlite3_bind_null(statement, index) == SQLITE_OK }
+        guard value.count <= Int(Int32.max) else { return false }
+        return value.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, index, buffer.baseAddress, Int32(value.count), SQLiteSupport.transient)
+        } == SQLITE_OK
+    }
+
+    /// 同步日志库的**默认文件位置**。`HealthSyncIntentJournal` 必须与任务行同库（同一份
+    /// 本地同步存储），但仍然使用**自己那条受控连接**（见 §9.2）。
+    nonisolated static func defaultDatabaseURL() -> URL {
+        let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+        return applicationSupport
+            .appendingPathComponent("RAI", isDirectory: true)
+            .appendingPathComponent("sync.sqlite")
+    }
+
     /// 登记/刷新一批 workout 补齐窗口。**三条护栏与 `upsertRouteStates` 同源**：
     /// 单事务、逐行 `sqlite3_changes() == 1`、提交**前**回读断言。
     ///
@@ -1700,6 +2156,14 @@ final class SyncTaskStore {
         defer {
             if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
         }
+        // R3：窗口扩宽 ⇒ revision 变 ⇒ 旧分页游标作废（不能把旧锚点套到新谓词上）。
+        // 在同一事务里删除同 (scope, workout) 的旧 revision 行；崩在之前/之后都安全：
+        // 残留行会被探针按"revision 与当前窗口不一致"过滤掉，不会制造永久待办。
+        guard let prunePages = prepare("""
+            DELETE FROM sync_workout_type_pages
+            WHERE scope = ?1 AND workout_uuid = ?2 AND window_revision <> ?3
+            """) else { return false }
+        defer { sqlite3_finalize(prunePages) }
         guard let statement = prepare("""
             INSERT INTO sync_pending_workout_windows(
                 scope, workout_uuid, window_start, window_end, created_at, next_check_at,
@@ -1749,6 +2213,19 @@ final class SyncTaskStore {
             guard touched == 1 else {
                 lastError = "workout 补齐窗口未能写入，本次提交已回滚。"
                 SQLiteSupport.report("workout windows upsert touched \(touched) row(s)", database: database)
+                return false
+            }
+            // 旧 revision 的分页行在同事务里清掉（不覆盖新进度：新 revision 的行是本次导出
+            // 之后才会创建的）。
+            sqlite3_reset(prunePages)
+            sqlite3_clear_bindings(prunePages)
+            guard SQLiteSupport.bind(scope, to: prunePages, at: 1),
+                  SQLiteSupport.bind(record.workoutUUID, to: prunePages, at: 2),
+                  sqlite3_bind_int64(
+                      prunePages, 3, Int64(WorkoutWindowPaging.windowRevision(record))
+                  ) == SQLITE_OK,
+                  sqlite3_step(prunePages) == SQLITE_DONE else {
+                fail("prune stale workout pages")
                 return false
             }
         }

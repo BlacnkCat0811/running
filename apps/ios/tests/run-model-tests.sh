@@ -78,6 +78,7 @@ xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor 
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/DirectSyncReceiptState.swift apps/ios/RAI/DirectSyncCursorPolicy.swift \
   apps/ios/RAI/SyncTaskState.swift apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/WorkoutWindowPaging.swift \
   apps/ios/tests/DirectSyncReceiptRegression.swift -o "$tmp/direct-sync-receipt-tests"
 "$tmp/direct-sync-receipt-tests"
 
@@ -120,6 +121,12 @@ python3 apps/ios/tests/check-export-determinism.py
 python3 apps/ios/tests/check-direct-sync-status-copy.py
 python3 apps/ios/tests/check-direct-sync-contract-parity.py
 python3 apps/ios/tests/check-direct-sync-analysis-reconcile.py
+# PR5 读侧一致性（C9 键集/可选性 + C2 键集不跨域 + 能力位命名）。它此前是**唯一一支孤儿**：
+# 只挂在 `npm run check:ios-gates` 里，而那个入口不在 pre-commit、也不在 CI ⇒ 从 2026-10-13
+# 引入起连续 6 天**一条判据都没执行**（还因为缺 gitignored 的基线被写成"预存在失败"）。
+# 2026-10-19：基线入库（`apps/ios/tests/fixtures/pr5-c9-baseline-keys.json`，可由
+# `--write-baseline` 重建）+ 挂进本聚合入口 ⇒ `npm run test:ios` 在 macOS 上真的会跑它。
+python3 apps/ios/tests/check-pr5-facts-analysis.py
 # Optional release red/green proof; ordinary gates already execute all positive regressions.
 if [ "${RAI_PLAN_STATE_MUTATIONS:-0}" = 1 ]; then
   bash apps/ios/tests/run-plan-state-mutations.sh

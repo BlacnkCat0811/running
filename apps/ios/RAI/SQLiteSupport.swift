@@ -3,7 +3,7 @@ import SQLite3
 
 /// Shared low-level operations. Callers decide whether a failure is a cache miss
 /// or a blocking journal error; neither layer silently reports a successful write.
-enum SQLiteSupport {
+nonisolated enum SQLiteSupport {
     static var transient: sqlite3_destructor_type {
         unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     }

@@ -76,7 +76,7 @@ import { registerImportRoutes } from "./routes/import-routes.js";
 import { RuntimeTelemetry } from "./runtime-telemetry.js";
 // systemd readiness/watchdog（2026-10-18 事故复盘 P1）：无 NOTIFY_SOCKET 时 no-op。
 import { createSystemdNotifier } from "./systemd-notify.js";
-import { importEngine, nativeFallback, nativeBinary, NATIVE_VERSION } from "@rai/health-export-parser";
+import { importEngine, nativeFallback, nativeWorkerAvailability, NATIVE_VERSION } from "@rai/health-export-parser";
 import { installMutationLifetime } from "./request-mutation-lifetime.js";
 import {
   backupParamsSchema,
@@ -143,8 +143,16 @@ const apiToken = process.env.RAI_API_TOKEN?.trim() || undefined;
 // 旧值在 50 GB 盘上构成真实威胁（一个异常包就能吃光解压预算）。生产 env 若显式设置该键需同步改。
 const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 64 * 1024 ** 2);
 const importExecutionEngine = { name: importEngine(), fallback: nativeFallback(), version: NATIVE_VERSION };
-if (importExecutionEngine.name === "rust" && importExecutionEngine.fallback === "none" && !existsSync(nativeBinary())) {
-  throw new Error("Rust worker is missing. Run npm run rust:build or configure RAI_RUST_BINARY before enabling Rust.");
+if (importExecutionEngine.name === "rust" && importExecutionEngine.fallback === "none") {
+  // 产物过期与缺失同等严重：旧 worker 与当前 TypeScript 语义不一致（parity 修复之前构建的
+  // 二进制会把错误结果写进真实健康库）。只有"源码树不存在"（打包部署）才不判过期。
+  const artifact = nativeWorkerAvailability();
+  if (!artifact.ready) {
+    throw new Error(
+      `Rust worker is unavailable: ${artifact.reason ?? "unknown"}. `
+        + "Run npm run rust:build or configure RAI_RUST_BINARY before enabling Rust."
+    );
+  }
 }
 const serverId = process.env.RAI_SERVER_ID?.trim() || "local";
 const athleteId = process.env.RAI_ATHLETE_ID?.trim() || "athlete_1";

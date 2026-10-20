@@ -4,6 +4,7 @@ import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../s
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
 import { nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
+import { parseBatchAnalysisDirtyEvidence } from "./batch-analysis-dirty-evidence.js";
 import { readHealthRecordOverlap } from "./health-record-overlap-reads.js";
 import { SqliteRoutePointReader } from "./route-point-reader.js";
 
@@ -276,16 +277,40 @@ const factAverageHeartRateSql = (featureAlias: string | null, workoutAlias: stri
  * 而列表一次要读几十行、详情页还在前台轮询。这里把**批次集合先缩小**（只保留
  * "可能没被 active release 覆盖"的那几个批次），再一次性取它们的触及范围：
  * - `workoutIds`：`import_entity_changes` 的 `workout` 实体行直接给出 canonical workout；
- * - `intervals`：`record` 行的 `effective_at` 区间（按批次取 MIN/MAX）。
+ * - `intervals`：`record` 行的**新旧并集**区间（按批次取 MIN/MAX；v37 的
+ *   `previous_effective_at` / `previous_end_at` 也并入）。只取当前 `effective_at` 会让
+ *   "把一条记录从训练窗口内更正到窗口外"读成没碰过本训练（R4 的第二个复现）。
  *   "区间内的会话"是**保守**的：账本不记录这条记录属于哪次训练，所以同窗口内的
  *   其它训练也会被算作可能受影响 —— 宁可多报 pending（分析本来就会按脏范围重算），
  *   不可少报成 published（那正是 A6 的缺陷）。
+ * - `dirtyFromAt` / `instants` / `allSessions`：v45 `import_batches.analysis_dirty_plan_json`
+ *   里的持久脏证据（R4 的第一个复现）。路线-only 批次可以没有账本行，账本永远重建不出
+ *   它的边界，所以这份证据是唯一来源。语义与写侧分析计划**同源**：
+ *   `startedAt >= dirtyFromAt` 的训练会被 `extractFeatures` 重算（含恢复事实对后继训练的
+ *   影响），因此都算"可能被这批动过"。
  */
 interface SessionTouchMatcher {
   /** 被这些批次**直接写过** workout 实体的 canonical workout id。 */
   workoutIds: Set<string>;
-  /** 被这些批次写过记录的时间区间（ISO，含端点）。 */
+  /** 被这些批次写过记录的时间区间（新旧并集，ISO，含端点）。 */
   intervals: Array<{ fromAt: string; toAt: string }>;
+  /**
+   * 持久脏证据里"从这一刻起（含）必须重算"的最早边界；`null` = 没有可用的增量边界。
+   *
+   * 判据与写侧 `extractFeatures` 的 `workoutStartAt >= dirtyFromAt` 逐字同义
+   * （`recompute-pipeline.ts`）：边界**之后**的训练会拿到新特征/新能力时间线，边界之前
+   * 的不受影响 —— 不能用"区间相交"代替它（恢复边界通常落在训练开始之前）。
+   */
+  dirtyFromAt: string | null;
+  /** 路线事实/恢复事实的精确时刻（窗口包含判定；补足 `dirtyFromAt` 之外的直接命中）。 */
+  instants: string[];
+  /**
+   * 证据**无法归因到单条训练**（`full = true`，或证据损坏/未知版本）。
+   *
+   * 这种批次在写侧等于"全量重算"：任何训练都可能被它动过。方向必须保守
+   * （"不知道"不是"没有影响"），否则又会把待更新的旧结论说成最新。
+   */
+  allSessions: boolean;
 }
 
 /**
@@ -305,6 +330,11 @@ interface SessionTouchMatcher {
  *    按 `request_json.importBatchId(s)` 关联到批次。只要它指向**未被覆盖**的批次，
  *    本训练就是"新分析未发布"。⚠️ 不用 `analysis_job_coverage`：那是**执行方在发布事务**
  *    写的，queued 任务根本没有行（见 v39 注释），拿它做判据会把"正在排队"读成"没影响"。
+ * 4. **持久脏证据**：v45 `import_batches.analysis_dirty_plan_json`。路线-only 批次可以没有
+ *    任何账本行（workout XML 未变），账本永远重建不出它的边界 —— 只有这份证据知道
+ *    "这一批动过哪条训练"。`full`/损坏 ⇒ 无法归因 ⇒ 所有训练都算可能被它动过；
+ *    可增量 ⇒ `dirtyFromAt` 之后（含）的训练 + 路线/恢复时刻命中的训练。
+ *    ⚠️ 只对**已经进入上面三类**的批次读它（不为"已覆盖"的批次发明第二套判据）。
  *
  * 退化分支（**必须**留痕，否则下一个人会以为是漏实现）：
  * - `import_generations` 计数器全库没有写入方之前（`raw_generation = 0`）或老批次没有
@@ -333,7 +363,13 @@ interface AnalysisVisibilityEvidence {
 }
 
 /** 空匹配器：不触及任何训练（"没有证据"与"没有影响"在这里是同一个可读结果）。 */
-const emptyTouchMatcher = (): SessionTouchMatcher => ({ workoutIds: new Set<string>(), intervals: [] });
+const emptyTouchMatcher = (): SessionTouchMatcher => ({
+  workoutIds: new Set<string>(),
+  intervals: [],
+  dirtyFromAt: null,
+  instants: [],
+  allSessions: false
+});
 
 /** 这个批次集合有没有触及给定训练（见 {@link SessionTouchMatcher} 的保守口径）。 */
 function matcherTouchesSession(
@@ -342,8 +378,11 @@ function matcherTouchesSession(
   startedAt: string,
   endedAt: string
 ): boolean {
+  if (matcher.allSessions) return true;
   if (matcher.workoutIds.has(canonicalWorkoutId)) return true;
   // ISO-8601 UTC 字符串按字典序比较即时间序（库里两类时刻都是 `toISOString()` 形状）。
+  if (matcher.dirtyFromAt !== null && startedAt >= matcher.dirtyFromAt) return true;
+  if (matcher.instants.some((instant) => instant >= startedAt && instant <= endedAt)) return true;
   return matcher.intervals.some((interval) => interval.fromAt <= endedAt && interval.toAt >= startedAt);
 }
 
@@ -976,7 +1015,14 @@ export class SqliteWorkoutReadRepository {
     return Number.isFinite(captured) ? Math.trunc(captured) : null;
   }
 
-  /** 一组批次的"触及训练"投影（{@link SessionTouchMatcher}；两次查询，不是逐行子查询）。 */
+  /**
+   * 一组批次的"触及训练"投影（{@link SessionTouchMatcher}；三次查询，不是逐行子查询）。
+   *
+   * R4（2026-10-19 复查）：在 A6 的两条证据之外补两处**已有事实**，而不是发明新的匹配器：
+   * 1. 账本区间取**新旧并集**（v37 的 `previous_effective_at` / `previous_end_at`）——
+   *    时间更正把记录移出窗口时，只有旧区间还落在窗口内；
+   * 2. v45 的持久脏证据（`analysis_dirty_plan_json`）—— 路线-only 批次没有账本行。
+   */
   private touchMatcher(batchIds: string[]): SessionTouchMatcher {
     if (batchIds.length === 0) return emptyTouchMatcher();
     const placeholders = batchIds.map(() => "?").join(",");
@@ -987,15 +1033,123 @@ export class SqliteWorkoutReadRepository {
         WHERE change.batch_id IN (${placeholders}) AND change.entity_kind = 'workout'
       `).all(...batchIds) as Array<{ workoutId: string }>).map((row) => String(row.workoutId))
     );
+    // v37 之前打开的库没有 `previous_*` 三列：退回"只看当前时刻"的旧区间（与修复前逐字相同）。
+    const merged = this.hasImportChangePreviousColumns();
+    const lowerSql = merged
+      ? "MIN(COALESCE(change.effective_at, change.previous_effective_at),"
+        + " COALESCE(change.previous_effective_at, change.effective_at))"
+      : "change.effective_at";
+    const upperSql = merged
+      ? "MAX(COALESCE(change.effective_at, change.previous_end_at, change.previous_effective_at),"
+        + " COALESCE(change.previous_end_at, change.previous_effective_at, change.effective_at))"
+      : "change.effective_at";
+    const presenceSql = merged
+      ? "(change.effective_at IS NOT NULL OR change.previous_effective_at IS NOT NULL)"
+      : "change.effective_at IS NOT NULL";
     const intervals = (this.database.prepare(`
-      SELECT MIN(change.effective_at) AS fromAt, MAX(change.effective_at) AS toAt
+      SELECT MIN(${lowerSql}) AS fromAt, MAX(${upperSql}) AS toAt
       FROM import_entity_changes change
       WHERE change.batch_id IN (${placeholders})
-        AND change.entity_kind = 'record' AND change.effective_at IS NOT NULL
+        AND change.entity_kind = 'record' AND ${presenceSql}
       GROUP BY change.batch_id
     `).all(...batchIds) as Array<{ fromAt: string; toAt: string }>)
       .map((row) => ({ fromAt: String(row.fromAt), toAt: String(row.toAt) }));
-    return { workoutIds, intervals };
+    return { workoutIds, intervals, ...this.dirtyEvidenceTouch(batchIds, placeholders) };
+  }
+
+  /**
+   * 持久脏证据的"触及训练"投影（R4，v45 `import_batches.analysis_dirty_plan_json`）。
+   *
+   * 三种出口（与写侧 `planDirtyForBatches` 的失败方向一致）：
+   * - `absent`：v45 之前的老批次/该批不影响分析 ⇒ **不额外触及**（保持修复前的行为；
+   *   它的账本证据仍由 {@link touchMatcher} 的另两条查询覆盖）；
+   * - `invalid`：版本/形状不认识 ⇒ `allSessions = true`（"这一批动过什么"不可知，
+   *   不得读成"没有影响"）；
+   * - `ok` + `full`：增量计划表达不了 ⇒ `allSessions = true`；
+   * - `ok` + 可增量 ⇒ `dirtyFromAt`/域边界（多批取最早）+ 路线/恢复时刻。
+   *   某域边界为 `null`（= 该域不可增量、全算）时同样 `allSessions = true`。
+   *
+   * 🔴 列存在性是运行期探测：v45 之前的库没有这一列，此时不可能有证据（等价 `absent`），
+   * 不能因为"读不到列"让整张列表 500。
+   */
+  private dirtyEvidenceTouch(
+    batchIds: string[],
+    placeholders: string
+  ): Pick<SessionTouchMatcher, "dirtyFromAt" | "instants" | "allSessions"> {
+    let dirtyFromAt: string | null = null;
+    const instants = new Set<string>();
+    let allSessions = false;
+    if (this.hasBatchDirtyEvidenceColumn()) {
+      const rows = this.database.prepare(`
+        SELECT analysis_dirty_plan_json AS json
+        FROM import_batches
+        WHERE id IN (${placeholders})
+      `).all(...batchIds) as Array<{ json: string | null }>;
+      for (const row of rows) {
+        const parsed = parseBatchAnalysisDirtyEvidence(row.json);
+        if (parsed.status === "absent") continue;
+        if (parsed.status === "invalid") {
+          // 损坏/未知版本：不可归因 ⇒ 保守（见方法文档）。
+          allSessions = true;
+          continue;
+        }
+        if (parsed.evidence.full) {
+          // `full` = 本批不可增量，任何训练都可能被它动过。
+          allSessions = true;
+          continue;
+        }
+        const evidence = parsed.evidence;
+        // 分域边界的 `null` = **该域不可增量（全算）**，不是"该域不脏"（见
+        // `recompute-pipeline.ts` 的 `domainBoundaries`）。该域一旦全算，任何训练的分析
+        // 都可能变 ⇒ 与 `full` 同一保守档。
+        if (evidence.domains.features === null
+            || evidence.domains.fitness === null
+            || evidence.domains.readiness === null) {
+          allSessions = true;
+          continue;
+        }
+        // 写侧当前让三个域与 `dirtyFromAt` 同值；但证据里域边界可以更早（例如只影响
+        // fitness/readiness 的更早边界），取最早者才是"从这一刻起要重算"的保守下界。
+        for (const boundary of [
+          evidence.dirtyFromAt,
+          evidence.domains.features,
+          evidence.domains.fitness,
+          evidence.domains.readiness
+        ]) {
+          if (boundary !== null && (dirtyFromAt === null || boundary < dirtyFromAt)) {
+            dirtyFromAt = boundary;
+          }
+        }
+        for (const instant of [...evidence.routeDirtyTimes, ...evidence.recoveryBoundaries]) {
+          instants.add(instant);
+        }
+      }
+    }
+    return { dirtyFromAt, instants: [...instants].sort(), allSessions };
+  }
+
+  /** 账本 v37 的"更新前范围"三列（运行期探测，理由同 {@link hasHealthRecordAvailableAt}）。 */
+  private importChangePreviousColumns: boolean | null = null;
+
+  private hasImportChangePreviousColumns(): boolean {
+    if (this.importChangePreviousColumns !== null) return this.importChangePreviousColumns;
+    const columns = this.database.prepare("PRAGMA table_info(import_entity_changes)").all() as Array<{
+      name: string;
+    }>;
+    this.importChangePreviousColumns = columns.some((column) => column.name === "previous_effective_at");
+    return this.importChangePreviousColumns;
+  }
+
+  /** 批次表 v45 的 `analysis_dirty_plan_json`（运行期探测，理由同上）。 */
+  private batchDirtyEvidenceColumn: boolean | null = null;
+
+  private hasBatchDirtyEvidenceColumn(): boolean {
+    if (this.batchDirtyEvidenceColumn !== null) return this.batchDirtyEvidenceColumn;
+    const columns = this.database.prepare("PRAGMA table_info(import_batches)").all() as Array<{
+      name: string;
+    }>;
+    this.batchDirtyEvidenceColumn = columns.some((column) => column.name === "analysis_dirty_plan_json");
+    return this.batchDirtyEvidenceColumn;
   }
 
   /**

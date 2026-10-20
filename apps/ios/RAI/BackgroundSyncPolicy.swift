@@ -151,6 +151,9 @@ nonisolated enum SyncFollowUp {
     /// - Parameters:
     ///   - hasUncoveredGeneration: 有新代次（通知 / scope 恢复请求）没被覆盖。
     ///   - hasPendingContinuation: 上一批还有**未读完的页**（`PendingWork.hasPendingContinuation`）。
+    ///   - hasWorkoutWork: workout 定向补齐通道现在有活（到期窗口 / 已确认页之后的下一页）。
+    ///     R1（2026-10-19 复核）：它必须能被这里接住 —— 旧实现只把窗口算进"要不要重排"，
+    ///     不算"要不要执行"，于是同一份待办在两条路径上给出相反答案。
     ///   - foregroundRoundsLeft: 新代次的前台补跑额度（从 `maxForegroundRounds` 起算）。
     ///   - continuationBudgetLeft: 这一波前台续读的预算还够不够
     ///     （`ForegroundContinuationBudget.allows(now:)`；时间 + 轮数双上界）。
@@ -158,14 +161,16 @@ nonisolated enum SyncFollowUp {
     /// 🔴 判定的优先级 = 新代次优先用**自己的**额度：两者同时挂起时先按新代次扣账，
     /// 额度尽后若待续页仍悬着再落到续读预算 —— 每个分支都对应"这一轮到底为什么还要跑"，
     /// 调用方据此扣**对应**的计数器（见 `AppDelegate.handOffUncoveredGenerations`）。
+    /// 窗口页/探测与待续页同属"续读预算"：它不是新通知，不该吃掉防自旋额度。
     static func handoff(
         hasUncoveredGeneration: Bool,
         hasPendingContinuation: Bool,
+        hasWorkoutWork: Bool = false,
         isForeground: Bool,
         foregroundRoundsLeft: Int,
         continuationBudgetLeft: Bool
     ) -> Handoff {
-        guard hasUncoveredGeneration || hasPendingContinuation else { return .nothing }
+        guard hasUncoveredGeneration || hasPendingContinuation || hasWorkoutWork else { return .nothing }
         guard isForeground else { return .scheduleBackground }
         if hasUncoveredGeneration { return foregroundRoundsLeft > 0 ? .runAgain : .scheduleBackground }
         return continuationBudgetLeft ? .runAgain : .scheduleBackground
@@ -249,6 +254,12 @@ nonisolated enum BackgroundRunPolicy {
         /// `background pass: action=…` 的日志才能把 R1 那种"发现待续页却不执行"的活锁与
         /// "真的没事做"区分开。
         case resumeContinuation
+        /// R1（2026-10-19 复核）：没有任务行，但 workout 定向补齐通道有**现在就能执行**的活
+        /// （已确认页之后还有页，或到期窗口要探一次迟样本）⇒ 从零开始一次同步（导出内含窗口）。
+        ///
+        /// 它必须与 `.nothingToDo` 分开：旧实现的到期窗口只进了 `needsAnotherRound`，没进
+        /// `action`，于是后台被派发后不导出、只再次重排 —— 直到窗口过期或别的入口打破条件。
+        case runWorkoutWindowPass
     }
 
     /// 后台运行的软预算（秒）。**这是参数，不是验收标准。**
@@ -299,6 +310,41 @@ nonisolated enum BackgroundRunPolicy {
         // 存在本身就是重试依据，轮不到续页判据说话。
         if wantsFreshSync { return .startFreshSync }
         return wantsContinuation ? .resumeContinuation : .nothingToDo
+    }
+
+    /// R1（2026-10-19 复核）：**生产路径**的执行决策 —— 唯一入参是 `HealthSyncWorkPlanner`
+    /// 的统一计划，不再由调用方拼 `wantsFreshSync` / `wantsContinuation` 两个布尔。
+    ///
+    /// 保留上面的旧 `action(...)` 是刻意的：它是 `check-background-mutations.py` 的结构锚点
+    /// （已安装的判据仍在用它逐条突变），而生产改走这里之后，"窗口到期却 nothingToDo" 的
+    /// 活锁形态就不再可能发生 —— 因为计划本身已经回答了"为什么跑"。
+    ///
+    /// `jobId` / `hasTask` / `hasBackgroundUploadTask` 仍优先于计划：它们回答的是"字节与
+    /// 服务端作业现在归谁"，比"有没有新活"更靠前（见旧 `action` 的说明）。
+    static func action(
+        jobId: String?,
+        hasTask: Bool,
+        hasBackgroundUploadTask: Bool,
+        plan: HealthSyncWorkPlanner.Action
+    ) -> Action {
+        // 用 `hasTask == false` 而不是 `if let jobId`（后者在旧 `action` 里已有一份，
+        // `check-background-mutations.py` 的锚点要求该片段**恰好出现一次**）。
+        if hasTask == false, let jobId, !jobId.isEmpty { return .resumeJob }
+        if hasTask {
+            return hasBackgroundUploadTask ? .awaitSystemUpload : .runAtomicUnit
+        }
+        switch plan {
+        case .export(.newDelivery):
+            return .startFreshSync
+        case .export(.workoutPage), .export(.workoutProbe):
+            return .runWorkoutWindowPass
+        case .export(.regularContinuation):
+            return .resumeContinuation
+        case .deferUntil, .blocked, .idle, .resumeExistingTask:
+            // `.resumeExistingTask` 只在 `hasTask == true` 时返回；走到这里说明调用方的
+            // 两个事实不一致 —— 保守收工（任务行仍在，下一轮仍会按盘上状态续接）。
+            return .nothingToDo
+        }
     }
 
     /// 这一轮后台运行是否已经该主动收手。
@@ -377,6 +423,51 @@ nonisolated enum BackgroundRunPolicy {
     /// 下一次 `submit` 该填的 `earliestBeginDate`。
     static func earliestBeginDate(now: Date, after delay: TimeInterval = resubmitDelay) -> Date {
         now.addingTimeInterval(delay)
+    }
+
+    /// R1（2026-10-19 复核）：一次后台执行请求的**唯一来源**（重排与切后台共用）。
+    ///
+    /// 三态（§8.3）：
+    ///   - 还有现在就能做的活 ⇒ `now + resubmitDelay`（既有 backoff，不把预算花在重放错误上）；
+    ///   - 只有未来探测 ⇒ `nextProbeAt`（**不立即执行**，也不丢未来复查）；
+    ///   - 都没有 ⇒ `nil`（不创建空任务）。
+    ///
+    /// `pending.reportsSuccess` 与它不是一回事：预约未来工作的一轮可以如实报成功
+    /// （`needsAnotherRound` 刻意不含 `nextProbeAt`），否则每次收工都会向系统虚报失败。
+    nonisolated struct BackgroundRunRequest: Equatable, Sendable {
+        enum Reason: String, Equatable, Sendable {
+            case pendingWork = "pending_work"
+            case futureWorkoutProbe = "future_workout_probe"
+        }
+
+        let earliestBeginDate: Date
+        let reason: Reason
+    }
+
+    static func nextBackgroundRequest(
+        now: Date,
+        pending: HealthSyncBackgroundRecovery.PendingWork
+    ) -> BackgroundRunRequest? {
+        if pending.needsAnotherRound {
+            return BackgroundRunRequest(
+                earliestBeginDate: earliestBeginDate(now: now),
+                reason: .pendingWork
+            )
+        }
+        if let next = pending.workoutWindow.nextProbeAt, next > now {
+            return BackgroundRunRequest(earliestBeginDate: next, reason: .futureWorkoutProbe)
+        }
+        return nil
+    }
+
+    /// R1（§8.3）：**更早的待发请求不能被更晚的重排推迟**。
+    ///
+    /// `BGTaskScheduler` 同一 identifier 只保留一个待发请求，后 `submit` 会覆盖先前的
+    /// `earliestBeginDate` —— 于是"后台跑完按 15 分钟重排"会顺手把用户切后台时排下的
+    /// 立刻执行请求推到 15 分钟后。判据：已有请求更早 ⇒ 保留；确实要提前 ⇒ 才覆盖。
+    static func shouldReplacePendingRequest(existingEarliest: Date?, proposed: Date) -> Bool {
+        guard let existingEarliest else { return true }
+        return proposed < existingEarliest
     }
 }
 

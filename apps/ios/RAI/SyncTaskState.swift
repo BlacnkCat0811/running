@@ -212,6 +212,19 @@ nonisolated struct SyncTaskState: Codable {
     /// 但解码仍然走 `decodeIfPresent`：任何新键都不许让整份任务消失（文件头兼容纪律）。
     var lastExportCounts: ExportChannelCounts?
 
+    /// R3（2026-10-19 复核）：本批**已交付但尚未拿到 committed 回执**的训练窗口分页候选。
+    ///
+    /// 内容 = `(scope, workout, windowRevision, type)` 的起始确认指纹、候选 anchor、EOF/退避
+    /// 状态与下一次探测时刻。三条纪律：
+    ///   1. **上传前**随任务行落盘（与 `pendingDeletions` 同一条"导出态"透传通道）；
+    ///   2. 所有恢复分支（`.waitJob` / inspect 续接 / 原 ZIP 重传 / 正常新导出）原样透传；
+    ///   3. 只有在 `commitSuccess` 的同一事务里、拿到服务端 committed 回执后才落 `sync_workout_type_pages`。
+    ///
+    /// `nil`（老 payload 缺键）= 本轮没有分页候选；**不是**"清空分页表"。解不开时降级为
+    /// `nil`（与 `routeCommit` 同一条兼容纪律：丢掉候选只让下一批重读一页，丢掉整份任务
+    /// 会让升级后的首次同步重导整个窗口）。
+    var pendingWorkoutPages: [WorkoutWindowPageCommit]?
+
     init(
         target: String,
         serverId: String? = nil,
@@ -244,7 +257,8 @@ nonisolated struct SyncTaskState: Codable {
         lastAnalysisStatus: DirectSyncAnalysisStatus? = nil,
         completedRouteTodos: [String]? = nil,
         routeCommit: RouteCommitCandidate? = nil,
-        lastExportCounts: ExportChannelCounts? = nil
+        lastExportCounts: ExportChannelCounts? = nil,
+        pendingWorkoutPages: [WorkoutWindowPageCommit]? = nil
     ) {
         self.target = target
         self.serverId = serverId
@@ -278,6 +292,7 @@ nonisolated struct SyncTaskState: Codable {
         self.completedRouteTodos = completedRouteTodos
         self.routeCommit = routeCommit
         self.lastExportCounts = lastExportCounts
+        self.pendingWorkoutPages = pendingWorkoutPages
     }
 
     /// 显式解码：老键保持必填，新键一律 `decodeIfPresent`。
@@ -341,6 +356,10 @@ nonisolated struct SyncTaskState: Codable {
         routeCommit = try? container.decodeIfPresent(RouteCommitCandidate.self, forKey: .routeCommit)
         // P2-3：纯计数，解不开也只是少一条观测 —— 与 `routeCommit` 同一条降级纪律。
         lastExportCounts = try? container.decodeIfPresent(ExportChannelCounts.self, forKey: .lastExportCounts)
+        // R3：分页候选是"恢复证据"，解不开时降级为 nil（下一批多读一页），绝不让整份任务消失。
+        pendingWorkoutPages = try? container.decodeIfPresent(
+            [WorkoutWindowPageCommit].self, forKey: .pendingWorkoutPages
+        )
     }
 
     /// 落盘的那个字符串 → 闭集取值。老 payload 的 `recomputing` 在这里归一到 `importing`。

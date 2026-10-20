@@ -10,8 +10,8 @@ struct TechWorkoutSeriesChart: View, Equatable {
     let average: Double?
     let durationSeconds: Double
     /// 空图占位。2026-10-18（事故复盘 P0-3）：`freshness.series[].state == not_seen_yet` 的
-    /// 指标是"样本还在 Apple Watch 里"，与"设备没有这项数据"必须用不同的话说 ——
-    /// 旧实现两种情形都渲染成「暂无…时序样本」，于是用户没法判断该等还是该放弃。
+    /// 指标是"服务端尚未观察到该指标"（**不**归因 Apple Watch），与"设备没有这项数据"必须
+    /// 用不同的话说 —— 旧实现两种情形都渲染成「暂无…时序样本」，于是用户没法判断该等还是该放弃。
     /// 文案由 `WorkoutFreshnessPresentation.emptySeriesPlaceholder` 给出（纯函数、有回归）。
     var emptySeriesNote: String? = nil
 

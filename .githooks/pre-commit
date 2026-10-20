@@ -35,6 +35,18 @@ node scripts/check-doc-line-refs.mjs
 # 每一条都真的坏过一次，坏法都是"Mac 上好好的、Windows 上是红的"。毫秒级，每次提交都跑。
 node scripts/check-npm-scripts-portable.mjs
 
+# iOS 结构门禁（python，跨平台、秒级）：`apps/ios` 或它读的契约源码一改就跑。
+# 触发面包含 packages/api-contracts / packages/contracts，是因为 `check-pr5-facts-analysis.py`
+# 冻结的就是这两处的接口形状 —— 只按 `apps/ios` 触发会漏掉"契约改了、判据没跑"。
+# 🔴 2026-10-19 的事故形态：`check-pr5-facts-analysis.py` 只挂在 `npm run check:ios-gates`，
+# 而那个入口既不在本钩子、也不在 CI ⇒ 它从 2026-10-13 引入起连续 6 天一条判据都没执行，
+# 还因为基线没入库被写成"预存在失败"。这里跑的是纯文本判据，不编译 Swift，所以
+# **非 macOS 也必须跑** —— "跳过"只属于 Xcode 那一档（下一段）。
+if git diff --cached --name-only --diff-filter=ACMR -- apps/ios packages/api-contracts packages/contracts | grep -q .; then
+  echo "pre-commit: 结构门禁（npm run check:ios-gates）"
+  npm run check:ios-gates
+fi
+
 # iOS 判据（typecheck-ios.sh + run-model-tests.sh）此前没有任何自动入口，
 # 只有人记得的时候才会被跑 —— 2026-09-19 的 test11 回归就是这么进主干的。
 # 触发面刻意收窄到 `apps/ios/`：iOS 门禁要真编译全部 Swift 源码，秒级变分钟级，

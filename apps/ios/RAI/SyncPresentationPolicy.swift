@@ -22,14 +22,18 @@ import Foundation
 /// 服务端合同（`packages/api-contracts`，2026-10-18 新增）：
 /// - `analysis.status`：`pending | running | published | failed`；
 /// - `series[].state`：`present | not_seen_yet | unsupported`（**`not_seen_yet` ≠ 设备不支持**）；
-/// - `completeness`：`partial | complete`。
+/// - `completeness`：`partial | complete`（老判据；A5 之后客户端仍须兼容，但不再是唯一依据）。
+/// - A5 三态（2026-10-19，老服务端整组省略）：`deliveryState` = `delivered | partial | unknown`
+///   （**到达证据**，不证明手机读到了什么）、`analysisState`（与 `analysis.status` 同源）、
+///   `stabilityState` = `stable | settling`（唯一吃 24h 静默窗口的量）。
 nonisolated enum WorkoutFreshnessPresentation {
     /// 详情页顶部横幅。视图只负责挑颜色/图标，文案与条件都在这里。
     struct Banner: Equatable, Sendable {
         enum Kind: Equatable, Sendable {
             /// 事实已提交、分析未发布：`analysis.status != "published"`（或详情里的 `publishStatus == "pending"`）。
             case analyzing
-            /// 分析已发布，但样本仍在往服务端/手机里补（`completeness == "partial"`）。
+            /// 分析已发布，但仍有指标 `not_seen_yet`，或观测窗口仍在 `settling`。
+            /// 文案只说"尚未观察到 / 可能仍在补传"，**不**替服务端声称手表还在传。
             case waitingForSamples
             /// 分析失败：**不是**"还在算"，不能继续用「分析中」。
             case analysisFailed
@@ -42,30 +46,77 @@ nonisolated enum WorkoutFreshnessPresentation {
         let pollsInForeground: Bool
     }
 
-    /// 老服务端没有 freshness 端点时，`completeness` 只能是 `complete` 之外的东西 ——
-    /// 没有证据就当"已完整"，否则每次进入详情页都会白轮询。
+    /// A5 三态字段是否可用。
+    ///
+    /// 服务端一次性发 `deliveryState` / `analysisState` / `stabilityState` 三个键；老服务端
+    /// 整组省略。这里按"任一键出现即新服务端"处理：否则一个只缺 `stabilityState` 的载荷会
+    /// 被当成老服务端，而它恰恰带着新服务端的 `not_seen_yet` 证据。**全部缺失**时才退回
+    /// `completeness` 语义 —— 那才是真正的老服务端。
+    static func hasTriState(_ freshness: WorkoutFreshnessResponse?) -> Bool {
+        guard let freshness else { return false }
+        return freshness.deliveryState != nil || freshness.analysisState != nil
+            || freshness.stabilityState != nil
+    }
+
+    /// 分析状态。优先 A5 的 `analysisState`（与 `analysis.status` 同源），老服务端退回
+    /// `analysis.status` —— 两个字段都由服务端给出，缺失时不会凭空编造。
+    static func analysisState(_ freshness: WorkoutFreshnessResponse?) -> String? {
+        guard let freshness else { return nil }
+        return freshness.analysisState ?? freshness.analysis.status
+    }
+
+    /// 至少一个指标处于 `not_seen_yet`（尚未观察到）。`unsupported` 不算：设备没有这项
+    /// 能力，再等也不会来 —— 把它算进"补齐中"就是让用户永远等一个不会到的样本（D9）。
+    static func hasUnobservedMetrics(_ freshness: WorkoutFreshnessResponse?) -> Bool {
+        guard let freshness else { return false }
+        return freshness.series.contains { $0.state == "not_seen_yet" }
+    }
+
+    /// **唯一**的"仍在补齐 / 仍可能变化"判据（R5，2026-10-19）。
+    ///
+    /// 新服务端（三态任一出现）满足任一即算补齐：
+    ///   1. 分析未发布（`analysisState`/`analysis.status` ≠ `published`）；
+    ///   2. `stabilityState == "settling"`（24h 内仍有批次 —— 安静只说明观测稳定）；
+    ///   3. 至少一个指标 `not_seen_yet`。
+    /// 三项都不成立 ⇒ **不**因为旧 `completeness == "partial"` 继续装成"还在补"。这正是
+    /// R5 的合成案例：`deliveryState=delivered`、`completeness=complete`、功率 0/not_seen_yet
+    /// 必须判为补齐；反过来 published+stable 且没有缺项时必须判为收敛。
+    ///
+    /// 老服务端（三态全缺）：原样沿用 `completeness != "complete"`，行为不变。
+    /// 混合载荷只缺 `stabilityState`：这一项退回 `completeness`，不把"未知"读成 stable。
     static func isPartial(_ freshness: WorkoutFreshnessResponse?) -> Bool {
         guard let freshness else { return false }
-        return freshness.completeness != "complete"
+        guard hasTriState(freshness) else { return freshness.completeness != "complete" }
+        if analysisIsPending(freshness, publishStatus: nil) { return true }
+        if let stability = freshness.stabilityState {
+            if stability == "settling" { return true }
+        } else if freshness.completeness != "complete" {
+            // 没有 stability 证据时保守退回旧口径：缺键不是 stable 的证明。
+            return true
+        }
+        return hasUnobservedMetrics(freshness)
     }
 
     /// 分析是否还没发布。freshness 缺失（老服务端）时退回详情/列表里的 `analysisPublishStatus`。
     static func analysisIsPending(_ freshness: WorkoutFreshnessResponse?, publishStatus: String?) -> Bool {
-        if let freshness { return freshness.analysis.status != "published" }
+        if let freshness { return analysisState(freshness) != "published" }
         return publishStatus == "pending"
     }
 
     /// 分析是否**失败**（区别于"还在算"）。freshness 缺失时无从判断，按未失败处理。
     static func analysisFailed(_ freshness: WorkoutFreshnessResponse?) -> Bool {
-        freshness?.analysis.status == "failed"
+        analysisState(freshness) == "failed"
     }
 
-    /// 详情页横幅。返回 `nil` = 已完整且分析已发布 ⇒ 不占位。
+    /// 详情页横幅。返回 `nil` = 没有待补齐的证据（分析已发布、观测已安静、没有待观察指标）。
     ///
     /// 三种情形必须分开，否则会出现"用一句假话盖住另一句"：
     ///   1. 分析未发布 ⇒ 「分析中」（派生字段为 null 时**不许**显示成 0/空）；
-    ///   2. 分析已发布但样本仍在补 ⇒ 「数据仍在补齐」+ 待到达指标清单；
+    ///   2. 分析已发布但还有 `not_seen_yet` 指标 ⇒ 「数据仍在补齐」+ 待观察指标清单；
     ///   3. 分析失败 ⇒ 「分析未完成」，且**不**轮询（再算一次是服务端的事，不是刷页面能解决的）。
+    ///
+    /// R5：横幅**不再**说"Apple Watch 数据仍在传输"。服务端没有"手机读到了哪些类型"的回执，
+    /// 它只知道自己收到了什么 —— 可以说"尚未观察到 / 可能仍在补传"，不能把未知归因给手表。
     static func banner(freshness: WorkoutFreshnessResponse?, publishStatus: String?) -> Banner? {
         let failed = analysisFailed(freshness)
         let pending = analysisIsPending(freshness, publishStatus: publishStatus)
@@ -74,16 +125,18 @@ nonisolated enum WorkoutFreshnessPresentation {
         guard failed || pending || partial else { return nil }
 
         var parts: [String] = []
-        if !missing.isEmpty {
-            parts.append("Apple Watch 数据仍在传输：\(missing.joined(separator: "、")) 待到达。")
-        }
+        // 分析与样本是两件事：各说各的结论，别用一句话同时替两者下断言。
         if failed {
             parts.append("训练记录已保存；分析结果发布后会自动更新。")
         } else if pending {
             parts.append("分析仍在进行，完成后自动更新。")
-        } else if parts.isEmpty {
-            // 只有 `completeness == partial`（最近 24h 仍可能有新事实），分析已发布、
-            // 也没有识别出待到达指标 —— 这时只说明"可能还有"，不编造具体指标。
+        }
+        if !missing.isEmpty {
+            parts.append("部分指标尚未观察到：\(missing.joined(separator: "、"))，可能仍在补传或同步；到齐后自动更新。")
+        }
+        if parts.isEmpty {
+            // 只有 `stabilityState == "settling"`（或老服务端 `completeness == partial`）：
+            // 只知道"最近 24h 还可能有新批次"，不知道缺哪项 —— 不编造指标，也不归因手表。
             parts.append("最近 24 小时仍可能有新样本到达；到齐后自动更新。")
         }
 
@@ -117,9 +170,9 @@ nonisolated enum WorkoutFreshnessPresentation {
         return freshness.series.first { canonicalMetricKey($0.metric) == wanted }?.state
     }
 
-    /// 待到达指标的中文名（横幅清单用），按固定顺序去重。
+    /// 待观察指标的中文名（横幅清单用），按固定顺序去重。
     ///
-    /// 只收 `not_seen_yet`：`unsupported` 是"设备没有这项能力"，把它写进"仍在传输"就是
+    /// 只收 `not_seen_yet`：`unsupported` 是"设备没有这项能力"，把它写进"还没到"就是
     /// 让用户永远等一个不会来的样本 —— 那正是 D9 要消灭的那类假话。
     static func missingMetricNames(_ freshness: WorkoutFreshnessResponse?) -> [String] {
         guard let freshness else { return [] }
@@ -152,7 +205,8 @@ nonisolated enum WorkoutFreshnessPresentation {
     /// 时序图的空态占位（P0-3 的核心之一）。
     ///
     /// 三句话必须分得开：
-    ///   · `not_seen_yet` ⇒ 「尚未到达（Apple Watch 仍在传输，会自动更新）」——**不是**"没有"；
+    ///   · `not_seen_yet` ⇒ 「样本尚未观察到；可能仍在补传或同步」——**不是**"没有"，
+    ///     也**不**声称手表还在传输（手机读到什么，服务端并不知道）；
     ///   · `unsupported` ⇒ 「设备未提供」——设备确实没有，不要再等；
     ///   · 其余（`present` 但 0 点 / 没有 freshness 的老服务端）⇒ 沿用既有的「暂无…时序样本」。
     static func emptySeriesPlaceholder(
@@ -162,7 +216,7 @@ nonisolated enum WorkoutFreshnessPresentation {
     ) -> String {
         switch metricState(metricKey, freshness: freshness) {
         case "not_seen_yet":
-            return "\(title)样本尚未到达；Apple Watch 仍在传输，到齐后会自动更新。"
+            return "\(title)样本尚未观察到；可能仍在补传或同步，到齐后会自动更新。"
         case "unsupported":
             return "设备未提供\(title)数据。"
         default:
@@ -170,14 +224,20 @@ nonisolated enum WorkoutFreshnessPresentation {
         }
     }
 
-    /// 详情自动重取的判据（P0-6）。
+    /// 详情自动重取的判据（P0-6 / R5）。
     ///
     /// 判据顺序（越靠前越保守）：
-    ///   1. 有 freshness：`partial` 或分析未发布 ⇒ 重取（这正是"数据到了页面没变"的缺口）；
+    ///   1. 有 freshness：`isPartial` ⇒ 重取。新服务端由三态决定（分析未发布 / `settling` /
+    ///      有 `not_seen_yet`）；三态全缺时**原样**退回旧 `completeness != complete` 语义；
     ///   2. 老服务端没有 freshness：`publishStatus == "pending"` ⇒ 重取；
     ///   3. 仍无证据：会话在最近 `recentWindow` 内结束 ⇒ 重取一次（迟到样本窗口）；
     ///   4. 最后：连时序都没有（`series` 全 0 样本）⇒ 重取一次；
-    ///   5. 其余（很久以前、已完整）⇒ 不重取，避免每一代次都白读三条接口。
+    ///   5. 其余 ⇒ 不重取，避免每一代次都白读三条接口。
+    ///
+    /// R5 的关键：新字段说 `analysisState=published` + `stabilityState=stable` + 没有
+    /// `not_seen_yet` 时返回 `false`，**即使旧 `completeness` 仍是 `partial`**；反过来，
+    /// 分析已发布但某个指标仍 `not_seen_yet` 时必须 `true`（旧实现只看 completeness，合成
+    /// 案例里会停止刷新）。分析失败也算"未发布"：失败不证明不会重算，保留既有重取语义。
     static func shouldReload(
         endedAt: String,
         publishStatus: String?,
@@ -187,7 +247,11 @@ nonisolated enum WorkoutFreshnessPresentation {
         recentWindow: TimeInterval = 6 * 3600
     ) -> Bool {
         if let freshness {
-            return isPartial(freshness) || analysisIsPending(freshness, publishStatus: publishStatus)
+            // 老服务端：`isPartial` 已退回 completeness；`analysisIsPending` 保住旧 OR 的第二条。
+            guard hasTriState(freshness) else {
+                return isPartial(freshness) || analysisIsPending(freshness, publishStatus: publishStatus)
+            }
+            return isPartial(freshness)
         }
         if publishStatus == "pending" { return true }
         if let ended = parseISO8601(endedAt), now.timeIntervalSince(ended) <= recentWindow { return true }
@@ -213,7 +277,8 @@ nonisolated enum WorkoutFreshnessPresentation {
 
 // MARK: - 详情页可见期间的有界前台轮询（P0-3 / P0-6）
 
-/// freshness 仍是 `partial` 时，详情页在**可见期间**的有限重取。
+/// `WorkoutFreshnessPresentation.isPartial`（仍在补齐：分析未发布 / settling / 有
+/// `not_seen_yet` 指标）为真时，详情页在**可见期间**的有限重取。
 ///
 /// 硬约束（事故复盘 §6.1 P0-3：不新增后台机制）：
 ///   · 只在详情页的 `.task` 里跑 —— 页面消失时任务被取消，`Task.sleep` 直接抛出停止；
@@ -233,8 +298,8 @@ nonisolated enum WorkoutFreshnessPollPolicy {
 
     /// 这一轮还能不能继续轮询。
     ///
-    /// 四个条件缺一不可：还有次数、freshness 仍是 partial、用户看的仍是这条训练、
-    /// 详情页还在前台（调用方用 `scenePhase` 决定要不要开这个任务）。
+    /// 四个条件缺一不可：还有次数、freshness 仍在补齐（`isPartial` 的三态判据）、
+    /// 用户看的仍是这条训练、详情页还在前台（调用方用 `scenePhase` 决定要不要开这个任务）。
     static func shouldContinue(
         attempts: Int,
         isPartial: Bool,

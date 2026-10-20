@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 const iosRunner = await import(pathToFileURL(resolve("scripts/run-ios.mjs")).href);
 const openIos = await import(pathToFileURL(resolve("scripts/open-ios.mjs")).href);
 const portable = await import(pathToFileURL(resolve("scripts/check-npm-scripts-portable.mjs")).href);
+const pythonGates = await import(pathToFileURL(resolve("scripts/run-ios-python-gates.mjs")).href);
 const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
 
 /**
@@ -203,6 +204,49 @@ test("pre-commit 的 iOS 段：门禁「跳过」不等于「放行」，必须�
     + "而那一次会连带绕过 blob 上限 / typecheck / 文档引用 / 迁移冻结四道门禁");
   assert.ok(code.includes("npm run test:ios"),
     "认账闸门不能替代跑门禁本身：本机跑得动时必须真跑");
+  assert.ok(code.includes("npm run check:ios-gates"),
+    "跨平台结构门禁入口必须挂在 pre-commit：`test:ios` 在非 macOS 上整体跳过，"
+    + "那时 `check:ios-gates` 是唯一执行者（`check-pr5-facts-analysis.py` 曾因此 6 天没跑）");
+});
+
+test("跨平台结构门禁：自动发现 − 显式排除 = 可执行集，孤儿必须让整支入口变红", () => {
+  const plan = pythonGates.planGates({
+    files: ["check-a.py", "check-b.py", "check-excluded.py"],
+    excluded: new Set(["check-excluded.py"]),
+    referenced: new Set(["check-a.py"]),
+    python: "python3"
+  });
+  assert.deepEqual(plan.runnable, ["check-a.py", "check-b.py"]);
+  assert.deepEqual(plan.skipped, ["check-excluded.py"]);
+  assert.deepEqual(plan.orphans, ["check-b.py"]);
+
+  // "判据存在 ≠ 判据被执行"：孤儿不是警告，是红。
+  const { value, stderr } = captureStderr(() =>
+    pythonGates.runGates(plan, () => ({ status: 0 }), "/tmp")
+  );
+  assert.equal(value, 1);
+  assert.match(stderr, /没有任何执行者/);
+  assert.match(stderr, /check-b\.py/);
+});
+
+test("仓库里每支非排除结构门禁都挂在某个 run-*.sh 上（孤儿检查不是空转）", () => {
+  const referenced = pythonGates.referencedGateFiles();
+  const plan = pythonGates.planGates({ python: "python3" });
+  assert.ok(plan.runnable.includes("check-pr5-facts-analysis.py"),
+    "pr5 门禁必须仍在可执行集里 —— 它曾只挂在 check:ios-gates、连续 6 天没有执行者");
+  assert.deepEqual(plan.orphans, [],
+    `这些门禁没有任何 run-*.sh 执行者：${plan.orphans.join("、")}`);
+  // 真实仓库里每一支非排除门禁都必须被引用到：孤儿为空不是靠"目录里只有这一支"。
+  assert.ok(plan.runnable.length >= 10, `可执行判据只剩 ${plan.runnable.length} 支，自动发现可能坏了`);
+  assert.ok(referenced.size >= plan.runnable.length, "run-*.sh 的引用集合小于可执行集合");
+});
+
+test("解释器下限与 run-ios-gates.sh 的口径一致（3.9）", () => {
+  // 一份判据严格、一份宽松 = 没有地板：shell 侧拒绝 3.[0-8]，Node 侧 probe 也必须是 3.9。
+  assert.deepEqual(pythonGates.PYTHON_VERSION_FLOOR, [3, 9]);
+  const gates = readFileSync(resolve("apps/ios/tests/run-ios-gates.sh"), "utf8");
+  assert.ok(gates.includes("3.[0-8])"),
+    "run-ios-gates.sh 的 Python 下限判据不在了：两处口径必须同时改");
 });
 
 test("open:ios 在 macOS 打开 workspace，其它平台显式跳过且不假装打开", () => {

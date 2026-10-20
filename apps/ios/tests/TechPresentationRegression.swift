@@ -605,6 +605,8 @@ struct TechPresentationRegression {
         // 75 批待读时界面说「同步完成」。
         // ---------------------------------------------------------------------------
         func freshness(completeness: String, analysisStatus: String,
+                       deliveryState: String? = nil, analysisState: String? = nil,
+                       stabilityState: String? = nil,
                        series: [(metric: String, samples: Int, state: String)]) -> WorkoutFreshnessResponse {
             WorkoutFreshnessResponse(
                 workoutId: "session",
@@ -617,7 +619,10 @@ struct TechPresentationRegression {
                 series: series.map {
                     WorkoutFreshnessMetric(metric: $0.metric, samples: $0.samples, state: $0.state)
                 },
-                completeness: completeness
+                completeness: completeness,
+                deliveryState: deliveryState,
+                analysisState: analysisState,
+                stabilityState: stabilityState
             )
         }
         let partialFreshness = freshness(completeness: "partial", analysisStatus: "published", series: [
@@ -631,8 +636,10 @@ struct TechPresentationRegression {
         let partialBanner = WorkoutFreshnessPresentation.banner(freshness: partialFreshness, publishStatus: nil)
         check(partialBanner?.kind == .waitingForSamples, "A partial freshness must read as waiting for samples")
         check(partialBanner?.pollsInForeground == true, "A partial freshness must allow the bounded foreground poll")
-        check(partialBanner?.detail.contains("Apple Watch 数据仍在传输：配速、步频、跑步功率 待到达") == true,
-              "The banner must name the metrics that have not arrived, in a stable order")
+        check(partialBanner?.detail.contains("部分指标尚未观察到：配速、步频、跑步功率") == true,
+              "The banner must name the not_seen_yet metrics, in a stable order")
+        check(partialBanner?.detail.contains("Apple Watch") == false,
+              "The banner must not attribute the gap to the Watch — the server only knows what it received")
         check(partialBanner?.detail.contains("垂直振幅") == false,
               "`unsupported` is not 'still transferring' — a device capability gap must never be promised")
         // 分析未发布优先于"等样本"：此刻缺的是分析，不是样本。
@@ -713,9 +720,12 @@ struct TechPresentationRegression {
         check(WorkoutFreshnessPresentation.banner(freshness: nil, publishStatus: "pending")?.kind == .analyzing,
               "A legacy server's pending publish status still reads as 分析中")
         // 时序空态：`not_seen_yet` / `unsupported` / 真的没有 三句话必须不同。
-        check(WorkoutFreshnessPresentation.emptySeriesPlaceholder(
-            metricKey: "pace", title: "配速", freshness: partialFreshness).contains("尚未到达"),
-            "`not_seen_yet` must read as 'not arrived yet', not as 'none'")
+        let notSeenPlaceholder = WorkoutFreshnessPresentation.emptySeriesPlaceholder(
+            metricKey: "pace", title: "配速", freshness: partialFreshness)
+        check(notSeenPlaceholder.contains("尚未观察到"),
+              "`not_seen_yet` must read as 'not observed yet', not as 'none'")
+        check(!notSeenPlaceholder.contains("Apple Watch") && !notSeenPlaceholder.contains("仍在传输"),
+              "The placeholder must not claim the Watch is transmitting (R5)")
         check(WorkoutFreshnessPresentation.emptySeriesPlaceholder(
             metricKey: "verticalOscillation", title: "垂直振幅", freshness: partialFreshness).contains("设备未提供"),
             "`unsupported` must read as a device capability gap")
@@ -752,6 +762,84 @@ struct TechPresentationRegression {
             endedAt: "2026-10-14T12:00:00Z", publishStatus: "published", freshness: nil,
             series: decodeSeries(), now: reloadNow),
             "A workout whose series has no samples at all is still stale")
+        // ---------------------------------------------------------------------------
+        // 2026-10-19（R5）：横幅与重取必须消费三态，而不是继续被旧 `completeness` 绑架。
+        //
+        // 本轮实调的合成案例：`deliveryState=delivered`、`completeness=complete`、某指标
+        // `samples=0 / state=not_seen_yet` ⇒ 旧实现 `banner=nil`、`shouldReload=false`：
+        // 用户永远看不到"还有指标没到"，页面也不再刷新。这里逐格钉住新判据与老服务端回退。
+        // ---------------------------------------------------------------------------
+        let deliveredOnlyFreshness = freshness(
+            completeness: "complete", analysisStatus: "published", deliveryState: "delivered",
+            series: [("heartRate", 505, "present"), ("power", 0, "not_seen_yet")])
+        let deliveredOnlyBanner = WorkoutFreshnessPresentation.banner(
+            freshness: deliveredOnlyFreshness, publishStatus: nil)
+        check(deliveredOnlyBanner?.kind == .waitingForSamples
+              && deliveredOnlyBanner?.pollsInForeground == true,
+              "The confirmed R5 case (delivered + complete + not_seen_yet) must show the waiting banner")
+        check(deliveredOnlyBanner?.detail.contains("跑步功率") == true
+              && deliveredOnlyBanner?.detail.contains("尚未观察到") == true
+              && deliveredOnlyBanner?.detail.contains("Apple Watch") == false,
+              "The waiting banner names the unobserved metric without blaming the Watch")
+        check(WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published",
+            freshness: deliveredOnlyFreshness, series: decodeSeries(), now: reloadNow),
+            "The confirmed R5 case must keep refetching while the metric is not_seen_yet")
+        // 三态齐全且收敛：旧 completeness 仍是 partial 也不许再装"还在补"。
+        let settledSeries: [(metric: String, samples: Int, state: String)] = [
+            ("heartRate", 505, "present"), ("speed", 410, "present"), ("cadence", 430, "present")
+        ]
+        let settledFreshness = freshness(
+            completeness: "partial", analysisStatus: "published",
+            deliveryState: "delivered", analysisState: "published", stabilityState: "stable",
+            series: settledSeries)
+        check(WorkoutFreshnessPresentation.banner(freshness: settledFreshness, publishStatus: nil) == nil,
+              "published + stable + no not_seen_yet must hide the banner even with completeness=partial")
+        check(!WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published",
+            freshness: settledFreshness, series: decodeSeries(), now: reloadNow),
+            "Once analysis is published, stability is stable and nothing is missing, nothing can change")
+        // `unsupported` 是"设备没有这项能力"，不是"还在传"：既不出横幅，也不再重取。
+        let unsupportedOnlyFreshness = freshness(
+            completeness: "partial", analysisStatus: "published",
+            deliveryState: "delivered", analysisState: "published", stabilityState: "stable",
+            series: [("power", 0, "unsupported"), ("verticalOscillation", 0, "unsupported")])
+        check(WorkoutFreshnessPresentation.banner(freshness: unsupportedOnlyFreshness, publishStatus: nil) == nil,
+              "`unsupported`-only must never read as 'still transferring'")
+        check(!WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published",
+            freshness: unsupportedOnlyFreshness, series: decodeSeries(), now: reloadNow),
+            "`unsupported` cannot arrive later, so it must not keep the refetch alive")
+        // 分析未发布优先于"等样本"：新三态下也必须读成「分析中」并继续重取。
+        let triStatePending = freshness(
+            completeness: "partial", analysisStatus: "pending",
+            deliveryState: "delivered", analysisState: "pending", stabilityState: "settling",
+            series: [("heartRate", 505, "present")])
+        let triStatePendingBanner = WorkoutFreshnessPresentation.banner(
+            freshness: triStatePending, publishStatus: nil)
+        check(triStatePendingBanner?.kind == .analyzing && triStatePendingBanner?.title == "分析中",
+              "analysisState=pending must read as 分析中")
+        check(WorkoutFreshnessPresentation.shouldReload(
+            endedAt: "2026-10-14T12:00:00Z", publishStatus: "published",
+            freshness: triStatePending, series: decodeSeries(), now: reloadNow),
+            "A pending analysis still refetches")
+        // settling（分析已发布、无缺项）只说明观测未安静：横幅保留，但不编造指标清单。
+        let settlingFreshness = freshness(
+            completeness: "partial", analysisStatus: "published",
+            deliveryState: "delivered", analysisState: "published", stabilityState: "settling",
+            series: settledSeries)
+        let settlingBanner = WorkoutFreshnessPresentation.banner(
+            freshness: settlingFreshness, publishStatus: nil)
+        check(settlingBanner?.kind == .waitingForSamples
+              && settlingBanner?.detail.contains("24 小时") == true
+              && settlingBanner?.detail.contains("尚未观察到") == false,
+              "settling without missing metrics must not invent a metric list")
+        // 老服务端回退：三态全缺 ⇒ 原 `completeness != complete` 语义逐字保留。
+        check(!WorkoutFreshnessPresentation.hasTriState(partialFreshness)
+              && WorkoutFreshnessPresentation.isPartial(partialFreshness)
+              && !WorkoutFreshnessPresentation.isPartial(
+                  freshness(completeness: "complete", analysisStatus: "published", series: [])),
+              "Without the three-state fields the old completeness semantics stay untouched")
         // 详情页可见期间的有界前台轮询（P0-3）：次数、间隔与停止条件都必须是判据。
         check(WorkoutFreshnessPollPolicy.maxAttempts == WorkoutFreshnessPollPolicy.delays.count,
               "Each polling attempt must have its own delay")

@@ -94,6 +94,19 @@ nonisolated struct HealthKitExportResult: Sendable {
     /// 同一窗口（重复样本由服务端按 UUID 幂等吸收）。
     let workoutWindowUpdates: [WorkoutBackfillWindow]
 
+    /// R3（2026-10-19 复核）：本批**已写进载荷**的训练窗口分页候选。
+    ///
+    /// 必须在上传**之前**随任务行落盘（`SyncTaskState.pendingWorkoutPages`），并在
+    /// `commitSuccess` 的同一事务里、拿到服务端 committed 回执后落 `sync_workout_type_pages`。
+    /// 崩在"导出完成 → 提交成功"之间时，恢复轮凭它续交同一候选，不必重读 HealthKit。
+    let workoutPageCandidates: [WorkoutWindowPageCommit]
+
+    /// R3：本批**纯空查询/授权失败**得到的分页观察（没有新增载荷）。
+    ///
+    /// 它们不必等 upload 回执（没有事实要交付），由调用方在导出成功后立刻用窄事务
+    /// `commitEmptyWorkoutPageObservations` 落盘；不生成只含 manifest 的空 ZIP。
+    let workoutPageEmptyCommits: [WorkoutWindowPageCommit]
+
     /// P2-3：本批各通道的计数（只写计数，不写样本值）。
     let channelCounts: ExportChannelCounts
 
@@ -428,6 +441,11 @@ nonisolated enum HealthKitExport {
         /// 历史重放之前**对到期窗口做全类型有界查询；本批的登记/记账分别在返回值的两个数组里，
         /// 由调用方按"先表后锚 / 成功后才结算"两条纪律落盘。
         workoutBackfillWindows: [WorkoutBackfillWindow] = [],
+        /// R3（2026-10-19 复核）：训练窗口的独立 anchored 分页游标（上一批已确认的快照）。
+        /// 空 = 该 scope 还没有分页行（首次导出/旧库）⇒ 每个类型从 nil anchor 读第一页。
+        workoutWindowPages: [WorkoutWindowPage] = [],
+        /// R3：分页行所属的同步 scope（创建初始页/候选 key 需要它；导出层不认识会话身份）。
+        workoutPageScope: String = "",
         /// P1-1：服务端覆盖表（`GET /v1/sync/coverage` 的归一结果）。空 = 老服务端/探测失败
         /// ⇒ 历史段回落全量重放。只在 `historyFromScratch` / `historyResume` 段使用。
         coverage: [String: SyncCoveragePolicy.TypeCoverage] = [:],
@@ -946,9 +964,14 @@ nonisolated enum HealthKitExport {
             ),
             // P1-1：服务端覆盖表（空 = 老服务端/失败 ⇒ 历史段回落全量重放）。
             coverage: coverage,
+            // R3：分页快照 + scope。窗口通道只返回"候选页进度"，由调用方在回执后提交。
+            workoutWindowPages: workoutWindowPages,
+            workoutPageScope: workoutPageScope,
             onProgress: onProgress
         )
         recordCount += records.count
+        let workoutPageCandidates = records.pageCandidates
+        let workoutPageEmptyCommits = records.emptyPageCommits
         let exportedThrough = Date()
         try write(xml, "\n</HealthData>\n")
         try xml.synchronize()
@@ -1050,6 +1073,9 @@ nonisolated enum HealthKitExport {
             // 时机不同，合成一个数组会让"失败批次也把重试时刻推进"这种错误无法表达。
             workoutWindowRegistrations: WorkoutBackfillScheduler.normalized(Array(windowRegistrations.values)),
             workoutWindowUpdates: WorkoutBackfillScheduler.normalized(records.windowUpdates),
+            // R3：分页候选与空观察分开输出 —— 前者等 committed 回执，后者立即窄事务落盘。
+            workoutPageCandidates: workoutPageCandidates,
+            workoutPageEmptyCommits: workoutPageEmptyCommits,
             channelCounts: records.counts
         )
     }
@@ -1379,6 +1405,9 @@ nonisolated enum HealthKitExport {
         workoutWindows: [WorkoutBackfillWindow],
         // P1-1：服务端覆盖表（空 = 老服务端/探测失败 ⇒ 历史段回落全量重放）。
         coverage: [String: SyncCoveragePolicy.TypeCoverage],
+        // R3：分页游标快照 + scope（见 `exportArchive` 同名参数）。
+        workoutWindowPages: [WorkoutWindowPage],
+        workoutPageScope: String,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> (
         count: Int, cursors: Data, deleted: [[String: String]],
@@ -1386,6 +1415,9 @@ nonisolated enum HealthKitExport {
         nextTypeRotationStart: Int,
         // P0-4：本批整窗查询的记账（成功后才由调用方结算）。
         windowUpdates: [WorkoutBackfillWindow],
+        // R3：已写进载荷的分页候选（等 committed 回执）+ 纯空观察（立即窄事务）。
+        pageCandidates: [WorkoutWindowPageCommit],
+        emptyPageCommits: [WorkoutWindowPageCommit],
         // P2-3：各通道计数（只写计数）。
         counts: ExportChannelCounts
     ) {
@@ -1527,6 +1559,22 @@ nonisolated enum HealthKitExport {
         // 它决定 unseen：登记过却从未读到样本的类型不允许被其它类型的正数"代为完成"，
         // 只能等 7 天到期（迟到的类型因此仍有整段窗口时间被补齐的机会）。
         let windowRegisteredTypes: [String] = windowQuantityDescriptors.map { $0.2 }
+        // R3（2026-10-19 复核）：分页游标的**本批内存快照**。已确认锚点来自 store；
+        // 本批的候选只回传（等 committed 回执），绝不在这里直接落库。
+        var pagesByKey: [WorkoutWindowPageKey: WorkoutWindowPage] = [:]
+        for page in workoutWindowPages { pagesByKey[page.key] = page }
+        var workoutPageCandidates: [WorkoutWindowPageCommit] = []
+        var workoutPageEmptyCommits: [WorkoutWindowPageCommit] = []
+        /// 同一个 key 只保留本批**最后一次**判定（同一窗口类型本批最多读一页，理论上一次）。
+        func replacePageCandidate(_ commit: WorkoutWindowPageCommit, isEmptyObservation: Bool) {
+            workoutPageCandidates.removeAll { $0.key == commit.key }
+            workoutPageEmptyCommits.removeAll { $0.key == commit.key }
+            if isEmptyObservation {
+                workoutPageEmptyCommits.append(commit)
+            } else {
+                workoutPageCandidates.append(commit)
+            }
+        }
         for window in WorkoutBackfillScheduler.due(workoutWindows, now: now) {
             // 份额已耗尽 ⇒ 本批不再处理更多窗口（它们保持到期状态，下批优先）。
             guard workoutWindowShareBytes < workoutWindowShare.maxBytes,
@@ -1536,8 +1584,37 @@ nonisolated enum HealthKitExport {
             // 判据住在 HealthKitExport 里就没有任何回归能执行它。
             var observations: [String: TypeObservation] = [:]
             var windowCut = false
-            for (type, unit, xmlType, xmlUnit) in windowQuantityDescriptors {
+            let shareBytesBeforeWindow = workoutWindowShareBytes
+            let shareRecordsBeforeWindow = workoutWindowShareRecords
+            let windowRevision = WorkoutWindowPaging.windowRevision(window)
+            // R3：每个 (workout, revision, type) 自有锚点；本批按 `lastServedAt` 公平轮转，
+            // 不再每批都从固定类型序的第一名开始（旧形态里排尾类型永远分不到预算）。
+            let pages: [WorkoutWindowPage] = windowQuantityDescriptors.map { descriptor in
+                let key = WorkoutWindowPageKey(
+                    scope: workoutPageScope,
+                    workoutUUID: window.workoutUUID,
+                    windowRevision: windowRevision,
+                    recordType: descriptor.2
+                )
+                return pagesByKey[key] ?? WorkoutWindowPaging.initialPage(
+                    scope: workoutPageScope, window: window, recordType: descriptor.2
+                )
+            }
+            // R3：公平轮转必须**真的**被生产循环消费。旧形态按 descriptor 顺序直接遍历
+            // `pages.indices`，`serviceOrder` 只在回归里被调用 —— 高密度窗口下排尾类型仍可能
+            // 永远分不到预算（公平性没有执行者）。这里先按 lastServedAt 排序，再用
+            // recordType → descriptor 映射取类型，**不能**排序后仍按旧下标配对（会串类型）。
+            let descriptorIndexByType = Dictionary(
+                uniqueKeysWithValues: windowQuantityDescriptors.enumerated().map { ($1.2, $0) }
+            )
+            let serviceableTypes = WorkoutWindowPaging.serviceOrder(pages, now: now)
+                .map { $0.key.recordType }
+            for xmlType in serviceableTypes {
+                guard !windowCut else { break }
                 try Task.checkCancellation()
+                guard let index = descriptorIndexByType[xmlType] else { continue }
+                let page = pages[index]
+                let (type, unit, _, xmlUnit) = windowQuantityDescriptors[index]
                 let estimate = workoutWindowShareRecords > 0
                     ? max(1, workoutWindowShareBytes / workoutWindowShareRecords) : 512
                 let pageLimit = DirectSyncBatchBudget.shareLimitedPageSize(
@@ -1550,42 +1627,94 @@ nonisolated enum HealthKitExport {
                 let predicate = HKQuery.predicateForSamples(
                     withStart: window.windowStart, end: window.windowEnd, options: .strictStartDate
                 )
+                // 已确认 anchor 与谓词同源：窗口扩宽会换 revision（新行、从 nil 重读），
+                // 绝不把旧锚点套到新谓词上。解不开的旧锚点按"坏游标"处理（同批停止重试，
+                // 不伪造 EOF、不从头重扫）。
+                var anchor: HKQueryAnchor?
+                if let committed = page.committedAnchor {
+                    guard let decoded = decodeAnchor(committed) else {
+                        replacePageCandidate(
+                            WorkoutWindowPaging.afterRejectedPage(
+                                page, canShrink: false, reason: "invalid_page_anchor", now: now
+                            ),
+                            isEmptyObservation: true
+                        )
+                        windowCut = true
+                        break
+                    }
+                    anchor = decoded
+                }
                 do {
-                    let samples: [HKSample] = try await recentSamples(
-                        type: type, predicate: predicate, limit: pageLimit, store: store
+                    let result = try await anchoredWindowPage(
+                        store: store, type: type, anchor: anchor, limit: pageLimit, predicate: predicate
                     )
-                    if samples.isEmpty {
-                        // 空页是合法观测（0 条）。它**不是**"稳定"证据 —— 样本可能还在手表上，
-                        // 所以 `afterPass` 对 0 条永远清零稳定计数，只能等 7 天到期。
+                    let nextAnchor: Data? = result.next.flatMap(encodeAnchor)
+                    if result.added.isEmpty {
+                        // 空结果是合法观测（0 条），但**不是**"这条训练没有该类型"：它只证明
+                        // 本次 EOF。删除-only 页更不是 EOF（删除事件由正式记录流交付）。
                         observations[xmlType] = TypeObservation(
                             observed: 0, delivered: 0, pageLimit: pageLimit
                         )
+                        if result.deleted.isEmpty {
+                            replacePageCandidate(
+                                WorkoutWindowPaging.afterEmptyPage(
+                                    page, nextAnchor: nextAnchor, deletedCount: 0, now: now
+                                ),
+                                isEmptyObservation: true
+                            )
+                        } else {
+                            replacePageCandidate(
+                                WorkoutWindowPaging.afterEmptyPage(
+                                    page, nextAnchor: nextAnchor,
+                                    deletedCount: result.deleted.count, now: now
+                                ),
+                                isEmptyObservation: true
+                            )
+                            // 删除-only 页：本批不写载荷，但也不能原地重读同一页。
+                            windowCut = true
+                        }
                         continue
                     }
-                    let page = try renderedRecordPage(
-                        added: samples, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
+                    guard let nextAnchor else {
+                        // 非空结果却没有候选锚点：**不推进**已确认游标、不写载荷（写了也没法
+                        // 续读），本批停下、下批从同一 anchor 重试。
+                        observations[xmlType] = TypeObservation(
+                            observed: result.added.count, delivered: 0,
+                            pageLimit: pageLimit, unauthorized: false
+                        )
+                        windowCut = true
+                        break
+                    }
+                    let rendered = try renderedRecordPage(
+                        added: result.added, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
                     )
                     // 写前判定（与两个子通道同一个 `acceptsWithin`）：整页放不下 ⇒
-                    // 本窗口本轮**不记账**（样本已查询但不写，下批重来；服务端幂等）。
+                    // 本窗口本轮**不记账**（样本已查询但不写，下批从同一 anchor 重来；服务端幂等）。
                     guard DirectSyncBatchBudget.acceptsWithin(
                         budget: budget,
                         share: workoutWindowShare,
                         shareBytesUsed: workoutWindowShareBytes,
                         shareRecordsUsed: workoutWindowShareRecords,
                         xmlBytes: xml.offsetInFile, records: count,
-                        pageBytes: page.data.count, pageRecords: page.recordCount
+                        pageBytes: rendered.data.count, pageRecords: rendered.recordCount
                     ) else { windowCut = true; break }
-                    try xml.write(contentsOf: page.data)
-                    count += page.recordCount
-                    workoutWindowShareBytes += page.data.count
-                    workoutWindowShareRecords += page.recordCount
+                    try xml.write(contentsOf: rendered.data)
+                    count += rendered.recordCount
+                    workoutWindowShareBytes += rendered.data.count
+                    workoutWindowShareRecords += rendered.recordCount
                     writtenTypes.insert(xmlType)
-                    // 🔴 A2 分页尚未实现：返回条数 == 本次页上限 ⇒ **可能被截断**，
-                    // 不得把"这一页装满了"读成 EOF（`TypeObservation.pageComplete` 负责判）。
                     observations[xmlType] = TypeObservation(
-                        observed: samples.count,
-                        delivered: page.recordCount,
+                        observed: result.added.count,
+                        delivered: rendered.recordCount,
                         pageLimit: pageLimit
+                    )
+                    // R3：这一页已进载荷 ⇒ 候选锚点等 committed 回执后再提交。
+                    replacePageCandidate(
+                        WorkoutWindowPaging.afterAcceptedPage(
+                            page, observed: result.added.count, pageLimit: pageLimit,
+                            nextAnchor: nextAnchor, now: now
+                        ),
+                        isEmptyObservation: false
                     )
                 } catch {
                     // 与类型循环同口径，但**区分"授权失败"与"没有数据"**：
@@ -1596,6 +1725,10 @@ nonisolated enum HealthKitExport {
                     if isAuthorizationError(error) {
                         observations[xmlType] = TypeObservation(
                             observed: 0, delivered: 0, pageLimit: pageLimit, unauthorized: true
+                        )
+                        replacePageCandidate(
+                            WorkoutWindowPaging.afterUnauthorizedPage(page, now: now),
+                            isEmptyObservation: true
                         )
                         continue
                     }
@@ -1610,23 +1743,41 @@ nonisolated enum HealthKitExport {
                 }
             }
             if windowCut {
-                // 预算/份额把这一趟切断了：**不推进稳定计数**（下批从同一窗口重来）。
+                // 预算/份额把这一趟切断了：**不推进稳定计数**（下批从同一页/同一窗口重来）。
                 // 但把已经读到的逐类型实况与结局记下来 —— 这是"份额耗尽后仍有进展、
                 // 到期有原因"的载体；已写出的样本不回滚（载荷是追加写的，服务端按 UUID
                 // 幂等吸收重复）。
-                workoutWindowUpdates.append(
-                    WorkoutBackfillScheduler.afterBlockedPass(
-                        window, observations: observations, now: now
-                    )
+                var blocked = WorkoutBackfillScheduler.afterBlockedPass(
+                    window, observations: observations, now: now
                 )
+                if workoutWindowShareBytes == shareBytesBeforeWindow
+                    && workoutWindowShareRecords == shareRecordsBeforeWindow {
+                    // 8.4：一波内同一类型再次零进展 ⇒ 不原地重试同一份装不下的页，
+                    // 按原因退避（窗口行保留 nextCheckAt，避免每批空转）。
+                    blocked.nextCheckAt = now.addingTimeInterval(
+                        WorkoutBackfillScheduler.retryInterval(attempts: max(1, window.attemptCount + 1))
+                    )
+                }
+                workoutWindowUpdates.append(blocked)
                 break
             }
-            let updated = WorkoutBackfillScheduler.afterPass(
+            var updated = WorkoutBackfillScheduler.afterPass(
                 window,
                 observations: observations,
                 registeredTypes: windowRegisteredTypes,
                 now: now
             )
+            // R3：本批还有 `paging` 候选（已交付一页、后面还有）⇒ 窗口必须**立即**再到期，
+            // 否则下一页要等 15 分钟/1 小时的重试阶梯，高密度窗口无法在几批内收敛。
+            let hasMorePages = workoutPageCandidates.contains {
+                $0.key.workoutUUID == window.workoutUUID
+                    && $0.key.windowRevision == windowRevision
+                    && $0.state == .paging
+            }
+            if hasMorePages {
+                updated.completedAt = nil
+                updated.nextCheckAt = now
+            }
             workoutWindowUpdates.append(updated)
             channelCounts.workoutWindows += 1
             channelCounts.workoutWindowRecords += observations.values.reduce(0) { $0 + $1.observed }
@@ -1716,28 +1867,16 @@ nonisolated enum HealthKitExport {
                         paging: before.lateBackfillBefore != nil
                     ) {
                     case .completed:
-                        cursors[xmlType] = HealthKitRecordCursor(
-                            anchor: before.anchor,
-                            historyReadAt: before.historyReadAt,
-                            historyReplayPhase: before.historyReplayPhase,
-                            recentWindowReadAt: before.recentWindowReadAt,
-                            lateBackfillAt: now,
-                            lateBackfillBefore: nil,
-                            lateBackfillWindowStart: nil,   // 整窗已覆盖 ⇒ 下次补读重新取窗口
-                            // P1-1：覆盖下界是**历史重放段**的记账，补读重建必须透传（同上）。
-                            historyCoverageFloor: before.historyCoverageFloor
+                        // B2：补读完成只改补读三件套；anchor/历史重放/窗口记账全部透传。
+                        cursors[xmlType] = before.settingLateBackfill(
+                            at: now, before: nil, windowStart: nil   // 整窗已覆盖 ⇒ 下次补读重新取窗口
                         )
                     case .nextPage(let nextPageUpperBound):
-                        cursors[xmlType] = HealthKitRecordCursor(
-                            anchor: before.anchor,
-                            historyReadAt: before.historyReadAt,
-                            historyReplayPhase: before.historyReplayPhase,
-                            recentWindowReadAt: before.recentWindowReadAt,
-                            lateBackfillAt: before.lateBackfillAt,
-                            lateBackfillBefore: nextPageUpperBound,
+                        cursors[xmlType] = before.settingLateBackfill(
+                            at: before.lateBackfillAt,
+                            before: nextPageUpperBound,
                             // 固定下界（P3-22）：后续页复用这次的开场值，绝不随批次前移。
-                            lateBackfillWindowStart: windowStart,
-                            historyCoverageFloor: before.historyCoverageFloor
+                            windowStart: windowStart
                         )
                     case .retry:
                         // 🔴 空页**不记账**（与 ③ 同一条纪律）：HealthKit 对未授权读取、或样本
@@ -1847,19 +1986,8 @@ nonisolated enum HealthKitExport {
                 if let previousWindow,
                    let mark = RecentWindowAccounting.nextMark(
                        written: windowWritten ? recent.count : 0, now: now) {
-                    cursors[xmlType] = HealthKitRecordCursor(
-                        anchor: previousWindow.anchor,
-                        historyReadAt: previousWindow.historyReadAt,
-                        historyReplayPhase: previousWindow.historyReplayPhase,
-                        recentWindowReadAt: mark,
-                        lateBackfillAt: previousWindow.lateBackfillAt,
-                        lateBackfillBefore: previousWindow.lateBackfillBefore,
-                        // P3-22：补读的分页/窗口记账必须**透传**。这两处重建都在补读循环之后，
-                        // 少带一个字段就等于把本批刚写下的分页位置清掉（下一批重读同一页）。
-                        lateBackfillWindowStart: previousWindow.lateBackfillWindowStart,
-                        // P1-1：覆盖下界同理（历史段跨多批续读时必须沿用同一个下界）。
-                        historyCoverageFloor: previousWindow.historyCoverageFloor
-                    )
+                    // B2：窗口记账只改一个字段；补读分页/覆盖下界在 helper 内整体透传。
+                    cursors[xmlType] = previousWindow.settingRecentWindowReadAt(mark)
                 }
             } catch {
                 // 与类型循环同口径：授权/无数据 ⇒ 跳过该类型窗口（下批重试）；
@@ -1921,17 +2049,41 @@ nonisolated enum HealthKitExport {
             // 由 `check-export-determinism.py` 钉着，加这一段不得改变任何一个字节。
             await onProgress("正在读取健康记录 \(offset + 1)/\(descriptors.count)（已 \(count) 条）")
             let previous = cursors[xmlType]
+            // R6（2026-10-19 复核）：来源不可信的覆盖下界（开关关闭时仍存在）走**一次**
+            // 逐类型历史重放：丢弃旧锚点（它与旧谓词同源，不能换 predicate 继续用）、
+            // 从 nil 重读该类型历史。只在检测到这种行时发生；正常游标不受影响。
+            //
+            // 🔴 A9（2026-10-19 二次复核）：修复判定必须在**锚点可解码性检查之前**。
+            // 坏锚点 + 旧 floor 的组合正是修复最该覆盖的行；先抛 `invalidRecordAnchor`
+            // 会让它永远修不好（而修复是清掉这种行的唯一路径）。
+            let disabledFloorRepair = SyncCoveragePolicy.hasDisabledCoverageFloor(previous)
             let decoded = previous.flatMap { decodeAnchor($0.anchor) }
-            guard previous == nil || decoded != nil else {
+            guard previous == nil || decoded != nil || disabledFloorRepair else {
                 throw HealthKitExportError.invalidRecordAnchor
             }
-            let history = previous == nil || decoded == nil
-                || previous!.needsHistoryRead()
+            if disabledFloorRepair {
+                NSLog(
+                    "[RAI] 类型 %@ 的游标带有已禁用的历史覆盖下界；本轮按类型重放一次以清除它",
+                    xmlType
+                )
+            }
+            // 修复轮必须从 nil 开始（见 `RecordReplayPlan`：decodedAvailable=false ⇒
+            // 只有 `.historyFromScratch` 一段）；不能带旧锚点做增量，否则只是"从旧锚点往后读"，
+            // 旧下界之前的历史仍然缺失。
+            // ⚠️ 代价（如实记录）：修复轮只有 `.historyFromScratch` 一段 ⇒ 旧锚点之后发生的
+            // **删除事件不会重放**（`HKAnchoredObjectQuery` 从 nil 出发本来也看不到删除）。
+            // 接受它的大前提是 `allowsHistorySkip == false` ⇒ 已提交构建从未写出过 floor，
+            // 现实里只有本地调构建可能留下这种行（见 `SyncCoveragePolicy.hasDisabledCoverageFloor`）。
+            let decodedAnchor = disabledFloorRepair ? nil : decoded
+            let history = previous == nil || decodedAnchor == nil
+                || previous!.needsHistoryRead() || disabledFloorRepair
             do {
                 // 本轮的段计划由 `RecordReplayPlan`（纯逻辑，回归逐组合钉着）决定：
                 // 初次重放 = 先增量段（保住删除事件）再历史段（从头）；上轮中断在历史段 =
                 // 只续历史段断点。这里只做接线。
-                let resumingHistoryPhase = previous?.historyReplayPhase == .history
+                // 修复轮不许按"历史续读"恢复：那段续读带的是旧谓词。改成从 nil 重放。
+                let resumingHistoryPhase = !disabledFloorRepair
+                    && previous?.historyReplayPhase == .history
                 // P1-1（2026-10-18 同步诊断）：服务端覆盖探测给出的**历史段查询下界**。
                 // 只有"确实要重放"的类型才有意义；稳态增量哪怕拿到覆盖点也不会用它
                 // （下层 `segmentFloor` 只把下界交给历史段）。
@@ -1941,15 +2093,23 @@ nonisolated enum HealthKitExport {
                 let coverageRestart = SyncCoveragePolicy.shouldRestartHistory(
                     cursor: previous, floor: coverageFloor
                 )
+                // 🔴 A8（2026-10-19 复核修复）：这里必须用 `decodedAnchor`，不能用 `decoded`。
+                // 修复轮把 `decodedAnchor` 置 nil 正是为了"从 nil 重放一次"；若把**能解码的旧锚点**
+                // 当成可用起点（`decoded != nil` ⇒ true），段计划会变成
+                // `[.incremental, .historyFromScratch]`，而 `.incremental` 的起点同样是 nil
+                // （见下面 `starts` 的映射）⇒ 同一类型的历史被**从头读两遍**，且从 nil 的增量段
+                // 也看不到旧锚点之后的删除事件。传 `decodedAnchor != nil` 后，修复轮只会得到
+                // `.historyFromScratch` 一段（设计意图；纯判据见
+                // `HealthKitRecordCursorRegression.swift` 的 R6 段）。
                 let segments = RecordReplayPlan.segments(
-                    decodedAvailable: decoded != nil,
+                    decodedAvailable: decodedAnchor != nil,
                     history: history,
                     resumingHistoryPhase: resumingHistoryPhase,
                     coverageRestart: coverageRestart
                 )
                 let starts: [HKQueryAnchor?] = segments.map { segment in
                     switch segment {
-                    case .incremental, .historyResume: return decoded
+                    case .incremental, .historyResume: return decodedAnchor
                     case .historyFromScratch: return nil
                     }
                 }
@@ -2083,34 +2243,26 @@ nonisolated enum HealthKitExport {
                     throw HealthKitExportError.missingRecordAnchor
                 }
                 let encoded = try NSKeyedArchiver.archivedData(withRootObject: next, requiringSecureCoding: true)
-                cursors[xmlType] = HealthKitRecordCursor(
+                // B2：正式 anchor 推进只显式给四个字段；窗口与补读分页等旁路通道由 helper
+                // 整体透传 —— 旧实现手抄 8 个字段，新增通道字段时任何一处漏带都是静默的。
+                let advanced = previous?.advancingAnchor(
                     anchor: encoded,
                     // 重放完成（未被预算截断）才把 `historyReadAt` 推到 `now`；中断时保留旧值 ——
                     // "未完成"由 `historyReplayPhase` 承载，下轮据此续段（R-03 防护）。
                     historyReadAt: (history && interruptedPhase == nil) ? now : (previous?.historyReadAt ?? now),
                     historyReplayPhase: interruptedPhase,
-                    // B1：窗口记账必须**透传** —— 窗口 pass 已在本循环之前写过它（`previous`
-                    // 读到的就是那时的值）；不带上就会被这次构造覆盖，症状是每批重扫整个 48h 窗。
-                    recentWindowReadAt: previous?.recentWindowReadAt,
-                    // 2026-10-17：补读记账同样**透传**（上一段可能刚把它写成 `now`）。
-                    // 新建游标保持 `nil`（= 还没补过）：首装/游标被清后，等这个类型读完第一页
-                    // 出现游标，下一批再补一次近 14 天 —— 代价是一批重复记录（服务端按 UUID
-                    // 幂等），换来的是"任何一次漏投都有一条确定的按日期恢复路径"。
-                    lateBackfillAt: previous?.lateBackfillAt,
-                    lateBackfillBefore: previous?.lateBackfillBefore,
-                    // 2026-10-18（P3-22）：补读窗口下界也必须透传 —— 补读循环在本次构造
-                    // **之前**就可能把 `lateBackfillWindowStart` 写进 `cursors[...]`（`previous`
-                    // 读到的就是那时的值）。不带上会把它清成 nil ⇒ 下一批重新取 `now − 14d`，
-                    // 前缘漂移的旧缺陷原样复现。
-                    lateBackfillWindowStart: previous?.lateBackfillWindowStart,
-                    // P1-1（Lead 复核修正）：覆盖下界**一旦用过就持久保留** —— 该类型之后
-                    // **所有** anchor 查询（增量段也是）都必须带同一个 `startDate` 谓词。
-                    // 中断时记"实际用的下界"；否则记本轮最后一次查询用的下界（历史段跑完
-                    // 也保留）。⛔ 不要在历史段完成后清成 nil：换谓词用旧锚点没有文档保证。
-                    // 唯一清除路径 = 显式「修复增量游标」（清掉该类型整条游标）。
+                    // P1-1：覆盖下界**一旦用过就持久保留**；中断时记"实际用的下界"，
+                    // 否则记本轮最后一次查询用的下界（历史段跑完也保留）。
+                    historyCoverageFloor: interruptedPhase == .history
+                        ? interruptedCoverageFloor : currentQueryFloor
+                ) ?? HealthKitRecordCursor.established(
+                    anchor: encoded,
+                    historyReadAt: now,
+                    historyReplayPhase: interruptedPhase,
                     historyCoverageFloor: interruptedPhase == .history
                         ? interruptedCoverageFloor : currentQueryFloor
                 )
+                cursors[xmlType] = advanced
             } catch {
                 if isAuthorizationError(error) || isNoDataError(error) {
                     warnings.add("部分健康记录暂不可读取；已保留该类型的同步游标")
@@ -2147,7 +2299,8 @@ nonisolated enum HealthKitExport {
                   channelCounts.historySkippedTypes)
         }
         return (count, try encoder.encode(cursors), deleted, budgetStopReason, nextRotation,
-                WorkoutBackfillScheduler.normalized(workoutWindowUpdates), channelCounts)
+                WorkoutBackfillScheduler.normalized(workoutWindowUpdates),
+                workoutPageCandidates, workoutPageEmptyCommits, channelCounts)
     }
 
     /// 一页记录的**渲染**（S2.5 写前判定）：把这一页要写进 `export.xml` 的**全部字节**先在内存里
@@ -2257,6 +2410,53 @@ nonisolated enum HealthKitExport {
                 return []
             }
             throw error
+        }
+    }
+
+    /// R3（2026-10-19 复核）：训练窗口的**独立 anchored 分页查询**。
+    ///
+    /// 与 `recentSamples` 的差别：锚点就是下一页的断点。同一时间戳下有多少样本都不会被
+    /// 时间边界截断；进程重启后从 `sync_workout_type_pages.committed_anchor` 继续。
+    ///
+    /// 返回的 `next` 由调用方决定怎么用：
+    ///   - 非空结果 + 非空 `next` ⇒ 页可交付，候选锚点等 committed 回执；
+    ///   - 空结果 + 非空 `next` ⇒ 本次 EOF；写 `caught_up`（空观察可由窄事务立即提交）；
+    ///   - `next == nil` ⇒ **不推进**已确认锚点、不伪造 EOF（下批从同一 anchor 重试）。
+    ///
+    /// ⚠️ 删除事件交给**正式记录流**交付；这里只把 `deleted` 数量用于"删除-only 页不是
+    /// EOF"的判定，避免同一批删除在两个通道里各写一份（服务端按 UUID 幂等，但删除配额
+    /// 只能被计一次）。
+    private static func anchoredWindowPage(
+        store: HKHealthStore,
+        type: HKSampleType,
+        anchor: HKQueryAnchor?,
+        limit: Int,
+        predicate: NSPredicate
+    ) async throws -> (added: [HKSample], deleted: [HKDeletedObject], next: HKQueryAnchor?) {
+        let box = QueryContinuation<(added: [HKSample], deleted: [HKDeletedObject], next: HKQueryAnchor?)>()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await withCheckedThrowingContinuation { continuation in
+                box.set(continuation)
+                let query = HKAnchoredObjectQuery(
+                    type: type, predicate: predicate, anchor: anchor, limit: limit
+                ) { _, samples, deleted, next, error in
+                    if let error {
+                        box.resume(throwing: error)
+                        return
+                    }
+                    box.resume(returning: (
+                        added: samples ?? [],
+                        deleted: deleted ?? [],
+                        next: next
+                    ))
+                }
+                box.execute(query, on: store)
+            }
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            box.cancel()
         }
     }
 

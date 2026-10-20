@@ -1425,8 +1425,9 @@ struct TechWorkoutDetailView: View {
     /// 2026-10-18（事故复盘 P0-3）：详情页顶部的补齐状态横幅。
     ///
     /// 三种状态必须分得开（判据在 `WorkoutFreshnessPresentation.banner`）：分析中 / 数据仍在补齐
-    /// （含"Apple Watch 数据仍在传输：xx 待到达"）/ 分析未完成。它的存在本身就是为了消灭 D9：
-    /// 旧页面把"还没到"渲染成空数组/`null`，与"设备没有这项能力"不可区分。
+    /// （含"部分指标尚未观察到：xx"）/ 分析未完成。它的存在本身就是为了消灭 D9：
+    /// 旧页面把"还没到"渲染成空数组/`null`，与"设备没有这项能力"不可区分。文案不归因
+    /// Apple Watch —— 服务端只知道收到了什么，不知道手机读到了什么（R5）。
     @ViewBuilder private func freshnessPanel(_ banner: WorkoutFreshnessPresentation.Banner) -> some View {
         TechPanel(tint: banner.kind == .analysisFailed ? TechColor.coral : TechColor.cyan,
                   fill: banner.kind == .analysisFailed ? TechColor.coral.opacity(0.08) : TechColor.paper) {
@@ -1451,7 +1452,7 @@ struct TechWorkoutDetailView: View {
     private func freshnessIcon(_ kind: WorkoutFreshnessPresentation.Banner.Kind) -> String {
         switch kind {
         case .analyzing: return "hourglass"
-        case .waitingForSamples: return "applewatch"
+        case .waitingForSamples: return "clock.arrow.circlepath"
         case .analysisFailed: return "exclamationmark.circle"
         }
     }

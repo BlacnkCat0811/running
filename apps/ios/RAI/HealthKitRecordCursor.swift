@@ -184,6 +184,68 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     }
 }
 
+/// B2（2026-10-19 复核）：游标更新的**集中构造点**。
+///
+/// 失效形态是"新增一个通道字段之后，某一条重建路径漏带它" —— 每条路径都手写 8 个字段，
+/// 漏掉 `lateBackfillWindowStart` 会让补读每批重读同一页、漏掉 `historyCoverageFloor` 会让
+/// 历史段换谓词（旧锚点与下界不同源）。三个 helper 各自只接受**本通道明确要改的字段**，
+/// 其余字段在 helper 内部整体透传；以后加字段只需要改这里。
+extension HealthKitRecordCursor {
+    /// 旁路记账：窗口 pass 写完近 48h 后只推进 `recentWindowReadAt`。
+    func settingRecentWindowReadAt(_ value: Date) -> HealthKitRecordCursor {
+        var copy = self
+        copy.recentWindowReadAt = value
+        return copy
+    }
+
+    /// 旁路记账：迟到补读的完成/分页位置（anchor 与历史重放状态一概不动）。
+    func settingLateBackfill(
+        at value: Date?,
+        before: Date?,
+        windowStart: Date?
+    ) -> HealthKitRecordCursor {
+        var copy = self
+        copy.lateBackfillAt = value
+        copy.lateBackfillBefore = before
+        copy.lateBackfillWindowStart = windowStart
+        return copy
+    }
+
+    /// 正式 anchor 推进：只接受本段明确变化的四个字段，所有旁路通道原样保留。
+    func advancingAnchor(
+        anchor: Data,
+        historyReadAt: Date,
+        historyReplayPhase: HistoryReplayPhase?,
+        historyCoverageFloor: Date?
+    ) -> HealthKitRecordCursor {
+        HealthKitRecordCursor(
+            anchor: anchor,
+            historyReadAt: historyReadAt,
+            historyReplayPhase: historyReplayPhase,
+            recentWindowReadAt: recentWindowReadAt,
+            lateBackfillAt: lateBackfillAt,
+            lateBackfillBefore: lateBackfillBefore,
+            lateBackfillWindowStart: lateBackfillWindowStart,
+            historyCoverageFloor: historyCoverageFloor
+        )
+    }
+
+    /// 首装/无旧游标时的显式初始化：旁路通道一律 nil（不是"继承一个不存在的值"）。
+    static func established(
+        anchor: Data,
+        historyReadAt: Date,
+        historyReplayPhase: HistoryReplayPhase?,
+        historyCoverageFloor: Date?
+    ) -> HealthKitRecordCursor {
+        HealthKitRecordCursor(
+            anchor: anchor,
+            historyReadAt: historyReadAt,
+            historyReplayPhase: historyReplayPhase,
+            historyCoverageFloor: historyCoverageFloor
+        )
+    }
+}
+
 /// 记录 drain 的**段计划**：把"本轮从哪些起点读、中断记在哪一段"从
 /// `HealthKitExport.writeGlobalRecords` 里抽出来的**纯逻辑**（不依赖 HealthKit 类型，
 /// 因此回归能在 macOS 上直接钉它）。
@@ -467,9 +529,14 @@ nonisolated enum SyncCoveragePolicy {
     /// "游标缺失"或"上轮重放未完成"。稳态增量同步（所有类型游标都有效）不花这次请求。
     static func needsCoverageQuery(
         cursors: [String: HealthKitRecordCursor],
-        types: [String]
+        types: [String],
+        allowSkip: Bool = allowsHistorySkip
     ) -> Bool {
-        types.contains { type in
+        // R6/A3（2026-10-19 复核）：全局关闭"按覆盖点跳过历史"时，覆盖探测**没有任何
+        // 消费方** —— 继续发请求只会白花一次网络往返，并在日志里写一句"历史段将跳过服务端
+        // 已覆盖部分"的误导话。默认走全局开关；参数只给回归用（与 `historyFloor` 同一手法）。
+        guard allowSkip else { return false }
+        return types.contains { type in
             guard let cursor = cursors[type] else { return true }
             return cursor.needsHistoryRead()
         }
@@ -513,6 +580,21 @@ nonisolated enum SyncCoveragePolicy {
         return floor
     }
 
+    /// R6（2026-10-19 复核）：游标上带着一个**已禁用**的覆盖下界。
+    ///
+    /// 历史证据：`allowsHistorySkip` 只在提交 `33f79fe` 里出现过一次，值就是 `false`
+    /// （`git log -S` 全历史唯一命中）。也就是说**没有任何已提交/已分发构建**会把
+    /// `historyCoverageFloor` 写进游标；生产 `33f79fe` 与本地 `67028e1` 都关闭该开关。
+    ///
+    /// 但"无法证明用户从未装过某个本地调试构建"不是不处理它的理由。这里给出确定性的
+    /// 检测：开关关闭时若仍读到 floor，说明来源不可信（不是本代码路径写的），必须走
+    /// **逐类型、一次性**的历史重放来清除它 —— 不能只丢 floor 继续复用旧 anchor
+    /// （谓词与锚点不同源，旧样本反而可能永远读不到），也不能清空全部正式游标。
+    static func hasDisabledCoverageFloor(_ cursor: HealthKitRecordCursor?) -> Bool {
+        !allowsHistorySkip && cursor?.historyCoverageFloor != nil
+    }
+
+    /// 是否需要把一段**旧的无下界历史续读**换成带下界的新重放。
     /// 是否需要把一段**旧的无下界历史续读**换成带下界的新重放。
     ///
     /// 只有"上轮中断在历史段、且那一轮没有持久化覆盖下界"才重开；已经带下界的续读必须
