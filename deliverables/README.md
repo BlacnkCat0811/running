@@ -8,6 +8,13 @@
 
 > 状态口径（2026-10-18 修正）：本节报告可能**已提交**，也可能仍只存在于工作树；一律按文末「新产物约定」在下一轮并入 `PROJECT_REVIEW` 或删除，不能把本节标题读成"这些文件还没提交"。
 
+- [IOS_SYNC_RELEASE_2026-10-20.md](IOS_SYNC_RELEASE_2026-10-20.md)：
+  **R1–R6 发布记录（已提交 + 已部署）** —— `62f490b` 已推送 gitee，并经 `deploy/upgrade.sh --apply`
+  部署到生产（`101.33.202.40`；无 schema 迁移，v46 不变）；记录本机全部发布判据（含三次 `npm test`
+  的既有时间敏感 flake 与已修的夹具时间炸弹、13 条 Rust parity skip）、生产实测（health/401/读路径/
+  watchdog/无 5xx）、既有 freshness 延迟基线与代码回滚边界。**iOS 签名构建与真机验收仍未做；
+  gitee 侧不会给出 CI 绿灯。**
+
 - [IOS_SYNC_DEFECT_FIX_EXECUTION_2026-10-19.md](IOS_SYNC_DEFECT_FIX_EXECUTION_2026-10-19.md)：
   **同步残余缺陷修复记录（第二轮）** —— 修掉核实报告列出的 4 条残余风险：R6 修复轮接线
   （双重重放）、R6 边缘（坏锚点+旧 floor 整批失败）、B1 前台触发点无门禁（`RAIApp.swift`
