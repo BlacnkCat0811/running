@@ -17,6 +17,7 @@ import {
   readDatabaseImportIdentity
 } from "../src/import-payload-identity.js";
 import { ImportWorker } from "../src/worker.js";
+import { writeNoopReceiptTask } from "../src/import-database-thread.js";
 import { readImportReceipt } from "../src/import-publication.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
@@ -527,6 +528,55 @@ test("the recorded anchor survives a real direct import into the live database",
       true,
       "runtime state remains readable"
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("worker no-op 回执任务：重验通过才提交，anchor 失效返回 not_verified 且不写回执", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-noop-task-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const inputPath = writeExport(root, exportXml("2026-09-23 10:01:26 +0800"));
+  try {
+    await seedDatabase(databasePath);
+    const sha256 = await computeImportPayloadSha256(inputPath, {
+      preserveAbsent: true,
+      contractVersion: CONTRACT_VERSION,
+      engine: `typescript@${NATIVE_VERSION}`,
+      identityAlgorithm: identityAlgorithmFingerprint()
+    });
+    writeAnchor(databasePath, { sha256, datasetVersion: "preflight_fixture" });
+
+    const committedId = "noop_task_committed";
+    const committed = writeNoopReceiptTask({
+      databasePath,
+      jobId: committedId,
+      payloadSha256: sha256,
+      unchangedWorkouts: 3,
+      startedAtMs: Date.now() - 10
+    });
+    assert.equal(committed.kind, "committed");
+    assert.equal(committed.summary.importMode, "unchanged");
+    assert.equal(readImportReceipt(databasePath, committedId)?.directSync?.receiptId, committedId);
+
+    // 两次检查之间另一批导入推进了 datasetVersion：worker 必须回滚，不写成功回执。
+    const moved = new DatabaseSync(databasePath);
+    try {
+      moved.prepare("UPDATE import_manifest SET value = ? WHERE key = 'dataset_version'").run("preflight_moved");
+    } finally {
+      moved.close();
+    }
+    const staleId = "noop_task_stale";
+    const stale = writeNoopReceiptTask({
+      databasePath,
+      jobId: staleId,
+      payloadSha256: sha256,
+      unchangedWorkouts: 3,
+      startedAtMs: Date.now() - 10
+    });
+    assert.deepEqual(stale, { kind: "not_verified" });
+    assert.equal(readImportReceipt(databasePath, staleId), null, "not_verified 不得留下成功回执");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

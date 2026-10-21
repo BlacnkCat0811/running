@@ -15,6 +15,8 @@ export class RuntimeTelemetry {
     this.requestMs += durationMs;
     this.requestMaxMs = Math.max(this.requestMaxMs, durationMs);
   }
+  /** Benchmark/acceptance hook: start a fresh event-loop-delay window. */
+  resetEventLoopDelay(): void { this.loop.reset(); }
   snapshot() {
     const memory = process.memoryUsage();
     const cpu = process.cpuUsage();

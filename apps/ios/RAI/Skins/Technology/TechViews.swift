@@ -357,7 +357,7 @@ struct TechTodayView: View {
                 if let reason = data.recommendation.adjustmentReason {
                     Text(reason).font(.caption).foregroundStyle(TechColor.muted)
                 }
-                // 2026-10-18（审查 P3-18 / TODAY_PLAN_CARDS_REVIEW A4）：把"今日改为休息"
+                // 2026-10-18（审查 P3-18）：把"今日改为休息"
                 // 与本周课表缺口串起来，用户不必自己在两张卡之间对齐两个数。
                 if data.recommendation.effectiveKind == "rest",
                    let week = data.adherence?.current,
@@ -457,7 +457,7 @@ struct TechTodayView: View {
                         }
                     }
                     // A1：显式写明这是"阶段建议量带"（按最近 4 周实测推算），
-                    // 不是今天要补的距离（TODAY_PLAN_CARDS_REVIEW C1/C2）。
+                    // 不是今天要补的距离（判据见 apps/ios/tests/check-today-layout.py）。
                     Text("阶段建议量带 \(nativeNumber(week.volumeBandKm.lower, digits: 0))–\(nativeNumber(week.volumeBandKm.upper, digits: 0)) km（按最近 4 周实测推算）· 长距离 ≤\(nativeNumber(week.longRunCapKm, digits: 0)) km · 质量课 ≤\(week.qualityDose)")
                         .font(.caption).foregroundStyle(TechColor.muted)
                         .fixedSize(horizontal: false, vertical: true)

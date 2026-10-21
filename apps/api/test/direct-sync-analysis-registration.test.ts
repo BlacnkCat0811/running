@@ -209,11 +209,13 @@ test("`directSync` 直连回执今天只有三个产出方（新增第四个即�
   //   · `data-only-import.ts` —— record-only 快通路，回执恒为 `not_required`（源码守卫 + 行为守卫）；
   //   · `direct-sync-ingest.ts` —— 统一接收器（PR4 2c/2d），回执按分类取 `queued` / `not_required`
   //     （**行为**守卫在 `apps/api/test/direct-sync-ingest.test.ts`，两种分类各一条）。
-  //   · `import-worker.ts` —— no-op 回执（R2，`writeNoopReceipt`：unchanged 短路的持久回执，
-  //     2026-10-15 引入），恒为 `not_required`。**行为**守卫在
+  //   · `import-database-thread.ts` —— no-op 回执（R2；2026-10-21 阶段 1 从
+  //     `import-worker.ts` 的 `writeNoopReceipt` 迁入 worker 线程的 `writeNoopReceiptTask`，
+  //     unchanged 短路的持久回执仍恒为 `not_required`）。**行为**守卫在
   //     `apps/api/test/import-payload-preflight.test.ts` 的
   //     "an import records the payload anchor and the next identical sync skips the whole pipeline"
-  //     用例 R2 段：receipt 可持久查询 + `directSync` 形状逐字段 + `not_required`。
+  //     用例 R2 段，以及 "worker no-op 回执任务" 用例：receipt 可持久查询 + `directSync`
+  //     形状逐字段 + `not_required`。
   //     ⚠️ 这就是"新增第三个产出方时，必须同时说清它的回执语义由谁守"的兑现记录：
   //     本包（WP-01）把它登记为**已声明语义**的产出方，而不是删守卫让红灯变绿。
   // ⚠️ 上一条源码守卫**只扫第一个**：第二、三个的判据是行为级的，不是文本级的。
@@ -223,7 +225,7 @@ test("`directSync` 直连回执今天只有三个产出方（新增第四个即�
     [
       "apps/api/src/data-only-import.ts",
       "apps/api/src/direct-sync-ingest.ts",
-      "apps/api/src/import-worker.ts"
+      "apps/api/src/import-database-thread.ts"
     ],
     "出现了第四个 `directSync` 产出方：上一条源码守卫只会扫 data-only-import.ts，" +
       "新产出方不会被它覆盖 —— 请把新产出方一并纳入守卫（或改为运行期唯一来源断言）"

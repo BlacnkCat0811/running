@@ -1,7 +1,8 @@
 # iOS 同步后续项「未实施项」实际情况核实与优化建议（2026-10-19 第三轮）
 
-- 依据：[IOS_SYNC_FOLLOWUP_PLAN_2026-10-19.md](IOS_SYNC_FOLLOWUP_PLAN_2026-10-19.md) §2 的五个
-  “本轮不实施”项（B3 / B4 / B5 / B6 / C1）。
+- 依据：`IOS_SYNC_FOLLOWUP_PLAN_2026-10-19.md` §2 的五个
+  “本轮不实施”项（B3 / B4 / B5 / B6 / C1）。（该文件已随批次收尾删除，可用
+  `git show 62f490b:deliverables/IOS_SYNC_FOLLOWUP_PLAN_2026-10-19.md` 取回。）
 - 基线：**当前工作树**（`67028e1` + 未提交改动，含 R1–R6 与上一轮 R6 防御重放、B1、B2）。
   不是 HEAD —— `git status` 显示 37 个已改文件 + 若干未跟踪文件，R1–R6 批次尚未提交。
 - 方法：只读核实（读码 / `git log` / 只读执行门禁）+ 本机可跑判据。**未修改任何源码、测试或
@@ -422,7 +423,8 @@
 > `decodedAvailable: decodedAnchor != nil`（另修"坏锚点 + 旧 floor 整批失败"的边缘）、
 > B1 前台触发点新增 6 条源码判据、B2 helper 唯一性新增 2 条判据、计划文档计数更正；
 > 每条新判据都做了"改坏→红、还原→绿"的定向突变。记录见
-> [IOS_SYNC_DEFECT_FIX_EXECUTION_2026-10-19.md](IOS_SYNC_DEFECT_FIX_EXECUTION_2026-10-19.md)。
+> `IOS_SYNC_DEFECT_FIX_EXECUTION_2026-10-19.md`（已随批次收尾删除，可用
+> `git show 62f490b:deliverables/IOS_SYNC_DEFECT_FIX_EXECUTION_2026-10-19.md` 取回）。
 > B6 的 P1 剩余批次与 P2（视觉快照）仍未做，理由见该记录 §6。
 
 ## 8. 边界与未验证

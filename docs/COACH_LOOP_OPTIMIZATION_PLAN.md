@@ -4,10 +4,10 @@
 
 | 项目 | 说明 |
 | --- | --- |
-| 文档状态 | **服务端新合同已实现、整体验收尚未全部完成**；追加、修补、反馈、模板及摘要已接入显式选择的新API合同，不再仅为离线函数；旧客户端未静默升级，未迁移真实数据库或替用户启用；详见[实施状态](COACH_LOOP_IMPLEMENTATION_STATUS.md) |
+| 文档状态 | **服务端新合同已实现、整体验收尚未全部完成**；追加、修补、反馈、模板及摘要已接入显式选择的新API合同，不再仅为离线函数；旧客户端未静默升级，未迁移真实数据库或替用户启用。**2026-10-20 补注**：`/v1/mobile/goals`、`/v1/mobile/run-coach`、`/v1/mobile/workout-plan/*` 已退役为 `410 legacy_surface_retired`（[DECISIONS](DECISIONS.md) D19），统一排课读写走 `training-plan-state` / `training-plan/commands*`；coach-loop 合同仍是显式选择路径。发布审计仍为 **`blocked`**，剩余 5 类外部签收：①78 项完整签收及长期跨周实证；②独立 golden 及领域政策审阅；③性能发布预算冻结；④物理设备及回退签收；⑤运维发布（未迁移真实库、未部署、未启用）。**未迁移真实数据库、未部署、未替用户启用**；原实施状态表已随文档收敛移出 `docs/`，需要时从 git 取回（下同）。 |
 | 编写日期 | 2026-10-10，Asia/Shanghai |
 | 代码复核基线 | `308fee97a864d13ec92c89bdd4bbb61ba6481ca3`，以该时点工作区为准，不代表线上版本 |
-| 输入 | 上一轮《总体判断》及2026-10-10用户补充需求；本次明确要求“周建议量完成后，状态允许仍可追加完整课”；[佳明教练研究报告](GARMIN_COACH_RESEARCH.md)仅作背景，不把研发原型公式视为已验证策略 |
+| 输入 | 上一轮《总体判断》及2026-10-10用户补充需求；本次明确要求“周建议量完成后，状态允许仍可追加完整课”；《佳明教练研究报告》（已随文档收敛移出 `docs/`，需要时从 git 取回）仅作背景，不把研发原型公式视为已验证策略 |
 | 性质 | 可拆任务的工程优化方案，不是研究综述，也不是训练有效性证明 |
 | 覆盖 | 原编号 **1、2、3、4、5、6、8**保留；前置 **O0：双模式、单堂30分钟、建议量/硬约束分离与逐次追加**（§1.3–1.9），扩展O4课型库 |
 | 排除 | 原第7点桌面 Web 优化；不涉及桌面 UI、导航、页面布局、React 组件或视觉验收，不新增相关需求 |
@@ -66,11 +66,11 @@
 | E08 | [恢复](../packages/readiness/src/index.ts)；[负荷](../packages/training-load/src/index.ts)；[HTTP合同](../packages/api-contracts/src/index.ts) `OverrideWorkoutInput` | 已有训练后RPE及负荷使用路径；尚缺独立训练前主观反馈闭环 |
 | E09 | [跑步教练](RUN_COACH.md)；[预测构建](../packages/application/src/prediction-report.ts) | 准备度不是达标概率；昂贵预测构建不能直接搬入同步教练读取 |
 | E10 | [算法合同](ALGORITHM.md)；[回放基础](../packages/model-eval/src/replay.ts) | 已有显式时点、确定性、版本和独立标签边界，继续复用 |
-| E11 | [计划事实快照与恢复实现](IOS_TRAINING_PLAN_STATE_V1.md)；[聚合读取](../apps/api/src/data.ts) `trainingPlanState`；[发布服务](../apps/api/src/plan-publication.ts) | 快照、操作幂等、回执生命周期和恢复保护已经实现；设备边界仍需独立证据 |
+| E11 | 计划事实快照与恢复实现（原状态文档已随文档收敛移出，需要时从 git 取回）；[聚合读取](../apps/api/src/data.ts) `trainingPlanState`；[发布服务](../apps/api/src/plan-publication.ts) | 快照、操作幂等、回执生命周期和恢复保护已经实现；设备边界仍需独立证据 |
 | E12 | [摘要](../apps/api/src/plan-digest.ts) `prescriptionDigest/executionContent`；[不可变快照发布](../packages/storage-sqlite/src/model-release-repository.ts) | 执行内容摘要可以复用；不能向已封存bundle补写快照而破坏原hash |
 | E13 | [每日处方](../apps/api/src/mobile-coach.ts) `prescribeUnplannedSession/decideNextSessionDecision/buildSessionStructure/measureStructure` | 无保存课表时先按剩余km/剩余自然日估量；最终按剩余km缩减；轻松结构下限是5分钟热身、至少1km工作、5分钟整理，未保证30分钟 |
 | E14 | [周生成器](../apps/api/src/weekly-plan-validate.ts) `MIN_EASY_DISTANCE_KM/buildCoachWeekPlan`；[统一约束](../apps/api/src/weekly-plan-service.ts) `constrainUpcomingPlan` | 已有“减少课次数而不是无限缩短”思路，但门槛来自2km请求对应的结构最小量；自然周扣实际量及保留量后还会再次裁剪，不是30分钟整课合同 |
-| E15 | [生命周期](../apps/api/src/run-coach-policy.ts) `validateRunCoachConfig/runCoachEndDate`；[容量](../apps/api/src/weekly-capacity.ts) `weeklyCapacity` | fitness仍为默认12周的有期限计划；新比赛需42–364天，至少3个可跑日；无计划与fitness在容量增长策略上也有差别，不能声称已经同模式 |
+| E15 | [生命周期](../apps/api/src/run-coach-policy.ts) `validateRunCoachConfig/runCoachEndDate`；[容量](../apps/api/src/weekly-capacity.ts) `weeklyCapacity` | fitness仍为默认12周的有期限计划；新比赛需42–364天，至少3个可跑日；无计划与fitness在容量增长策略上也有差别，不能声称已经同模式。**2026-10-20 注：新建路径已改为统一排课 v2（`training-plan-state`/`training-plan/commands*`，单一模式由赛事目标推导），旧 `legacy_goals`/`run_coach` 状态只读/迁移；「12 周期限是否仍适用于新路径」未经本文件复核，以现行统一排课合同为准，E15 原文只描述 2026-10-10 时点。** |
 | E16 | [课型合同](../packages/contracts/src/index.ts) `MOBILE_SESSION_KINDS`；[结构目标](../apps/api/src/mobile-coach.ts) `sessionRanges/workSecondsPerKm`；[心率适配](../apps/api/src/run-coach-policy.ts) `runCoachSessionTargets` | 当前只有rest/recovery/easy/long_run/tempo/interval；非tempo/interval工作段统一取easy目标，新增有氧/法特莱克不能只换名字 |
 | E17 | [历史周量](../apps/api/src/data.ts) `recentWeeklyKm/previousWeekDistanceKm`；[风险标记](../apps/api/src/mobile-coach.ts) `buildInjuryFlags/decideVerdict` | 已有完整周历史、负荷状态、跑量跳升、应激、单调性和恢复证据；这些不是“绿灯即可无限加课”的证明，当前也没有建议量完成后的独立追加资格器 |
 | E18 | [既有决策](DECISIONS.md) D13–D16；[容量裁剪](../apps/api/src/weekly-plan-validate.ts) `weeklyPlanVolumeCeiling`；[周期量带](../apps/api/src/plan-periodization.ts) | 现行合同将派生容量/量带作为限制；建议量与独立保护上限拆分是有意的策略变更，不能只给字段改名或偷偷删掉校验 |
@@ -202,7 +202,7 @@ type CoachPolicyManifest = {
 4. 已完成今日训练默认不再追加第二堂；自主训练全部计入事实和剩余容量。原处方仍保留用于复盘，不能事后新建处方来宣布完成。
 5. 跨上海本地日、新训练导入/撤回、恢复/反馈/分区或目标变更触发重新评估；事实变了不代表执行结构必须变化。O3负责已发布安排的最小修补。
 6. **今天的无计划建议允许按冻结输入只读推导，不在GET写库；已有发布计划的重排必须走显式命令。** 前台打开/刷新或数据更新后的既有交互流程可提交幂等刷新命令，再读取同一修订，不新增定时后台任务。
-7. 无programme的持续模式必须增加可用的刷新命令路径：可扩展既有周计划发布服务，接受 `programmeId=null` 和模式配置，不为调用 `/run-coach refresh` 强造一个12周计划。是否需要刷新由业务日期、事实hash和策略manifest判断，不依赖每周一自动生成条件。
+7. 无programme的持续模式必须增加可用的刷新命令路径：可扩展既有周计划发布服务，接受 `programmeId=null` 和模式配置，不为调用 `/run-coach refresh` 强造一个12周计划。**（2026-10-20 注：`/v1/mobile/run-coach` 已退役为 `410 legacy_surface_retired`，D19；统一入口是 `/v1/mobile/training-plan/commands*`，coach-loop 合同用自己的 refresh 命令。本条只作为当时的设计意图保留，不要再依赖该端点。）** 是否需要刷新由业务日期、事实hash和策略manifest判断，不依赖每周一自动生成条件。
 8. 有效读取可立即安全降级旧处方；需要新增/升级/移课而尚未成功发布时，返回 `refresh_required`，不让不同入口各自生成可执行替代课。无计划推导建议与“已保存/已排期”明确区分；导出前经过发布与快照校验。
 9. 离线、刷新失败、窗口过期要明确状态；不假装已经完成今日自适应。未打开应用且服务不可达时，不承诺每天后台写课或同步手表。
 
@@ -1145,7 +1145,7 @@ type CoachGoalGap = {
 #### C. 教练读取与目标提示
 
 - 在既有 `training-plan-state.coachSummary`内增量返回 `goalGap`，同步读摘要及准备度；身份纳入同一冻结视图及令牌。
-- 独立run-coach兼容读取复用同一装配函数；没有摘要时不触发昂贵构建。
+- 独立兼容读取复用同一装配函数（统一排课读 `training-plan-state`；旧 `/v1/mobile/run-coach` 已于 2026-10-20 退役为 410）；没有摘要时不触发昂贵构建。
 - 无时间目标为 `no_time_goal`，自定义/全马为 `unsupported_distance`，不外推预测。
 - 新鲜且兼容参考比目标慢时，返回事实性提示：“当前参考比目标慢X秒，可考虑调整目标或重新评估准备期。”
 - 是否“大幅差距”第一版不增加未经验证的分档，只报告差值；不把任意百分比阈值称为不可达。
@@ -1391,7 +1391,7 @@ O5与O6可独立排期；已有恢复/训练后RPE不等待O5，追加也不等�
 
 ## 11. 总体验收清单
 
-以下为端到端验收清单，**不因局部实现或单个测试通过就全部勾选**；新合同运行实现、本轮验证与剩余边界见[实施状态](COACH_LOOP_IMPLEMENTATION_STATUS.md)。实际发布正例已补上，但不能替代全部协议、设备及独立评审验收。
+以下为端到端验收清单，**不因局部实现或单个测试通过就全部勾选**；新合同运行实现、本轮验证与剩余边界见 §0 的 2026-10-20 状态注记（原实施状态表已移出 `docs/`）。发布审计仍 `blocked`：78 项完整签收、独立 golden/领域政策审阅、大库性能预算、物理设备与回退、长期真实数据与运维发布这 5 类外部签收都未完成。实际发布正例已补上，但不能替代全部协议、设备及独立评审验收。
 
 - [ ] 无比赛目标可持续每日自适应，不要求固定周期，不虚构比赛阶段。对应AC0、R13。
 - [ ] 每日规则、周期教练和有效执行共享同一事实与决策，前台刷新可用、GET无写副作用。对应AC0、R17。
@@ -1428,7 +1428,6 @@ O5与O6可独立排期；已有恢复/训练后RPE不等待O5，追加也不等�
 # 实施时按实际改动运行；不是本轮已运行记录
 npm run typecheck
 npm test
-npm run build
 npm run check:docs
 npm run check:doc-refs
 npm run check:package-boundaries
@@ -1442,7 +1441,7 @@ npm run test:ios
 
 ### 11.2 方案制定阶段的交付检查（实施前历史记录）
 
-本节记录实施请求前的方案制定轮次，并非后续实施验证：该轮只修改本文件；既有 `RUN_COACH.md`修改及研究报告保持原样。SYN-01至04均为此前记录，该轮未重跑；追加策略仅复核源码及文档算例。当时业务代码、真实数据库、配置和模型指针未修改。本轮实现证据另见[实施状态](COACH_LOOP_IMPLEMENTATION_STATUS.md)。
+本节记录实施请求前的方案制定轮次，并非后续实施验证：该轮只修改本文件；既有 `RUN_COACH.md`修改及研究报告保持原样。SYN-01至04均为此前记录，该轮未重跑；追加策略仅复核源码及文档算例。当时业务代码、真实数据库、配置和模型指针未修改。本轮实现证据另见 §0 的 2026-10-20 状态注记（原实施状态表已移出 `docs/`）。
 
 本次交付检查（2026-10-10重新执行，不沿用上一轮结果）：
 

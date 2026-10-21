@@ -2,7 +2,11 @@ import { workoutExportQuerySchema } from "./workout-summary-export.js";
 import { DATABASE_TIMEZONE, MOBILE_SESSION_KINDS } from "@rai/contracts";
 // `stagesMs` 的键枚举从契约的**运行期单一来源**生成（审查 A1：手抄列表漏过 directSyncApply）。
 // `plan-operations` 的四种状态同理：summary 不许手抄（审查 P2-14 实测漏了 scopeMismatch）。
-import { IMPORT_STAGES, MOBILE_PLAN_OPERATION_QUERY_STATUSES } from "@rai/api-contracts";
+import {
+  IMPORT_STAGES,
+  MOBILE_PLAN_OPERATION_QUERY_STATUSES,
+  RETIRED_TRAINING_PLAN_SURFACES
+} from "@rai/api-contracts";
 
 import {
   MAX_ALERT_HEART_RATE_BPM,
@@ -842,6 +846,21 @@ const retiredOperation = (tags: string[], summary: string, replacement: string) 
   }
 });
 /**
+ * 退役路径的 OpenAPI 条目同样从共享 method+path 表生成（PR-02）。
+ * 手写一份 `paths` 会在下一次新增/删除退役操作时静默漂移；测试
+ * `schemas.test.ts` 另外按表逐项核对 deprecated / 410 / replacement。
+ */
+const retiredPlanPaths: Record<string, Record<string, unknown>> = (() => {
+  const grouped: Record<string, Record<string, unknown>> = {};
+  for (const surface of RETIRED_TRAINING_PLAN_SURFACES) {
+    grouped[surface.path] = {
+      ...(grouped[surface.path] ?? {}),
+      [surface.method.toLowerCase()]: retiredOperation([surface.tag], surface.summary, surface.replacement)
+    };
+  }
+  return grouped;
+})();
+/**
  * `GET /v1/mobile/plan-operations/:id` 的 summary **由共享状态表生成**。
  *
  * 2026-10-18 审查（P2-14）实测：手写的 summary 是
@@ -907,6 +926,7 @@ export const openapiDocument = {
     }
   },
   paths: {
+    ...retiredPlanPaths,
     "/v1/mobile/coach-loop": {
       get: operation(["Read"], "版本化教练聚合：S/H、有效课表、反馈和执行评价；无写副作用"),
       post: operation(["Workouts"], "显式确认规则并启用、刷新、暂停或结束持续/比赛训练；原子发布追加课", {
@@ -1046,14 +1066,6 @@ export const openapiDocument = {
     "/v1/mobile/plan-operations/{id}": { get: operation(["Read"], planOperationQuerySummary, { parameters: pathId }) },
     "/v1/mobile/statistics": { get: operation(["Read"], "iOS 统计页聚合：近 3 月分运动类型里程、滚动汇总与心率区间分布") },
     "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：能力曲线、12 周跑量、四周增幅、个人纪录与洞察") },
-    "/v1/mobile/goals": {
-      get: retiredOperation(["Read"], "读取 iOS 周目标、结构目标与赛事目标", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"),
-      put: retiredOperation(["Workouts"], "更新 iOS 周目标、结构目标与赛事目标", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands")
-    },
-    "/v1/mobile/run-coach": {
-      get: retiredOperation(["Read"], "自适应跑步教练计划、阶段和补充力量安排", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"),
-      post: retiredOperation(["Workouts"], "创建、更新偏好、自适应刷新、暂停、恢复或结束跑步教练计划", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands")
-    },
     "/v1/mobile/lock": {
       post: operation(["Workouts"], "锁定或按新裁决重锁今天的课", {
         requestBody: body({ $ref: "#/components/schemas/MobileLock" }, "lock 或 relock")
@@ -1061,15 +1073,6 @@ export const openapiDocument = {
     },
     "/v1/mobile/workout-plan": {
       get: operation(["Read"], "iOS 可执行周课表：今日按闸门裁决，其后按已存计划逐日给出结构、距离与时长")
-    },
-    "/v1/mobile/workout-plan/generate": {
-      post: retiredOperation(["Workouts"], "规则教练生成并持久化未来七日课表", "/v1/mobile/training-plan/commands/refresh")
-    },
-    "/v1/mobile/workout-plan/preview": {
-      post: retiredOperation(["Workouts"], "规则教练生成未来七日候选课表；不保存、不推送手表", "/v1/mobile/training-plan/commands/preview")
-    },
-    "/v1/mobile/workout-plan/confirm": {
-      post: retiredOperation(["Workouts"], "确认预览并发布课表；支持重复确认幂等", "/v1/mobile/training-plan/commands")
     },
     "/v1/mobile/workout-plan/synced": {
       post: operation(["Workouts"], "登记手机已把某天的课表推送到 Apple Watch，供训练详情按课表结构还原分段", {

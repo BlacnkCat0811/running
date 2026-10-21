@@ -1,14 +1,16 @@
 import { statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { parentPort } from "node:worker_threads";
+import type { ImportJobResponse } from "@rai/api-contracts";
 import {
   buildImportAudit, checkpointImportDatabase, databaseReadable, IMPORT_LANE_ATTEMPTS,
   type ImportDatabaseTask, type ImportLaneAttempt, type ImportLaneTimings, type ImportLanesInput,
-  type ImportLanesOutcome, type IngestWorkerMessage
+  type ImportLanesOutcome, type IngestWorkerMessage, type NoopReceiptInput, type NoopReceiptOutcome
 } from "./import-database-tasks.js";
 import { applyDataOnlyImport, type DataOnlyImportInput } from "./data-only-import.js";
 import { applyDirectSyncImport, isDirectSyncRejection, type DirectSyncImportInput } from "./direct-sync-ingest.js";
 import { readImportIdentityInDatabase } from "./import-payload-identity.js";
+import { writeImportReceiptInDatabase } from "./import-publication.js";
 
 /**
  * 常驻 **ingest Worker** 的线程入口（WP-41 / O12 第一、二阶段）。
@@ -52,6 +54,9 @@ import { readImportIdentityInDatabase } from "./import-payload-identity.js";
  *
  * ⚠️ 本文件在 worker 线程里运行；`parentPort` 为空时（被单测直接 import）只提供纯函数，
  * 不启动常驻循环。
+ *
+ * 2026-10-21（阶段 1）：同一线程还执行 `noop-receipt`。它和两条导入车道一样在每个任务里
+ * 自己打开并关闭连接，不跨任务缓存 statement；`COMMIT` 后回复丢失时由主线程从持久回执恢复。
  */
 
 /** 车道计划校验：只允许已知的两条车道，且顺序恒为 record-only 在前。 */
@@ -115,12 +120,70 @@ export async function runImportLanesTask(input: ImportLanesInput): Promise<Impor
   return { kind: "applied", lane: "direct-sync", laneAttempts, result: direct, timings: timings() };
 }
 
+/**
+ * no-op 回执事务：**只在这个 worker 线程里**打开连接、重验库身份、写回执并提交。
+ *
+ * 主线程只下发路径和预检结果；连接、`BEGIN IMMEDIATE`、rollback 与 close 都由这里拥有。
+ * 事务内重验条件与 `ImportWorker.detectUnchangedPayload` 保持一致：锚点存在、库代次仍是
+ * 锚点记录的那一代、载荷摘要相同。任何一条不成立都返回 `not_verified`，由主线程落回
+ * 既有正式车道，**不写成功回执**。
+ */
+export function writeNoopReceiptTask(input: NoopReceiptInput): NoopReceiptOutcome {
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(input.databasePath);
+    database.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL");
+    database.exec("BEGIN IMMEDIATE");
+    const identity = readImportIdentityInDatabase(database);
+    const verified = identity.anchor !== null
+      && identity.datasetVersion !== null
+      && identity.datasetVersion === identity.anchor.datasetVersion
+      && identity.anchor.sha256 === input.payloadSha256;
+    if (!verified) {
+      database.exec("ROLLBACK");
+      return { kind: "not_verified" };
+    }
+    const summary: NonNullable<ImportJobResponse["summary"]> = {
+      recomputeReasons: ["payload_identity_unchanged"],
+      importMode: "unchanged",
+      insertedWorkouts: 0,
+      updatedWorkouts: 0,
+      removedWorkouts: 0,
+      unchangedWorkouts: input.unchangedWorkouts,
+      routesUpdated: 0,
+      featuresReused: 0,
+      featuresRecomputed: 0,
+      modelReplayFrom: null,
+      durationMs: Date.now() - input.startedAtMs,
+      // 这一条路径根本没有生成备份，所以这里恒为 null，不是"备份失败"。
+      backupName: null,
+      directSync: {
+        ingestStatus: "committed",
+        receiptId: input.jobId,
+        analysisStatus: "not_required",
+        dependencyGeneration: null,
+        publishedReleaseId: null,
+        parentBatchId: null
+      }
+    };
+    writeImportReceiptInDatabase(database, input.jobId, summary);
+    database.exec("COMMIT");
+    return { kind: "committed", summary };
+  } catch (error) {
+    try { database?.exec("ROLLBACK"); } catch { /* 事务可能未开启或已结束 */ }
+    throw error;
+  } finally {
+    database?.close();
+  }
+}
+
 /** 任务分发（编译期穷尽守卫保留：给 `ImportDatabaseTask` 加了新 operation 却忘了这里 ⇒ 编译不过）。 */
 export async function runImportDatabaseTask(task: ImportDatabaseTask): Promise<unknown> {
   switch (task.operation) {
     case "verify": return databaseReadable(task.path);
     case "audit": return buildImportAudit(task.path);
     case "checkpoint": return checkpointImportDatabase(task.path);
+    case "noop-receipt": return writeNoopReceiptTask(task.input);
     case "import-lanes": return runImportLanesTask(task.input);
     default: {
       // 🔴 这个 default 今天不可达 —— 它守的是**将来**：`result` 保持 `undefined` 会被

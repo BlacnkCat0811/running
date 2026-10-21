@@ -7,7 +7,7 @@
 > |---|---|
 > | 版本 | v2 · 2026-10-17（重写并取代 v1 草案；v1 见 `git show 9a1e2c8:deliverables/plan-remove-web-keep-ios-api.md`） |
 > | 证据基线 | `main` @ `9a1e2c8`，工作树干净；文中所有 `文件:行号` 均为该提交实测 |
-> | 合并来源 | v1 草案 + [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)（两份均未执行、未获授权） |
+> | 合并来源 | v1 草案 + `WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md`（两份均未执行、未获授权；旧方案已收尾删除，可用 `git show 91dbed9:deliverables/WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md` 取回） |
 > | 适用仓库 | `/Users/tp/running`（npm workspaces：`packages/*` + `apps/*`） |
 > | 生命周期 | 执行完成后按 [本目录约定](README.md) 归档或删除 |
 >

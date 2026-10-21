@@ -6,7 +6,7 @@ import { buildPeriodization, periodizationWeekStart } from "../src/plan-periodiz
 import type { PlanHistoryRevision } from "../src/mobile-goals.js";
 
 /**
- * Re-plan advice wording (TODAY_PLAN_CARDS_REVIEW C3 / 方案 A3).
+ * Re-plan advice wording (plan-card review 2026-10-06, C3 / 方案 A3).
  *
  * The `consecutive_low_volume_weeks` heuristic only reads **completed** weeks, but
  * its detail used to say "当前周量可能已经不现实" — an assertion about the current

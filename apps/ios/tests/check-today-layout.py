@@ -30,7 +30,7 @@ assert ".disabled(lockDisabled(data))" in recommendation
 assert ".foregroundStyle(lockDisabled(data) ? TechColor.muted : TechColor.actionInk)" in recommendation
 assert ".background(lockDisabled(data) ? TechColor.grid : TechColor.action, in: TechSurfaceShape())" in recommendation, \
     "Unavailable lock actions must be neutral, not a live Volt CTA"
-# 2026-10-18（审查 P3-18 / docs/TODAY_PLAN_CARDS_REVIEW A1/A2/A3/A4）：
+# 2026-10-18（审查 P3-18；计划卡审查的未决项 C4/C5 现记录在 PROJECT_REVIEW §2）：
 # 今日页有两张"计划"卡（今日推荐训练 + 阶段量带），此前口径互相冲突。
 # 这里钉住 2026-10-18 的文案分层：删掉「量带」或「课表」任一字样都必须变红。
 phase = views[views.index("private func planPhaseLine"):views.index("private func recoveryPanel")]

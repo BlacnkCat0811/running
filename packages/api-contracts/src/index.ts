@@ -174,6 +174,25 @@ export interface HandshakeResponse {
   /** /synced accepts UUID/time/idempotency/export metadata. Older servers omit it. */
   planReceiptMetadata?: boolean;
   planSnapshotContractVersion?: number;
+  /**
+   * 2026-10-21（PR-02）：统一训练**读**合同能力。`2` = `GET
+   * /v1/mobile/training-plan-state` 在 `X-RAI-Training-Contract: 2` 下可用。
+   *
+   * 🔴 读能力 != 该 scope 已迁移：未迁移的 scope 仍返回类型化 409
+   * `training_plan_not_migrated`，客户端必须分别处理"能力存在"和"scope 未迁移"。
+   * 受 coach-loop 管理的 scope 当前对该读返回 409（合同 §1），因此握手在该状态
+   * 省略本键，与 `planSnapshotContractVersion` 的宣告前提保持一致。
+   */
+  trainingPlanContractVersion?: number;
+  /**
+   * 2026-10-21（PR-02）：统一训练**写命令**合同能力（`/training-plan/commands*`）。
+   *
+   * 与读能力分开是刻意的：命令面可写不代表 WorkoutKit 执行获准，也不代表该
+   * scope 已完成迁移或 PR-03/04 的验收。**当前服务端不宣告本键**，直到 PR-03
+   * 所有权闭环与 PR-04 客户端编排通过验收；客户端缺位时必须按只读处理，不能
+   * 用 `coachLoopContractVersion` 猜测写能力。
+   */
+  trainingPlanCommandContractVersion?: number;
   /** Opt-in coach-loop aggregate/commands; legacy plan DTOs retain their meaning. */
   coachLoopContractVersion?: number;
   planPublicationContractVersion?: number;
@@ -2291,3 +2310,16 @@ export interface TrainingPlanRefreshResponse {
   };
   warnings: string[];
 }
+
+export {
+  RETIRED_TRAINING_PLAN_SURFACES,
+  retiredTrainingPlanSurface,
+  type RetiredPlanMethod,
+  type RetiredPlanSurface,
+  type RetiredPlanTag
+} from "./retired-surfaces.js";
+
+export {
+  HANDSHAKE_KEY_REGISTRY,
+  type HandshakeKeyRegistration
+} from "./handshake-registry.js";

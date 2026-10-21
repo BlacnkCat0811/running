@@ -2,15 +2,28 @@
 
 当前方案：**2 核 2GB 云服务器单机部署，不迁移 N100，不使用 FRP**。
 本页是唯一现行云部署入口，资源预算和维护顺序见文末。
+`deploy/n100/` 仍是仓库钉住的**备选家庭 VM profile**（由 `apps/api/test/deploy-n100.test.ts` 保持文本契约），不是现行生产入口；与云端的真实差异见「部署 profile 差异」。
 不要用示例环境文件覆盖现有 Token、身份标识或路径；仓库修改不代表线上已部署。
 
 应用只监听 `127.0.0.1:8787`（`RAI_API_HOST` / `RAI_API_PORT` 可覆盖），由 Nginx 提供 HTTPS 并反代 API；**Nginx 不再托管任何静态文件**（Web 前端已于 2026-10-17 退役）。SQLite、上传文件、运行时状态和备份放在 `/var/lib/rai`，不要把该目录放到 Web 根目录或共享盘。
 
 本页描述目标拓扑（不代表已核实或修改你的线上状态）：
 
-- 站点根路径与 `/assets/*` 一律 `404`，只有 `location /v1/` 反代到 `127.0.0.1:8787`，**透传客户端自己的 Bearer Token**；
+- 站点根路径与 `/assets/*` 一律 `404`，只有 `/v1` 反代到 `127.0.0.1:8787`（共 **3 个反代 location**：`location /v1/`、`^~ /v1/backups`、`= /v1/imports/uploads`；后两者是 600 s 长读例外），**透传客户端自己的 Bearer Token**；
 - 不做 Nginx 侧 Token 注入，必须透传客户端自己的 Bearer Token；
 - 后端 `apps/api/src/local-request-security.ts` 统一校验 Bearer 与请求上下文；云上必须配置 `RAI_API_TOKEN`。
+
+## 部署 profile 差异（云端 vs n100）
+
+| 维度 | 云端（本页，现行） | `deploy/n100/`（备选家庭 VM，仓库钉住） |
+|---|---|---|
+| systemd | `Type=notify` + `NotifyAccess=all` + `WatchdogSec=120`（hang 可自动重启） | `Type=simple`，**没有 watchdog** |
+| nginx 日志 | 自定义 `log_format rai`（`rt=/urt=/ust=/uaddr=`），写 `rai-access.log` | `access_log off`，**没有耗时字段** |
+| nginx 超时 | 默认 120 s；`/v1/backups`、`/v1/imports/uploads` 600 s | 默认 60 s |
+| 网络 | 直接 443 → loopback API | 带 FRP 模板（`frp@.service`/`frpc.toml`/`frps.toml`），产品现状不启用 |
+| 已知模板边界 | — | nginx 历史模板曾反代 `18787` 而 env 监听 `8787`；2026-10-20 已统一为 `8787`。n100 仍缺 watchdog/耗时日志，属 profile 真实差异，不是云端可照抄的配置 |
+
+本页的 hang 守护、日志判读与升级顺序**只适用于云端 profile**；不要按本页升级 n100，也不要把 n100 模板复制到云端。n100 不迁移、不安装 FRP 仍是产品现状。
 
 ## 首次部署
 
@@ -73,7 +86,7 @@ sudo certbot renew --dry-run
 
 把示例中的 `api.example.com` 换成已解析到服务器公网 IP 的域名。若暂时没有域名，可用 HTTP 公网 IP 做连通性测试；正式导入 HealthKit 数据前必须切换 HTTPS。
 
-不要把 API Token 放进任何浏览器或 Web 构建产物：那会把 Token 发布到 JavaScript（前端已退役，但同类错误仍可能以脚本示例形式出现）。iOS 应用在首次连接页（`apps/ios/RAI/Skins/Technology/TechSetupView.swift:45-56` 的「服务地址」与「访问令牌」）填写 HTTPS 地址与同一个 Token，Token 存 Keychain，只由 App 自身的请求携带（含 HealthKit 同步请求），不注入任何页面。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
+不要把 API Token 放进任何浏览器或 Web 构建产物：那会把 Token 发布到 JavaScript（前端已退役，但同类错误仍可能以脚本示例形式出现）。iOS 应用在首次连接页（`apps/ios/RAI/Skins/Technology/TechSetupView.swift` 的「服务地址」与「访问令牌」）填写 HTTPS 地址与同一个 Token，Token 存 Keychain，只由 App 自身的请求携带（含 HealthKit 同步请求），不注入任何页面。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
 
 ### 匿名只读（历史 Web 能力，默认关闭；2026-10-18 起仅 3 条探活/版本路由）
 
@@ -162,22 +175,31 @@ sudo systemctl show rai-api -p Type -p WatchdogUSec    # 期望 Type=simple，�
 仍会被到期判定并反复 SIGABRT/重启。反过来，**新 unit 配旧代码**（旧代码不发 READY=1）会卡到
 启动超时后失败——所以 unit 与 API 代码必须同批部署。完整排障判读见[运维](../docs/OPERATIONS.md)。
 
-## 数据目录与自动备份
+## 数据目录与备份
 
-- 数据目录：`/var/lib/rai`（`RAI_RUNTIME_ROOT`），主库 `/var/lib/rai/var/rai.sqlite`；
-  运行时状态 `/var/lib/rai/var/runtime.sqlite`；导入与报告 `/var/lib/rai/imports/`、
-  `/var/lib/rai/reports/`。
+- 数据目录：`/var/lib/rai`（`RAI_RUNTIME_ROOT`）。同一恢复边界内共 **4 个持久化文件**：
+  主库 `/var/lib/rai/var/rai.sqlite`、控制库 `/var/lib/rai/var/rai-control.sqlite`（schema v2）、
+  运行时状态 `/var/lib/rai/var/runtime.sqlite`、dataset epoch 侧车
+  `/var/lib/rai/var/rai.sqlite.dataset-epoch.sqlite`；导入与报告在
+  `/var/lib/rai/imports/`、`/var/lib/rai/reports/`。
 
-### 备份责任边界（2026-10-13 起）
+### 备份责任边界（2026-10-13 起；2026-10-20 修订）
 
-**应用不再创建备份。** `POST /v1/backups` 与 `DELETE /v1/backups/:name` 已退役：
-两者都返回 `410 Gone` 与一条维护提示，且**不碰任何文件**；`GET /v1/backups` 只剩只读清单，
-恢复入口改由运维用 `POST /v1/backups/:name/restore` 的 curl 流程执行（见
-[运维](../docs/OPERATIONS.md)「备份恢复」）。设计边界见
-[SQLite直接增量同步](../docs/SQLITE_DIRECT_SYNC_DESIGN.md) §11。
+**边界要说准确**：
+
+- API 在**导入、重算、升级、普通同步**中不再创建项目级整库备份。
+- `POST /v1/backups` 与 `DELETE /v1/backups/:name` 已退役为 **410 Gone**
+  （`backup_creation_retired` / `backup_deletion_retired`），且**不碰任何文件**。
+- **但恢复/删库仍会自动写安全快照**：`POST /v1/backups/:name/restore` 在替换前生成
+  `before-restore` 快照；`DELETE /v1/database` 在删除前生成 `before-delete` 快照。
+  它们落在 `/var/lib/rai/var/backups`，受 `RAI_BACKUP_*` 容量/保留约束，**不可当成可再生的**。
+- `GET /v1/backups` 只剩只读清单；恢复入口是运维 `POST /v1/backups/:name/restore` 的 curl 流程
+  （见[运维](../docs/OPERATIONS.md)「备份、恢复、删除」）。**restore 只按 basename 在
+  `/var/lib/rai/var/backups` 内找文件**：下载/异机备份必须先复制回该目录再调用。
+- 设计边界见 [SQLite直接增量同步](../docs/SQLITE_DIRECT_SYNC_DESIGN.md) §11。
 
 ⛔ 因此**不要**再为本机部署 `POST /v1/backups` 的 systemd timer —— 那个接口已退役，
-定时任务只会每 40 分钟拿到一次 410。备份改为运维自己的责任：
+定时任务只会每 40 分钟拿到一次 410。常规一致性备份改为运维自己的责任：
 
 ```bash
 # 整 runtime 冷备（停服 → tar → sha256；默认 dry-run，二次确认后加 --apply）
@@ -190,7 +212,9 @@ sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups --apply
   副本请自行在停服窗口之外完成。
 - 若确实需要更短停机窗口的**在线**备份，请用 SQLite 一致性备份 API 或与存储协调的快照；
   §11.1 明确：活跃 WAL 库**不能**只 `cp rai.sqlite`，也不得为“提速”删掉 `-wal`/`-shm`。
-  在线备份多个库**不**自动等于跨库一致（主库 / runtime / 上传工件 / 配置身份要在同一恢复边界内）。
+  在线备份多个库**不**自动等于跨库一致（主库 / 控制库 / runtime / dataset-epoch 侧车 /
+  上传工件 / 配置身份要在同一恢复边界内）；运行期跨库一致性由 publication guard +
+  detect/retry 保证，不是备份事务。
 - 已有备份**不会**被应用删除或自动清理（§11 明令不扫描备份作自动清理）；是否保留、归档、
   删除由运维决定。`var/backups/` 中的备份包含健康数据与精确路线，按主库同等安全等级保管，
   至少保留一份异机或对象存储副本。
@@ -250,15 +274,19 @@ unit 必须 `daemon-reload`，Nginx 必须 `reload`，可以用 `sudo nginx -T |
 - 保持端口 `8787` 关闭，仅暴露 80/443：先 `sudo ufw allow OpenSSH`，再
   `sudo ufw allow 80,443/tcp && sudo ufw enable`，避免锁死 SSH。
 - 若服务端 Nginx 站点按域名（SNI）分流且域名被云厂商备案拦截，可启用
-  `deploy/nginx-rai.conf` 注释中的 `rai-ip`（IP 自签证书 + iPhone 安装
-  `RAI-IP-CA.mobileconfig`）站点，备案通过后再改回域名。
+  `deploy/nginx-rai.conf` 注释中的 `rai-ip`（IP 自签证书 + iPhone 安装自建 CA 的
+  mobileconfig）站点，备案通过后再改回域名。**仓库不提供 `RAI-IP-CA.mobileconfig`**：
+  证书与 mobileconfig 属现场生成/保管资产，不要假设仓库里存在该文件。
+- iOS 的 HealthKit 授权边界：读取健康样本/记录是只读；通过 WorkoutKit 往 Apple Watch
+  下发训练排期需要 **workout 类型的 HealthKit 写授权**（`NSHealthUpdateUsageDescription`），
+  该授权只覆盖训练排程，不得写入或修改健康样本/记录。部署侧不要为此扩大任何服务端接口。
 - 重大变更前建议先在腾讯云控制台打快照；此外用 `deploy/backup-runtime.sh` 做整 runtime
   冷备（应用不再代做备份，见上面的「备份责任边界」）。
 
 
 ## 显式数据库迁移（2026-09-17 起）
 
-API 与后台 worker 不再自动迁移主库。API 启动发现待迁移版本或待修复的旧迁移元数据时退出 **78**；缺失主库仍保留首次导入/维护入口。默认 `data:migrate` 仅只读预演，必须指定目标库。
+API 与后台 worker 不再自动迁移主库。API 启动发现**待迁移版本**（含缺列/缺 v1 metadata 这类会被当成待迁移的旧迁移元数据）时退出 **78**；checksum/name 与代码不匹配属于另一类：进程不退出 78，而以 `recovery_required`/维护模式启动，交由显式迁移或恢复处理。缺失主库仍保留首次导入/维护入口。默认 `data:migrate` 仅只读预演，必须指定目标库。
 
 ```bash
 cd /opt/rai
@@ -275,11 +303,13 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 健康响应必须同时包含 `status: "ok"` 和 `databaseReady: true`，HTTP 200/服务 active 不足以证明就绪。CLI 与 API 共用 publication lock；不要在 API 运行时执行 `--apply`，不要手工删除活进程锁。
 
-发布脚本可显式加入 `--apply --migrate --database /var/lib/rai/var/rai.sqlite`：更新代码和构建完成后，停服、迁移、重启并检查真实就绪；迁移失败保持停止。**脚本本身不再做在线备份**（只打印外部备份责任提示，且不校验运维是否已完成），所以加 `--migrate` 之前请先自行备份。不加 `--migrate` 不会自动升级库。首次引入本变更时应先更新部署机脚本，再执行该选项。
+发布脚本可显式加入 `--apply --migrate --database /var/lib/rai/var/rai.sqlite`：拉取代码、按 lockfile 重装依赖后，停服、迁移、重启并检查真实就绪；迁移失败保持停止。**脚本本身不再做在线备份**（只打印外部备份责任提示，且不校验运维是否已完成），所以加 `--migrate` 之前请先自行备份。不加 `--migrate` 不会自动升级库。首次引入本变更时应先更新部署机脚本，再执行该选项。
 
 同时更新 systemd unit（保留本机已有的必要定制）：`[Unit]` 段的 `StartLimitIntervalSec=300`、`StartLimitBurst=3`，以及 `[Service]` 段的 `RestartPreventExitStatus=78`，然后 `sudo systemctl daemon-reload`。仅改仓库文件不会更新已安装的 unit。
 
-迁移按**单个版本**事务提交，不是全序列事务；失败后不要假设已恢复到最初版本。自动迁移备份位于 `dirname(database)/backups`；维护 API 备份位于 `RAI_RUNTIME_ROOT/var/backups`（默认两者相同，自定义数据库路径时可能不同）。空间预检只是最低备份空间门槛，不保证迁移峰值空间足够。恢复到旧 schema 后必须同时匹配旧版应用，或重新显式迁移；不能用新 API 的拒绝策略直接启动旧库。
+迁移按**单个版本**事务提交，不是全序列事务；失败后不要假设已恢复到最初版本。`data:migrate --apply` 默认在 `dirname(database)/backups` 生成迁移备份（`--no-backup` 才关闭）；恢复/删库的安全快照在 `RAI_RUNTIME_ROOT/var/backups`（默认同一目录，自定义数据库路径时可能不同）。空间预检只是最低备份空间门槛，不保证迁移峰值空间足够。恢复到旧 schema 后必须同时匹配旧版应用，或重新显式迁移；不能用新 API 的拒绝策略直接启动旧库。
+
+控制库是另一条边界：schema v2（`mobile_training_state` / `_history` / `_migration_audit`）由 API 启动时幂等追加，属于加表；**控制库数据迁移**只由 `scripts/migrate-training-planner.mts` 显式执行（默认 dry-run；`--apply` 必须带 dry-run 的 `sourceDigest`；只开控制库、不参与 publication lock，需停服窗口）。流程与实测见[运维](../docs/OPERATIONS.md)「控制库训练计划迁移」。
 
 ## 用户体验版本的发布核验（2026-09-28）
 
@@ -295,10 +325,11 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 ## 资源预算与一致性维护
 
-### HealthKit data-only 快通路（2026-10-12）
+### HealthKit data-only 快通路（2026-10-12，批次记录）
 
-本批新增 schema v33：为 UUID 别名修复增加来源索引。部署新 API 前按本页既有
-显式迁移流程备份、停服、迁移并检查 `databaseReady`；不能在 API 运行期间直接建索引。
+该批次引入了 UUID 别名来源索引（migration 33）；**现行迁移版本不要从本页抄写**——以
+`npm run data:migrate` 的 dry-run 输出或 `MIGRATION_VERSIONS` 为准（当前已远高于 33）。
+部署新 API 前按本页既有显式迁移流程备份、停服、迁移并检查 `databaseReady`；不能在 API 运行期间直接建索引。
 `RAI_IMPORT_DATA_ONLY_FAST_PATH=1` 是默认值；`0`（并重启服务）会**暂停同步入口**——
 直连车道以 `fast_path_disabled` 显式失败（稳定码 `direct_sync_unavailable`），**不再回退任何
 候选路径**：旧的整库备份 / 暂存副本 / CLI 换库链路已随服务端收口版从运行期删除（2026-10-14，阶段 3）。
@@ -313,7 +344,7 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 MemoryHigh=1100M、MemoryMax=1400M、MemorySwapMax=512M、CPUQuota=150%；Node堆每进程512MiB，数值库线程1。
 这些是初始预算，不保证任意规模健康导出能在2GB内完成；swap限制不等于主机已有swap。
 先检查磁盘、内存和实际cgroup生效值，不关闭质量门禁换吞吐。
-不迁移N100、不安装FRP、不新增第二个可写主库。可选Rust路径见[Rust说明](../docs/RUST_DATA_ENGINE.md)，不能只改env而不部署匹配工件。
+不迁移N100、不安装FRP、不新增第二个可写主库（`deploy/n100/` 只是仓库钉住的备选 profile，差异见文首）。可选Rust路径见[Rust说明](../docs/RUST_DATA_ENGINE.md)，不能只改env而不部署匹配工件；注意 API 两条导入车道要求 TypeScript 引擎——把 `RAI_IMPORT_ENGINE` 设成 `rust` 会让 API 导入以 `engine_<name>` 被拒绝，Rust 路径只用于 CLI/benchmark。
 
 升级前停手机同步、等待任务结束、禁止独立CLI写者，保留代码/环境/身份配置和回滚版本。
 [backup-runtime.sh](backup-runtime.sh)默认dry-run，对整个runtime做冷备；所有自定义DB/工件目录都需纳入实际备份范围。

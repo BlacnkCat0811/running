@@ -9,7 +9,8 @@
 
 ## 1. 提交内容
 
-见 `62f490b` 提交说明与 [IOS_SYNC_REREVIEW_2026-10-19.md](IOS_SYNC_REREVIEW_2026-10-19.md) §7–11。要点：
+见 `62f490b` 提交说明与 `IOS_SYNC_REREVIEW_2026-10-19.md`（已收尾删除，可用
+`git show 62f490b:deliverables/IOS_SYNC_REREVIEW_2026-10-19.md` 取回）§7–11。要点：
 
 - iOS：R1 统一待办（`HealthSyncWorkPlanner`）、R2 observer 原子意图（`HealthSyncIntentJournal`，本地 schema v5）、R3 窗口 anchored 分页（`WorkoutWindowPaging`，默认关闭）、R5 三态展示。
 - 服务端/共享包：R4 读侧补账本新旧并集（v37 `previous_*`）与 v45 批次持久脏证据（路线-only 批次）；`nativeWorkerAvailability` 拒绝缺失/过期 Rust 产物；新增 `batch-analysis-dirty-evidence` 只读严格解析。

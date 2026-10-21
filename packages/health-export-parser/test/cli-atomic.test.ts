@@ -116,6 +116,19 @@ test("a failed owned-candidate parse leaves the live database and existing audit
   }
 });
 
+test("the CLI runs the strong integrity check before touching the live database", () => {
+  const source = readFileSync(resolve("packages/health-export-parser/src/cli.ts"), "utf8");
+  const activateStart = source.indexOf("async function activateStagingDatabase");
+  const activateEnd = source.indexOf("async function importCommand", activateStart);
+  assert.ok(activateStart >= 0 && activateEnd > activateStart);
+  const activate = source.slice(activateStart, activateEnd);
+  const quickCheck = activate.indexOf("quickCheckDatabase(staging)");
+  const publish = activate.indexOf("publishDatabaseFile({");
+  assert.ok(quickCheck >= 0, "candidate quick_check must be wired into activateStagingDatabase");
+  assert.ok(publish > quickCheck, "quick_check must run before publishDatabaseFile");
+  assert.match(activate, /Staging database failed the pre-publication integrity check/);
+});
+
 test("retries transient Windows file locks during database publication", async () => {
   let attempts = 0;
   await retryTransientFileOperation(async () => {

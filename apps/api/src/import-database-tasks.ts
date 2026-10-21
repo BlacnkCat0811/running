@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import type { ImportJobResponse } from "@rai/api-contracts";
 import { buildAudit, type DataAudit } from "@rai/health-export-parser";
 import type { DataOnlyImportResult } from "./data-only-import.js";
 import type { DirectSyncImportResult, DirectSyncRejection } from "./direct-sync-ingest.js";
@@ -76,10 +77,31 @@ export function isImportLanesRejection(
   return outcome.kind === "rejected";
 }
 
+/**
+ * no-op 持久回执任务的输入。
+ *
+ * 事务仍在 worker 里重新验证锚点；这里传的 `payloadSha256` 只是主线程预检时读到的
+ * 不可变载荷身份，用来和事务内的库身份对照。`unchangedWorkouts` 也由主线程预检读出，
+ * 作为原 summary 的输入原样写回，不改变 no-op 的公开合同。
+ */
+export interface NoopReceiptInput {
+  databasePath: string;
+  jobId: string;
+  payloadSha256: string;
+  unchangedWorkouts: number;
+  startedAtMs: number;
+}
+
+/** worker 内 no-op 回执事务的两种结论；`not_verified` 会落回既有正式车道。 */
+export type NoopReceiptOutcome =
+  | { kind: "committed"; summary: NonNullable<ImportJobResponse["summary"]> }
+  | { kind: "not_verified" };
+
 export type ImportDatabaseTask =
   | { operation: "verify"; path: string }
   | { operation: "audit"; path: string }
   | { operation: "checkpoint"; path: string }
+  | { operation: "noop-receipt"; input: NoopReceiptInput }
   | { operation: "import-lanes"; input: ImportLanesInput };
 
 /**

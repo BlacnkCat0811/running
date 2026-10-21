@@ -77,6 +77,33 @@ final class NativeAppModel {
     /// "先结束一个再创建另一个"。
     var usesUnifiedTrainingPage: Bool { usesCoachLoopContract || isCoachLoopManaged }
 
+    /// PR-02（2026-10-21）：旧计划写面是否仍可用。
+    ///
+    /// 新服务宣告 `trainingPlanContractVersion`（统一读）后，旧写路由
+    /// `/goals`、`/run-coach`、`/workout-plan/preview|confirm|generate` 已退役，
+    /// 只有 `trainingPlanCommandContractVersion` 宣告后才允许改走命令面。
+    /// 老服务两个键都没有 ⇒ 继续使用它自己的既有协议（兼容只读之外的旧服务器
+    /// 路径，不属于当前生产请求清单）。
+    var planWritesAvailable: Bool {
+        guard let handshake else { return true }
+        if handshake.trainingPlanContractVersion != nil {
+            // New server: the old surfaces are gone; only the explicit command
+            // capability may authorize a write.
+            return handshake.trainingPlanCommandContractVersion != nil
+        }
+        if handshake.coachLoopContractVersion != nil && handshake.planSnapshotContractVersion == nil {
+            // Managed (or staggered) dataset: legacy reads already answer 409,
+            // so legacy writes must fail closed even though the new read key is
+            // absent. The unified page is the only reachable UI in this state.
+            return false
+        }
+        return true
+    }
+
+    /// 旧写路由的 route 名（与 `APIClient.replayPlanPublication` 的映射同源）。
+    /// 这些路由在 `planWritesAvailable == false` 时必须在发请求前拒绝。
+    private static let retiredPlanWriteRoutes: Set<String> = ["coach", "confirm", "goals"]
+
     /// 统一训练页的纯展示状态（判定全部在 `TrainingPlanUnifiedPolicy`）。
     var trainingPlanUnifiedView: TrainingPlanUnifiedView {
         TrainingPlanUnifiedPolicy.view(
@@ -1075,6 +1102,10 @@ final class NativeAppModel {
     private func persistGoals(_ request: UpdateMobileGoalsRequest, editorSessionID: String? = nil) async -> Bool {
         guard editorSessionID == nil || editorSessionID == feedbackSessionID else { return false }
         guard !isPlanBusy else { return false }
+        guard planWritesAvailable else {
+            errorMessage = "该编辑方式尚未适配当前服务；本版只读展示训练安排。"
+            return false
+        }
         guard !isOffline, let baseURL = session.serverURL else {
             errorMessage = "请先连接 RAI 服务。"
             return false
@@ -1166,6 +1197,10 @@ final class NativeAppModel {
     /// leaves the runner's stored week unchanged.
     @discardableResult
     func createWeeklyPlanPreview() async -> Bool {
+        guard planWritesAvailable else {
+            errorMessage = "该编辑方式尚未适配当前服务；本版只读展示训练安排。"
+            return false
+        }
         guard !isPlanBusy, let baseURL = session.serverURL else { return false }
         let requestID = UUID()
         regeneratePlanRequestID = requestID
@@ -1660,6 +1695,12 @@ final class NativeAppModel {
 
     private func publishPlan<Input: Encodable, Result: Decodable>(route: String, input: Input, baseURL: URL, token: String, isCurrent: () -> Bool) async throws -> Result {
         guard isCurrent() else { throw CancellationError() }
+        // PR-02：新服务宣告统一读能力后，旧写面（coach/confirm/goals）已退役；
+        // 在编码和持久化之前就拒绝，连"待确认发布"账目都不产生。
+        guard planWritesAvailable || !Self.retiredPlanWriteRoutes.contains(route) else {
+            throw RaiAPIClientError.server(code: "plan_write_surface_retired",
+                message: "该编辑方式尚未适配当前服务；本版只读展示训练安排。", status: 410)
+        }
         let scope = cacheScope
         let encoded = try JSONEncoder().encode(input)
         // 2026-10-18（审查 P3-17）：安全解包并给出可诊断错误，编码形状变化不能
@@ -1690,10 +1731,23 @@ final class NativeAppModel {
         trainingPlanStore.invalidate()
         do { return try await api.replayPlanPublication(pending, baseURL: baseURL, token: token) }
         catch {
-            if durable, case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status), !code.hasPrefix("plan_operation_") {
+            let retirement = (error as? RaiAPIClientError)?.httpStatus == 410
+            if durable, case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status),
+               !code.hasPrefix("plan_operation_") || PlanMutationDisposition.isTerminalPlanPublicationError(code)
+                 || PlanMutationDisposition.isTerminalPlanPublicationStatus(status) {
+                // Only the local pending-publication row is closed. The system
+                // schedule ledger, receipt history, withdrawal risks and the
+                // revision floor are separate ledgers and stay intact.
                 _ = cache.savePublication(nil, scope: scope)
             }
-            if durable, !(error is CancellationError) { planMessage = "发布结果尚未确认；请查询原操作，重试不会提高 expectedRevision。" }
+            if durable, !(error is CancellationError) {
+                // PR-01: a 410 is a confirmed terminal answer ("this surface is
+                // gone"), not an unknown outcome. Saying "发布结果尚未确认"
+                // after it contradicts the answer we just received.
+                planMessage = retirement
+                    ? "该旧接口已退役，本次操作未执行；请更新 App 后重新预览训练安排。"
+                    : "发布结果尚未确认；请查询原操作，重试不会提高 expectedRevision。"
+            }
             throw error
         }
     }
@@ -1728,7 +1782,8 @@ final class NativeAppModel {
                 // （未来新增的 `plan_operation_*`）保持保守：保留账目，由「放弃本次未确认发布」
                 // 的显式出口兜底（审查 🔴-1）。
                 if case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status),
-                   !code.hasPrefix("plan_operation_") || PlanMutationDisposition.isTerminalPlanPublicationError(code) {
+                   !code.hasPrefix("plan_operation_") || PlanMutationDisposition.isTerminalPlanPublicationError(code)
+                     || PlanMutationDisposition.isTerminalPlanPublicationStatus(status) {
                     _ = cache.savePublication(nil, scope: scope)
                 }
                 throw error
@@ -1784,9 +1839,14 @@ final class NativeAppModel {
         } catch {
             // 终局码的账目已在 `resolvePendingPublication` 里作废，其文案自述了这一结果
             // （再加"尚未确认"前缀会与事实矛盾；审查 🔴-1）。
-            if case RaiAPIClientError.server(let code, _, _) = error,
-               PlanMutationDisposition.isTerminalPlanPublicationError(code) {
-                return friendlyMessage(error)
+            if case RaiAPIClientError.server(let code, _, let status) = error {
+                if code == "legacy_surface_retired" {
+                    return "该旧接口已退役，本地待确认发布已关闭；请更新 App 后重新预览训练安排。"
+                }
+                if PlanMutationDisposition.isTerminalPlanPublicationError(code)
+                     || PlanMutationDisposition.isTerminalPlanPublicationStatus(status) {
+                    return friendlyMessage(error)
+                }
             }
             return "原操作结果尚未确认：" + friendlyMessage(error)
         }

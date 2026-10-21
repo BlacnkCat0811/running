@@ -10,7 +10,12 @@ import { TRAINING_PLAN_CONTRACT_VERSION } from "@rai/api-contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { shiftCoachDate } from "./coach-loop-facts.js";
-import { trainingPlanCommandError, type PreparedTrainingPlan, type TrainingPlanCommandService } from "./training-plan-commands.js";
+import {
+  internalErrorLogDetail,
+  trainingPlanCommandError,
+  type PreparedTrainingPlan,
+  type TrainingPlanCommandService
+} from "./training-plan-commands.js";
 import { isValidLocalDate } from "./local-date.js";
 import {
   admissionStateFor,
@@ -186,8 +191,17 @@ export function createTrainingPlanStateRoute(deps: TrainingPlanStateRouteDeps) {
         currentGoalsRevision: deps.readGoalsRevision()
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return reply.code(503).send({ code: "training_plan_state_invalid", message });
+      // Known projection rejections carry a deliberate, user-facing message.
+      // Anything else is an internal failure: its message may name SQLite
+      // details, file paths or payload internals, so it stays in the log only.
+      if (error instanceof TrainingPlanReadError) {
+        return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+      }
+      request.log.error({ error: internalErrorLogDetail(error), requestId: request.id }, "training plan v2 read failed");
+      return reply.code(503).send({
+        code: "training_plan_state_invalid",
+        message: "统一训练状态暂不可读，请稍后重试；不会回退到旧合同。"
+      });
     }
   };
 }
@@ -220,6 +234,13 @@ export interface TrainingPlanPlanDeps {
 }
 
 export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandService, planDeps?: TrainingPlanPlanDeps) {
+  /** One place that both logs internal detail and keeps the wire answer fixed. */
+  const errorContext = (request: FastifyRequest) => ({
+    requestId: request.id,
+    report: (detail: { error: unknown; requestId?: string }) =>
+      request.log.error({ error: internalErrorLogDetail(detail.error), requestId: detail.requestId },
+        "training plan command failed")
+  });
   return {
     preview: async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
       try {
@@ -227,7 +248,7 @@ export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandSe
         return service.preview(body);
       } catch (error) {
         const mapped = error instanceof Error && error.message.includes("必须") && !(error as { statusCode?: number }).statusCode
-          ? commandRequestError(error.message) : trainingPlanCommandError(error);
+          ? commandRequestError(error.message) : trainingPlanCommandError(error, errorContext(request));
         return reply.code(mapped.statusCode).send({ code: mapped.code, message: mapped.message });
       }
     },
@@ -246,7 +267,7 @@ export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandSe
         return service.submit(body);
       } catch (error) {
         const mapped = error instanceof Error && error.message.includes("必须") && !(error as { statusCode?: number }).statusCode
-          ? commandRequestError(error.message) : trainingPlanCommandError(error);
+          ? commandRequestError(error.message) : trainingPlanCommandError(error, errorContext(request));
         return reply.code(mapped.statusCode).send({ code: mapped.code, message: mapped.message });
       }
     }

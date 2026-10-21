@@ -116,7 +116,7 @@ export function canonicalPlanScheduledAt(value: unknown): string | null {
  * and what every identity predicate compares against. A client that spells the
  * same UUID/instant differently ("uuid" vs "UUID", "+08:00" vs "Z") therefore
  * addresses the same entry, which is the promise documented in
- * `docs/IOS_TRAINING_PLAN_STATE_V1.md` §回执版本与生命周期. Legacy receipts are
+ * `docs/IOS_NATIVE_PLAN_SCHEDULING.md` §7（回执）。Legacy receipts are
  * left byte-identical on purpose: their payload comparison is the old
  * contract and rewriting it would change what a legacy client is deduplicated
  * against.

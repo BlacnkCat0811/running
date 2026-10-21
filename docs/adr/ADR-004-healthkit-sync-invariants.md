@@ -1,8 +1,8 @@
 # ADR-004：HealthKit 后台同步的四条不变式（封板记录）
 
-- **状态**：已接受（Accepted）· **封板日期**：2026-09-23
+- **状态**：已接受（Accepted）· **封板日期**：2026-09-23 · **2026-10-20 校订**：`文件:行号` 锚点与测试计数属封板时快照，已改为符号引用/删除计数；四条决策正文不变。
 - **范围**：`apps/ios/RAI/` 的 HealthKit 同步写入路径 + `packages/health-export-parser/` 的 GPX 配额
-- **历史来源**：封板讨论从 Git 查阅；下列决策仍有效，文中旧测试计数只代表封板时记录，不是当前审查结果。
+- **历史来源**：封板讨论从 Git 查阅；下列决策仍有效。引用时以符号/文件名定位，不要抄写行号或计数（会随每次改动漂移）。
 - **依据规范**：《RAI HealthKit 后台可靠同步系统 V2.1 架构设计与实施规范》
 
 > ### 🛑 如果你觉得下面某一条"写错了、像个 Bug"——先读这里
@@ -55,8 +55,8 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 
 ### 可证伪性（这条不是"写着好看"）
 
-- **回归**：`apps/ios/tests/SyncStateCommitRegression.swift`（57 条）与
-  `apps/ios/tests/RouteSyncStatePersistenceRegression.swift`（39 条）；
+- **回归**：`apps/ios/tests/SyncStateCommitRegression.swift` 与
+  `apps/ios/tests/RouteSyncStatePersistenceRegression.swift`；
   2026-09-24 追加的第 3b / 第 11 节按职责分别住在这两处（水位在提交回归、route 在落盘回归），包含
   注入 `CREATE TRIGGER … BEFORE UPDATE ON sync_state` 与 `… BEFORE DELETE ON sync_tasks` 的**强制失败**用例，
   验证失败路径确实整段回滚、且不留下半份状态。
@@ -76,7 +76,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 ### 背景
 
 一次导出可以产出**几个 GB** 的 `upload-<payloadHash>.{zip,multipart}`
-（`HealthKitSync.swift` 的 `removeTaskArtifacts(payloadHash:)` 负责删，`:1493-1501`）。
+（`HealthKitSync.swift` 的 `removeTaskArtifacts(payloadHash:)` 负责删）。
 
 ### 曾经的反转
 
@@ -88,11 +88,10 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 
 ### 理由
 
-`removeTaskArtifacts` 的删除动作是 `try? FileManager.default.removeItem(at:)`（`:1499`）——
+`removeTaskArtifacts` 的删除动作是 `try? FileManager.default.removeItem(at:)`——
 **失败是静默的**。而全仓**没有**任何全局孤儿回收进程：
 
-- `removeAllTaskArtifacts()`（`:1507-1513`）的**唯一**其它调用点在 `:1621`，
-  触发条件是"任务进度读不出来"（载荷解码失败路径），**不是**一个定时清理器；
+- `removeAllTaskArtifacts()` 的**唯一**其它调用点在 `discardUnreadableTask()`（任务进度读不出来的解码失败路径），**不是**一个定时清理器；
 - 也就是说：**提交成功后删文件失败，就没有第二个东西会来碰这份文件。**
 
 后果是磁盘上留下无主的 GB 级 ZIP，且**不可归因**（没有任务行指向它，用户与日志都看不到它）。
@@ -131,7 +130,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 ### 决定
 
 **配额超限落 `pending`**（`gpx-parser.ts`）；`invalid` 只保留给**真的坏了**的文件
-（解析失败的 `invalid_xml` 路径，`:446`）。
+（解析失败的 `invalid_xml` 路径）。
 
 ### 理由（这是四条里后果最重的一条）
 
@@ -210,7 +209,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 ## 补充 A：GPX 三级配额的基准参数与"为什么不照抄规范"
 
 规范给的三个数字是 **20 MB / 50,000 点 / 200,000 点**。本仓**三个都没照抄**，
-固化为（`packages/health-export-parser/src/gpx-parser.ts,65,80`）：
+固化为（`packages/health-export-parser/src/gpx-parser.ts` 的 `MAX_GPX_ROUTE_BYTES` / `MAX_GPX_ROUTE_POINTS` / `MAX_GPX_BATCH_POINTS`）：
 
 | 层级 | 规范 | **本仓固化值** | 类别 |
 | :--- | :--- | :--- | :--- |
@@ -361,11 +360,10 @@ route 一侧同因：`HealthKitExport.swift` 的 `routeNow = Date()` 同样带�
 | 层 | 载体 | 挡的是 |
 | :--- | :--- | :--- |
 | **结构门禁** | `apps/ios/tests/check-background-capabilities.py` | "改错了照样编译通过"的形状问题：调用顺序、比较值、判据载体是否还在 |
-| **可跑回归** | `SyncStateCommitRegression.swift`（57 条）、`RouteSyncStatePersistenceRegression.swift`（39 条）、`BackgroundSyncPolicyRegression`、`gpx-quota.test.ts`（4 条） | **语义**：锚点改名挡不住的那些（例如 `mayCommit` 被改成恒真） |
+| **可跑回归** | `SyncStateCommitRegression.swift`、`RouteSyncStatePersistenceRegression.swift`、`BackgroundSyncPolicyRegression`、`gpx-quota.test.ts` | **语义**：锚点改名挡不住的那些（例如 `mayCommit` 被改成恒真） |
 | **突变验证** | `apps/ios/tests/check-background-mutations.py` | 上面两层的**断言有效性**本身：跑绿只说明"没红"，不说明"改坏了会红" |
 
-⚠️ 括号里的条数一律是**时点快照**，会随每次改动增减 —— 要引用数字就现跑一遍，别照抄这里的。
-**本文件因此不写具体条数。** 2026-10-09 那批改动曾在这里写下"capabilities 256 / mutations 90"，
+⚠️ 本文不写具体条数：条数一律是**时点快照**，会随每次改动增减 —— 要引用数字就现跑一遍，别照抄任何文档。 2026-10-09 那批改动曾在这里写下"capabilities 256 / mutations 90"，
 而这两行在**同一批改动的最终态**就已经不等于实测值 —— 说明"贴一个日期"本身并不赋予数字可信度：
 数字会被同一天的后续改动立刻甩掉。要数字就跑
 `python3 apps/ios/tests/check-background-capabilities.py` 与

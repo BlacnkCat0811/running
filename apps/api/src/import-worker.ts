@@ -6,7 +6,7 @@ import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { analyzeDatasetChange, type ImportDatasetChange } from "./import-dataset-analysis.js";
-import { computeImportPayloadSha256, readDatabaseImportIdentity, readImportIdentityInDatabase } from "./import-payload-identity.js";
+import { computeImportPayloadSha256, readDatabaseImportIdentity } from "./import-payload-identity.js";
 
 import type {
   ImportExecutionEngine, ImportJobPerformance, ImportJobResponse, ImportLaneRejection, ImportLaneTelemetry, ImportStage
@@ -27,7 +27,8 @@ import { ImportPerformanceTracker } from "./import-performance.js";
 import {
   databaseReadable, IMPORT_LANE_ATTEMPTS,
   type ImportDatabaseTask, type ImportLaneTimings, type ImportLanesOutcome,
-  type IngestWorkerMessage, type IngestWorkerReadyMessage, type IngestWorkerReply
+  type IngestWorkerMessage, type IngestWorkerReadyMessage, type IngestWorkerReply,
+  type NoopReceiptOutcome
 } from "./import-database-tasks.js";
 import { type DirectSyncRejection } from "./direct-sync-ingest.js";
 import { planDirectSyncLane } from "./direct-sync-plan.js";
@@ -35,7 +36,9 @@ import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import { RuntimeStateStore } from "./runtime-state.js";
 
-import { ImportPublicationJournal, readImportReceipt, writeImportReceipt, writeImportReceiptInDatabase } from "./import-publication.js";
+import {
+  ImportPublicationJournal, readImportReceipt, readImportReceiptStrict
+} from "./import-publication.js";
 import type { TaskAdmission } from "./task-admission.js";
 import { waitForShutdown } from "./worker-process.js";
 
@@ -246,15 +249,26 @@ if (IMPORT_LANE_SEQUENCE.length !== IMPORT_LANE_ATTEMPTS.length
  * 否则一次丢失/错配的回复会把 A 批的结论记到 B 批头上。崩溃或某批抛错时，
  * 未决任务**逐个** reject（绝不当成"没跑"静默放过），线程随后被替换。
  */
+interface IngestWorkerStartup {
+  /** 只能结算一次：ready、error、exit、主动退休都走同一个入口。 */
+  settled: boolean;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
 interface ResidentIngestWorker {
   thread: Worker;
   /** 线程内 tsx 注册 + 模块加载完成（第一条 `ready` 消息）。 */
   ready: Promise<void>;
+  /** 启动等待的单一结算器；线程在 ready 前退出时必须被 reject。 */
+  startup: IngestWorkerStartup;
   /** 启动耗时（`new Worker` → `ready`）：spawn + tsx 注册 + 模块加载。 */
   startupMs: number;
   startError: Error | null;
   retired: boolean;
   pending: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; stage: string; startedAt: number }>;
+  /** 线程终止的单一 Promise；提交结果不确定时，恢复前必须等它结束。 */
+  termination: Promise<void> | null;
   /**
    * 当前安装着的 `message` 监听器 —— **只在有任务在飞时存在**。
    *
@@ -283,6 +297,22 @@ export class ImportWorker {
   private recoveryBlocked = false;
   /** 常驻 ingest Worker（WP-41 第二阶段）：懒创建、跨批复用、崩溃或任务抛错后替换。 */
   private ingest: ResidentIngestWorker | null = null;
+  /**
+   * **尚未结算**的终止操作集合（不是退休历史）。
+   *
+   * 每条 termination Promise 创建时加入，成功/失败结算后立即移除；连续多轮线程
+   * 失败、替换之后集合不会随历史增长。关闭与恢复路径可能并发退休不同线程，
+   * 等待时必须看得见所有仍未结算的操作。
+   */
+  private readonly ingestTerminations = new Set<Promise<void>>();
+  /**
+   * 本 ImportWorker 生命周期内**首次**“无法确认停止”的终止失败。
+   *
+   * 一旦记录就保持到进程重启：即使集合里已经没有待退出线程，也不能据此宣布线程
+   * 已停止。只记录 termination 调用抛错 / Promise 拒绝；作业失败、worker 非零
+   * 退出码都不是终止失败。
+   */
+  private ingestTerminationError: Error | null = null;
   private ingestSequence = 0;
   private readonly ingestStats = {
     started: 0, tasks: 0, retired: 0, targetResets: 0, startupMs: 0, lastRssKiB: 0, maxRssKiB: 0
@@ -509,11 +539,14 @@ export class ImportWorker {
       // 任务结束它就没了；常驻之后没有任何别的路径会回收它 ⇒ 这里显式退休。
       const resident = this.ingest;
       if (resident) {
-        const stopped = resident.thread.terminate();
-        this.retireIngestWorker(resident, new Error("Import worker closing"));
-        await stopped;
-      } else {
-        await this.activeAnalysis?.terminate();
+        await this.retireIngestWorker(resident, new Error("Import worker closing"));
+      } else if (this.activeAnalysis) {
+        await this.activeAnalysis.terminate();
+      }
+      // 不论线程是本次关闭退休的，还是并发恢复路径先退休的，都必须等到真实
+      // 退出；不能只等“最后一条”或把不在 this.ingest 里的线程当成已停止。
+      if (!(await this.waitForIngestTermination())) {
+        throw new Error("Ingest worker termination could not be confirmed");
       }
     } catch (error) {
       terminationError = error;
@@ -571,7 +604,28 @@ export class ImportWorker {
     // （审计报告发布与项目备份只服务那条链路；保留的方法仍在类上，供阶段 5 隔离退役）。
     let terminalSucceeded = false;
     let publishTerminalState: (() => void) | null = null;
-    let fastPathAttempted = false;
+    let writeMayHaveCommitted = false;
+    /**
+     * 结果无法裁决时，不发布成功/失败终态，也不执行终态来源清理。
+     * 作业保持 running + queue 未 finalize，调度器/维护入口因此继续被挡住。
+     */
+    let terminalDecisionWithheld = false;
+    /**
+     * 无法确认“线程已停止”时的统一收口。
+     *
+     * 🔴 内存状态必须先于执行器释放许可：`scheduleNext` 的 finally 在 run() 返回后
+     * 立刻释放 admission，所以 `recoveryBlocked` / `onRecoveryRequired` 必须在这里
+     * 生效，不能留到 finally。作业保持 running、queue 不 finalize，不发布 summary，
+     * 也不触发 onTerminal；持久化只是尽力而为，失败不得撤销阻断。
+     */
+    const withholdTerminalDecision = (message: string): void => {
+      terminalDecisionWithheld = true;
+      this.recoveryBlocked = true;
+      job.phase = "recovery_required";
+      job.message = message;
+      this.queueOptions?.onRecoveryRequired?.();
+      try { this.persistJobs(); } catch { /* 内存中的恢复阻断仍然生效 */ }
+    };
     // 观测（阶段 1，实施方案 §5.2 S1.3）：车道决策与拒因。
     // `null` = 该路径不适用（重放 / 恢复），`performance_json` 不写 `lane` 键。
     // 落点：finally 的 `job.performance` + 拒收发生时的主线程 stderr 日志（D5：
@@ -620,25 +674,43 @@ export class ImportWorker {
         this.detectUnchangedPayload(job, engine, (digest) => { payloadSha256 = digest; }));
       this.assertNotClosing();
       if (preflight) {
-        // R2（2026-10-15）：no-op 也必须落**可持久查询的回执**（见 `writeNoopReceipt` 的注释）。
+        // R2（2026-10-15）：no-op 也必须落**可持久查询的回执**（见 writeNoopReceiptTask）。
         // 旧行为只写内存 summary ⇒ 已建立 job 的客户端分支 `.hold(no_receipt)` 永久循环。
-        const noopSummary = this.writeNoopReceipt(job, preflight, startedAtMs);
-        if (noopSummary) {
-          fastPathAttempted = true; // 回执已持久提交：回复丢失时由 catch / 下轮从回执恢复同一结论
+        //
+        // 2026-10-21（阶段 1）：事务搬到常驻 ingest worker。派发前进入不可取消的提交区：
+        // cancel() 对 phase=activate 返回 "publishing"，不会终止正在提交的线程；若 worker
+        // 返回 not_verified，再恢复 phase 并落回正式车道。
+        const phaseBeforeNoop = job.phase;
+        job.phase = "activate";
+        // 这是“可能已经尝试提交”的恢复判据，不是成功标记。必须在派发之前置位：
+        // 线程可能在 COMMIT 后、回复到达前退出，只有持久回执能裁决结果。
+        writeMayHaveCommitted = true;
+        const noop = await this.databaseTask<NoopReceiptOutcome>({
+          operation: "noop-receipt",
+          input: {
+            databasePath: this.databasePath,
+            jobId: job.id,
+            payloadSha256: preflight.sha256,
+            unchangedWorkouts: preflight.unchangedWorkouts,
+            startedAtMs
+          }
+        });
+        if (noop.kind === "committed") {
           laneTelemetry = { outcome: "unchanged", reasons: [] };
-          job.phase = "activate"; // terminal decision is now irreversible, including no-op imports
           terminalSucceeded = true;
           publishTerminalState = () => {
             job.status = "succeeded";
             job.phase = "completed";
             job.message = "导出文件与上次已导入的内容完全一致，未重新解析";
             job.completedAt = new Date().toISOString();
-            job.summary = noopSummary;
+            job.summary = noop.summary;
           };
           return;
         }
         // 重验失败：两次检查之间另一批导入推进了 datasetVersion（anchor 已失效）。
         // 此刻的载荷不再"可证明不变"，一律落回正式车道——不写回执、不短路。
+        job.phase = phaseBeforeNoop;
+        this.assertNotClosing();
         process.stderr.write(`No-op preflight invalidated for ${job.id}: baseline moved before receipt could commit\n`);
       }
       // 车道判定抽成纯函数（`direct-sync-plan.ts`）：旧候选链路与直连链路的分歧只在这一个地方，
@@ -677,7 +749,7 @@ export class ImportWorker {
           job.phase = "activate";
           job.message = "正在按增量事务保存原始健康记录";
           this.persistJobs();
-          fastPathAttempted = true;
+          writeMayHaveCommitted = true;
           // 🔴 WP-41 / O12 第一阶段：两条车道现在在**同一个任务 Worker** 内按
           // `IMPORT_LANE_SEQUENCE` 顺序执行。从前这里是两次 `databaseTask` ——
           // 先 record-only、它拒收后再投递统一接收器 ⇒ **一个载荷两次 `new Worker`**
@@ -748,8 +820,8 @@ export class ImportWorker {
             + `${direct.bounds === undefined ? "" : ` bounds=${JSON.stringify(direct.bounds)}`}\n`);
           // S3.3 收口：两条直连车道都不合格 ⇒ **显式失败**（带稳定码），不再回退候选链路。
           // 上面那条 `Direct sync rejected` 日志（阶段 1 观测面）继续保留。
-          // `fastPathAttempted` 保持 true 到 catch —— 若此前确有一批走直连车道**提交**过、
-          // 只是回执没送到，catch 会先试 `readImportReceipt` 恢复成功（判据不变）。
+          // `writeMayHaveCommitted` 保持 true 到 catch —— 若此前确有一批走直连车道**提交**过、
+          // 只是回执没送到，catch 会先试严格回执读取恢复成功（判据不变）。
           throw new ImportLaneRefusal([direct.reason], direct);
         }
       }
@@ -761,17 +833,55 @@ export class ImportWorker {
     } catch (error) {
       // The SQLite commit may have completed just before a worker lost its
       // reply or shutdown interrupted the parent. Never report a committed
-      // delta as failed: its receipt is in the SAME transaction as its facts.
-      const committedDelta = fastPathAttempted ? readImportReceipt(this.databasePath, job.id) : null;
-      if (committedDelta) {
-        terminalSucceeded = true;
-        publishTerminalState = () => {
-          job.status = "succeeded"; job.phase = "completed"; job.error = null;
-          job.summary = committedDelta; job.completedAt = new Date().toISOString();
-          job.message = "增量事务已提交，已从持久回执恢复成功结果";
-        };
-        process.stderr.write(`Recovered committed data-only import ${job.id} after its worker reply was lost.\n`);
-        return;
+      // result as failed: its receipt is in the SAME transaction as its facts.
+      if (writeMayHaveCommitted) {
+        // 不把当前仍存活的线程留在写事务里：先让它真正退出，再读回执。
+        // 这既覆盖 worker 崩溃/回复丢失，也覆盖父进程触发终止但 terminate() 尚未完成。
+        const active = this.ingest;
+        let stopped = false;
+        try {
+          // 🔴 退休请求与等待必须在**同一个**保护分支里：terminate() 同步抛错或
+          // termination Promise 拒绝时，绝不能从这里逃出去 —— 一旦逃逸就会跳过
+          // 恢复阻断，在“不知道线程是否停下”时继续严格读取回执并裁决提交结果。
+          if (active && !active.retired) {
+            await this.retireIngestWorker(active,
+              error instanceof Error ? error : new Error(String(error)));
+          }
+          stopped = await this.waitForIngestTermination();
+        } catch (terminationFailure) {
+          // 同步抛错（未走到 termination 登记）也必须留下生命周期内的失败证据。
+          const failure = this.noteIngestTerminationFailure(terminationFailure);
+          console.error(`Import job ${job.id} could not retire its ingest worker: ${failure.stack ?? failure.message}`);
+          stopped = false;
+        }
+        if (!stopped) {
+          withholdTerminalDecision("提交结果无法核实，写入已暂停；需在服务重启后人工恢复");
+          console.error(`Import job ${job.id} has an unconfirmed commit: ingest worker did not terminate`);
+          return;
+        }
+        let committed: ImportJobResponse["summary"] | null;
+        try {
+          // 严格读取：只有“读取成功且没有该 job 回执”才返回 null；数据库忙/损坏/
+          // 权限失败必须上抛，不能被当成“未提交”。
+          committed = readImportReceiptStrict(this.databasePath, job.id);
+        } catch (readError) {
+          withholdTerminalDecision("无法读取持久回执，提交结果不确定；写入已暂停，需人工恢复");
+          const detail = readError instanceof Error ? readError.stack ?? readError.message : String(readError);
+          console.error(`Import job ${job.id} could not verify its committed receipt: ${detail}`);
+          return;
+        }
+        if (committed) {
+          terminalSucceeded = true;
+          publishTerminalState = () => {
+            job.status = "succeeded"; job.phase = "completed"; job.error = null;
+            job.summary = committed; job.completedAt = new Date().toISOString();
+            job.message = committed.importMode === "unchanged"
+              ? "无变化导入已提交，已从持久回执恢复成功结果"
+              : "增量事务已提交，已从持久回执恢复成功结果";
+          };
+          process.stderr.write(`Recovered committed import ${job.id} after its worker reply was lost.\n`);
+          return;
+        }
       }
       if (error instanceof ImportLaneRefusal) {
         // S3.1 收口：直连拒绝 = **终态失败**（带稳定码 + 受控文案），不是回退信号。
@@ -837,29 +947,47 @@ export class ImportWorker {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         process.stderr.write(`Failed to clean up import staging database: ${message}\n`);
       } finally {
-        let terminalStatePersisted = false;
-        try {
-          job.performance = {
-            ...timing.snapshot(),
-            computeStagesMs: { ...this.computeStagesMs },
-            ...(laneTelemetry === null ? {} : { lane: laneTelemetry })
-          };
-          publishTerminalState?.();
-          if (publishTerminalState) {
-            await this.persistJobsWithRetry();
-            terminalStatePersisted = true;
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.stack ?? error.message : String(error);
-          process.stderr.write(`Failed to persist terminal import state for ${job.id}: ${message}\n`);
-        } finally {
+        if (terminalDecisionWithheld) {
+          // 恢复阻断不是终态：不发布 summary/status，也不触发来源清理或
+          // onTerminal 回调（那会把“无法核实”传染成一次确定的失败处置）。
+          // 只落一份诊断性能账本，作业本身保持 running + queue 未 finalize。
           try {
-            await this.runTerminalCallbackWithRetry(job, terminalSucceeded, terminalStatePersisted);
+            job.performance = {
+              ...timing.snapshot(),
+              computeStagesMs: { ...this.computeStagesMs },
+              ...(laneTelemetry === null ? {} : { lane: laneTelemetry })
+            };
+            this.persistJobs();
           } catch (error) {
             const message = error instanceof Error ? error.stack ?? error.message : String(error);
-            process.stderr.write(`Failed to finalize import source for ${job.id}: ${message}\n`);
+            process.stderr.write(`Failed to persist withheld import state for ${job.id}: ${message}\n`);
+          }
+          this.running = false;
+        } else {
+          let terminalStatePersisted = false;
+          try {
+            job.performance = {
+              ...timing.snapshot(),
+              computeStagesMs: { ...this.computeStagesMs },
+              ...(laneTelemetry === null ? {} : { lane: laneTelemetry })
+            };
+            publishTerminalState?.();
+            if (publishTerminalState) {
+              await this.persistJobsWithRetry();
+              terminalStatePersisted = true;
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.stack ?? error.message : String(error);
+            process.stderr.write(`Failed to persist terminal import state for ${job.id}: ${message}\n`);
           } finally {
-            this.running = false;
+            try {
+              await this.runTerminalCallbackWithRetry(job, terminalSucceeded, terminalStatePersisted);
+            } catch (error) {
+              const message = error instanceof Error ? error.stack ?? error.message : String(error);
+              process.stderr.write(`Failed to finalize import source for ${job.id}: ${message}\n`);
+            } finally {
+              this.running = false;
+            }
           }
         }
       }
@@ -976,38 +1104,50 @@ export class ImportWorker {
    * 最坏情况（进程在任务中途退出）也只是未提交事务回滚、作业重启后从持久回执/队列恢复。
    */
   private ensureIngestWorker(): ResidentIngestWorker {
+    if (this.closing) throw new Error("Import worker is shutting down; refusing to create an ingest worker");
     const existing = this.ingest;
     if (existing && !existing.retired) return existing;
     const startedAt = performance.now();
     const thread = new Worker(new URL("./import-database-bootstrap.mjs", import.meta.url));
     thread.unref();
+    let resolveReady!: () => void;
+    let rejectReady!: (error: Error) => void;
+    const ready = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolveReady = resolvePromise;
+      rejectReady = rejectPromise;
+    });
+    // 启动失败可能发生在没有任何 databaseTask 等待 ready 的窗口（线程刚创建、
+    // 调用方尚未 await）。保留 rejection 供真正等待者读取，但不能让它升级成
+    // process 级 unhandledRejection。
+    void ready.catch(() => { /* 由等待者或 retire 的调用方裁决 */ });
     const resident: ResidentIngestWorker = {
-      thread, ready: Promise.resolve(), startupMs: 0, startError: null, retired: false,
-      pending: new Map(), listener: null
+      thread, ready, startup: { settled: false, resolve: resolveReady, reject: rejectReady },
+      startupMs: 0, startError: null, retired: false,
+      pending: new Map(), termination: null, listener: null
     };
     this.ingest = resident;
     this.ingestStats.started += 1;
-    resident.ready = new Promise<void>((resolveReady, rejectReady) => {
-      thread.once("message", (message: IngestWorkerMessage) => {
-        if (message.kind !== "ready") return;
-        const ready = message as IngestWorkerReadyMessage;
-        const startupMs = performance.now() - startedAt;
-        resident.startupMs = startupMs;
-        this.ingestStats.startupMs += startupMs;
-        this.recordComputeStage("import_worker_startup", startupMs);
-        resolveReady();
-      });
-      thread.once("error", (error: Error) => {
-        resident.startError = error;
-        rejectReady(error);
-      });
+    thread.once("message", (message: IngestWorkerMessage) => {
+      if (message.kind !== "ready" || resident.retired || resident.startup.settled) return;
+      const readyMessage = message as IngestWorkerReadyMessage;
+      const startupMs = performance.now() - startedAt;
+      resident.startupMs = startupMs;
+      resident.startup.settled = true;
+      this.ingestStats.startupMs += startupMs;
+      this.recordComputeStage("import_worker_startup", startupMs);
+      resident.startup.resolve();
     });
-    // 🔴 崩溃必须按 taskId 逐个归因并**替换线程**：静默地让在飞的任务悬着，
-    // 会把"这一批到底写没写"变成没人知道的事（导入成功与否仍由持久回执裁决）。
-    thread.once("error", (error: Error) => { this.retireIngestWorker(resident, error); });
+    // 🔴 启动期的 error/exit 必须结算 ready；否则 databaseTask 永远停在 await，
+    // close() 也会等一个永远不会完成的 runPromise。exit 不区分退出码：0 也意味着
+    // 这条线程不可能再接收任务。
+    thread.once("error", (error: Error) => {
+      resident.startError ??= error;
+      void this.retireIngestWorker(resident, error);
+    });
     thread.once("exit", (code: number) => {
       if (!resident.retired) {
-        this.retireIngestWorker(resident, new Error(`Ingest worker thread exited with code ${code}`));
+        void this.retireIngestWorker(resident,
+          new Error(`Ingest worker thread exited with code ${code}`));
       }
     });
     return resident;
@@ -1066,20 +1206,81 @@ export class ImportWorker {
     waiting.reject(failure);
   }
 
-  /** 线程作废：拒绝在飞任务、清空 pending、终止线程。可重入（第一次生效）。 */
-  private retireIngestWorker(resident: ResidentIngestWorker, error: Error): void {
-    if (resident.retired) return;
+  /** 线程作废：拒绝启动等待与在飞任务、清空 pending、终止线程。可重入（第一次生效）。 */
+  private retireIngestWorker(resident: ResidentIngestWorker, error: Error): Promise<void> {
+    if (resident.retired) return resident.termination ?? Promise.resolve();
     resident.retired = true;
     if (this.ingest === resident) this.ingest = null;
     if (this.activeAnalysis === resident.thread) this.activeAnalysis = null;
     this.ingestStats.retired += 1;
+    // 🔴 ready 未结算时必须在这里 fail：线程已经不可能再发 ready，等待者不能
+    // 永远停在 await resident.ready，close() 更不能等一个没有终点的 runPromise。
+    if (!resident.startup.settled) {
+      resident.startup.settled = true;
+      resident.startError ??= error;
+      resident.startup.reject(error);
+    }
     for (const [taskId, waiting] of resident.pending) {
       this.recordComputeStage(waiting.stage, performance.now() - waiting.startedAt);
       waiting.reject(new Error(`${error.message} (ingest task ${taskId} did not complete)`));
     }
     resident.pending.clear();
     this.disarmIngestListener(resident);
-    void resident.thread.terminate().catch(() => { /* 线程可能已经退出 */ });
+    let termination: Promise<void>;
+    try {
+      termination = Promise.resolve(resident.thread.terminate()).then(() => undefined).catch((cause: unknown) => {
+        throw cause instanceof Error ? cause : new Error(String(cause));
+      });
+    } catch (cause) {
+      termination = Promise.reject(cause instanceof Error ? cause : new Error(String(cause)));
+    }
+    resident.termination = termination;
+    this.trackIngestTermination(termination);
+    return termination;
+  }
+
+  /** 记录生命周期内首次“无法确认停止”，返回本次失败的规范化错误。 */
+  private noteIngestTerminationFailure(cause: unknown): Error {
+    const failure = cause instanceof Error ? cause : new Error(String(cause));
+    this.ingestTerminationError ??= failure;
+    return failure;
+  }
+
+  /**
+   * 只跟踪**尚未结算**的终止操作：结算即移除，失败另记首次错误。
+   *
+   * 清理分支必须正常结束（返回 void），不能把同一个 rejection 再抛一次 ——
+   * 原 Promise 的拒绝结果仍由 `waitForIngestTermination()` 的调用方裁决。
+   */
+  private trackIngestTermination(termination: Promise<void>): void {
+    this.ingestTerminations.add(termination);
+    void termination.then(
+      () => { this.ingestTerminations.delete(termination); },
+      (cause: unknown) => {
+        this.noteIngestTerminationFailure(cause);
+        this.ingestTerminations.delete(termination);
+      }
+    );
+  }
+
+  /**
+   * 提交结果不确定时，等**所有**已退休的 ingest 线程真正退出。
+   *
+   * `thread.terminate()` 是异步的；只发出终止请求就读回执，可能与仍在提交/回滚的
+   * 连接竞争。这里不设“超时后继续”的捷径：等不到退出就返回 false，由调用方进入
+   * 恢复阻断，而不是伪成功或伪失败。集合只包含未结算的操作（见
+   * {@link trackIngestTermination}）；快照之后新增的退休会在下一轮继续等待。
+   */
+  private async waitForIngestTermination(): Promise<boolean> {
+    for (;;) {
+      const pending = [...this.ingestTerminations];
+      if (pending.length === 0) break;
+      const results = await Promise.allSettled(pending);
+      if (results.some((result) => result.status === "rejected")) return false;
+      // 快照内的都结算了；等待期间新增的终止操作仍留在集合里，下一轮继续等。
+    }
+    // 集合为空只说明"现在没有待退出的线程"：历史终止失败仍意味着无法确认停止。
+    return this.ingestTerminationError === null;
   }
 
   private recordComputeStage(stage: string, milliseconds: number): void {
@@ -1112,13 +1313,23 @@ export class ImportWorker {
    * task failure, never as evidence that a healthy database is corrupt. */
   private async databaseTask<T>(task: ImportDatabaseTask, stage = task.operation === "verify"
     ? "database_quick_check" : task.operation === "audit" ? "final_audit_build"
+      : task.operation === "noop-receipt" ? "noop_receipt_transaction"
       : task.operation === "import-lanes" ? "import_lanes_transaction" : "database_checkpoint"): Promise<T> {
     // 🔴 两轮：只在"线程恰好在我们投递之前作废"（崩溃、取消、任务抛错后退休）时重试一次。
     // `ensureIngestWorker()` → `await ready` 之间有 await，线程可能在那一刻退休；投递本身
     // 是同步的，所以过了下面那道检查就不可能再插进一次退休。
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (this.closing) throw new Error("Import worker is shutting down; refusing to dispatch an ingest task");
       const resident = this.ensureIngestWorker();
-      await resident.ready;
+      try {
+        await resident.ready;
+      } catch (error) {
+        // 关闭引发的启动 rejection 不是“重试信号”：close() 正在等真实线程退出，
+        // 这里再起一条替代线程会既拖延关闭又制造一条本不该存在的线程。
+        if (this.closing) throw new Error("Import worker is shutting down before its ingest worker became ready", { cause: error });
+        throw error;
+      }
+      if (this.closing) throw new Error("Import worker is shutting down; refusing to dispatch an ingest task");
       if (resident.retired) continue;
       const taskId = this.ingestSequence += 1;
       return new Promise<T>((resolveResult, reject) => {
@@ -1241,82 +1452,8 @@ export class ImportWorker {
   }
 
   /**
-   * R2（2026-10-15）：无变化成功的**持久回执**。
-   *
-   * 为什么必须有：客户端对"已建立 job"的批次要求 `summary.directSync` 形式的
-   * committed 回执才推进游标（`DirectSyncCursorPolicy.decision` 的 `.hold(no_receipt)`）。
-   * 旧的 unchanged 早退只在内存里写 summary、没有任何持久回执 ⇒ 客户端每轮恢复都读到
-   * 同一份无回执的成功响应 ⇒ 永久循环（同内容并发来源、不经 inspect 直接建 job 的通道可达）。
-   *
-   * 事务纪律与重验：写回执在**一个短写事务**里完成，且在**同一事务内**重验
-   * 「库仍对应本载荷」——判据与 `detectUnchangedPayload` 逐条一致（anchor 存在、
-   * datasetVersion 未变、sha256 相等）。任何一个不成立 ⇒ 返回 `null`（调用方落回
-   * 正式车道）：两次检查之间任何导入都会推进 datasetVersion，让 anchor 失效。
-   *
-   * 回执形状（`packages/contracts/src/direct-sync.ts` 的 `DirectSyncReceipt`）：
-   *   - `ingestStatus: "committed"` —— 事实层的结论：本批没有要写入的新事实，
-   *     "服务端已确认当前库与此载荷一致"；
-   *   - `analysisStatus: "not_required"` —— 本批**没有**登记分析任务：内容与已导入
-   *     完全一致 ⇒ 结构上不影响分析（§9.1）。**绝不**复用/伪造其它批次的 `published`；
-   *   - 三个"没有值"的字段一律 `null`（合同：本批不影响分析 / 未发布 / 未分片）。
-   *
-   * 失败面：写库异常向上抛（基础设施故障 ⇒ job 失败；重试幂等——每轮开头的
-   * `readImportReceipt` 或再次走到这里都会收敛到同一结论）。
+   * Sessions in the live database; `0` when it cannot be read, never a thrown error.
    */
-  private writeNoopReceipt(
-    job: MutableImportJob,
-    preflight: PayloadPreflight,
-    startedAtMs: number
-  ): ImportJobResponse["summary"] | null {
-    let database: DatabaseSync | undefined;
-    try {
-      database = new DatabaseSync(this.databasePath);
-      database.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL");
-      database.exec("BEGIN IMMEDIATE");
-      const identity = readImportIdentityInDatabase(database);
-      const verified = identity.anchor !== null
-        && identity.datasetVersion !== null
-        && identity.datasetVersion === identity.anchor.datasetVersion
-        && identity.anchor.sha256 === preflight.sha256;
-      if (!verified) {
-        database.exec("ROLLBACK");
-        return null;
-      }
-      const summary: NonNullable<ImportJobResponse["summary"]> = {
-        recomputeReasons: ["payload_identity_unchanged"],
-        importMode: "unchanged",
-        insertedWorkouts: 0,
-        updatedWorkouts: 0,
-        removedWorkouts: 0,
-        unchangedWorkouts: preflight.unchangedWorkouts,
-        routesUpdated: 0,
-        featuresReused: 0,
-        featuresRecomputed: 0,
-        modelReplayFrom: null,
-        durationMs: Date.now() - startedAtMs,
-        // 这一条路径根本没有生成备份，所以这里恒为 null，不是"备份失败"。
-        backupName: null,
-        directSync: {
-          ingestStatus: "committed",
-          receiptId: job.id,
-          analysisStatus: "not_required",
-          dependencyGeneration: null,
-          publishedReleaseId: null,
-          parentBatchId: null
-        }
-      };
-      writeImportReceiptInDatabase(database, job.id, summary);
-      database.exec("COMMIT");
-      return summary;
-    } catch (error) {
-      try { database?.exec("ROLLBACK"); } catch { /* 事务可能未开启或已结束 */ }
-      throw error;
-    } finally {
-      database?.close();
-    }
-  }
-
-  /** Sessions in the live database; `0` when it cannot be read, never a thrown error. */
   private countTrainingSessions(): number {
     try {
       return this.countRows(this.databasePath, "training_sessions");

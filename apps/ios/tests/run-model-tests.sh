@@ -135,6 +135,11 @@ python3 apps/ios/tests/check-export-determinism.py
 python3 apps/ios/tests/check-direct-sync-status-copy.py
 python3 apps/ios/tests/check-direct-sync-contract-parity.py
 python3 apps/ios/tests/check-direct-sync-analysis-reconcile.py
+# PR-02（2026-10-21）退役计划面出站门禁：统一页不得再链到手动课表编辑器，
+# 生产 Swift 代码只能在 APIClient 兼容传输里拼退役路径；新服务宣告统一读能力
+# 而未宣告写能力时，模型必须在发请求前拒绝旧写 route。它同时断言自己是本聚合
+# 入口的真实调用者（`check-today-layout.py` 的孤儿教训）。
+python3 apps/ios/tests/check-retired-plan-outbound.py
 # PR5 读侧一致性（C9 键集/可选性 + C2 键集不跨域 + 能力位命名）。它此前是**唯一一支孤儿**：
 # 只挂在 `npm run check:ios-gates` 里，而那个入口不在 pre-commit、也不在 CI ⇒ 从 2026-10-13
 # 引入起连续 6 天**一条判据都没执行**（还因为缺 gitignored 的基线被写成"预存在失败"）。

@@ -28,11 +28,16 @@ nonisolated enum PlanMutationDisposition {
     ///   legacy 写路由（`/v1/mobile/goals`、`/v1/mobile/workout-plan/**` 等），恒 409。
     ///   同一份 legacy 载荷在该数据集上重放**永远不可能成功**，而保留账目会把
     ///   `hasPendingPlanPublication` 永久钉住（用户再也无法发布新计划）。
+    /// - `legacy_surface_retired`（2026-10-21，PR-01）：产品已退役 `/goals`、
+    ///   `/run-coach`、`/workout-plan/preview|confirm|generate`（`server.ts`
+    ///   `retiredLegacyRoutes`），旧载荷重放只会得到 410。它不是一次"结果未知"，
+    ///   必须视为终局并关闭 pending 发布；系统排期账目/回执/水位不在清除范围内。
     static let terminalPlanPublicationErrorCodes: Set<String> = [
         "plan_operation_scope_mismatch",
         "plan_operation_expired",
         "plan_operation_key_conflict",
-        "coach_loop_contract_required"
+        "coach_loop_contract_required",
+        "legacy_surface_retired"
     ]
 
     /// 手表排期回执的**内容级**终局拒绝码（同一份字节重放永远失败）。
@@ -80,6 +85,14 @@ nonisolated enum PlanMutationDisposition {
 
     static func isTerminalPlanPublicationError(_ code: String) -> Bool {
         terminalPlanPublicationErrorCodes.contains(code)
+    }
+
+    /// HTTP 410 is the protocol-level "gone" answer: whatever the server calls it,
+    /// the same request can never succeed again. Unknown 410 codes are therefore
+    /// terminal too (PR-01: "未知 410 同样不进入自动重试"), while 409/429/503 stay
+    /// retryable because they can describe a state that may later change.
+    static func isTerminalPlanPublicationStatus(_ status: Int) -> Bool {
+        status == 410
     }
 
     static func isTerminalPlanReceiptError(_ code: String) -> Bool {

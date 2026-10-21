@@ -3,9 +3,9 @@
 日期：2026-10-13，Asia/Shanghai。基线：`5fedc2a` + PR4 步骤 2a/2b（工作树在制）。
 上位设计：[SQLITE_DIRECT_SYNC_DESIGN.md](SQLITE_DIRECT_SYNC_DESIGN.md) §9.1、§9.2、§13 PR5、§14.2 A12/A13。
 前序：[SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md](SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md)、[SQLITE_DIRECT_SYNC_PR4_DESIGN.md](SQLITE_DIRECT_SYNC_PR4_DESIGN.md)。
-证据底稿：`var/reports/pr5-recon.md`（191 行）；验收盘点：`deliverables/ACCEPTANCE_INVENTORY_DIRECT_SYNC_2026-10-13.md`。
+证据底稿：`var/reports/pr5-recon.md`（191 行，未跟踪；需要时从 git/本地临时目录取回）；验收盘点原存于一轮性 deliverable，已随该轮收尾移出仓库，需要时从 git 历史取回（本文件不再链接它）。
 
-**状态：本文档是设计，未实施。** 所有"现状"断言落到 `文件:行号`；转引自侦察报告而未由本文作者重读的，
+**状态（2026-10-20 更新）：部分实施。** S1–S6、S10、S11 已在 HEAD 落地（细节与证据见 §5 状态表）；**S7（`executable`/锁课接新鲜度）、S8（coach/预测 identity 与 `dataThroughAt` 绑定）、S9（缓存五元组）仍未做**；§4 的 P01–P06/A12 截图/真机验收仍给不了。**当时的状态：本文档是设计，未实施。** 所有"现状"断言落到 `文件:行号`，是 **2026-10-13 快照**；转引自侦察报告而未由本文作者重读的，
 逐条标注"转引自侦察报告，已复核/未复核"。
 
 ---
@@ -22,7 +22,7 @@
 
 ---
 
-## 1. 现状锚点
+## 1. 现状锚点（as-of 2026-10-13；行号按当时快照，实施后已漂移）
 
 ### 1.1 🔴 本轮新发现（侦察报告没有）
 
@@ -286,7 +286,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 2. `workoutPresentConditionSql` 是事实存在性的**唯一**实现：不存在第二处 `import_entity_tombstones`/`deleted_at IS NULL` 字面 SQL。
 3. 新增迁移只 `ALTER TABLE ADD COLUMN`（可空）；`FROZEN_MIGRATION_CHECKSUMS` 追加而不修改历史项。
 
-**本环境给不了的（不得宣称通过）**：A12 的桌面/iOS 状态截图（需运行桌面 Web 与 Simulator）；
+**本环境给不了的（不得宣称通过）**：A12 的 iOS 状态截图（需运行 Simulator；桌面 Web 已随 D17 退役）；
 A13 的"新数据持续到达仍有结果可读"的**真并发**时序（本环境只能做固定顺序的交错调用）；
 §14.3 P01–P06（需目标云机、隔离脱敏数据集与 200 个有效样本，§14.4 明令不得用开发机空库替代）；
 真机 HealthKit 删除/续传（§14.5）。
@@ -299,20 +299,20 @@ A13 的"新数据持续到达仍有结果可读"的**真并发**时序（本环�
 |---|---|---|---|---|
 | S1 | `workoutPresentConditionSql` + 事实侧排除已删（清单 1、3、6、7、8、11、12） | C3 转绿；**旧响应逐字节不变**（此时还没有新字段） | 🔴 **必须早于 PR4 2e** | ✅ 已完成（与 S2 同批，见 §8） |
 | S2 | `deleted_at` 软删标记 + 两处写路径 + `import_equivalence` 复核（清单 2） | C7 转绿；既有删除保护用例（A03）全绿 | 🔴 **必须早于 PR4 2e** | ✅ 已完成（与 S1 同批，见 §8） |
-| S3 | `versions`/`freshness`（D2）+ 绑定列可读 + `metadata` 可选字段（清单 18、9） | C4 的 `generations_absent` 分支转绿；C10 转绿 | 与 S1/S2 同批发布 | ⛔ 未做 |
-| S4 | 两块视图 + handshake 能力（清单 3、4、8） | C1、C2、C9 转绿 | 需 S3 | ⛔ 未做 |
-| S5 | 详情路线走版本表（清单 5） | C8 转绿（含老库退化分支） | 需 S4 | ⛔ 未做 |
-| S6 | 今日/周/统计/趋势/计划快照数值修正（清单 6、7、8、9、10） | C3 在四个端点分别转绿 | 需 S1 | ⛔ 未做 |
-| S7 | `executable` 与锁课接入新鲜度（清单 14） | C4 全分支转绿 | 需 S3 | ⛔ 未做 |
-| S8 | coach/预测 identity 与 `dataThroughAt` 绑定（清单 10、15） | A13 的"迟到任务不倒退"在**读侧**有断言 | 需 S3 | ⛔ 未做 |
-| S9 | 缓存五元组 + `versionSnapshot()`（清单 16） | C6 转绿 | 需 S3 | ⛔ 未做 |
-| S10 | `FactsReader.routeFor` 版本语义收尾（清单 17） | 路线读取两条路径同源 | 需 S5 | ⛔ 未做 |
-| S11 | `route_points` 双写退役（D7） | C8 仍绿（新版本不再写 `route_points`） | 需 S5 **且** PR4 §2.4 评审同意 | ⛔ 未做 |
+| S3 | `versions`/`freshness`（D2）+ 绑定列可读 + `metadata` 可选字段（清单 18、9） | C4 的 `generations_absent` 分支转绿；C10 转绿 | 与 S1/S2 同批发布 | ✅ 已完成（2026-10-20 核实：`data.ts:696` 的 `metadata.versions/freshness`、`fact-read-view.ts` 的 `generations_absent`、`data.ts:2450-2454` 的绑定列 DTO） |
+| S4 | 两块视图 + handshake 能力（清单 3、4、8） | C1、C2、C9 转绿 | 需 S3 | ✅ 已完成（`server.ts:1056` `factsAnalysisContractVersion:1`、`contracts/facts-analysis-view.ts`、`data.ts:542,693,771`） |
+| S5 | 详情路线走版本表（清单 5） | C8 转绿（含老库退化分支） | 需 S4 | ✅ 已完成（v43 `readable_route_points` 视图 + `read/route-point-reader.ts`） |
+| S6 | 今日/周/统计/趋势/计划快照数值修正（清单 6、7、8、9、10） | C3 在四个端点分别转绿 | 需 S1 | ✅ 已完成（`workoutPresentConditionSql`/`sessionFactPresentConditionSql` 在 `data.ts` 与 `read/*` 的引用） |
+| S7 | `executable` 与锁课接入新鲜度（清单 14） | C4 全分支转绿 | 需 S3 | ⛔ **未做**（HEAD 仍为结构判据：`mobile-read.ts:567,614`；锁课未接 `analysis_stale`） |
+| S8 | coach/预测 identity 与 `dataThroughAt` 绑定（清单 10、15） | A13 的"迟到任务不倒退"在**读侧**有断言 | 需 S3 | ⛔ **未做**（`coach-prediction-companion.ts:19` 仍 `digest(facts)`，未拆 `versions` 域） |
+| S9 | 缓存五元组 + `versionSnapshot()`（清单 16） | C6 转绿 | 需 S3 | ⛔ **未做**（缓存仍按 `PRAGMA data_version` 失效：`data.ts:330,445,625,741`） |
+| S10 | `FactsReader.routeFor` 版本语义收尾（清单 17） | 路线读取两条路径同源 | 需 S5 | ✅ 已完成（`facts-reader.ts` 的 `routeFor` 已委托唯一 `routePointReader`/`readable_route_points`，与写侧 `hasUsableRoute` 同源） |
+| S11 | `route_points` 双写退役（D7） | C8 仍绿（新版本不再写 `route_points`） | 需 S5 **且** PR4 §2.4 评审同意 | ✅ 已完成（`database.ts:2874-2901`：发布只写 published 版本行并排空旧副本） |
 
-**🔥 解锁 PR4 2e 的最小 PR5 子集 = S1 + S2。** 只有这两步能同时挡住
+**✅ 解锁 PR4 2e 的最小 PR5 子集（S1 + S2）已于 2026-10-13 落地。** 它同时挡住
 ①已删训练的负荷进入当前汇总（C3）与 ②级联销毁已发布路线的版本内容（C7）。
-建议 S3 同批带上，但它在**语义上**不阻塞 2e——2e 不改变 `executable` 的判据。
-⛔ 顺序不可交换：S4 之前必须 S3（否则新块没有 `versions` 可填）；S7 之前必须 S3；S11 之前必须 S5。
+S3/S4/S6/S10/S11 随后续提交落地；**S7/S8/S9 仍开放**，因此「读侧全部一致性」尚未完成，不能把本表读成全绿。
+⛔ 顺序约束保留：S4 之前必须 S3；S7 之前必须 S3；S11 之前必须 S5。
 
 ---
 
@@ -383,20 +383,15 @@ A13 的"新数据持续到达仍有结果可读"的**真并发**时序（本环�
 
 ---
 
-## 7. 未决问题
+## 7. 未决问题（2026-10-20 复核：1/2/3 已由实现落定；4–6 仍开放；7 仍给不了）
 
-1. **未决（需接口评审拍定）**：D1 两块的**确切字段名与嵌套深度**——顶层块
-   （`currentFacts: { rows, factVersion, … }`）还是把两块**平铺**进现有行类型
-   （在 `StoredWorkoutListItem` 上并列 `facts`/`analysis` 子对象）。本文给的是最小必要形状 + 三条硬约束
-   （默认 `null`、块内不许跨域、旧字段语义不变）。平铺更省响应体但更容易被误当成"同一行的两个视图"；
-   顶层块更明确但客户端多读一层。**settle 它需要**：与 `apps/web`/`apps/ios` 消费方的接口评审 + A12 的状态截图证据。
-2. **未决**：D2 的 `analysisStatus` 派生口径——用 `recompute_jobs` 里最新相关任务的状态，
-   还是纯版本比较（完全不看任务表）。前者能区分 `queued`/`running`/`failed`，后者不依赖任务保留策略。
-   本文暂定前者，`failed` 与版本比较同时成立时才报 `analysis_failed`。
-   **settle 它需要**：PR4 步骤 2d 后 `recompute_jobs` 的保留/清理策略（今天只做读取，见 `data.ts:1819-1820`）。
-3. **未决**：D4.5 的软删标记是否与 PR4 **同一批**落地。它改变写侧可见行为
-   （`workout_routes` 不再级联消失、`import_equivalence` 摘要可能变化），跨 PR 边界需 PR4 owner 明确同意。
-   **settle 它需要**：一次 PR4/PR5 联合评审 + `import-equivalence` 基线前后对比。
+1. ✅ **已定（实现采用顶层可空块）**：D1 两块采用顶层 `currentFacts: FactsView | null` / `publishedAnalysis: AnalysisView | null`
+   （`packages/api-contracts/src/index.ts:461-462,1430-1431,1743-1744`），默认 `null`、块内不跨域、旧字段语义不变。
+   ~~平铺还是顶层~~ 的评审问题已由实现选择回答；A12 的状态截图仍缺（见 7）。
+2. ✅ **已定（实现采用任务状态 + 版本比较的组合）**：`fact-read-view.ts` 以 `import_generations` 与任务状态派生
+   `stale/reason`；`generations_absent` 作为显式回退分支。保留策略仍是后续运维事项。
+3. ✅ **已落地（与 PR4 2c/2d 同批）**：v36 `workouts.deleted_at` 软删 + 存在性判据，见 §5.1；
+   `import_equivalence` 的 `workouts` 域忽略 `deleted_at`（删除由 tombstone/账目承载）。
 4. **未决**：`pendingAnalysisCount` 的"未分析"定义——"有事实且未出现在当前 release 的任何 assessment/load 行里"
    还是"`valid_from_generation > 已发布代次`"。后者更精确，但需要 `model_runs` 记录它消费的 raw 代次（今天没有这一列）。
    **settle 它需要**：PR4 步骤 2d 是否为 `model_runs` 加"输入代次"列。

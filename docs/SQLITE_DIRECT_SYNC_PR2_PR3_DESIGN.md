@@ -5,7 +5,8 @@
 本文件只覆盖 **PR2（同库事务接收全部正常类型）** 与 **PR3（版本化事实与路线）**；
 PR4（分析输入与短写调度）、PR5（读侧一致性）、PR6（客户端与切路）另出。
 
-**状态：设计，未实施。** 本文所有"现状"断言都落到 `文件:行号`，可逐条复核。
+**状态（2026-10-20 更新）：已实施。** PR1–PR3 的落地点在 HEAD 全部存在：v34/v35 迁移、`transactionOwner:"caller"` + SAVEPOINT、`DirectSyncIngestWorker` 分派、路线版本（`route_versions`/`route_version_points`）、局部 canonical（`canonicalizeNightsForWindow`）、`FactsReader`；§9「实施进度」逐项 ✅。本文正文的 `文件:行号` 与「现状」是 **2026-10-12 快照**，行号会漂移，但设计判据与裁决（D1–D4）仍是当前实现的依据，代码注释按本文节号引用。
+**当时的状态：设计，未实施。** 本文所有"现状"断言都落到 `文件:行号`，可逐条复核。
 
 ---
 
@@ -17,7 +18,7 @@ PR4（分析输入与短写调度）、PR5（读侧一致性）、PR6（客户�
 
 ---
 
-## 1. 现状锚点（设计必须绕着走的事实）
+## 1. 现状锚点（as-of 2026-10-12，设计必须绕着走的事实；行号按当时快照，实施后已漂移）
 
 | 事实 | 位置 | 对设计的影响 |
 |---|---|---|
@@ -340,8 +341,8 @@ export interface FactsReader {
 | 🔴 | full 载荷被以 `preserveAbsent: false` 送进直连 ⇒ **静默全库删除** | 用 §2.6 的类型约束封死；补一条断言（"参数类型里不存在这个字段"） |
 | 🔴 | `canonicalizeNightsForWindow` 的窗口边界算错 ⇒ 夜间事实丢失或重复 | 复用 `canonicalize-nights.ts:447-449` 的"开始与结束都算"口径；合成用例钉住跨界夜 |
 | 🟡 | 新增两个迁移不可逆 | 先隔离库演练 + 冻结校验和；API 以 `refuse` 开库，pending 直接 exit 78（现有机制） |
-| 🟡 | `workout_routes.relative_path UNIQUE` 与版本表并存会不会冲突 | 版本表不写 `relative_path`；待实施时用一条断言钉住 |
-| ⚪ | ~~未决：`route_version_points` 与既有 `route_points` 是否长期双写~~ | **已定（步骤 5）**：过渡期双写（发布时点写两处），PR5/PR6 让读侧改走版本表后 `route_points` 退役 |
+| 🟡 | `workout_routes.relative_path UNIQUE` 与版本表并存会不会冲突 | 版本表不写 `relative_path`（v35 DDL 无该列），结构性成立；`direct-sync-migrations.test.ts` 钉住表形状 |
+| ⚪ | ~~未决：`route_version_points` 与既有 `route_points` 是否长期双写~~ | **已定并落地**：过渡期双写 → v43 `readable_route_points` 视图 + PR5 S11 让 `publishRouteVersion` **不再写** `route_points`（退役≠删表，老库指针 NULL 仍读旧表） |
 
 ---
 
@@ -370,7 +371,7 @@ PR5（读侧一致性）/PR6（客户端与切路）仍待另出。
 | 4. 逐实体代次，替换补种 | ✅ 已完成（结论：**不需要**"逐实体代次"；见下） | 见下 |
 | 5. 路线版本 | ✅ 已完成（含两处对初稿的修正 + 红队 F1/NEW-1/NEW-2 修复） | 见下 |
 | 6. 局部 canonical + `FactsReader` | ✅ 已完成（多智能体并行 + 红队交叉复核） | 见下 |
-| 6b. 分析任务登记（切路前提） | ◐ **上线三步里的第 1 步已落地**（消费者认识 `import`，但只认直连载荷）；**登记与 `deltaMode: "full"` 仍未做** | 见文末「6b 步骤 1」 |
+| 6b. 分析任务登记（切路前提） | ✅ **已完成（2026-10-13 步骤 2e）**：统一接收器在同事务登记 `import` 任务（四个绑定列 + 代次递增 + 回执 `queued`），`deltaMode` 已放开为 `"full"`；第 1 步（消费者认识 `import`）见文末 | 见 [PR4 §8.4](SQLITE_DIRECT_SYNC_PR4_DESIGN.md) 与 `apps/api/test/import-worker-direct-sync.test.ts` |
 
 > ⚠️ 本表以下各节的正文（含 `文件:行号`）是**当时（2026-10-12）**的记录。步骤 6b 的步骤 1
 > 在 2026-10-13 落地后，其中若干行号与"消费者只认识两种类型"一类断言**已经变化** ——
@@ -700,7 +701,7 @@ claimNext      : import                                            ← 被消费
 `AND status='running'`**，理论上会覆盖并发的状态变化。红队标注"未证实、可达性低"，我同意 ——
 本轮不修，因为它属既有 CLI 路径、又没有复现路径；要动它得先能构造出那个竞争窗口。
 
-### 🔴 步骤 6b：分析任务登记（切路前**必须**做；本步只落地"能力 + 门禁"，**登记本身仍未做**）
+### 🔴 步骤 6b：分析任务登记（as-of 2026-10-12 的未决前提；2026-10-13 已由步骤 2e 完成，见本节末更新块）
 
 `planDirectSyncLane` 把车道限定为 `"record-only"` 是有前提的：record-only 载荷
 **结构上不可能**触及分析，所以可以不登记分析任务。一旦 `deltaMode` 扩到 `"full"`
@@ -810,7 +811,7 @@ final error:         {"message":"Unsupported application job type: import","name
   ⛔ 未放宽 `job_type` / `status` 的 `CHECK`。
 - 门禁测试（见上）+ 两条"今天不许登记"的断言：`planDirectSyncLane` 恒为 `deltaMode: "record-only"`、
   直连回执 `analysisStatus` 恒为 `"not_required"`。
-- ⛔ **本步有意未做**：不真的登记任何分析任务，`planDirectSyncLane` 的 `deltaMode` 不放开到 `"full"`。
+- ⛔ **本步（2026-10-12）有意未做**：不真的登记任何分析任务，`planDirectSyncLane` 的 `deltaMode` 不放开到 `"full"`。**该边界已被下方 2026-10-13 的步骤 2e 取代。**
 
 > ✅ **2026-10-13 更新（步骤 2e）：第 2、3 步都已落地。** 统一接收器在同事务里登记
 > `import` 任务（四个绑定列 + 代次递增 + 回执 `queued`），`deltaMode` 已放开为 `"full"`，

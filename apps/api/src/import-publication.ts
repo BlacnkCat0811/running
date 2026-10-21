@@ -35,6 +35,61 @@ export function readImportReceipt(path: string, id: string): ImportJobResponse["
   finally { db?.close(); }
 }
 
+/**
+ * Validate a receipt read through the strict path.
+ *
+ * A row whose JSON parses to `null` (or to a non-object) is a damaged receipt,
+ * not an absent one. Returning `null` there would let the recovery decision
+ * treat "the database contains a receipt we cannot understand" as "the
+ * transaction never committed" — exactly the ambiguity this path exists to
+ * remove. The required fields are the long-lived subset shared by old and new
+ * receipts; newer optional fields (`directSync`, `analysisJobId`, …) remain
+ * optional.
+ */
+function parseStrictImportReceipt(value: string): NonNullable<ImportJobResponse["summary"]> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); }
+  catch (error) {
+    throw new Error("Import receipt is not valid JSON", { cause: error });
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Import receipt is not an object");
+  }
+  const receipt = parsed as Record<string, unknown>;
+  const modes = new Set(["unchanged", "incremental", "full"]);
+  if (typeof receipt.importMode !== "string" || !modes.has(receipt.importMode)
+      || !["insertedWorkouts", "updatedWorkouts", "removedWorkouts", "unchangedWorkouts",
+        "routesUpdated", "featuresReused", "featuresRecomputed"].every((key) => Number.isInteger(receipt[key]))
+      || typeof receipt.durationMs !== "number" || !Number.isFinite(receipt.durationMs)
+      || (receipt.modelReplayFrom !== null && typeof receipt.modelReplayFrom !== "string")
+      || (receipt.backupName !== null && typeof receipt.backupName !== "string")) {
+    throw new Error("Import receipt is missing required fields or has invalid field types");
+  }
+  return parsed as NonNullable<ImportJobResponse["summary"]>;
+}
+
+/**
+ * 提交结果不确定时的严格回执读取。
+ *
+ * `readImportReceipt` 的 "读不到 = null" 适合启动时的尽力恢复，但不能用来裁决
+ * "worker 到底提交了没有"：数据库忙、损坏或权限错误时，把异常吞成 `null` 会把
+ * 已提交的结果误报成未提交。这里只在**读取成功且确实没有该 job 回执**时返回 null；
+ * 其余失败全部上抛，由调用方进入恢复阻断。
+ *
+ * 🔴 不使用 `existsSync(path) → null`：数据库缺失本身就是"无法核实"，必须让
+ * `readOnly` 打开失败上抛。`readOnly` 保证失败时不会顺手创建一份空数据库。
+ */
+export function readImportReceiptStrict(path: string, id: string): ImportJobResponse["summary"] | null {
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    const row = db.prepare("SELECT value FROM import_manifest WHERE key = ?")
+      .get(receiptKey(id)) as { value: string } | undefined;
+    if (!row) return null;
+    return parseStrictImportReceipt(row.value);
+  } finally { db.close(); }
+}
+
 export function writeImportReceipt(path: string, id: string, summary: NonNullable<ImportJobResponse["summary"]>): void {
   const db = new DatabaseSync(path);
   try {

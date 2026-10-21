@@ -38,6 +38,21 @@ prediction management, data operations, audit, import administration,
 performance entries, privacy zones). Removing those endpoints is a separate
 product decision, not part of the Web retirement.
 
+"Still mounted" does not always mean "still callable": two capability groups
+were retired later by their own product decisions and now answer `410 Gone`
+with a stable code (`legacy_surface_retired` or `*_retired`). Do not treat them
+as working features or route new clients to them:
+
+- the legacy training-plan write surface (`/v1/mobile/goals`, `/v1/mobile/run-coach`,
+  `/v1/mobile/workout-plan/{preview,confirm,generate}`) — replaced by the
+  unified plan v2 endpoints documented in
+  [IOS_NATIVE_API_CONTRACT](docs/IOS_NATIVE_API_CONTRACT.md) (decision D19);
+- backup creation/deletion (`POST /v1/backups`, `DELETE /v1/backups/:name`) —
+  backups are an operator responsibility (decision D18).
+
+A stale client must be able to tell `410` from `404`; see
+[DECISIONS](docs/DECISIONS.md) D18/D19 and the retirement matrix in the API contract.
+
 ## Default Verification
 
 Choose checks proportionate to the change. For ordinary API / package work:
@@ -54,10 +69,11 @@ Choose checks proportionate to the change. For ordinary API / package work:
 For iOS work under `apps/ios`, use:
 
 - `npm run test:ios` — type-checks every iOS source and runs the pure-logic
-  regressions, including the 10 cross-platform `apps/ios/tests/check-*.py`
-  source gates. On a host without Xcode it skips loudly ("no iOS source was
-  checked") instead of passing quietly. The pre-commit hook runs it whenever
-  paths under `apps/ios/` are staged.
+  regressions, including the cross-platform `apps/ios/tests/check-*.py` source
+  gates in the aggregate chain (gates excluded by design run only through their
+  explicit manual entry). On a host without Xcode it skips loudly ("no iOS
+  source was checked") instead of passing quietly. The pre-commit hook runs it
+  whenever paths under `apps/ios/` are staged.
 - `npm run check:ios-gates` — runs the cross-platform source gates directly
   (no Xcode needed, so it works on Windows/Linux too). It also fails when a
   non-excluded gate is not referenced by any `apps/ios/tests/run-*.sh`

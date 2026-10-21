@@ -1,6 +1,6 @@
 # CatBoost 残差研究与发布合同
 
-生产Web/API只需要Node；Python用于用户明确发起的离线训练/评估，不是`npm start`的前置。
+生产 API 只需要 Node（iOS 是唯一客户端，不再有 Web 构建产物）；Python用于用户明确发起的离线训练/评估，不是`npm start`的前置。
 整体语义见[算法](../docs/ALGORITHM.md)，运行边界见[架构](../docs/ARCHITECTURE.md)。
 
 ## 环境

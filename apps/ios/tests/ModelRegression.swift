@@ -1526,6 +1526,86 @@ final class RequestLog: @unchecked Sendable {
         }
 
         do {
+            // PR-01：410 是**已确认的终局**（旧面已退役），不是"结果未知"。
+            // 旧文案会在收到 410 后仍提示"发布结果尚未确认"，把用户留在一个
+            // 永远不会成功的重试循环里；未知 410 码同样不得自动重试。
+            CacheStore.resetScheduleSafety()
+            let retireSession = ServerSession()
+            let retireClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let retireState = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let retireCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete",
+                datasetEpoch: "epoch", syncProtocolVersion: 1, apiVersion: "v1",
+                planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2))
+            let retireModel = NativeAppModel(session: retireSession, api: api, now: { retireClock })
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/handshake" { return (200, retireCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, retireState, 0) }
+                return (503, "{}", 0)
+            }
+            await retireModel.bootstrap()
+            // A separate ledger: the pending watch receipt must survive the 410
+            // cleanup. Only the publication row may be closed.
+            let keptReceipt = PlanSyncReceipt(localDate: "2026-10-09", kind: "easy", revision: 12,
+                structure: MobileSessionStructure(warmup: nil, blocks: [.init(iterations: 1, steps: [
+                    .init(purpose: "work", goal: .time(seconds: 600), alert: nil)])], cooldown: nil),
+                workoutID: UUID().uuidString, scheduledAt: "2026-10-09T00:30:00Z",
+                idempotencyKey: UUID().uuidString, contractVersion: 2,
+                scope: .init(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch"),
+                operationId: UUID().uuidString, coherenceToken: String(repeating: "a", count: 64),
+                verifiedAt: "2026-10-09T00:00:00Z", timezone: "Asia/Shanghai",
+                prescriptionDigest: String(repeating: "b", count: 64), lifecycleEvent: "verified")
+            check(CacheStore().savePendingPlanReceipts([keptReceipt], scope: retireModel.feedbackScope),
+                  "fixture: seed a pending watch receipt before the retirement answer")
+            for code in ["legacy_surface_retired", "unknown_gone_surface"] {
+                StubProtocol.handler = { request in
+                    if request.url!.path == "/v1/handshake" { return (200, retireCapabilities, 0) }
+                    if request.url!.path == "/v1/mobile/training-plan-state" { return (200, retireState, 0) }
+                    if request.httpMethod == "PUT" && request.url!.path == "/v1/mobile/goals" {
+                        return (410, "{\"code\":\"\(code)\",\"message\":\"该旧接口已退役。\"}", 0)
+                    }
+                    return (503, "{}", 0)
+                }
+                let accepted = await retireModel.saveRaceTarget(nil, expectedRevision: 12)
+                check(!accepted && !retireModel.hasPendingPlanPublication,
+                      "a terminal 410 (\(code)) closes the pending publication instead of pinning it forever")
+                check((retireModel.planMessage ?? "").contains("已退役") &&
+                      !(retireModel.planMessage ?? "").contains("尚未确认"),
+                      "after a confirmed 410 the UI never claims the result is still unconfirmed")
+                check(CacheStore().pendingPlanReceipts(scope: retireModel.feedbackScope).count == 1,
+                      "closing the publication row must not delete the independent watch-receipt ledger")
+            }
+        }
+
+        do {
+            // PR-02：新服务宣告统一**读**能力（trainingPlanContractVersion=2）但
+            // 未宣告写命令能力时，旧写面必须 fail-closed，且连本地 pending 账目
+            // 都不应产生。老服务两个新键都缺 ⇒ 既有协议不受影响（其他用例覆盖）。
+            CacheStore.resetScheduleSafety()
+            let readOnlySession = ServerSession()
+            let readOnlyClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let readOnlyState = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let readOnlyCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete",
+                datasetEpoch: "epoch", syncProtocolVersion: 1, apiVersion: "v1",
+                planSnapshotContractVersion: 1, trainingPlanContractVersion: 2, planReceiptContractVersion: 2))
+            let readOnlyLog = RequestLog()
+            let readOnlyModel = NativeAppModel(session: readOnlySession, api: api, now: { readOnlyClock })
+            StubProtocol.handler = { request in
+                readOnlyLog.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, readOnlyCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, readOnlyState, 0) }
+                return (503, "{}", 0)
+            }
+            await readOnlyModel.bootstrap()
+            check(!readOnlyModel.planWritesAvailable,
+                  "a server advertising the unified read capability without the write command capability is read-only")
+            let blocked = await readOnlyModel.saveRaceTarget(nil, expectedRevision: 12)
+            check(!blocked && !readOnlyModel.hasPendingPlanPublication &&
+                  readOnlyLog.count(method: "PUT", path: "/v1/mobile/goals") == 0 &&
+                  (readOnlyModel.errorMessage ?? "").contains("尚未适配"),
+                  "a retired legacy write is refused before any request and never creates a pending publication")
+        }
+
+        do {
             // 终局码白名单的**纯判据对账**（审查 🔴-1 / 🟡-C1 / 🟡-C4）：
             // 三组名单是"作废本地账目"的全部依据，名单成员错了就是要么锁死、要么误删。
             for code in ["plan_operation_scope_mismatch", "plan_operation_expired", "plan_operation_key_conflict"] {
@@ -1542,6 +1622,13 @@ final class RequestLog: @unchecked Sendable {
                   "the coach-loop contract guard (409) is terminal for a legacy watch receipt too " +
                   "(/v1/mobile/workout-plan/** is prefix-matched) — otherwise hasPendingPlanReceipts " +
                   "stays true forever and the user has no exit")
+            // PR-01：旧面退役是 410 终局；任何未知 410 也不得进入自动重试。
+            check(PlanMutationDisposition.isTerminalPlanPublicationError("legacy_surface_retired"),
+                  "legacy_surface_retired is terminal: the retired route can never accept the old payload")
+            check(PlanMutationDisposition.isTerminalPlanPublicationStatus(410)
+                    && !PlanMutationDisposition.isTerminalPlanPublicationStatus(409)
+                    && !PlanMutationDisposition.isTerminalPlanPublicationStatus(503),
+                  "HTTP 410 (gone) is terminal for any code, while 409/503 stay retryable")
             check(!PlanMutationDisposition.isTerminalPlanReceiptError("plan_snapshot_changed")
                     && !PlanMutationDisposition.isTerminalPlanReceiptError("database_busy"),
                   "the retryable 503 codes must NOT become terminal (they are 're-read, facts changed')")
@@ -2270,6 +2357,11 @@ final class RequestLog: @unchecked Sendable {
                           "a retryable 503 is classified as retryable server-unavailable, not contract mismatch")
                     check(hinted.errorDescription == message, "retryable server error has a localized message")
                 }
+                // PR-01：旧面 410 是终局升级状态，不是"服务端暂时不可用"。
+                let retiredRead = PlanReadIssue.network(
+                    RaiAPIClientError.server(code: "legacy_surface_retired", message: "该旧接口已退役", status: 410))
+                check(retiredRead.code == .contractMismatch && !retiredRead.retryable,
+                      "a retired 410 read is an upgrade state and is never auto-retried")
             } else {
                 check(false, "503 with Retry-After: 1 must throw retryableServer")
             }

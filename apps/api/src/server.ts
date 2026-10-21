@@ -109,9 +109,19 @@ import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, shouldGenerateWe
 import { CoachLoopRuntime, coachLoopReceiptManaged, type CoachRuntimeReceipt } from "./coach-loop-runtime.js";
 import { registerCoachLoopRoutes } from "./coach-loop-routes.js";
 import { createTrainingPlanCommandHandlers, createTrainingPlanStateRoute } from "./training-plan-routes.js";
-import { TrainingPlanCommandService, legacyRaceTargetMirror, trainingPlanCommandError } from "./training-plan-commands.js";
+import {
+  internalErrorLogDetail,
+  TrainingPlanCommandService,
+  legacyRaceTargetMirror,
+  trainingPlanCommandError
+} from "./training-plan-commands.js";
 import { TrainingPlanCoordinator } from "./training-plan-coordinator.js";
 import type { TrainingPlanRefreshRequest } from "@rai/api-contracts";
+import {
+  RETIRED_TRAINING_PLAN_SURFACES,
+  retiredTrainingPlanSurface,
+  type RetiredPlanMethod
+} from "@rai/api-contracts";
 import { PlanPublicationService, PlanOperationError } from "./plan-publication.js";
 import { prescriptionDigest } from "./plan-digest.js";
 import { normalizePlanReceiptV2 } from "./plan-receipt.js";
@@ -417,20 +427,18 @@ export const lockOnlyMutationRoutes = new Set([
  * implementation: each one answers 410 `legacy_surface_retired` with the
  * replacement surface.
  *
- * Kept as one set because three separate boundaries must agree: the mounted
- * route list, the managed-dataset 409 gate below (retirement wins over "this
- * dataset is managed"), and `legacy-surface-retirement.test.ts`. A retired
- * route is not a write any more, so it lives in `metadataOnlyMutationRoutes`
- * for the source/route-table classification checks (no mutation lock, no
- * database-readiness gate, no import/restore side effects).
+ * The identity is **method + exact pathname**, sourced from
+ * `RETIRED_TRAINING_PLAN_SURFACES` in `@rai/api-contracts`. A path-only set
+ * would hide a new method on the same path; a `/workout-plan` prefix would
+ * retire the still-live GET and `/synced`. A retired route is not a write any
+ * more, so it lives in `metadataOnlyMutationRoutes` for the source/route-table
+ * classification checks (no mutation lock, no database-readiness gate, no
+ * import/restore side effects).
  */
-export const retiredLegacyRoutes = new Set([
-  "/v1/mobile/goals",
-  "/v1/mobile/run-coach",
-  "/v1/mobile/workout-plan/confirm",
-  "/v1/mobile/workout-plan/generate",
-  "/v1/mobile/workout-plan/preview"
-]);
+export const retiredLegacyRoutes = new Set(RETIRED_TRAINING_PLAN_SURFACES.map((surface) => surface.path));
+
+const isRetiredLegacyRequest = (method: string, routeUrl: string | undefined): boolean =>
+  routeUrl !== undefined && retiredTrainingPlanSurface(method, routeUrl) !== null;
 
 /**
  * One shape for every retirement: the old surface is gone, the replacement is a
@@ -443,6 +451,15 @@ function retiredLegacySurface(replacement: string) {
     message: `该旧接口已退役，不再执行旧协议；请改用 ${replacement}。`,
     replacement
   });
+}
+
+/** Route registration must not be able to drift from the shared table. */
+function retiredLegacySurfaceFor(method: RetiredPlanMethod, path: string) {
+  const surface = retiredTrainingPlanSurface(method, path);
+  if (surface === null) {
+    throw new Error(`retired training-plan surface table is missing ${method} ${path}`);
+  }
+  return retiredLegacySurface(surface.replacement);
 }
 const mutationCoordinator = new MutationCoordinator();
 const sourceMutations = new MutationCoordinator();
@@ -485,7 +502,7 @@ app.addHook("preHandler", async (request, reply) => {
   if (routeUrl?.startsWith("/v1/mobile/") &&
     // Retirement answers 410 for every dataset: a managed / ended / recovering
     // dataset must not turn a deliberately-removed surface into a different 409.
-    !(routeUrl !== undefined && retiredLegacyRoutes.has(routeUrl)) &&
+    !isRetiredLegacyRequest(request.method, routeUrl) &&
     !["/v1/mobile/coach-loop", "/v1/mobile/coach-loop/synced", "/v1/mobile/coach-execution", "/v1/mobile/coach-feedback",
       "/v1/mobile/coach-prediction-refresh", "/v1/mobile/plan-operations/:id"].includes(routeUrl)) {
     const managed = coachLoopManaged();
@@ -1049,8 +1066,20 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   // capability is omitted instead of advertising a route the same handshake
   // document cannot fulfil (review P3-3). The coach-loop capability below stays
   // set, which is what a client in this state must use.
-  ...(coachLoopManaged() ? {} : { planSnapshotContractVersion: 1 }),
+  //
+  // 2026-10-21（PR-02）：`trainingPlanContractVersion` is the new **read**
+  // contract (`X-RAI-Training-Contract: 2`). It is advertised under the same
+  // precondition: the managed preHandler currently answers that route with 409,
+  // so a managed dataset must not claim it. "Capability present" is not "this
+  // scope is migrated" — unmigrated scopes still answer the typed
+  // `training_plan_not_migrated` 409 the client must handle separately.
+  ...(coachLoopManaged() ? {} : { planSnapshotContractVersion: 1, trainingPlanContractVersion: 2 }),
   coachLoopContractVersion: 1,
+  // PR-02 deliberately does NOT advertise `trainingPlanCommandContractVersion`:
+  // the configuration command surface exists, but the plan single-ownership
+  // decision (PR-03) and the iOS Publisher (PR-04) are not accepted yet. Absence
+  // means "read-only" to a client; it must never guess write availability from
+  // `coachLoopContractVersion`.
   ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),
   planReceiptContractVersion: 2,
   factsAnalysisContractVersion: 1,
@@ -1087,10 +1116,16 @@ app.get<{ Querystring: { types?: string } }>("/v1/sync/coverage",
     return { datasetEpoch, types: withReadStore((store) => store.syncCoverage(types)) };
   });
 app.get("/v1/openapi.json", async () => openapiDocument);
-app.get("/v1/performance", async () => ({
-  ...telemetry.snapshot(), admission: taskAdmission.snapshot(),
-  importPending: importWorker.hasPending, commandPending: commandQueue.hasPending
-}));
+app.get<{ Querystring: { reset?: string } }>("/v1/performance", async (request) => {
+  // 仅验收环境可重置事件循环直方图；正常部署没有这个开关，诊断值保持单调。
+  if (process.env.RAI_PHASE1_BENCH_RESET === "1" && request.query.reset === "1") {
+    telemetry.resetEventLoopDelay();
+  }
+  return {
+    ...telemetry.snapshot(), admission: taskAdmission.snapshot(),
+    importPending: importWorker.hasPending, commandPending: commandQueue.hasPending
+  };
+});
 
 app.get("/v1/dashboard", async () => withReadStore((store) => store.dashboard()));
 app.get("/v1/data-summary", async () => withReadStore((store) => store.dataSummary()));
@@ -1643,7 +1678,14 @@ app.post("/v1/mobile/training-plan/commands/refresh", async (request, reply) => 
   try {
     return await trainingPlanCommands.refresh(request.body as TrainingPlanRefreshRequest);
   } catch (error) {
-    const mapped = trainingPlanCommandError(error);
+    // PR-01: unknown exceptions never reach the wire verbatim; internal detail is
+    // logged with the Fastify request id so support can correlate the sanitized
+    // 5xx the client received.
+    const mapped = trainingPlanCommandError(error, {
+      requestId: request.id,
+      report: (detail) => request.log.error({ error: internalErrorLogDetail(detail.error), requestId: detail.requestId },
+        "training plan refresh failed")
+    });
     return reply.code(mapped.statusCode).send({ code: mapped.code, message: mapped.message });
   } finally {
     release();
@@ -1655,8 +1697,8 @@ app.post("/v1/mobile/training-plan/commands/refresh", async (request, reply) => 
 // command. The replacement is the unified v2 read plus the configuration
 // command endpoints; both stay mounted and answer 410 so a stale client gets a
 // machine-readable retirement instead of a 404.
-app.get("/v1/mobile/run-coach", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
-app.post("/v1/mobile/run-coach", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
+app.get("/v1/mobile/run-coach", retiredLegacySurfaceFor("GET", "/v1/mobile/run-coach"));
+app.post("/v1/mobile/run-coach", retiredLegacySurfaceFor("POST", "/v1/mobile/run-coach"));
 
 const coachLoopRuntime = new CoachLoopRuntime(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch }),
   (goals, history) => withReadStore(store => store.coachLoopFacts(goals, history, { athleteId, datasetEpoch })),
@@ -1764,9 +1806,9 @@ function weeklyPlanSnapshot() {
 // preview/confirm candidate machinery was process-local + a second plan write
 // path; the unified command endpoints own candidate generation and the atomic
 // plan/state commit now. These mounts stay for route-table and OpenAPI audits.
-app.post("/v1/mobile/workout-plan/preview", retiredLegacySurface("/v1/mobile/training-plan/commands/preview"));
-app.post("/v1/mobile/workout-plan/confirm", retiredLegacySurface("/v1/mobile/training-plan/commands"));
-app.post("/v1/mobile/workout-plan/generate", retiredLegacySurface("/v1/mobile/training-plan/commands/refresh"));
+app.post("/v1/mobile/workout-plan/preview", retiredLegacySurfaceFor("POST", "/v1/mobile/workout-plan/preview"));
+app.post("/v1/mobile/workout-plan/confirm", retiredLegacySurfaceFor("POST", "/v1/mobile/workout-plan/confirm"));
+app.post("/v1/mobile/workout-plan/generate", retiredLegacySurfaceFor("POST", "/v1/mobile/workout-plan/generate"));
 
 app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
 
@@ -1790,8 +1832,8 @@ const planPrescription = (): PlanMergeOptions =>
 // Goals read/write is retired by product decision (2026-10-20). The unified
 // training-plan state is the read surface and configuration changes go through
 // the contract-v2 command endpoints; the store API stays internal.
-app.get("/v1/mobile/goals", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
-app.put("/v1/mobile/goals", retiredLegacySurface("/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"));
+app.get("/v1/mobile/goals", retiredLegacySurfaceFor("GET", "/v1/mobile/goals"));
+app.put("/v1/mobile/goals", retiredLegacySurfaceFor("PUT", "/v1/mobile/goals"));
 
 app.post<{ Body: LockMobileSessionInput }>(
   "/v1/mobile/lock",

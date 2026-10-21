@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import {
   IMPORT_STAGES,
   MOBILE_PLAN_OPERATION_QUERY_STATUSES,
+  RETIRED_TRAINING_PLAN_SURFACES,
   type MobilePlanOperationQueryStatus
 } from "@rai/api-contracts";
 
@@ -386,15 +387,12 @@ test("every registered mutation route is documented in OpenAPI", () => {
   // the route-table / write-registry audits keep enumerating them, but the only
   // contract is 410 legacy_surface_retired with a replacement. A stale client
   // generating from this document must not get a 200 branch.
-  const retiredOperations: ReadonlyArray<[string, string, string]> = [
-    ["get", "/v1/mobile/goals", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
-    ["put", "/v1/mobile/goals", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
-    ["get", "/v1/mobile/run-coach", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
-    ["post", "/v1/mobile/run-coach", "/v1/mobile/training-plan-state and /v1/mobile/training-plan/commands"],
-    ["post", "/v1/mobile/workout-plan/preview", "/v1/mobile/training-plan/commands/preview"],
-    ["post", "/v1/mobile/workout-plan/confirm", "/v1/mobile/training-plan/commands"],
-    ["post", "/v1/mobile/workout-plan/generate", "/v1/mobile/training-plan/commands/refresh"]
-  ];
+  // PR-02: the expectation itself comes from the shared method+path table. A
+  // handwritten copy here would let the document and the router disagree while
+  // this test stayed green.
+  const retiredOperations: ReadonlyArray<[string, string, string]> = RETIRED_TRAINING_PLAN_SURFACES.map(
+    (surface) => [surface.method.toLowerCase(), surface.path, surface.replacement]
+  );
   for (const [method, path, replacement] of retiredOperations) {
     const operation = (openapiDocument.paths as Record<string, Record<string, {
       deprecated?: boolean; description?: string; responses?: Record<string, unknown>;

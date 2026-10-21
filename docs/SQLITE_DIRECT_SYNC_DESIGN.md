@@ -2,11 +2,11 @@
 
 日期：2026-10-12，Asia/Shanghai。审查源码基线：`7a6408a`。
 
-**状态：用户目标已明确；本文件是完整实施设计，不表示改造已经上线。**
+**状态（2026-10-20 更新）：本文件是交付设计 + 验收合同。HEAD `9db450f` 上 §3–§13 的**主体设计**已落地并上线（直连车道 2026-10-14 起生产；见 §15），本文件继续作为 §14 验收矩阵与 §14.1 禁止操作判据的权威来源，代码注释按节号引用它。仍开放/未完成、不得当成已通过的只有两处：§5.2 的**大包分片（A08）未实现**（`direct-sync-ingest.ts` 恒 `parentBatchId: null`，`import_batch_partitions` 无生产写入方），§14.3 的 **P01–P06 未在目标云机实测**（§14.4 禁止用开发机空库替代）；§14.5 真机清单仍未签收。**
   
 保留 SQLite，不引入 PostgreSQL 或 Redis；不修改 TypeScript 评分算法的领域语义。
   
-范围为现有服务端、桌面 Web 和原生 iOS；不扩展冻结的窄屏 Web。
+范围：现有服务端与原生 iOS。桌面 Web 已于 2026-10-17 随 D17/ADR-006 退役删除，本文件保留的 Web 字样只作为历史设计前提，**不构成对 Web 的现行要求**。
 
 ## 文档使用方式
 
@@ -21,7 +21,7 @@
 
 **交付原则：先确认本批原始数据已经持久保存，再异步更新分析；不复制或替换主库。**
   
-下列验收项均为待实施后的通过条件，不是当前版本已经通过的声明。
+本节验收项按**合同**判读，不按「已全部通过」判读：§14.1 禁止操作与 A01–A07、A09–A18 已有实现、行为守卫或结构判据（见 §15 与各条留存的证据）；**A08（大包分片）仍未实现，P01–P06 仍未实测**。未测项不得标成「通过」。
 
 ## 1. 不可折中的产品要求
 
@@ -62,7 +62,11 @@
   
 **它们不是整份主库副本，从不替换正式 SQLite。**
 
-## 2. 当前实现为什么不能只删两处函数
+## 2. 改造前现状：为什么不能只删两处函数（as-of 2026-10-12，保留为设计依据）
+
+> ⏱ 本节描述的是 **2026-10-12 改造前**的旧链路，用于解释「为什么必须一起改事务所有权/输入版本/读模型」。
+> HEAD 上该链路已在运行期删除：`ImportWorker` 只剩两条直连车道，车道否决即 `ImportLaneRefusal` 终态失败
+> （`apps/api/src/import-worker.ts`）；候选链只保留给 CLI / 隔离维护使用。**不要把本节读成当前实现。**
 
 现有入口：
 
@@ -77,7 +81,7 @@ ImportWorker.run
   → activateDatabase / checkpoint / rename / quick_check
 ```
 
-目前只有受限 `data-only` 支持主库事务；混合评分批次仍走旧路径。
+当时只有受限 `data-only` 支持主库事务；混合评分批次仍走旧路径（HEAD 已由 PR4 2e 扩到 `deltaMode:"full"`，车道判定见 `direct-sync-plan.ts`）。
 
 直接删除 `createCurrentBackup` 并返回 null，会改变 CLI 选择，误走新库 import。
   
@@ -334,9 +338,14 @@ dirty entities / before-after times
   
 旧 active release保持可读。完成结果校验后，短事务只更新发布指针和任务状态。
 
-### 9.1 解决当前“旧分数 JOIN 新训练”的读模型
+### 9.1 解决“旧分数 JOIN 新训练”的读模型（as-of 2026-10-12 现状；改造已由 PR5 S1–S6/S10 落地）
 
-现有训练读取部分 JOIN 当前 workouts/training_sessions，必须同时改造：
+> ⏱ 以下是 2026-10-12 的读侧现状与改造要求。HEAD 上已落地：`workoutPresentConditionSql`/`sessionFactPresentConditionSql`（事实侧排除已删）、
+> v43 `readable_route_points` 视图与路线版本读侧、`currentFacts`/`publishedAnalysis` 两块视图（`factsAnalysisContractVersion:1`）、
+> `route_points` 双写退役。**仍未接线的是「今日处方/锁课/手表导出按 freshness 降级」**（PR5 S7）与缓存五元组（S9）——
+> 见 `SQLITE_DIRECT_SYNC_PR5_DESIGN.md` §5。
+>
+> 当时的现状：
 
 - 已发布分数、距离/时刻、canonical选择、route version等使用 release冻结输入或相应历史版本。
 - 当前事实列表可以及时显示新增/更正，未分析字段是 null/待分析，不配上旧分数冒充一致。
@@ -608,7 +617,7 @@ seedImportGenerations全库补种
 | A15 | 项目完全退出备份 | 同步、启动、升级脚本和维护入口均不创建、验证、轮换或删除备份；不等待外部备份。已有归档不被删除。 | 入口检查、备份操作监视、归档清单前后对比。 |
 | A16 | 正常持久性与数据库故障 | 保留外键、约束、WAL 和 FULL COMMIT；corruption/EIO 明确暂停写入，不自动替换主库或创建空库。 | 配置断言、故障模拟、日志和主库身份检查。 |
 | A17 | 客户端状态和领域语义 | raw COMMIT 后可显示“已保存，分析更新中”；不再显示备份/临时库/换库阶段。评分语义和业务发布 gate 不变。 | 协议兼容测试、文案/状态截图、既有评分与 gate 回归。 |
-| A18 | 改动范围与迁移 | 不新增 PostgreSQL/Redis；只新增迁移，不修改历史 checksum；冻结的窄屏 Web 不修改。 | 依赖、diff、迁移校验及桌面回归报告。 |
+| A18 | 改动范围与迁移 | 不新增 PostgreSQL/Redis；只新增迁移，不修改历史 checksum；已退役的 Web（D17）不重建、不修改。 | 依赖、diff、迁移校验及 Postgres/Redis 依赖检查报告。 |
 
 ### 14.3 性能验收标准
 
@@ -659,7 +668,11 @@ seedImportGenerations全库补种
 
 ## 15. 当前边界与需要批准的后续操作
 
-本文件完成的是设计。实施状态（2026-10-14）：
+本文件完成的是设计。**HEAD（2026-10-20）状态：§3–§13 已实现并上线；仍开放 = §5.2 大包分片（A08）、§14.3 P01–P06 目标云机实测、§14.5 真机清单。**
+运行期入口：`ImportWorker` 只有 `data-only` + `direct-sync` 两条车道（`IMPORT_LANE_SEQUENCE`），两条都拒收即终态失败（`ImportLaneRefusal`），不再回退旧候选链路；候选/换库相关方法只服务 CLI 与隔离维护（该边界已固化为 [DECISIONS](DECISIONS.md) D18）。§14.1 的禁止操作由 `apps/api/test/direct-sync-prohibited-operations.test.ts` 等守卫执行，不靠「函数改名或 UI 提前成功」。
+HEAD 之后新增的迁移已到 v45（v36 软删、v39 分析输入绑定/覆盖、v40 夜间范围读、v42–v43 读侧与 `readable_route_points`、v44 覆盖证据、v45 批次 dirty 证据），本文件的 §13 分 PR 顺序与 §14.2 判据仍适用；新增迁移仍只追加、不改历史 checksum。
+
+以下为 2026-10-14 的上线记录（保留为时间点证据）：
 阶段 1 观测版（`8ab8fd5`）已上生产（`directSyncBounds` 契约 + 拒因结构化 + lane 遥测）；
 阶段 2 iOS 分批版已发布（`d428c7b`，含 `3831817` 的 Mac 验收阻断修复）；
 阶段 3 服务端收口版（显式拒绝、删除 backup/candidate/swap 运行期调用链、文案收口、
@@ -674,7 +687,7 @@ xml/records、route 无预算维度，且停止点可超尾页 ⇒ 仅“iOS 分
 同日放宽直连单批上界（xml 2 → 8 MiB、route 32 → 64 MiB，见 `direct-sync-ingest.ts` 常量注释）
 以先恢复数据流。iOS 侧 route 预算维度**已补**（`DirectSyncBatchBudget` 增 maxRouteFiles / maxRouteBytes 两维；收集侧为“先判后取”闸门——`HealthKitExport.swift` 逐 workout 循环，状态与文件同进同退，余量由 rediscovery 轮转补）。
 
-🔴 2026-10-14 尾页超额**已根治**（方案见 `deliverables/DIRECT_SYNC_TAIL_PAGE_ROOT_FIX_PLAN_2026-10-14.md`）：
+🔴 2026-10-14 尾页超额**已根治**（方案与实测证据见 `docs/PROJECT_REVIEW.md` 的已收尾批次表；当时的一次性记录已不入 `docs/`，需要时从 git 取回）：
 「服务端 8 MiB 对『预算 ×0.9 + 尾页』留有余量」**不再是一条判据，只是兜底**。
 根因是「提交单位」与「上界单位」不匹配——服务端按**字节**判上界（`statSync(export.xml).size`），
 iOS 按**页**提交（`HKAnchoredObjectQuery` `limit: 1000`），而预算检查发生在页**已落盘之后**

@@ -1,7 +1,7 @@
 # 算法合同与验收
 
-维护日期：2026-10-18。本文是现行工程合同，取代已过期的 V1 PRD、分阶段 V2 方案和各批次状态报告。
-代码已实现、候选政策、数据实证与实际激活必须分开表达。当前核验结果见 [项目审查](PROJECT_REVIEW.md)；运行操作见 [运维](OPERATIONS.md)。
+维护日期：2026-10-20。本文是现行工程合同，取代已过期的 V1 PRD、分阶段 V2 方案和各批次状态报告。
+代码已实现、候选政策、数据实证与实际激活必须分开表达。历史核验时点见 [项目审查](PROJECT_REVIEW.md)（2026-09-30 快照，不作为当前结论）；2026-10-20 的发布证据见 [统一训练排课 v2 发布记录](../deliverables/UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)；运行操作见 [运维](OPERATIONS.md)。
 
 ## 0. 范围与证据边界
 
@@ -202,7 +202,7 @@ unknown prehistory/未同步日不能直接当作已观察到的休息日。Load
 - [完整课分配](../apps/api/src/coach-complete-plan.ts)用于新周生成和教练周生成：基础轻松结构为5分钟热身、20分钟工作、5分钟整理；沿用已有节奏3×8分钟与间歇4×800m构建器和既有强度规则。先减少整课再经过唯一周校验器，最终删除不满足完整剂量的课后重新检查低强度占比；不凭显示30分钟放行，不把剩余km均分给剩余日。
 - 今日无计划/自动建议使用同一剂量出口；今日已有跑步或programme暂停/结束/到期不新增自动课。人工/锁定历史保留兼容口径，不把它们称为新自动保证；旧来源不明处方未静默迁移。完整剂量不能绕过恢复、14天保护、现行容量或工作量限制。
 - [赛前策略](../apps/api/src/race-plan-policy.ts)的14天保护与骨架阶段分离；`executionPolicy`是解释元数据，实际限制仍在服务端。固定5K例`2026-10-18 → 2026-11-01`返回phase=peak及14天保护，而非第二个taper阶段。
-- S/H纯函数仍可单独离线评价；[新合同运行服务](../apps/api/src/coach-loop-runtime.ts)已经把它接入显式接受policy hash后的发布：S20、实际20、H26且门控通过时，完整30分钟课可以在真实控制库事务中获准。训练前56日单次参考、最近7日异常与追加次数均参与判断，不改旧`weeklyCapacityKm`含义。原数据集未启用，新政策不是已验证医学安全线；具体证据及剩余验收见[实施状态](COACH_LOOP_IMPLEMENTATION_STATUS.md)。
+- S/H纯函数仍可单独离线评价；[新合同运行服务](../apps/api/src/coach-loop-runtime.ts)已经把它接入显式接受policy hash后的发布：S20、实际20、H26且门控通过时，完整30分钟课可以在真实控制库事务中获准。训练前56日单次参考、最近7日异常与追加次数均参与判断，不改旧`weeklyCapacityKm`含义。原数据集未启用，新政策不是已验证医学安全线；方案口径与剩余验收见[教练闭环优化方案 §0/§11](COACH_LOOP_OPTIMIZATION_PLAN.md)，时点实测见[项目审查](PROJECT_REVIEW.md)。
 - `npm run data:coach-replay -- --output /tmp/rai-coach-replay.json`复用`replayModelPair`的冻结输入、显式时钟与双次确定性检查；基础轮4个子场景，继续实施后扩为13个局部子场景，仍不是22类场景全验收。`npm run test:coach:mutation`在隔离源码副本先编译语义突变，再要求行为断言失败；编译失败不计成功拦截。产物明确实际发布、整体最小修补oracle、长期效果为`not_evaluable`，小窗口oracle另有独立测试。
 
 **同日继续实施的增量：**
@@ -212,7 +212,7 @@ unknown prehistory/未同步日不能直接当作已观察到的休息日。Load
 - 既有`run-coach refresh`增加保守语义相等出口：事实/解释变动但执行内容及配置相同时不写goals/history，显式operationId沿用发布事务幂等，不仅为了`adaptationKey/adaptedAt`增修订；窗口外课表保留并参与预算。这尚不是新授权或最小搜索的完整发布合同。
 - [执行评价](../apps/api/src/coach-execution-assessment.ts)、[最小修补](../apps/api/src/coach-plan-repair.ts)、[主观反馈](../apps/api/src/coach-subjective-feedback.ts)、[差距装配](../apps/api/src/coach-goal-gap.ts)保留可独立回放的纯函数，新合同消费其结果：真实步骤/信号适配、确认与未知统计、已知不满足限制、今日反馈与目标差距分别装配。原始信号首次可得时间缺失时仅认证本次评价，不能冒充历史as-known-then。
 - v32仅追加主库反馈修订、命令幂等和预测伴随摘要表；不修改旧迁移checksum或封存bundle。反馈保存/撤回不重算Fitness，不复制RPE；预测通过显式异步命令调用一次既有构建器，提取摘要后事务复核身份。GET只查兼容摘要，不构建预测，不自动排队。
-- 回放包含原13个纯模块子场景及12个真实SQLite发布子场景；另有HTTP、失败回滚、100次只读GET、模板与主库事实回归。它们覆盖各场景的选定断言，不等同于整份78条验收已经完成，也不证明个体训练收益。完整结果、跳过项和剩余人工审阅见[实施状态](COACH_LOOP_IMPLEMENTATION_STATUS.md)。
+- 回放包含原13个纯模块子场景及12个真实SQLite发布子场景；另有HTTP、失败回滚、100次只读GET、模板与主库事实回归。它们覆盖各场景的选定断言，不等同于整份**教练方案的 78 项 AC ID**（与 §16.1 的 80 条验收是两份清单）已经完成，也不证明个体训练收益。方案口径与完整结果入口见[教练闭环优化方案 §0/§11](COACH_LOOP_OPTIMIZATION_PLAN.md)，时点实测见[项目审查](PROJECT_REVIEW.md)。
 
 ## 10. 分区
 
@@ -444,7 +444,7 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。同�
 
 ### 16.2 核验层级
 
-默认 typecheck、npm test、check:docs、check:acceptance-matrix；iOS 另有 test:ios。不因“完整审查”运行冻结窄屏（窄屏冻结区已随 Web 前端一起退役）。
+默认 typecheck、npm test、check:docs、check:acceptance-matrix；iOS 另有 test:ios。本仓库不存在 Web/responsive/390px 门禁或测试面，不要为退役前的窄屏冻结区保留任何判据。
 iOS 自动门禁不替代真机 HealthKit/后台/地图与视觉验收；Python 训练合同另跑 ml:test。
 精度未校准、原库未部署、失败或平台跳过必须分别列出。
 

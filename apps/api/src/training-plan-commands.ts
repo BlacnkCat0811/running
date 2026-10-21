@@ -459,17 +459,70 @@ export interface TrainingPlanRefreshDeps {
   fingerprint: () => string;
 }
 
-/** HTTP-facing facade: one entry point per operation, with explicit error mapping. */
-export function trainingPlanCommandError(error: unknown): { statusCode: number; code: string; message: string } {
+/**
+ * Redacted form of an internal error for the server log.
+ *
+ * The raw `Error.message` may carry an absolute database path, a SQLite
+ * diagnostic or a token pasted into a connection string. The wire never sees
+ * it; the log should not either. Keep the error type/code (useful for triage)
+ * and a message with paths/credentials replaced.
+ */
+export function internalErrorLogDetail(error: unknown): { name: string; code?: string; message: string } {
+  const name = error instanceof Error ? error.name : typeof error;
+  const rawCode = (error as { code?: unknown } | null)?.code;
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = rawMessage
+    .replace(/(?:\/Users|\/home|\/var|\/tmp|\/private|[A-Za-z]:\\)[^\s"']*/g, "<path>")
+    .replace(/\b(token|secret|password|authorization)\s*[=:]\s*\S+/gi, "$1=<redacted>")
+    .replace(/\bBearer\s+\S+/gi, "Bearer <redacted>");
+  return { name, ...(typeof rawCode === "string" ? { code: rawCode } : {}), message };
+}
+
+/**
+ * HTTP-facing facade: one entry point per operation, with explicit error mapping.
+ *
+ * 2026-10-21 (PR-01): unknown exceptions used to reach the wire verbatim. That
+ * leaked internal paths, SQLite messages and anything else an Error message may
+ * carry (probe E-06). The rule is now a whitelist:
+ *
+ * - `PlanOperationError` is a deliberate business rejection; its stable
+ *   `code`/`message` are the contract and stay unchanged;
+ * - a unified-state CAS conflict is a known concurrency outcome (the English
+ *   store message names an internal revision, so it is replaced by a stable,
+ *   user-facing sentence);
+ * - a `TrainingPlanStateError` is an internal store failure; only its code is
+ *   stable, never its message;
+ * - anything else is an unexpected 500 with one fixed message.
+ *
+ * The original error is handed to `report` for a sanitized, requestId-linked
+ * server log. Nothing from that callback is serialized to the client.
+ */
+export interface TrainingPlanCommandErrorContext {
+  requestId?: string;
+  /** Internal-detail sink (server log). Must never write to the HTTP response. */
+  report?: (detail: { error: unknown; requestId?: string }) => void;
+}
+
+export function trainingPlanCommandError(
+  error: unknown,
+  context: TrainingPlanCommandErrorContext = {}
+): { statusCode: number; code: string; message: string } {
   if (error instanceof PlanOperationError) {
     return { statusCode: error.statusCode, code: error.code, message: error.message };
   }
   if (error instanceof TrainingPlanStateConflictError) {
-    return { statusCode: 409, code: "training_revision_conflict", message: error.message };
+    return {
+      statusCode: 409,
+      code: "training_revision_conflict",
+      message: "训练状态已更新，请重新读取并重新预览；不会自动提升 expectedRevision。"
+    };
   }
   if (error instanceof TrainingPlanStateError) {
-    return { statusCode: 503, code: "training_plan_state_invalid", message: error.message };
+    context.report?.({ error, ...(context.requestId === undefined ? {} : { requestId: context.requestId }) });
+    return { statusCode: 503, code: "training_plan_state_invalid",
+      message: "统一训练状态暂不可读，请稍后重试；请勿重复提交。" };
   }
+  context.report?.({ error, ...(context.requestId === undefined ? {} : { requestId: context.requestId }) });
   return { statusCode: 500, code: "training_plan_command_failed",
-    message: error instanceof Error ? error.message : String(error) };
+    message: "训练命令处理失败，请稍后重试；原计划保持不变。" };
 }

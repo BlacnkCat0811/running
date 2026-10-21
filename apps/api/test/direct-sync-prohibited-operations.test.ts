@@ -63,7 +63,7 @@ const uuid = "00000000-0000-0000-0000-00000000000a";
  * 所以下面每条断言都必须同时钉住**新的**事实（见 `laneAttempts`）。
  */
 const databaseTaskOperations: Record<ImportDatabaseTask["operation"], true> = {
-  verify: true, audit: true, checkpoint: true, "import-lanes": true
+  verify: true, audit: true, checkpoint: true, "noop-receipt": true, "import-lanes": true
 };
 
 interface Guard {

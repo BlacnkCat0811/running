@@ -41,7 +41,7 @@ iOS 真编译与模拟器验收在 Windows 上拿到的是**显式跳过**，既
 - macOS、Xcode 和 iOS 17 或更新的 SDK。
 - 已安装本项目使用的 iOS 平台组件。
 - CocoaPods（高德 SDK 由 `apps/ios/Podfile` 引入）。
-- Apple ID/开发团队可签名；HealthKit capability 已打开。
+- Apple ID/开发团队可签名；HealthKit capability 已打开（含背景投递；排期课表还需要体能训练写授权）。
 - iPhone 与 API 服务处于同一局域网，或通过个人 VPN 访问。
 
 ## 构建与运行
@@ -62,10 +62,13 @@ npm run dev:device
 npm run open:ios
 ```
 
-打开的是 `apps/ios/RAI.xcworkspace`（**不是** `RAI.xcodeproj`），选择 RAI scheme 和真实 iPhone，
+打开的是 `apps/ios/RAI.xcworkspace`（推荐入口），选择 RAI scheme 和真实 iPhone，
 检查 Signing & Capabilities 中的 Team，执行 Build/Run。项目最低部署版本保持 iOS 17。
 
-高德 SDK 以 pod 形式链接，只打开 `RAI.xcodeproj` 会构建失败（`ld: framework 'Pods_RAI' not found`）。
+`Podfile` 的 `post_integrate` 会从 `RAI.xcodeproj` 移除空的 `Pods_RAI.framework` 聚合链接，
+所以**执行过 `pod install` 之后**，单独打开 `RAI.xcodeproj` 也可以构建（不会再报
+`ld: framework 'Pods_RAI' not found`）。未执行 `pod install` 时两种打开方式都缺 Pods/高德框架；
+不要对生成的那处改动做 `git restore`。
 
 > **macOS 专属（前置：macOS + 已装 CocoaPods）** —— Windows 上没有 CocoaPods，
 > 这步不存在"跳过"以外的选项，所以只作为 macOS 片段保留，不进 npm script。
@@ -174,12 +177,13 @@ Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 
 
 ### 模拟器验收不到健康同步
 
-上面的命令产出的是**无签名模拟器包**，因此**没有 HealthKit 能力**：项目只在 device SDK 上挂
-`CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = RAI/RAI.entitlements`，模拟器包 `codesign -d --entitlements` 为空。
-此时 HealthKit 调用直接返回
+上面的命令产出的是**无签名模拟器包**（`CODE_SIGNING_ALLOWED=NO`），不签名也就不嵌入
+entitlements，因此**没有 HealthKit 能力**。工程配置本身对 device 与 simulator 都挂着
+`CODE_SIGN_ENTITLEMENTS = RAI/RAI.entitlements`（Debug/Release 均无条件）；缺能力的原因是这次构建
+跳过了签名，不是「只在 device SDK 上挂 entitlements」。此时 HealthKit 调用直接返回
 `Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement."`，
-`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift` 的
-`readAuthorizationState()` 四分支，文案见 `RAI/HealthKitExport.swift` 的 `HealthKitExportError`），
+`HealthKitExport.readAuthorizationState()` 按设计 fail closed（`HealthKitReadAuthorization` 四值：
+`unavailable` / `notDetermined` / `decided` / `unknown`，失败文案见 `HealthKitExportError`），
 首页与设置页显示「同步未完成」。
 
 模拟器是否有样本/授权取决于该实例，不能沿用旧机器“Health库为空”的结论。
@@ -190,13 +194,24 @@ Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 
 
 在原生 App 的“设置”填写 API 服务地址和 Token。连接成功后应能看到 `serverId`、`athleteId`、`datasetEpoch` 和协议版本。不要填写手机上的 `127.0.0.1`；服务端应绑定手机可达地址，并按现有策略配置 HTTPS/局域网访问。
 
-在“设置”点“同步健康数据”，只申请读取权限。App 通过现有 ZIP/XML 导入接口上传，不向 Apple 健康写入。后台同步由三个机制承担：HealthKit background delivery 负责“知道有变化”，`BGProcessingTask`（`app.rai.running.health-sync`）负责“给几分钟 CPU 做完导出与导入提交”，带 identifier 的 background URLSession 负责“把字节搬完”。**系统调度不可承诺具体时刻**；能承诺的只有两件事：一是已上传/已导入的进度一定落盘、下次唤醒能续接，二是前台打开时按权限、网络和服务状态重试补齐。真机验收清单见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`。
+在“设置”点“同步健康数据”，申请 **HealthKit 读权限**（健康样本/记录只读）。排期 Apple Watch 课表另需
+**WorkoutKit 的体能训练写授权**（`NSHealthUpdateUsageDescription`，见 `WorkoutKitBridge` 的
+`WorkoutScheduler.requestAuthorization()`）；该授权只覆盖训练排期，App 不写、不改健康样本与记录。
+App 通过现有 ZIP/XML 导入接口上传。后台同步由三个机制承担：HealthKit background delivery 负责“知道有变化”，`BGProcessingTask`（`app.rai.running.health-sync`）负责“给几分钟 CPU 做完导出与导入提交”，带 identifier 的 background URLSession 负责“把字节搬完”。**系统调度不可承诺具体时刻**；能承诺的只有两件事：一是已上传/已导入的进度一定落盘、下次唤醒能续接，二是前台打开时按权限、网络和服务状态重试补齐。真机验收清单见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`。
 
 ## 排障
 
-### 跑步教练
+### 训练计划与排课
 
-今日页“打开训练计划”进入新版自适应跑步教练，可创建目标、修改训练偏好、暂停/继续或结束计划。独立旧编辑器在无教练或已结束时由“手动课表”进入；进行中不支持逐日改期。完整边界见 [RUN_COACH](RUN_COACH.md)。
+训练页是**统一入口**（`TechUnifiedTrainingView`）：模式、准入、七日意图都在这里显示，配置与
+暂停/继续/结束走教练闭环命令；设备侧排期不变量（写前日志、强读回、先撤回再下发）见
+[IOS_NATIVE_PLAN_SCHEDULING](IOS_NATIVE_PLAN_SCHEDULING.md)。旧「跑步教练」独立编辑器已随
+`/v1/mobile/run-coach` 退役（410），不要再按旧流程排查。
+
+⚠️ 训练页仍保留「手动课表与本周安排」入口，但它的保存/预览/确认调用的是**已退役的旧写路由**
+（`PUT /v1/mobile/goals`、`POST /v1/mobile/workout-plan/preview`、`POST /v1/mobile/workout-plan/confirm`），
+在当前构建上会收到 `410 legacy_surface_retired`。这是**已知缺口 AR-1**（[PROJECT_REVIEW](PROJECT_REVIEW.md)），
+不是用户操作错误；需要调整周计划时以训练页的 v2 配置命令为准，修复前不要重试旧保存。
 
 暂停或结束后，应显式点“撤回 RAI 系统旧排期”并检查同步结果，不能把服务端状态变更当成设备已清空。模拟器用例 15/16 覆盖教练生命周期、大字体和目标时间计划；运行时可设 `RAI_VISUAL_DATABASE` 指向隔离验收数据库，不使用真实健康数据也能验证创建流程。
 
@@ -206,12 +221,12 @@ Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 
 | 无法连接 | 确认桥接网络、服务监听地址、手机与主机路由和证书 |
 | 页面可见但数据过期 | 展开首页「数据状态」横幅的「数据覆盖明细」，分别看三件事：**同步状态**（`sync.status`：`正常`/`尚未同步`/`同步失败`）、**训练数据截至**（`latestDataDate`）、**最近健康样本**（`coverage.latestHealthSampleAt`）。只有 `同步失败` 才需要重新同步 HealthKit；「尚未同步」表示这台设备还没跑成过一次刷新 |
 | 横幅写「今天没有恢复监测记录」 | 预期结果，不是故障：没戴表的夜晚属于**覆盖缺口**，只减少一份判断依据，不构成负面判断，也不再阻断锁定安排。要让今天纳入恢复数据，同步一次含昨夜记录的 Apple Health 导出即可 |
-| 目标保存冲突 | 重新读取服务端目标，确认后再保存 |
+| 手动课表保存/预览/确认返回 `410 legacy_surface_retired` | 已知缺口（AR-1）：当前构建的手动课表入口仍调用已退役的旧写路由。这不是数据损坏；改用训练页的 v2 配置（模式/比赛目标），不要重试旧保存 |
 | 训练详情没有底图 | 先确认已同意隐私说明（设置 → 地图底图）；再确认 `pod install` 打印了「已注入高德 Key」，Key 已绑本 App Bundle ID |
 | 同步中断 | 再次打开 App，任务会从本机 `sync.sqlite` 和保留的 ZIP 恢复 |
 | 模拟器上「同步未完成」 | 预期结果：模拟器包没有 HealthKit entitlement、Health 库也没有样本（见上文「模拟器验收不到健康同步」）；到真机按「首次连接」授权后验收 |
 | 清缓存后内容消失 | 重新联网读取；服务端数据、凭证和同步任务不应被清除 |
-| `ld: framework 'Pods_RAI' not found` | 用 `RAI.xcworkspace` 构建；先 `cd apps/ios && pod install` |
+| `ld: framework 'Pods_RAI' not found` | 先 `cd apps/ios && pod install`。`post_integrate` 会在安装后移除空的聚合框架链接；没跑过 `pod install` 才会出现这个链接错误 |
 | `bad interpreter: /bin/bash^M` | 脚本被 CRLF 污染了。`.gitattributes` 已把 `*.sh`/`*.py`/`*.swift`/`*.pbxproj` 钉成 `eol=lf`，核对用 `git ls-files --eol <path>`（要达到 `i/lf w/lf`）；经 zip/共享目录（而不是 git）拷过来的树不享受这条保护，先确认行尾再跑 |
 | `pod: command not found` | CocoaPods 已装但不在 PATH：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods` |
 | `unable to find utility "simctl"` | 命令行工具指向了 CommandLineTools：`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` 或 `sudo xcode-select -s /Applications/Xcode.app` |
@@ -226,7 +241,8 @@ Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 
 
 以下不由模拟器构建或纯逻辑测试替代；尚未现场执行时标记未验证。
 
-- 首次、拒绝、部分或撤销HealthKit读权限；未授权类型保持未知，不出现写权限。
+- 首次、拒绝、部分或撤销 HealthKit **读**权限；未授权类型保持未知。**不**请求健康样本/记录的写权限；
+  WorkoutKit 的体能训练写授权只用于排期，不得写入或修改健康样本。
 - 前台首次导出、同批重传、获jobId后的断网/杀进程/重启续接；anchor只在导入成功后前移。
 - 锁屏、系统后台唤醒/过期、background URLSession回调与前台主动同步竞争，不丢新意图、不重复提交。
 - 服务URL、serverId、athleteId、datasetEpoch改变时，旧任务/缓存不串目标；未知身份不当成确认空。
@@ -237,29 +253,67 @@ Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 
 
 记录设备、OS/App版本、数据scope、步骤/结果和脱敏证据；不得上传真实健康导出或凭证。
 
-### 直连增量同步的真机验收（§14.5 第七项 / §14.2 A07、A17）
+### 直连增量同步的真机验收（人工清单，2026-10-20 内联）
 
-上位判据是 [SQLite 直接增量同步设计](SQLITE_DIRECT_SYNC_DESIGN.md) §14.5 的「真机 HealthKit 自动增量、
-续传、有效游标保持和新状态完成手动验收」，逐条步骤、预期观测、留存证据与失败判据见
-[PR6 真机验收清单](../deliverables/DIRECT_SYNC_PR6_DEVICE_VERIFICATION_2026-10-13.md)。
-四条最容易判错方向的边界先写在下面，**它们的失败形态都不是报错，而是"看起来正常"**：
+上位设计见 [SQLite 直接增量同步设计](SQLITE_DIRECT_SYNC_DESIGN.md) 的真机验收一节；本清单自包含
+（原「PR6 真机验收清单」交付快照已并入本文并从仓库删除，不要再去 deliverables 找它）。
 
-- **有效游标保持**：连续两轮同步里，第二轮**不得**重导历史。第一轮之后 App 若被强杀，第二轮必须从已提交水位继续；
-  判据是服务端的批次/来源数量，不是界面耗时（§14.2 A02）。
-- **续传**：`needsContinuation` 为真时**不得**清空后台待办意图 —— 清掉的后果是"用户不打开 App 就再也没人发下一批"，
-  而界面当时显示的是成功（§10.2、§5.1）。
-- **新状态文案**：raw COMMIT 之后应看到「健康数据已保存，分析更新中」；分析终态由一次独立对账取得，
-  之后才可能变成「分析已更新」或「健康数据已保存，分析更新失败，可重试分析」。
-  ⚠️ 对账只在某一次同步收尾时触发，**冷启动不会主动对账** ⇒ 别把"重启后没立刻看到终态文案"记成文案失效（§10.3）。
-- **老服务端**（未宣告 `factsAnalysisContractVersion`）：必须**仍是旧行为**（游标正常推进）。
-  判错方向的后果是每次唤醒都 hold、窗口被反复重导，而用户看到的是"同步完了"（§10.2「保留旧等待含义」）。
+**先抄记录字段**（缺一项这次验收就不算数）：设备型号 / iOS 版本 ｜ App 版本 + build + commit ｜
+API 地址 / `serverId` / `athleteId` / `datasetEpoch` ｜ 服务端是否宣告 `factsAnalysisContractVersion`
+（新服务端 = 1 / 老服务端 = 缺失）｜ 数据 scope ｜ 起始游标与水位 ｜ 数据来源：**只允许合成或脱敏样本**。
+
+**D1 有效游标保持**
+
+1. 完整同步到成功，记录游标与水位。
+2. **不新增任何数据**再触发一轮：不得重导全历史；服务端回答「已是最新」；**游标与水位不得回退**。
+   若这一轮反复失败，按 receipt-less 成功路径的接线问题排查，**不要**当成「UI 文案没生效」。
+3. 新增一条合成跑步记录再同步：只上传新增；文案依次为「读取增量」→「上传本批数据」→「保存新增与更正记录」；
+   不得出现旧语义（`备份并校验现有数据` / `临时数据库增量同步` / `验证完成正在切换本地数据库`）。
+4. 对照服务端实际收到的批次数与条数（`/v1/import-jobs` 或 worker 日志）。
+
+**D2 后台中断后续传**
+
+1. 制造较大增量（几百条合成样本）并开始同步。
+2. 上传/导入中途切后台或锁屏 ~30 s 再回前台：必须可续接，**不得显示「同步已取消」**（切后台不是用户取消）。
+   留证：`sync_tasks` 行的 `phase` / `jobId` / `payloadHash` / `needsContinuation` + 同一 `jobId` 的终态。
+3. 强杀 App 后重开再同步：从持久状态恢复，**不重复导入已确认批**；同 scope 重试返回**同一份回执**。
+4. 必留字段（脱敏）：`receiptId`、`ingestStatus`、`analysisStatus`、`dependencyGeneration`、
+   `publishedReleaseId`、`parentBatchId`，以及游标 blob **是否**推进。
+
+**D3 文案两阶段**
+
+- raw COMMIT 之后：预期「健康数据已保存，分析更新中」（`ingestStatus: committed` + `analysisStatus: queued`）；
+  `queued ≠ published`，此时**不得**说「分析已更新」。
+- 分析终态由一次**有界 `GET /v1/jobs/:id` 对账**取得：`succeeded` ⇒「分析已更新」；
+  `failed` ⇒「健康数据已保存，分析更新失败，可重试分析」。对账只在某次同步收尾时触发，
+  **冷启动不会主动对账** ⇒ 别把「重启后没立刻看到终态文案」记成文案失效。
+- 回执是**写入时刻**的凭证，不随分析推进而变；「回执没变」不等于「分析没跑」，
+  也不得把「分析状态推进」实现成改写凭证。
+
+**D4 老服务端不被新客户端卡死**
+
+把 App 指向**未宣告** `factsAnalysisContractVersion` 的服务端：必须仍是旧行为（游标正常推进、同步能成功），
+**不得**每轮 hold、更不得永远同步不完。失败判据：任一轮以「缺回执/契约缺失」结尾且游标不推进 ⇒ 本次验收失败。
+
+**失败判据（任一命中即失败，不得用「性能改善了」替代）**
+
+1. 正常批次期间出现任何禁止操作的可见痕迹；
+2. 无新增数据的一轮**反复失败**或游标回退；
+3. 切后台被说成「用户取消」；
+4. COMMIT 后重启/丢回复导致重复导入，或重试拿到**不同**回执；
+5. 用户看到旧语义中的任何一句；
+6. `analysisStatus: queued` 被显示成「分析已更新」。
+
+留证：脱敏截图（只截文案区）、`sync_tasks` 行与回执字段文本、服务端同一 `jobId` 的状态与时间线。
+**不得**提交原始健康数据、精确路线、上传 ZIP 或 SQLite。
 
 真机执行前先在 macOS 上跑 `npm run test:ios`：它本机（Windows）是**显式跳过**，不是通过。
 `HealthKitSync.swift` 不被任何回归编译，所以它的问题只在真机与结构门禁上暴露。
 
-## 训练计划/WorkoutKit 发布前设备清单（2026-10-09）
+## 训练计划/WorkoutKit 发布前设备清单（2026-10-09，2026-10-20 重新指向）
 
-当前自动回归与存储/排期职责见 [IOS_TRAINING_PLAN_IMPLEMENTATION](IOS_TRAINING_PLAN_IMPLEMENTATION.md)。
+当前自动回归与设备侧排期职责见 [IOS_NATIVE_PLAN_SCHEDULING](IOS_NATIVE_PLAN_SCHEDULING.md)；
+wire 字段与退役矩阵见 [IOS_NATIVE_API_CONTRACT](IOS_NATIVE_API_CONTRACT.md)。
 两条页面共用“手表课表”管理入口；无计划、已结束、离线也可显式“撤回 RAI 系统旧排期”。
 “上次记录”不是本次验证，重启初态为“未核验”。系统排期是 app 级，不是 server/dataset 各自拥有一份。
 

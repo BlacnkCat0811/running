@@ -31,6 +31,7 @@ npm run rust:verify
 
 [工具入口](../scripts/rust-worker.mjs)和仓库Rust toolchain/lock是版本依据。缺工具链时明确报告，不把未运行当通过。
 默认`RAI_IMPORT_ENGINE=typescript`。启用Rust须部署匹配二进制并核对`RAI_RUST_BINARY`；生产例子使用仓库外`/opt/rai-native/rai-data-worker`，不是凭空存在的文件。
+**范围澄清**：API 的两条运行期导入车道（`data-only`、`direct-sync`）把解析引擎固定为 TypeScript，并在车道判定里要求 `engine.name === "typescript"`；**把 `RAI_IMPORT_ENGINE` 设成 `rust` 会让所有 API 导入以 `engine_<name>` 被车道拒绝**（客户端稳定码 `direct_sync_unavailable`，终态失败、只退避重试），不会切换引擎。Rust 解析只在 **CLI `data:import` / benchmark** 生效；改 env 后需重启并核对实际 lane。
 `RAI_RUST_FALLBACK=typescript`仅允许受支持失败分类的回退，数据/资源错误不能吞掉；`none`适合验证失败方向或避免benchmark偷偷跑回TS。
 
 ## 云服务器就地构建

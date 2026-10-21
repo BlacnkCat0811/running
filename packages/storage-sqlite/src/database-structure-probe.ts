@@ -34,10 +34,14 @@ import { DatabaseSync } from "node:sqlite";
  * ## 因此允许使用它的场合
  *
  * 只在**同时满足**下面两条时可以替换 `quick_check`：
- * 1. 紧邻的别处仍有 `quick_check` 兜底（例如 `import-worker.ts` 发布后的那一次），
- *    损坏的库最终仍会在发布闸门被拦下并触发回滚；
+ * 1. 调用方已在**发布前**对私有候选执行过强校验（CLI 的
+ *    `activateStagingDatabase` 会在换库前跑一次 `PRAGMA quick_check`）；
  * 2. 被检查的文件是**本进程刚刚写完**的（内容正确性在写入时就已确定，
  *    发布后再全库扫描属于重复校验）。
+ *
+ * 2026-10-21（PR-10）：不再声称“API 发布后还有 quick_check 兜底”。运行期候选
+ * 链路已退役，`import-worker.activateDatabase` 的旧方法没有生产调用者；CLI 是
+ * 唯一仍会换库的导入路径，因此强校验必须在 CLI 候选发布前完成。
  *
  * 不满足这两条（例如「即将对主库做破坏性动作前的检测」）就**不要**换 —— 那里的误判代价不对称。
  */
@@ -125,4 +129,41 @@ export function probeDatabaseStructure(path: string): DatabaseStructureReport {
 /** 探针的布尔投影，方便替换 `isReadableDatabase` 风格的调用点。 */
 export function isStructurallyReadable(path: string): boolean {
   return probeDatabaseStructure(path).readable;
+}
+
+/**
+ * 发布前的强完整性检查（PR-10，2026-10-21）。
+ *
+ * `probeDatabaseStructure` 只回答“文件/header/schema 基本可读”，**不**遍历
+ * 数据页；页内静默损坏会被它漏掉。CLI 的候选库在公开前是唯一一次可以安全承受
+ * 全库扫描的时机（它不是 API 热路径），因此在这里跑一次 `PRAGMA quick_check`，
+ * 并附带 `PRAGMA foreign_key_check` 的计数作为结构一致性信号。
+ *
+ * 这不能证明“所有数据页无损”（`quick_check` 自身也有边界），但能把
+ * “弱结构探针通过、quick_check 拒绝”的候选挡在发布之外。
+ */
+export interface DatabaseIntegrityReport {
+  readonly ok: boolean;
+  /** 失败时的可诊断原因；成功时不出现。 */
+  readonly reason?: string;
+}
+
+export function quickCheckDatabase(path: string): DatabaseIntegrityReport {
+  let database: DatabaseSync | null = null;
+  try {
+    database = new DatabaseSync(path, { readOnly: true });
+    const row = database.prepare("PRAGMA quick_check").get() as { quick_check?: unknown } | undefined;
+    if (row?.quick_check !== "ok") {
+      return { ok: false, reason: `quick_check: ${String(row?.quick_check)}` };
+    }
+    const foreignKeyViolations = database.prepare("PRAGMA foreign_key_check").all().length;
+    if (foreignKeyViolations > 0) {
+      return { ok: false, reason: `foreign_key_check: ${foreignKeyViolations} violation(s)` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: `quick_check failed: ${describe(error)}` };
+  } finally {
+    try { database?.close(); } catch { /* 连接可能已不可用。 */ }
+  }
 }

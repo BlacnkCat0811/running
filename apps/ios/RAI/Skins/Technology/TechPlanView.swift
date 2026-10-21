@@ -339,14 +339,22 @@ private struct TechUnifiedTrainingView: View {
 
     // MARK: - 手动覆盖 / 提示
 
+    /// PR-02（2026-10-21）：手动周课表编辑器仍通过已退役的
+    /// `/v1/mobile/goals`、`/workout-plan/preview|confirm|generate` 写入。
+    /// 服务端对这些 method/path 一律 410，继续展示入口只会把用户送进
+    /// "重试永远失败"的循环。这里保留只读说明，等 PR-04 的 v2 Publisher 接管后
+    /// 再恢复；旧服务器页面（TechRunCoachView）不在本页，不受影响。
     private var manualPlanEntry: some View {
-        NavigationLink { TechManualPlanView() } label: {
+        VStack(alignment: .leading, spacing: 4) {
             Label("手动课表与本周安排", systemImage: "calendar.badge.clock")
-                .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                .font(.subheadline.weight(.medium))
+            Text("该编辑方式尚未适配当前服务；本版只展示服务端已发布的安排。")
+                .font(.caption2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .buttonStyle(TechPressStyle())
-        .foregroundStyle(TechColor.cyan)
-        .accessibilityIdentifier("training.manual-plan")
+        .foregroundStyle(TechColor.muted)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityIdentifier("training.manual-plan.retired")
     }
 
     private var notices: some View {

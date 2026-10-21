@@ -78,11 +78,15 @@ extension PlanReadIssue {
         case RaiAPIClientError.timedOut: code = .timeout
         case RaiAPIClientError.unauthorized: code = .unauthorized
         case RaiAPIClientError.decoding: code = .contractMismatch
-        case RaiAPIClientError.server(_, _, let status): code = status == 409 ? .revisionConflict : status == 404 ? .contractMismatch : .serverUnavailable
+        case RaiAPIClientError.server(_, _, let status): code = status == 409 ? .revisionConflict
+            // PR-01: HTTP 410 means the old plan surface was deliberately
+            // retired. It is a terminal upgrade state, never "server
+            // temporarily unavailable" — retrying the same read cannot help.
+            : status == 404 || status == 410 ? .contractMismatch : .serverUnavailable
         // 2026-10-18（审查 P2-6 收尾）：503 + Retry-After 仍只是"服务端暂时不可用"，
         // 不能因为携带重试提示就归成 contractMismatch；保留可重试分类。
         case RaiAPIClientError.retryableServer(_, _, let status, _):
-            code = status == 409 ? .revisionConflict : status == 404 ? .contractMismatch : .serverUnavailable
+            code = status == 409 ? .revisionConflict : status == 404 || status == 410 ? .contractMismatch : .serverUnavailable
         default: code = .serverUnavailable
         }
         return .init(code: code, message: error.localizedDescription)

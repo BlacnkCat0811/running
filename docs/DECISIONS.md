@@ -44,7 +44,7 @@
 拿不到被移除的坐标。两个"藏起我家"的实现就是两次泄漏机会。
 `polylines` 是**数组的数组**而不是带洞的一条线：断开是数据结构里的，不是绘制代码要记得遵守的标志位。
 
-隐私区写入同时携带 `revision` 和 GET 返回的 `stateToken`（完整集合的内容哈希）。数据库恢复可能复用同一 revision，因此不能只比较整数；前端保留草稿原状态令牌并阻止旧草稿保存，服务端在写事务中再次校验，不匹配返回 409。
+隐私区写入同时携带 `revision` 和 GET 返回的 `stateToken`（完整集合的内容哈希）。数据库恢复可能复用同一 revision，因此不能只比较整数；客户端（iOS）保留草稿原状态令牌并阻止旧草稿保存，服务端在写事务中再次校验，不匹配返回 409。
 
 **裁剪必须切断穿越**：只删区内的点会留下一条穿过隐私区的弦 —— 卡片上就是一条直穿家门口的直线。
 圆-线段求交把线段切在圆上，`gaps` 报告断了几处（不是"多少段压到圆"，那个数对读者没有意义）。
@@ -98,7 +98,7 @@
 
 旧 `llm` 课表若只有今日及历史日期，也记录今日保护，但不新增未来课表待确认状态；没有今日处方的历史课表保持不变。
 
-2026-10-10完整剂量基础实现：新自动生成改用[完整课分配器](../apps/api/src/coach-complete-plan.ts)，先构造有目标的完整结构，再决定次数；预算不足时先减少整堂课，而不是均分剩余日或缩成短课。生成、阶段/预算裁剪后及明确为`heuristic`的有效读取复核普通自动课至少1800秒与工作剂量。人工短课、历史及锁定文本不被改写；恢复/赛前保护使完整剂量不可行时休息。新生成尚不使用候选H填满周量，追加发布未启用；完整实施边界见[实施状态](COACH_LOOP_IMPLEMENTATION_STATUS.md)。
+2026-10-10完整剂量基础实现：新自动生成改用[完整课分配器](../apps/api/src/coach-complete-plan.ts)，先构造有目标的完整结构，再决定次数；预算不足时先减少整堂课，而不是均分剩余日或缩成短课。生成、阶段/预算裁剪后及明确为`heuristic`的有效读取复核普通自动课至少1800秒与工作剂量。人工短课、历史及锁定文本不被改写；恢复/赛前保护使完整剂量不可行时休息。新生成尚不使用候选H填满周量，追加发布未启用；完整实施边界见[教练闭环优化方案 §0/§11](COACH_LOOP_OPTIMIZATION_PLAN.md)。
 
 公开人工保存明确改为`manual`审计，不能继承旧自动来源后误套30分钟下限；现有`manual/heuristic/llm`枚举不扩展，设置更新不改审计。旧来源无法逐日区分的历史仍不声称完成新保证迁移。
 
@@ -150,11 +150,29 @@
 
 **这不是"暂停维护"，而是删除**：不得重建浏览器客户端、WebView 壳、macOS/桌面 target，也不得用 `npm run build`/`test:e2e:*`/`check-web-build.mjs` 把旧门禁偷偷加回来。`AGENTS.md` 同步改写为该口径。
 
-**后端端点不随客户端退役**：全部 `/v1` 路由保留，包括 36 条此前只有 Web 在用的端点（备份、模型/预测管理、数据运维、审计、导入管理、手工成绩、隐私区）。裁剪端点属于独立产品决策，且必须连同 `server-runtime`/`schemas`/OpenAPI 断言一起改，不能按「Web 清理」名义批量删。`/v1/performance` 是运维遥测端点，两边客户端都不调用，尤其不要误删。
+**后端端点不随客户端退役**：全部 `/v1` 路由保留，包括 36 条此前只有 Web 在用的端点（备份、模型/预测管理、数据运维、审计、导入管理、手工成绩、隐私区）。裁剪端点属于独立产品决策，且必须连同 `server-runtime`/`schemas`/OpenAPI 断言一起改，不能按「Web 清理」名义批量删。`/v1/performance` 是运维遥测端点，两边客户端都不调用，尤其不要误删。**「保留挂载」不等于「旧协议可用」**：后续由各自产品决定退役的接口仍留在路由表里，但返回 `410 Gone` + 稳定码（如 `legacy_surface_retired`）；旧客户端必须能区分 410 与 404（见 D18/D19）。36 条这个数字的出处是 [Web/macOS 退役实施计划](../deliverables/plan-remove-web-keep-ios-api.md) 的 A.2，不是自动计数门禁。
 
 **服务地址与鉴权边界**：iOS 首次连接手填 HTTPS 地址（Release 在应用层强制 https），Token 存 Keychain；API 必须配置 `RAI_API_TOKEN`——否则经 nginx 转发后 Host 不是 loopback，原生请求会被 local-request-security 判 403。`RAI_ALLOW_REMOTE_TOKEN_AUTH` 对 iOS 不是必需（无 Origin 的请求在两条分支都放行），但 `deploy-cloud` 测试钉住了该 env 行，退役它要单独改测试并走安全评审。
 
 **开发流**：`npm run dev:device` 只启动 API（`RAI_API_HOST=0.0.0.0`）并注入/打印开发用 `RAI_API_TOKEN`；旧的「vite 代理 5173」路径随 `apps/web` 一起消失。`RAI_WEB_PORT`/`RAI_ALLOW_LAN_DEV` 仅服务浏览器跨源，已随 Web 退役清理。
 
 **部署**：API 不再托管静态文件，nginx 只反代 `/v1`，站点根路径与 `/assets/*` 一律 404；systemd 前置检查删掉 `check-web-build.mjs`，发布脚本不再构建前端。回滚 = revert 退役批次 + 恢复备份的 nginx/systemd 文件；数据库 schema 未改动。
+
+## D18. 导入只有两条直连车道；备份创建/删除已退役
+
+依据：[SQLite 直接增量同步](SQLITE_DIRECT_SYNC_DESIGN.md) §11；导入双车道顺序与拒绝语义见 `apps/api/src/import-worker.ts`（`IMPORT_LANE_SEQUENCE`，`84d553e` 起）；备份创建/删除 410 见 `apps/api/src/server.ts`（`60678af`）；运维边界见 [运维](OPERATIONS.md)「备份、恢复、删除」。
+
+- **API 运行期的导入只有两条车道**：`data-only`（记录白名单 + 基线合同戳）在前、`direct-sync`（统一接收器）在后，顺序写死为一份显式清单（`apps/api/src/import-worker.ts` 的 `IMPORT_LANE_SEQUENCE`）。两条都不合格时抛 `ImportLaneRefusal`，这是**终态失败**（稳定 `failureCode`），不是回退信号。
+- **不再回退候选库/文件换库**：旧候选链路（整库备份 → 暂存副本 → CLI 导入 → 重算 → 换库）在 API 运行期已删除，保留的方法只服务隔离退役。`data:import` CLI 是**另一条离线车道**（候选暂存 → 校验 → 换库），只用于可丢弃副本/维护窗口，不是 API 的回退路径，也不是线上修复手段。
+- **备份创建/删除退役为 410**：`POST /v1/backups` = `backup_creation_retired`、`DELETE /v1/backups/:name` = `backup_deletion_retired`，两者都不碰任何文件。`GET /v1/backups`、`GET /v1/backups/:name` 与 `POST /v1/backups/:name/restore` 保留。
+- **边界要写准确**：API 在导入/重算/升级/普通同步中不再创建项目级整库备份；但 `restore` 仍写 `before-restore` 安全快照，`DELETE /v1/database` 仍写 `before-delete` 快照。常规一致性备份是**外部运维责任**，升级脚本只提示、不代做、不校验。见 [运维](OPERATIONS.md)「备份、恢复、删除」。
+
+## D19. 统一训练计划 v2 是唯一写入口（2026-10-20）
+
+依据：2026-10-20 产品决定与发布提交 `2f5f2b8`，见 [统一训练排课 v2 发布记录](../deliverables/UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)；核实过程见 [统一训练排课核实与落地](../deliverables/UNIFIED_TRAINING_PLAN_VERIFY_2026-10-20.md)。
+
+- **唯一写入口**：`/v1/mobile/training-plan/commands`（preview/submit/refresh）；读取走 `/v1/mobile/training-plan-state`（v1 兼容读取保留，v2 通过 `X-RAI-Training-Contract: 2` 协商）。`/v1/mobile/lock` 保留。
+- **旧计划写面退役**：`/v1/mobile/goals`（GET/PUT）、`/v1/mobile/run-coach`（GET/POST）、`/v1/mobile/workout-plan/{preview,confirm,generate}`（POST）共 **5 条路径、7 个操作**，路由保留挂载但一律 `410 Gone` + `legacy_surface_retired`（带 replacement）；不可达旧实现删除。旧客户端无法再编辑计划，410 与 404 必须可区分。
+- **控制库 schema v2**：`mobile_training_state` / `_history` / `_migration_audit` 为**加表**，不改历史行；schema 由 API 启动时幂等追加。**数据**迁移只由 `scripts/migrate-training-planner.mts` 执行（默认 dry-run；`--apply` 必须带 dry-run 的 `sourceDigest`；只开控制库，不参与 publication lock，需停服窗口）。
+- **iOS 统一入口是客户端路径**：统一训练页是正式入口。已知缺口（发布记录 §5 已承认）：统一页仍保留「手动课表」入口，其保存仍调用已退役的 `PUT /v1/mobile/goals`，在该构建上会失败；后续应重接统一命令或隐藏该入口。**不得**因为该缺口恢复旧端点。
 

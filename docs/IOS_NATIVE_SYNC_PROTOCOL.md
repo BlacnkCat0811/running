@@ -18,8 +18,8 @@ Route 使用逐 workout 的 UNKNOWN → ACTIVE → COOLING → SETTLED 伴生状
 旧机器收益和历史批次计数不作为当前性能承诺。
 
 2026-10-09：非 Workout 记录改为逐类型、无事件日期过滤的分页 anchored 增量。
-v2 manifest 携带类型作用域 UUID 删除，服务端 v30 映射保留历史数据库 ID；
-新增能力字段不改变原有同步身份版本。迁移、兼容性及升级边界见
+v2 manifest 携带类型作用域 UUID 删除，服务端从 v30 起用 `(sample_type, sample_uuid)` 映射保留历史数据库 ID
+（当前 schema 已到 v46，见迁移 CLI）；新增能力字段不改变原有同步身份版本。迁移、兼容性及升级边界见
 [HealthKit 记录同步 v2](HEALTHKIT_RECORD_SYNC_V2.md)。
 
 ## 状态机
@@ -73,7 +73,8 @@ v2 manifest 携带类型作用域 UUID 删除，服务端 v30 映射保留历史
 （`zipFileName` / `multipartFileName` / `multipartBoundary` / `uploadState` …）。
 v2 另存可选的 `pendingRecordCursors`，四条恢复成功路径都提交这份原批次的候选游标；
 老任务缺字段仍可恢复，且不清除已经提交的记录游标。新导出与 v2 批次恢复均检查服务端记录能力。
-🔴 `uploadTaskId` 这个键**目前没有任何写入点**：判据用的是 `RaiBackgroundUploadSession` 内部按
+🔴 `uploadTaskId` 从没有过**真实值**的写入点，唯一的写入是清空（`HealthKitSync` 的
+`clearStaleUploadState` 里写 `nil`）：判据用的是 `RaiBackgroundUploadSession` 内部按
 identifier 索引的两张表（`waiters` / `descriptions`），把它当"字节归系统"的依据会得到**恒假**，
 于是每次唤醒都重传一遍。结构门禁会拦下这类读取。
 任务在上传前创建，在 source/job ID 变化后立即更新；批次校验值（`payloadHash`）同时作为
@@ -170,8 +171,8 @@ HealthKit 不暴露读取权限是否被授予，因此后续开放路线权限�
 | `uploading` | multipart 已就绪，传输在途 | 否 |
 | `uploaded` | 服务端已收下这一批（`sourceId` 已落盘），`inspect`/`startImport` 未完成 | 否 |
 | `importing` | `jobId` 已落盘，等服务端终态 | **是** |
-| `deferred_protected_data` | 设备锁屏 / 开机后未首次解锁，健康数据库硬件加密不可读（V2.1 §3.4） | 取决于盘上任务 |
-| `auth_required` | 批次凭证失效（401/403），本地批次完好（V2.1 §3.3） | 取决于盘上任务 |
+| `deferred_protected_data` | 设备锁屏 / 开机后未首次解锁，健康数据库硬件加密不可读（`HealthKitExportError.databaseLocked`） | 取决于盘上任务 |
+| `auth_required` | 批次凭证失效（401/403），本地批次完好（`SyncPhase.credentialFailureStatuses` → 阻塞态） | 取决于盘上任务 |
 
 **两个阻塞态**（`SyncPhase.blocked`）不是终态、也**不是**在飞的工作 —— 它们在等一个外部条件。
 两条硬约束：

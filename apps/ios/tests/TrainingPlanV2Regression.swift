@@ -92,6 +92,25 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         check(RaiTrainingPlanContract.version == 2 && RaiTrainingPlanContract.requestedVersion == "2",
               "the client requests exactly contract 2 (no version picker, no v1 downgrade)")
 
+        // PR-05：两个 facts/analysis 能力位是**不同的键**；iOS 本版只镜像
+        // `factsAnalysisViewContractVersion`、明确不消费两块视图，老服务端缺位
+        // 必须解成 nil（不能伪造“有视图但为空”）。
+        let handshakeJSON = """
+        {"serverId":"server","athleteId":"athlete","datasetEpoch":"epoch",
+         "syncProtocolVersion":1,"apiVersion":"v1",
+         "factsAnalysisContractVersion":1,"factsAnalysisViewContractVersion":1}
+        """
+        let handshake = try JSONDecoder().decode(RaiHandshake.self, from: Data(handshakeJSON.utf8))
+        check(handshake.factsAnalysisContractVersion == 1 && handshake.factsAnalysisViewContractVersion == 1,
+              "the receipt and view capabilities decode as separate keys")
+        let legacyHandshakeJSON = """
+        {"serverId":"server","athleteId":"athlete","datasetEpoch":"epoch",
+         "syncProtocolVersion":1,"apiVersion":"v1"}
+        """
+        let legacyHandshake = try JSONDecoder().decode(RaiHandshake.self, from: Data(legacyHandshakeJSON.utf8))
+        check(legacyHandshake.factsAnalysisContractVersion == nil && legacyHandshake.factsAnalysisViewContractVersion == nil,
+              "an old server's missing capability keys decode as nil, never as a zero/empty view")
+
         let v2JSON = """
         {
           "contractVersion": 2,

@@ -28,7 +28,7 @@ import { RACE_CANDIDATE_POLICY_VERSION } from "../src/race-candidate.js";
  * 只核对 `文件:行号`，类型检查看不见字符串。于是文档安静地滞后了一版。
  *
  * 只核**现行合同文档**（下面的白名单）。带日期的状态/计划/审查文档记录的是某个
- * 时点的说法（例如 `COACH_LOOP_IMPLEMENTATION_STATUS.md`、`SYNC_COMPUTE_SCALING_PLAN_*`），
+ * 时点的说法（已完成的批次见 `docs/PROJECT_REVIEW.md` 的收尾索引），
  * 版本升版后回写它们等于改写历史，因此有意排除。
  *
  * 每个版本常量是一"族"匹配形态：完整常量串 + 文档实际使用过的简写（§1 那一行）。

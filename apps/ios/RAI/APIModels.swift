@@ -16,6 +16,14 @@ struct RaiHandshake: Codable, Equatable {
     var healthKitRecordSyncVersion: Int? = nil
     var planReceiptMetadata: Bool? = nil
     var planSnapshotContractVersion: Int? = nil
+    /// 2026-10-21（PR-02）：统一训练**读**能力（2 = `/training-plan-state` 接受
+    /// `X-RAI-Training-Contract: 2`）。与 `planSnapshotContractVersion` 一样，
+    /// 受 coach-loop 管理的 scope 不宣告。能力存在 ≠ 当前 scope 已迁移：
+    /// 客户端仍须处理 `training_plan_not_migrated`。
+    var trainingPlanContractVersion: Int? = nil
+    /// 2026-10-21（PR-02）：统一训练**写命令**能力。**当前服务端故意不宣告**；
+    /// 缺位即可写性未获认证（只读），不得用 `coachLoopContractVersion` 猜测。
+    var trainingPlanCommandContractVersion: Int? = nil
     var planPublicationContractVersion: Int? = nil
     var planReceiptContractVersion: Int? = nil
     var coachLoopContractVersion: Int? = nil
@@ -26,6 +34,14 @@ struct RaiHandshake: Codable, Equatable {
     /// 老服务端省略这个键 ⇒ `nil`，而那正是"不得拿它的 `succeeded` 冒充回执"的判据。
     /// 可选 + 合成解码器的 `decodeIfPresent` 足以兼容老服务端，所以这里不需要显式 `init(from:)`。
     var factsAnalysisContractVersion: Int? = nil
+    /// 两块视图能力（PR5 D1.4）：1 = `/v1/workouts`、`/v1/mobile/today`、
+    /// `/v1/mobile/training-plan-state` 会带 `currentFacts` / `publishedAnalysis`。
+    ///
+    /// 2026-10-21（PR-05 消费决定）：本版 iOS **暂不消费**两块行视图，因此该字段
+    /// 只做解码镜像，不产生任何读写分支；将来消费时必须先 `guard == 1`，不能把
+    /// `nil`（老服务端）当成“有视图但为空”。它与 `factsAnalysisContractVersion`
+    /// （直连回执）是两个不同的键，禁止合并。
+    var factsAnalysisViewContractVersion: Int? = nil
     /// 直连车道的单批上界（观测阶段 1 起服务端随握手暴露；老服务端省略 ⇒ `nil`）。
     ///
     /// 唯一消费点 `DirectSyncBatchBudget.from(bounds:)`：`nil` 时回落保守常量。

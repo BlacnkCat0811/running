@@ -1,7 +1,10 @@
 # RAI SwiftUI iOS 应用
 
 已有产品：SwiftUI原生界面、HealthKit只读导出/后台同步、API查询/控制、本地缓存与续传。
-TypeScript评分在服务器执行；iOS不运行Node、不复制scorer、不写HealthKit，也不包含独立Watch产品。
+TypeScript评分在服务器执行；iOS不运行Node、不复制scorer，也不包含独立Watch产品。
+健康**样本与记录**严格只读（只申请 HealthKit 读权限，不写、不改健康数据）；通过 WorkoutKit 把每周课表
+排期到 Apple Watch 属于另一件事，需要体能训练类型写授权（`NSHealthUpdateUsageDescription`），
+该授权只覆盖系统训练日程。
 生产分支直接进入NativeRootView；工程只有 iOS 平台，没有 WKWebView、没有 macOS destination。
 
 ## 构建

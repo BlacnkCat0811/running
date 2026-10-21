@@ -59,6 +59,11 @@ test("真实 /v1/handshake 宣告 factsAnalysisContractVersion=1，且既有能�
     assert.equal(handshake.healthKitRecordSyncVersion, 2);
     assert.equal(handshake.planReceiptMetadata, true);
     assert.equal(handshake.planSnapshotContractVersion, 1);
+    // 2026-10-21（PR-02）：读能力与写能力分开宣告。新的统一读合同可用；
+    // 写命令在 PR-03/04 验收前**故意缺位**，客户端只能按只读处理。
+    assert.equal(handshake.trainingPlanContractVersion, 2);
+    assert.equal(handshake.trainingPlanCommandContractVersion, undefined,
+      "write capability must stay unadvertised until ownership + Publisher acceptance");
     assert.equal(handshake.coachLoopContractVersion, 1);
     assert.equal(handshake.planReceiptContractVersion, 2);
     // P1-1（2026-10-18 同步诊断）：覆盖探测能力位。客户端 `guard == 1` 才去调

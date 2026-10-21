@@ -1,6 +1,7 @@
 # 原生跑步教练
 
-后续服务端教练闭环的任务拆分、数据合同与验收见 [教练闭环优化文档](COACH_LOOP_OPTIMIZATION_PLAN.md)；该方案待实施，不包含桌面 Web 优化。
+服务端教练闭环的任务拆分、数据合同与验收见 [教练闭环优化文档](COACH_LOOP_OPTIMIZATION_PLAN.md)；
+服务端合同已实现，整体验收仍未完成（发布审计 `blocked`，仍缺设备与独立签收）。桌面 Web 不在范围内。
 
 ## 对齐对象
 
@@ -85,7 +86,7 @@
 
 ## 客户端排期与状态一致性（2026-10-09）
 
-完整执行边界与故障回归见 [IOS_TRAINING_PLAN_IMPLEMENTATION](IOS_TRAINING_PLAN_IMPLEMENTATION.md)。
+完整执行边界与故障回归见 [iOS 计划排期协议](IOS_NATIVE_PLAN_SCHEDULING.md)。
 自然周预算/进度与滚动未来7日排课数量分开展示；“未来3次训练”不解释成连续3天。
 无骨架（fitness、全马、自定义不支持距离）时 phase=null 且 phases=[]；客户端不生成替代阶段。
 显式同步核验本机系统日程，真实手表可见性另行核验；暂停/结束和离线/无计划仍有显式撤回入口。

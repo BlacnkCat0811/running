@@ -8,9 +8,12 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import { RETIRED_TRAINING_PLAN_SURFACES } from "@rai/api-contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { MobileGoalsStore } from "../src/mobile-goals.js";
+import { digest } from "../src/plan-digest.js";
+import { TrainingPlanStore, type TrainingPlanState } from "../src/training-plan-store.js";
 
 /**
  * Product decision 2026-10-20: four legacy `/v1` plan surfaces are retired.
@@ -95,6 +98,90 @@ const RETIRED: readonly RetiredRoute[] = [
   { method: "POST", path: "/v1/mobile/workout-plan/generate", replacement: "/v1/mobile/training-plan/commands/refresh", body: { expectedRevision: 0 } }
 ];
 
+const SCOPE = { serverId: "local", athleteId: "athlete_1", datasetEpoch: "default" } as const;
+const SCOPE_KEY = JSON.stringify([SCOPE.serverId, SCOPE.athleteId, SCOPE.datasetEpoch]);
+
+/**
+ * Replace the newest coach-loop receipt for the server's exact runtime scope.
+ *
+ * The receipt table is keyed by the **object** spelling `{serverId, athleteId,
+ * datasetEpoch}` (`server.ts` calls `coachLoopState(JSON.stringify({...}))`).
+ * The previous fixture used the array spelling, so `coachLoopManaged()` was
+ * always false and the "managed data set" test never entered the branch it
+ * claimed to cover (probe E-05).
+ */
+function setCoachLoopReceipt(controlPath: string, payload: unknown | null): void {
+  const control = new DatabaseSync(controlPath);
+  try {
+    control.prepare("DELETE FROM mobile_coach_loop_receipts WHERE scope = ?").run(JSON.stringify(SCOPE));
+    if (payload !== null) {
+      control.prepare("INSERT INTO mobile_coach_loop_receipts(scope, operation_id, payload_json) VALUES (?,?,?)")
+        .run(JSON.stringify(SCOPE), randomUUID(), JSON.stringify(payload));
+    }
+  } finally { control.close(); }
+}
+
+/** Seed a migrated unified state through the production CAS, not raw SQL. */
+function migrateUnifiedState(runtimeRoot: string, controlPath: string): void {
+  const goals = new MobileGoalsStore(runtimeRoot, controlPath);
+  const database = new DatabaseSync(controlPath);
+  try {
+    const unified = new TrainingPlanStore(database);
+    const sourceDigest = digest({ source: "legacy_goals", revision: goals.read().revision });
+    const state: TrainingPlanState = {
+      schemaVersion: 1,
+      migrationVersion: 1,
+      source: "legacy_goals",
+      sourceStatus: "active",
+      sourceDigest,
+      runState: "active",
+      raceGoal: null,
+      preferencesComplete: true,
+      legacyRaceTarget: null,
+      weekPlan: [],
+      lockedSession: null,
+      runCoach: null,
+      coachLoop: null,
+      goalsRevision: goals.read().revision,
+      planContextDigest: null,
+      migratedAt: new Date().toISOString()
+    };
+    const applied = unified.applyMigration({ scope: SCOPE_KEY, expectedAbsentOrRevision: 0, sourceDigest, state });
+    assert.equal(applied.status, "applied");
+  } finally {
+    database.close();
+    goals.close();
+  }
+}
+
+const readGoalsRevision = (controlPath: string): number => {
+  const control = new DatabaseSync(controlPath);
+  try {
+    return (control.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get() as { revision: number }).revision;
+  } finally { control.close(); }
+};
+
+const readHandshake = async (url: string): Promise<import("@rai/api-contracts").HandshakeResponse> =>
+  await fetch(url + "/v1/handshake").then(response => response.json()) as import("@rai/api-contracts").HandshakeResponse;
+
+async function assertAllRetired(url: string): Promise<void> {
+  for (const route of RETIRED) {
+    const response = await fetch(url + route.path, {
+      method: route.method,
+      ...(route.body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(route.body) })
+    });
+    assert.equal(response.status, 410, `${route.method} ${route.path}: ${await response.clone().text()}`);
+    assert.equal((await response.json() as { code: string }).code, "legacy_surface_retired");
+  }
+}
+
+const readPlanState = async (url: string, header?: string): Promise<{ status: number; code?: string }> => {
+  const response = await fetch(url + "/v1/mobile/training-plan-state",
+    header === undefined ? {} : { headers: { "x-rai-training-contract": header } });
+  const payload = await response.json() as { code?: string };
+  return { status: response.status, ...(payload.code === undefined ? {} : { code: payload.code }) };
+};
+
 async function launchServer(runtimeRoot: string, databasePath: string, controlPath: string): Promise<{ child: ChildProcess; url: string; output: () => string }> {
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
@@ -115,6 +202,13 @@ const readTrainingPlanState = async (url: string) =>
   await fetch(url + "/v1/mobile/training-plan-state").then(response => response.json()) as {
     metadata: { goalsRevision: number };
   };
+
+test("the request fixture is exactly the shared method+path retirement table", () => {
+  const fixture = RETIRED.map((route) => `${route.method} ${route.path}`).sort();
+  const shared = RETIRED_TRAINING_PLAN_SURFACES.map((surface) => `${surface.method} ${surface.path}`).sort();
+  assert.deepEqual(fixture, shared, "test fixture and production retirement table must not drift");
+  assert.equal(new Set(shared).size, shared.length, "method+path entries must be unique");
+});
 
 test("every retired legacy plan route answers 410 legacy_surface_retired with a real replacement", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-retirement-"));
@@ -182,15 +276,25 @@ test("a managed dataset does not turn retirement into the generic 409 contract e
   seed.close();
   // The receipt writer is intentionally only reachable inside the publication
   // transaction; this fixture seeds the append-only row directly, which is
-  // exactly the state a committed enable command would leave behind.
-  const control = new DatabaseSync(controlPath);
-  try {
-    control.prepare("INSERT INTO mobile_coach_loop_receipts(scope, operation_id, payload_json) VALUES (?,?,?)")
-      .run(JSON.stringify(["local", "athlete_1", "default"]), randomUUID(),
-        JSON.stringify({ settings: { status: "active" } }));
-  } finally { control.close(); }
+  // exactly the state a committed enable command would leave behind. The scope
+  // spelling must match the server's object key or the branch is never reached.
+  setCoachLoopReceipt(controlPath, { settings: { status: "active" } });
   const server = await launchServer(runtimeRoot, databasePath, controlPath);
   try {
+    // Preconditions (PR-01): prove the fixture really entered the managed branch
+    // before asserting anything about the retired routes. If the scope spelling
+    // regresses to an array, these two assertions fail first.
+    const handshake = await readHandshake(server.url);
+    assert.equal(handshake.planSnapshotContractVersion, undefined,
+      "a managed dataset must not advertise the legacy snapshot contract");
+    assert.equal(handshake.trainingPlanContractVersion, undefined,
+      "a managed dataset answers the v2 read with 409, so it must not advertise that capability");
+    const legacySnapshot = await readPlanState(server.url);
+    assert.equal(legacySnapshot.status, 409);
+    assert.equal(legacySnapshot.code, "coach_loop_contract_required",
+      "the legacy snapshot route must confirm the managed preHandler is reachable");
+
+    const revisionBefore = readGoalsRevision(controlPath);
     for (const route of RETIRED) {
       const response = await fetch(server.url + route.path, {
         method: route.method,
@@ -199,6 +303,82 @@ test("a managed dataset does not turn retirement into the generic 409 contract e
       assert.equal(response.status, 410, `${route.method} ${route.path}: ${await response.clone().text()}`);
       assert.equal((await response.json() as { code: string }).code, "legacy_surface_retired");
     }
+    assert.equal(readGoalsRevision(controlPath), revisionBefore,
+      "a retired write must not publish a goals revision on a managed dataset either");
+  } finally {
+    await stopApi(server.child).catch(() => server.child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+test("real router matrix: receipt lifecycle, header negotiation and migrated scope", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-retirement-matrix-"));
+  const databasePath = join(runtimeRoot, "var", "rai.sqlite");
+  const controlPath = join(runtimeRoot, "var", "rai-control.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  (await RaiDatabase.open(databasePath)).close();
+  const seed = new MobileGoalsStore(runtimeRoot, controlPath);
+  seed.close();
+  const server = await launchServer(runtimeRoot, databasePath, controlPath);
+  try {
+    // 1. Fresh, unmigrated, unmanaged: v1 is served, v2 is a typed not-migrated
+    //    answer, an unknown contract is rejected instead of downgraded.
+    let handshake = await readHandshake(server.url);
+    assert.equal(handshake.planSnapshotContractVersion, 1);
+    assert.equal(handshake.trainingPlanContractVersion, 2);
+    assert.equal(handshake.trainingPlanCommandContractVersion, undefined);
+    assert.equal((await readPlanState(server.url)).status, 200);
+    assert.equal((await readPlanState(server.url, "1")).status, 200);
+    assert.deepEqual(await readPlanState(server.url, "2"),
+      { status: 409, code: "training_plan_not_migrated" });
+    assert.deepEqual(await readPlanState(server.url, "3"),
+      { status: 409, code: "training_contract_unsupported" });
+
+    // 2. Migrated scope: v2 reads the unified projection; v1 is unchanged.
+    migrateUnifiedState(runtimeRoot, controlPath);
+    assert.equal((await readPlanState(server.url, "2")).status, 200);
+    assert.equal((await readPlanState(server.url)).status, 200);
+
+    // 3. The managed branch itself: active, paused and malformed receipts all
+    //    fail closed. The v1 *and* v2 reads stay 409 under the current contract;
+    //    this is a feature pin, not a defect (the ownership change in PR-03 is
+    //    what may revise it, together with the API contract).
+    for (const [name, receipt] of [
+      ["active", { settings: { status: "active" } }],
+      ["paused", { settings: { status: "paused" } }],
+      ["malformed", { policyHash: "not-a-receipt" }]
+    ] as const) {
+      setCoachLoopReceipt(controlPath, receipt);
+      handshake = await readHandshake(server.url);
+      assert.equal(handshake.planSnapshotContractVersion, undefined, `${name}: legacy snapshot must not be advertised`);
+      assert.equal(handshake.trainingPlanContractVersion, undefined, `${name}: v2 read capability must not be advertised`);
+      for (const header of [undefined, "1", "2", "3"] as const) {
+        assert.deepEqual(await readPlanState(server.url, header),
+          { status: 409, code: "coach_loop_contract_required" },
+          `${name}: header ${header ?? "absent"} must be caught by the managed preHandler`);
+      }
+      const revisionBefore = readGoalsRevision(controlPath);
+      await assertAllRetired(server.url);
+      assert.equal(readGoalsRevision(controlPath), revisionBefore, `${name}: retired reads must not publish`);
+    }
+
+    // 4. An ended receipt releases the legacy reads and the advertised snapshot
+    //    capability, while migration remains readable through v2.
+    setCoachLoopReceipt(controlPath, { settings: { status: "ended" } });
+    handshake = await readHandshake(server.url);
+    assert.equal(handshake.planSnapshotContractVersion, 1);
+    assert.equal(handshake.trainingPlanContractVersion, 2);
+    assert.equal((await readPlanState(server.url)).status, 200);
+    assert.equal((await readPlanState(server.url, "2")).status, 200);
+    await assertAllRetired(server.url);
+
+    // 5. No receipt behaves like an unmanaged scope, mounted routes included.
+    setCoachLoopReceipt(controlPath, null);
+    handshake = await readHandshake(server.url);
+    assert.equal(handshake.planSnapshotContractVersion, 1);
+    assert.equal(handshake.trainingPlanContractVersion, 2);
+    assert.equal((await readPlanState(server.url, "2")).status, 200);
+    await assertAllRetired(server.url);
   } finally {
     await stopApi(server.child).catch(() => server.child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

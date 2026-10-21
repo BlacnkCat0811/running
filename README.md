@@ -6,12 +6,12 @@ RAI 是个人跑步数据分析应用：Apple Health XML/GPX 或 iOS HealthKit �
 ## 当前边界
 
 - iOS：唯一客户端。SwiftUI App、HealthKit 只读导出/同步、后台恢复和 API 消费；不新增 Watch、Android、桌面原生产品，也不重建浏览器前端。
-- 后端：iOS 直连云 API；全部 `/v1` 端点保留（含此前仅 Web 使用的备份/模型/数据运维端点，裁剪属独立决策）。
+- 后端：iOS 直连云 API；`/v1` 路由整体保留（含此前仅 Web 使用的模型/数据运维端点），但有两组能力已由独立产品决定退役为 `410`：旧训练计划写面（2026-10-20，见 [D19](docs/DECISIONS.md)）与备份创建/删除（见 [D18](docs/DECISIONS.md)）。"仍挂载"不等于"仍可调用"。
 - 计算：Fitness CA/TA、Readiness、Preparation/Durability 证据、复合负荷/分区、5K/10K/半马预测；未知/未校准必须如实呈现。
-- 导入使用私有候选库和受控发布；**没有常驻 shadow 全量双跑**。ML/经验区间必须经过独立标签和发布门槛。
+- 导入：API 只有两条直连增量车道（data-only 快通路 → direct-sync 统一接收器），同一主库事务内写事实并登记分析；两条都不合格时显式失败，不回退候选库。候选库/文件换库只保留在 CLI 离线入口。**没有常驻 shadow 全量双跑**；备份是运维责任。ML/经验区间必须经过独立标签和发布门槛。
 - 源码版本、数据库已计算版本、线上已激活版本是三件事。本机没有足够真实比赛标签，不宣称准确率已经提高。
 
-具体开发范围以 [AGENTS.md](AGENTS.md) 为准；本轮问题与验证见 [项目审查](docs/PROJECT_REVIEW.md)。
+具体开发范围以 [AGENTS.md](AGENTS.md) 为准；当前状态、验证基线与未决问题见 [项目审查](docs/PROJECT_REVIEW.md)（对齐 2026-10-20）。
 
 ## 快速开始
 
@@ -67,30 +67,35 @@ npm run check:package-boundaries
 
 | 主题 | 文档 |
 |---|---|
-| 模块、数据流与依赖 | [架构](docs/ARCHITECTURE.md) |
+| 开发范围、退役面与跨平台命令规则 | [AGENTS.md](AGENTS.md) |
+| 实际架构：进程/线程、两条导入车道、四库、单写者与读路径边界 | [架构](docs/ARCHITECTURE.md) |
 | 算法职责、不变量与 §16.1 验收合同矩阵（80 条，以 `npm run check:acceptance-matrix` 输出为准） | [算法](docs/ALGORITHM.md) |
-| 导入、身份、恢复事实、存储与谱系 | [数据管线](docs/DATA_PIPELINE.md) |
-| 开发、迁移、备份、回放、发布操作 | [运维](docs/OPERATIONS.md) |
-| 长期约束与不能随意“优化”的决策 | [决策](docs/DECISIONS.md) |
-| 当前审查结果与未决问题 | [项目审查](docs/PROJECT_REVIEW.md) |
-| 今日页计划类卡片的口径冲突与改法 | [计划卡口径](docs/TODAY_PLAN_CARDS_REVIEW.md) |
-| iOS 构建、权限和平台入口 | [iOS](apps/ios/README.md) |
+| 导入、身份、时间语义、恢复事实、存储与发布合同 | [数据管线](docs/DATA_PIPELINE.md) |
+| 开发、迁移、四库备份/恢复、发布与排障 | [运维](docs/OPERATIONS.md) |
+| 长期约束与不能随意“优化”的决策（D1–D19） | [决策](docs/DECISIONS.md) |
+| 当前状态、验证基线、未决问题与已收尾批次索引 | [项目审查](docs/PROJECT_REVIEW.md) |
 | 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |
-| 统一训练排课三项政策门槛（G01 赛前剂量 / G02 无历史重启 / G03 受控追加；工程提案，未批准） | [训练计划政策评审](docs/TRAINING_PLAN_POLICY_REVIEW.md) |
-| iOS 训练计划现状复核与后续实施方案 | [训练计划架构方案](docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md) |
-| iOS 增量同步、解析入库与模型计算审查及具体优化方法 | [同步与计算优化方案](docs/IOS_SYNC_PERFORMANCE_REVIEW.md) |
-| 同步优化后七项问题的修复步骤、回归及验收 | [优化后修复实施方案](docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md) |
-| 第二轮复查五项残留问题的修复步骤、回归及验收 | [第二轮复查修复方案](docs/IOS_SYNC_RECHECK_FIX_PLAN_2026-10-17.md) |
-| 第三轮七项扩展性优化与「禁止全量同步」边界收紧 | [扩展性优化实施记录](docs/SYNC_COMPUTE_SCALING_PLAN_2026-10-17.md) |
+| 统一排课政策 G01/G02/G03（2026-10-20 所有者方向性批准并实现，非独立临床复核） | [训练计划政策](docs/TRAINING_PLAN_POLICY_REVIEW.md) |
+| iOS ↔ API 契约：handshake、统一训练 v2、410 退役矩阵 | [iOS API 契约](docs/IOS_NATIVE_API_CONTRACT.md) |
+| iOS 训练计划设备侧不变量：缓存水位、回执 v2、排期日志、先撤回再下发 | [训练排期](docs/IOS_NATIVE_PLAN_SCHEDULING.md) |
+| iOS 健康同步协议：增量、后台机制、锚点与路线 | [同步协议](docs/IOS_NATIVE_SYNC_PROTOCOL.md) |
+| HealthKit 记录同步 v2 合同 | [记录同步 v2](docs/HEALTHKIT_RECORD_SYNC_V2.md) |
+| iOS 构建、权限、测试与真机验收 | [iOS](apps/ios/README.md) / [运行说明](docs/IOS_NATIVE_RUNBOOK.md) |
 | Rust 可选数据执行器 | [Rust](docs/RUST_DATA_ENGINE.md) |
-| 直接增量同步 PR2+PR3 落地设计（同库事务、版本化事实与路线） | [直接同步落地设计](docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md) |
-| 直接增量同步 PR4 落地设计（全部类型接收、分析任务登记、短写调度） | [PR4 落地设计](docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md) |
-| 直接增量同步 PR5 落地设计（分析指针与全部读侧一致性） | [PR5 落地设计](docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md) |
+| 直接增量同步设计（已实施；仍开放条目见文首状态） | [直接同步设计](docs/SQLITE_DIRECT_SYNC_DESIGN.md) |
+| 直接同步 PR2–PR5 落地设计（代码注释引用的验收映射） | [PR2+PR3](docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md) / [PR4](docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md) / [PR5](docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md) |
+| 教练闭环验收合同（78 项 AC，发布门禁直接读取） | [教练闭环](docs/COACH_LOOP_OPTIMIZATION_PLAN.md) |
+| iOS 同步/计算优化设计与验收映射（O01–O12） | [同步优化审查](docs/IOS_SYNC_PERFORMANCE_REVIEW.md) |
+| 关键决策记录 | [ADR-004](docs/adr/ADR-004-healthkit-sync-invariants.md) / [ADR-005](docs/adr/ADR-005-temporal-training-labels.md) / [ADR-006](docs/adr/ADR-006-retire-web-and-macos.md) |
+| 云端部署（Nginx/systemd/备份责任） | [Ubuntu 部署](deploy/README-UBUNTU.md) |
 | ML 环境与工件 | [研究目录](research/README.md) |
 | 固定时点、固定数据库的机器证据 | [核验产物](deliverables/README.md) |
-| 只读的架构可视化审计（6 张交互图 + 规格 + 独立核验） | [架构审计](.archify/rai-audit-20261013-160439/AUDIT-REPORT.md) |
+| 只读的架构可视化审计（时点快照） | [架构审计](.archify/rai-audit-20261013-160439/AUDIT-REPORT.md) |
 
-过期 PRD、设计草案、实施批次、重复时点审计已删除；历史从 Git 查阅，不继续复制到 archive。
+过期 PRD、已完成的实施批次、修复方案与重复时点审计已删除；历史从 Git 查阅，不继续复制到 archive。
+2026-10-20 又收敛一轮：三份训练计划实施/方案文档、三份已完成的同步修复/扩展方案、教练闭环实施状态与佳明研究等，
+在把仍有效的结论并入现行文档后删除；原文、收尾提交与 `git show` 取回命令见
+[项目审查的已收尾批次索引](docs/PROJECT_REVIEW.md)。
 新结论更新相应现行文档；生成审计报告不是产品规范，也不能把另一台机器的统计当成本机事实。
 [架构审计](.archify/rai-audit-20261013-160439/AUDIT-REPORT.md) 是**对齐 `60678af` 的时点快照**：
 正文里的 `文件:行号` 刻画的是当时的工作树，源码改动后**不要**回写该目录（回写等于伪造历史），

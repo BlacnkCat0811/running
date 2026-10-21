@@ -14,7 +14,7 @@ import { acquireDatabasePublicationLock, RaiDatabase } from "@rai/storage-sqlite
 import yazl from "yazl";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
-import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from "../src/import-publication.js";
+import { ImportPublicationJournal, readImportReceiptStrict, writeImportReceipt } from "../src/import-publication.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 import { MobileGoalsStore } from "../src/mobile-goals.js";
 import { mobileLocalDate } from "../src/data.js";
@@ -63,6 +63,8 @@ test("coach-loop opt-in uses real main/control stores, feedback changes the fact
     // that cannot succeed. The coach-loop capability stays advertised.
     const managedHandshake = await fetch(url + "/v1/handshake").then(r => r.json()) as import("@rai/api-contracts").HandshakeResponse;
     assert.equal(managedHandshake.planSnapshotContractVersion, undefined);
+    assert.equal(managedHandshake.trainingPlanContractVersion, undefined,
+      "a managed dataset answers the v2 read with 409, so it must not advertise the read capability either");
     assert.equal(managedHandshake.coachLoopContractVersion, 1);
     // A stale expectedRevision is an ordinary concurrency outcome. It used to
     // reach the client as 500 `internal_error`, which meant a pending
@@ -199,7 +201,8 @@ test("restore and deletion reject a committed import whose acknowledgement is st
     }
     assert.equal(state.job("pending-ack")?.queue?.finalized, false);
     assert.equal(journal.has("pending-ack"), true);
-    assert.deepEqual(readImportReceipt(databasePath, "pending-ack"), summary);
+    assert.deepEqual(readImportReceiptStrict(databasePath, "pending-ack"), summary,
+      "the receipt must survive the still-pending acknowledgement; strict read avoids a transient read lock");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
@@ -1992,6 +1995,8 @@ test("snapshot capabilities and receipt lifecycle work through the production ro
   try {
     const handshake = await fetch(server.url + "/v1/handshake").then(response => response.json()) as import("@rai/api-contracts").HandshakeResponse;
     assert.equal(handshake.planSnapshotContractVersion, 1);
+    assert.equal(handshake.trainingPlanContractVersion, 2);
+    assert.equal(handshake.trainingPlanCommandContractVersion, undefined);
     assert.equal(handshake.planPublicationContractVersion, 1);
     assert.equal(handshake.planReceiptContractVersion, 2);
     const current = await snapshot();

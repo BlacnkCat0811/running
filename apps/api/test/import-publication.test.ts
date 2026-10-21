@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from "../src/import-publication.js";
+import { ImportPublicationJournal, readImportReceipt, readImportReceiptStrict, writeImportReceipt } from "../src/import-publication.js";
 import { ImportWorker } from "../src/import-worker.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
@@ -180,4 +180,67 @@ test("committed imports remain pending through failed cleanup and restart until 
     assert.equal(journal.has("job"), false);
     assert.deepEqual(readImportReceipt(main, "job"), summary);
   } finally { await worker.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("strict receipt read returns null only after a successful query with no receipt row", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-receipt-strict-absent-"));
+  const main = join(root, "rai.sqlite");
+  database(main, "fixture");
+  try {
+    assert.equal(readImportReceiptStrict(main, "job"), null,
+      "数据库可读且确实没有该 job 回执时才允许返回 null");
+    writeImportReceipt(main, "job", summary);
+    assert.deepEqual(readImportReceiptStrict(main, "job"), summary,
+      "存在的有效回执必须原样返回");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("strict receipt read rejects a missing database and never creates an empty one", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-receipt-strict-missing-"));
+  const missing = join(root, "missing.sqlite");
+  try {
+    assert.equal(existsSync(missing), false);
+    assert.throws(() => readImportReceiptStrict(missing, "job"),
+      "数据库缺失属于无法核实，不能当成没有回执");
+    assert.equal(existsSync(missing), false,
+      "readOnly 打开失败不得顺手创建空数据库");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("strict receipt read rejects corrupt databases, malformed JSON, and JSON null receipts", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-receipt-strict-corrupt-"));
+  const corrupt = join(root, "corrupt.sqlite");
+  const malformed = join(root, "malformed.sqlite");
+  const nullReceipt = join(root, "null-receipt.sqlite");
+  const wrongShape = join(root, "wrong-shape.sqlite");
+  writeFileSync(corrupt, "not a sqlite database");
+  database(malformed, "fixture");
+  database(nullReceipt, "fixture");
+  database(wrongShape, "fixture");
+  for (const [path, value] of [
+    [malformed, "{not-json"],
+    [nullReceipt, "null"],
+    [wrongShape, JSON.stringify({ importMode: "unchanged" })]
+  ] as const) {
+    const db = new DatabaseSync(path);
+    try {
+      db.prepare("INSERT INTO import_manifest VALUES (?, ?)")
+        .run(`rai.applied-import.job`, value);
+    } finally { db.close(); }
+  }
+  try {
+    assert.equal(readImportReceipt(corrupt, "job"), null,
+      "宽松读取保留启动恢复的尽力语义");
+    for (const path of [corrupt, malformed, nullReceipt, wrongShape]) {
+      assert.throws(() => readImportReceiptStrict(path, "job"),
+        `${path} 属于无法核实，必须上抛`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

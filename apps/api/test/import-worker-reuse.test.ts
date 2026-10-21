@@ -21,7 +21,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -29,15 +29,16 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { CONTRACT_VERSION } from "@rai/contracts";
+import type { ImportJobResponse } from "@rai/api-contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
 import { identityAlgorithmFingerprint } from "@rai/health-export-parser";
 
-import { ImportWorker } from "../src/import-worker.js";
+import { ImportWorker, type ImportQueueOptions } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 import { readImportReceipt } from "../src/import-publication.js";
 import type { ImportDatabaseTask } from "../src/import-database-tasks.js";
-import { assertLanePlan, surveyDatabase } from "../src/import-database-thread.js";
+import { assertLanePlan, surveyDatabase, writeNoopReceiptTask } from "../src/import-database-thread.js";
 
 const project = resolve(import.meta.dirname, "../../..");
 
@@ -60,8 +61,14 @@ const WORKOUT_XML = `<HealthData><Workout workoutActivityType="HKWorkoutActivity
     <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" unit="km" sum="5"/>
   </Workout></HealthData>`;
 
+type FixtureOptions = Partial<Pick<ImportQueueOptions, "admission" | "onRecoveryRequired" | "onTerminal">>;
+
 async function fixture(
-  run: (ctx: { root: string; main: string; make(): ImportWorker; writeInput(index: number, xml?: string): string }) => Promise<void>
+  run: (ctx: {
+    root: string; main: string;
+    make(options?: FixtureOptions): ImportWorker;
+    writeInput(index: number, xml?: string): string;
+  }) => Promise<void>
 ): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "rai-worker-reuse-"));
   const main = join(root, "main.sqlite");
@@ -80,11 +87,13 @@ async function fixture(
     }));
     return input;
   };
-  const make = () => new ImportWorker(main, project, root, () => {
+  const make = (options: FixtureOptions = {}) => new ImportWorker(main, project, root, () => {
     throw new Error("delta must not enter the replacement gate");
   }, undefined, undefined, {
     scope: "reuse-fixture", dataOnlyFastPath: true,
-    admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
+    admission: options.admission ?? new TaskAdmissionScheduler(new MutationCoordinator()).owner("import"),
+    ...(options.onRecoveryRequired === undefined ? {} : { onRecoveryRequired: options.onRecoveryRequired }),
+    ...(options.onTerminal === undefined ? {} : { onTerminal: options.onTerminal })
   });
   try { await run({ root, main, make, writeInput }); }
   finally { rmSync(root, { recursive: true, force: true }); }
@@ -98,6 +107,54 @@ async function runBatch(worker: ImportWorker, input: string, sourceId: string) {
     await new Promise((done) => setTimeout(done, 10));
   }
   return worker.get(job.id)!;
+}
+
+interface ThreadSurface {
+  terminate(): Promise<number>;
+  postMessage(message: unknown): void;
+  emit(event: string, ...args: unknown[]): boolean;
+}
+
+interface ResidentSurface {
+  thread: ThreadSurface;
+  startup: { settled: boolean };
+  retired: boolean;
+}
+
+interface LifecycleSurface extends Surface {
+  ensureIngestWorker(): ResidentSurface;
+  settleIngestReply(resident: ResidentSurface, message: {
+    kind: "result"; taskId: number; ok: boolean; value?: unknown; error?: string;
+  }): void;
+  ingest: ResidentSurface | null;
+}
+
+/** 外层截止时间：超时是测试失败，不是“产品关闭成功”。 */
+function withDeadline<T>(label: string, promise: Promise<T>, timeoutMs = 8_000): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} exceeded ${timeoutMs} ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+async function waitFor(label: string, condition: () => boolean, timeoutMs = 8_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`${label} timed out after ${timeoutMs} ms`);
+    await new Promise((done) => setTimeout(done, 10));
+  }
+}
+
+/** 测试失败也先把真实线程收掉，避免一个失败的断言把测试进程钉住。 */
+async function closeWithDeadline(worker: ImportWorker, label: string, timeoutMs = 8_000): Promise<void> {
+  try {
+    await withDeadline(label, worker.close(), timeoutMs);
+  } catch (error) {
+    const resident = (worker as unknown as LifecycleSurface).ingest;
+    if (resident) await resident.thread.terminate().catch(() => {});
+    throw error;
+  }
 }
 
 /**
@@ -201,6 +258,393 @@ test("20 个连续小批：ingest 线程只起 1 条，且启动成本只付一�
         "复用线程不得让任何一批退化成整库备份/候选链路"
       );
     } finally { await worker.close(); }
+  });
+});
+
+test("no-op 回执在常驻线程执行：连续 10 批复用一条线程，不落回主线程事务", async () => {
+  await fixture(async ({ root, make, writeInput }) => {
+    const worker = make();
+    const observed = observeLanes(worker);
+    try {
+      const input = writeInput(0);
+      const first = await runBatch(worker, input, "noop-first");
+      assert.equal(first.status, "succeeded", JSON.stringify(first));
+
+      const noops = [];
+      for (let index = 0; index < 10; index += 1) {
+        noops.push(await runBatch(worker, input, `noop-source-${index}`));
+      }
+
+      const stats = worker.ingestWorkerStats();
+      assert.equal(stats.started, 1, "首次导入和 10 个 no-op 必须复用同一条 ingest 线程");
+      assert.equal(stats.tasks, 11, "首次导入 + 10 个 no-op 各投递一次任务");
+      assert.deepEqual(observed.dispatches, [
+        "import-lanes",
+        ...Array.from({ length: 10 }, () => "noop-receipt")
+      ], "no-op 必须走独立的 noop-receipt 任务，不能在主线程同步写回执");
+
+      for (const [index, done] of noops.entries()) {
+        assert.equal(done?.status, "succeeded", `第 ${index + 1} 个 no-op 必须成功`);
+        assert.equal(done?.summary?.importMode, "unchanged");
+        assert.equal(done?.summary?.directSync?.analysisStatus, "not_required");
+        assert.equal(done?.summary?.directSync?.receiptId, done?.id);
+        assert.ok((done?.performance?.computeStagesMs?.noop_receipt_transaction ?? 0) > 0,
+          `第 ${index + 1} 个 no-op 必须留下 worker 事务耗时`);
+        assert.equal(done?.performance?.stagesMs?.directSyncApply, undefined,
+          "no-op 不得启动正式车道");
+        const receipt = readImportReceipt(join(root, "main.sqlite"), done!.id);
+        assert.equal(receipt?.directSync?.receiptId, done!.id, "每个 no-op 回执按 job id 隔离");
+      }
+    } finally { await worker.close(); }
+  });
+});
+
+test("提交后回复丢失：从持久回执恢复同一个 no-op 成功结果", async () => {
+  await fixture(async ({ root, make, writeInput }) => {
+    const worker = make();
+    const surface = worker as unknown as Surface;
+    try {
+      const input = writeInput(0);
+      const first = await runBatch(worker, input, "noop-lost-first");
+      assert.equal(first.status, "succeeded", JSON.stringify(first));
+
+      const original = surface.databaseTask.bind(worker);
+      surface.databaseTask = async <T>(task: ImportDatabaseTask): Promise<T> => {
+        if (task.operation === "noop-receipt") {
+          // 真正提交，然后丢掉回复。主线程只能从持久回执裁决结果。
+          const outcome = writeNoopReceiptTask(task.input);
+          assert.equal(outcome.kind, "committed");
+          throw new Error("simulated lost worker reply after commit");
+        }
+        return original<T>(task);
+      };
+
+      const recovered = await runBatch(worker, input, "noop-lost-reply");
+      assert.equal(recovered.status, "succeeded", JSON.stringify(recovered));
+      assert.equal(recovered.summary?.importMode, "unchanged");
+      assert.match(recovered.message ?? "", /持久回执/);
+      const receipt = readImportReceipt(join(root, "main.sqlite"), recovered.id);
+      assert.deepEqual(receipt, recovered.summary, "恢复结果必须与持久回执同源");
+    } finally { await worker.close(); }
+  });
+});
+
+test("no-op 提交等待期间取消返回 publishing，不终止线程，提交后仍成功", async () => {
+  await fixture(async ({ make, writeInput }) => {
+    const worker = make();
+    const surface = worker as unknown as Surface;
+    try {
+      const input = writeInput(0);
+      const first = await runBatch(worker, input, "noop-cancel-first");
+      assert.equal(first.status, "succeeded", JSON.stringify(first));
+
+      const original = surface.databaseTask.bind(worker);
+      let releaseGate!: () => void;
+      let entered!: () => void;
+      const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+      const enteredGate = new Promise<void>((resolve) => { entered = resolve; });
+      surface.databaseTask = async <T>(task: ImportDatabaseTask): Promise<T> => {
+        if (task.operation === "noop-receipt") {
+          entered();
+          await gate;
+        }
+        return original<T>(task);
+      };
+
+      // 常驻 worker 的调度 timer 是 unref 的；等待测试 gate 时必须自己保活事件循环。
+      const keepAlive = setInterval(() => {}, 50);
+      try {
+        const job = worker.create(input, undefined, "noop-cancel-target");
+        await enteredGate;
+        assert.equal(worker.get(job.id)?.phase, "activate",
+          "回执事务派发前必须进入不可取消的提交区");
+        assert.equal(await worker.cancel(job.id), "publishing",
+          "提交区的取消必须返回 publishing，而不是终止线程");
+
+        releaseGate();
+        const deadline = Date.now() + 60_000;
+        while (worker.hasPending || worker.isRunning) {
+          assert.ok(Date.now() < deadline, JSON.stringify(worker.latest()));
+          await new Promise((done) => setTimeout(done, 10));
+        }
+        const done = worker.get(job.id);
+        assert.equal(done?.status, "succeeded", JSON.stringify(done));
+        assert.equal(worker.ingestWorkerStats().retired, 0,
+          "publishing 语义下不得因取消而退休 ingest 线程");
+      } finally {
+        clearInterval(keepAlive);
+      }
+    } finally { await worker.close(); }
+  });
+});
+
+test("worker 冷启动期间 close：ready 与任务结算，关闭完成且不重建线程", { timeout: 25_000 }, async () => {
+  await fixture(async ({ make, writeInput }) => {
+    const input = writeInput(0);
+    const seed = make();
+    try { assert.equal((await runBatch(seed, input, "cold-close-seed")).status, "succeeded"); }
+    finally { await closeWithDeadline(seed, "seed close"); }
+
+    const worker = make();
+    const surface = worker as unknown as LifecycleSurface;
+    const originalEnsure = surface.ensureIngestWorker.bind(worker);
+    let created: ResidentSurface | null = null;
+    let wasStarting = false;
+    let closeStarted: Promise<void> | null = null;
+    surface.ensureIngestWorker = () => {
+      const resident = originalEnsure();
+      created = resident;
+      // 必须在调用 close() 之前读：close() 会同步退休线程并结算 ready。
+      wasStarting = !resident.startup.settled;
+      closeStarted = worker.close();
+      return resident;
+    };
+    try {
+      const job = worker.create(input, undefined, "cold-close");
+      await waitFor("close initiated during cold start", () => closeStarted !== null, 5_000);
+      assert.ok(closeStarted, "close() 必须在 ensureIngestWorker() 返回前启动");
+      await withDeadline("close during cold start", closeStarted!, 10_000);
+
+      assert.equal(wasStarting, true, "close() 必须发生在 ready 结算之前");
+      assert.equal(created!.retired, true);
+      assert.equal(created!.startup.settled, true, "ready 等待必须有终局，不能悬挂");
+      assert.equal(worker.ingestWorkerStats().started, 1,
+        "关闭期间不得为了重试再创建第二条线程");
+      assert.equal(worker.ingestWorkerStats().retired, 1, "只允许退休一次");
+      assert.equal(worker.get(job.id)?.status, "queued",
+        "关闭中的未提交批次按既有 resume 语义回到 queued，而不是伪失败或悬挂");
+
+      await withDeadline("second close", worker.close(), 5_000);
+      assert.equal(worker.ingestWorkerStats().retired, 1, "重复 close() 不得重复退休/释放");
+    } finally {
+      await closeWithDeadline(worker, "cold close cleanup");
+    }
+  });
+});
+
+test("ready 前真实退出：启动等待被结算，任务不悬挂", { timeout: 25_000 }, async () => {
+  await fixture(async ({ make, writeInput }) => {
+    const input = writeInput(0);
+    const seed = make();
+    try { assert.equal((await runBatch(seed, input, "exit-before-ready-seed")).status, "succeeded"); }
+    finally { await closeWithDeadline(seed, "seed close"); }
+
+    const worker = make();
+    const surface = worker as unknown as LifecycleSurface;
+    const originalEnsure = surface.ensureIngestWorker.bind(worker);
+    let resident: ResidentSurface | null = null;
+    surface.ensureIngestWorker = () => {
+      const created = originalEnsure();
+      resident = created;
+      // 真实线程终止（exit 事件代码由线程运行时给出），但发生在 ready 之前。
+      void created.thread.terminate().catch(() => {});
+      return created;
+    };
+    try {
+      const done = await withDeadline("task after pre-ready exit",
+        runBatch(worker, input, "exit-before-ready"), 10_000);
+      assert.equal(done.status, "failed", JSON.stringify(done));
+      assert.equal(resident!.startup.settled, true, "exit 必须结算 ready（不能只处理 error）");
+      assert.equal(resident!.retired, true);
+      assert.equal(worker.ingestWorkerStats().started, 1);
+    } finally {
+      await closeWithDeadline(worker, "exit-before-ready cleanup");
+    }
+  });
+});
+
+test("ready 前 error 事件：启动等待同样被拒绝，close 不悬挂", { timeout: 25_000 }, async () => {
+  await fixture(async ({ make, writeInput }) => {
+    const input = writeInput(0);
+    const seed = make();
+    try { assert.equal((await runBatch(seed, input, "error-before-ready-seed")).status, "succeeded"); }
+    finally { await closeWithDeadline(seed, "seed close"); }
+
+    const worker = make();
+    const surface = worker as unknown as LifecycleSurface;
+    const originalEnsure = surface.ensureIngestWorker.bind(worker);
+    let resident: ResidentSurface | null = null;
+    let closeStarted: Promise<void> | null = null;
+    surface.ensureIngestWorker = () => {
+      const created = originalEnsure();
+      resident = created;
+      // 在 ready 之前注入启动错误；retire 会真实 terminate 线程。
+      created.thread.emit("error", new Error("fixture pre-ready startup failure"));
+      closeStarted = worker.close();
+      return created;
+    };
+    try {
+      const job = worker.create(input, undefined, "error-before-ready");
+      await waitFor("pre-ready error initiation", () => closeStarted !== null, 5_000);
+      await withDeadline("close after pre-ready error", closeStarted!, 10_000);
+      assert.equal(resident!.startup.settled, true);
+      assert.equal(resident!.retired, true);
+      assert.equal(worker.get(job.id)?.status, "queued", JSON.stringify(worker.get(job.id)));
+    } finally {
+      await closeWithDeadline(worker, "error-before-ready cleanup");
+    }
+  });
+});
+
+test("真实 worker 提交后回复丢失：线程终止后从持久回执恢复同一成功结果", { timeout: 30_000 }, async () => {
+  await fixture(async ({ main, make, writeInput }) => {
+    const input = writeInput(0);
+    const seed = make();
+    try { assert.equal((await runBatch(seed, input, "lost-reply-seed")).status, "succeeded"); }
+    finally { await closeWithDeadline(seed, "seed close"); }
+
+    const worker = make();
+    const surface = worker as unknown as LifecycleSurface;
+    const originalSettle = surface.settleIngestReply.bind(worker);
+    let targetId: string | null = null;
+    let receiptAtInterception: ImportJobResponse["summary"] | null = null;
+    let termination: Promise<number> | null = null;
+    surface.settleIngestReply = (resident, message) => {
+      if (targetId && message.kind === "result" && message.ok && !receiptAtInterception) {
+        const receipt = readImportReceipt(main, targetId);
+        if (receipt) {
+          // 回执已同一事务提交；拒绝结算这条回复并真实终止线程。
+          receiptAtInterception = receipt;
+          termination = resident.thread.terminate();
+          return;
+        }
+      }
+      originalSettle(resident, message as never);
+    };
+    try {
+      const created = worker.create(input, undefined, "lost-reply-real-worker");
+      targetId = created.id;
+      const done = await withDeadline("recover lost real worker reply", (async () => {
+        while (worker.hasPending || worker.isRunning) {
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+        }
+        return worker.get(created.id);
+      })(), 15_000);
+      await termination;
+
+      assert.ok(receiptAtInterception, "拦截回复时必须已经有持久回执（真实提交完成）");
+      assert.equal(done?.status, "succeeded", JSON.stringify(done));
+      assert.deepEqual(done?.summary, receiptAtInterception,
+        "恢复结果必须来自持久回执，不能来自被丢弃的内存回复");
+      assert.match(done?.message ?? "", /持久回执/);
+      assert.equal(worker.ingestWorkerStats().retired, 1,
+        "回复丢失的线程必须被真实退休，不能继续复用");
+    } finally {
+      await closeWithDeadline(worker, "lost reply cleanup");
+    }
+  });
+});
+
+test("真实 worker 提交前失败：线程终止、无回执、无半提交", { timeout: 30_000 }, async () => {
+  await fixture(async ({ main, make, writeInput }) => {
+    const input = writeInput(0);
+    const seed = make();
+    try { assert.equal((await runBatch(seed, input, "precommit-seed")).status, "succeeded"); }
+    finally { await closeWithDeadline(seed, "seed close"); }
+
+    const lock = new DatabaseSync(main);
+    lock.exec("PRAGMA busy_timeout=0; BEGIN IMMEDIATE");
+    let rolledBack = false;
+    const releaseLock = () => {
+      if (rolledBack) return;
+      rolledBack = true;
+      try { lock.exec("ROLLBACK"); } catch { /* fixture may already have released */ }
+      try { lock.close(); } catch { /* fixture may already have closed */ }
+    };
+    const worker = make();
+    const surface = worker as unknown as LifecycleSurface;
+    const originalEnsure = surface.ensureIngestWorker.bind(worker);
+    let resident: ResidentSurface | null = null;
+    surface.ensureIngestWorker = () => {
+      const created = originalEnsure();
+      if (!resident) {
+        resident = created;
+        const post = created.thread.postMessage.bind(created.thread);
+        created.thread.postMessage = (message: unknown) => {
+          post(message);
+          // 写锁由夹具持有 ⇒ 任务无法 COMMIT；投递后立即终止真实线程。
+          const termination = created.thread.terminate();
+          void termination.finally(releaseLock);
+        };
+      }
+      return created;
+    };
+    try {
+      const done = await withDeadline("pre-commit failure", runBatch(worker, input, "precommit-fail"), 15_000);
+      releaseLock();
+      assert.equal(done.status, "failed", JSON.stringify(done));
+      assert.equal(readImportReceipt(main, done.id), null, "提交前失败不得留下成功回执");
+      assert.equal(worker.ingestWorkerStats().retired, 1);
+      const probe = new DatabaseSync(main, { readOnly: true });
+      try {
+        assert.equal(Number(probe.prepare("SELECT COUNT(*) AS n FROM import_manifest WHERE key = ?")
+          .get(`rai.applied-import.${done.id}`)!.n), 0, "回执行必须完全不存在");
+      } finally { probe.close(); }
+    } finally {
+      releaseLock();
+      await closeWithDeadline(worker, "precommit cleanup");
+    }
+  });
+});
+
+test("提交结果不确定且数据库不可访问：进入恢复阻断，不发布终态也不清理来源", { timeout: 30_000 }, async () => {
+  await fixture(async ({ main, make, writeInput }) => {
+    const input = writeInput(0);
+    const seed = make();
+    try { assert.equal((await runBatch(seed, input, "recovery-block-seed")).status, "succeeded"); }
+    finally { await closeWithDeadline(seed, "seed close"); }
+
+    const scheduler = new TaskAdmissionScheduler(new MutationCoordinator());
+    const admission = scheduler.owner("import");
+    let recoveryRequired = 0;
+    let terminalCalls = 0;
+    const worker = make({
+      admission,
+      onRecoveryRequired: () => {
+        recoveryRequired += 1;
+        scheduler.blockUntilRestart("import_publication_recovery_required");
+      },
+      onTerminal: () => { terminalCalls += 1; }
+    });
+    const surface = worker as unknown as LifecycleSurface;
+    const originalSettle = surface.settleIngestReply.bind(worker);
+    let targetId: string | null = null;
+    let hiddenDatabase: string | null = null;
+    let termination: Promise<number> | null = null;
+    surface.settleIngestReply = (resident, message) => {
+      if (targetId && message.kind === "result" && message.ok && hiddenDatabase === null) {
+        const receipt = readImportReceipt(main, targetId);
+        if (receipt) {
+          // 真实提交已发生；把原数据库从路径上移走，严格读取只能“无法核实”。
+          hiddenDatabase = `${main}.unavailable-${Date.now()}`;
+          renameSync(main, hiddenDatabase);
+          termination = resident.thread.terminate();
+          return;
+        }
+      }
+      originalSettle(resident, message as never);
+    };
+    try {
+      const created = worker.create(input, undefined, "recovery-blocked");
+      targetId = created.id;
+      await waitFor("recovery block", () => worker.get(created.id)?.phase === "recovery_required", 15_000);
+      await termination;
+
+      const blocked = worker.get(created.id);
+      assert.equal(blocked?.status, "running", JSON.stringify(blocked));
+      assert.equal(blocked?.phase, "recovery_required");
+      assert.equal(worker.hasPending, true, "恢复阻断必须保留未结束的作业");
+      assert.equal(recoveryRequired, 1, "必须通知全局恢复阻断一次");
+      assert.equal(terminalCalls, 0, "无法核实结果时不得调用终态来源清理");
+      assert.equal(scheduler.isBlocked, true, "全局 TaskAdmissionScheduler 必须被阻断");
+      assert.equal(admission.acquire(), null, "阻断后任何新的全局写者都不得取得许可");
+
+      await closeWithDeadline(worker, "recovery block cleanup");
+      assert.equal(worker.get(created.id)?.status, "running", "关闭不是终态裁决");
+      assert.equal(recoveryRequired, 1);
+    } finally {
+      await closeWithDeadline(worker, "recovery block finally");
+    }
   });
 });
 
@@ -418,4 +862,278 @@ test("每个任务的数据库调查：同路径换文件（恢复/换库）必�
       "同路径换了文件必须被看见 —— 旧连接与旧调查结论都不许带进新库");
     assert.equal(second.datasetVersion, "restored", "当前版本必须**每任务重读**，不能沿用上一批的");
   });
+});
+
+/*
+ * 终止账本与恢复阻断的回归（2026-10-21 补修）。
+ *
+ * 这里守的是两条**资源/安全**性质，而不是性能：
+ *   ① `ingestTerminations` 只跟踪尚未结算的终止操作；连续失败、替换线程后不得
+ *      把历史 Promise 永久留在集合里。
+ *   ② 恢复分支中的 terminate 失败（同步抛错或 Promise 拒绝）不得绕过阻断：
+ *      作业必须停在 running + recovery_required，全局 TaskAdmission 不得再发许可，
+ *      也不得执行 onTerminal。
+ */
+
+interface TerminationSurface extends Surface {
+  ingest: ResidentSurface | null;
+  ingestTerminations: Set<Promise<void>>;
+  ingestTerminationError: Error | null;
+  retireIngestWorker(resident: unknown, error: Error): Promise<void>;
+  waitForIngestTermination(): Promise<boolean>;
+}
+
+/** 只满足 retireIngestWorker 所需字段的假 resident；不创建真实线程。 */
+function fakeResident(terminate: () => Promise<number>) {
+  return {
+    thread: { terminate, postMessage: () => {}, emit: () => false },
+    ready: Promise.resolve(),
+    startup: { settled: true, resolve: () => {}, reject: () => {} },
+    startupMs: 0,
+    startError: null as Error | null,
+    retired: false,
+    pending: new Map<number, {
+      resolve: (value: unknown) => void; reject: (error: Error) => void; stage: string; startedAt: number;
+    }>(),
+    termination: null as Promise<void> | null,
+    listener: null
+  };
+}
+
+test("连续 25 轮正常退休：已结算的 termination 立即移出集合，不随历史增长", async () => {
+  await fixture(async ({ make }) => {
+    const worker = make();
+    const surface = worker as unknown as TerminationSurface;
+    try {
+      for (let index = 0; index < 25; index += 1) {
+        await surface.retireIngestWorker(fakeResident(async () => 0), new Error(`retire-${index}`));
+        assert.equal(surface.ingestTerminations.size, 0,
+          `第 ${index + 1} 轮结算后集合必须为空（历史记录不得累积）`);
+      }
+      assert.equal(await surface.waitForIngestTermination(), true);
+      assert.equal(surface.ingestTerminationError, null);
+    } finally { await worker.close(); }
+  });
+});
+
+test("两条终止操作交错完成：第一条完成不得被判为整体停止", async () => {
+  await fixture(async ({ make }) => {
+    const worker = make();
+    const surface = worker as unknown as TerminationSurface;
+    try {
+      let releaseFirst!: (code: number) => void;
+      let releaseSecond!: (code: number) => void;
+      const first = fakeResident(() => new Promise<number>((resolve) => { releaseFirst = resolve; }));
+      const second = fakeResident(() => new Promise<number>((resolve) => { releaseSecond = resolve; }));
+      const firstRetirement = surface.retireIngestWorker(first, new Error("first"));
+      const secondRetirement = surface.retireIngestWorker(second, new Error("second"));
+      assert.equal(surface.ingestTerminations.size, 2, "两条未结算的终止操作都必须在集合里");
+
+      let settled = false;
+      const waiting = surface.waitForIngestTermination().then((value) => { settled = true; return value; });
+      releaseFirst(0);
+      await firstRetirement;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(settled, false, "第二条终止操作仍在等待时，第一条完成不能判为全部停止");
+      assert.equal(surface.ingestTerminations.size, 1, "已结算的第一条必须已移出集合");
+
+      releaseSecond(0);
+      await secondRetirement;
+      assert.equal(await waiting, true);
+      assert.equal(surface.ingestTerminations.size, 0);
+    } finally { await worker.close(); }
+  });
+});
+
+test("等待期间新增退休操作：新增的 termination 同样被等待", async () => {
+  await fixture(async ({ make }) => {
+    const worker = make();
+    const surface = worker as unknown as TerminationSurface;
+    try {
+      let releaseFirst!: (code: number) => void;
+      let releaseSecond!: (code: number) => void;
+      const first = fakeResident(() => new Promise<number>((resolve) => { releaseFirst = resolve; }));
+      const second = fakeResident(() => new Promise<number>((resolve) => { releaseSecond = resolve; }));
+      const firstRetirement = surface.retireIngestWorker(first, new Error("first"));
+
+      let settled = false;
+      const waiting = surface.waitForIngestTermination().then((value) => { settled = true; return value; });
+      // 让等待真正进入第一个快照之后，再退休一条：覆盖“等待期间新增”的路径。
+      await Promise.resolve();
+      const secondRetirement = surface.retireIngestWorker(second, new Error("second"));
+      assert.equal(surface.ingestTerminations.size, 2);
+
+      releaseFirst(0);
+      await firstRetirement;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(settled, false, "等待期间新增的终止操作必须继续等待，不能提前返回");
+
+      releaseSecond(0);
+      await secondRetirement;
+      assert.equal(await waiting, true);
+      assert.equal(surface.ingestTerminations.size, 0);
+    } finally { await worker.close(); }
+  });
+});
+
+test("terminate 同步抛错/异步拒绝：集合清空后仍返回停止未确认，后续成功不得清除失败", async () => {
+  await fixture(async ({ make }) => {
+    for (const mode of ["sync", "async"] as const) {
+      const worker = make();
+      const surface = worker as unknown as TerminationSurface;
+      const failing = fakeResident(mode === "sync"
+        ? () => { throw new Error(`injected ${mode} terminate failure`); }
+        : async () => { throw new Error(`injected ${mode} terminate failure`); });
+      await assert.rejects(
+        surface.retireIngestWorker(failing, new Error("retire failing resident")),
+        new RegExp(`injected ${mode} terminate failure`));
+      assert.equal(surface.ingestTerminations.size, 0, `${mode}：拒绝的终止操作也必须移出集合`);
+      assert.ok(surface.ingestTerminationError instanceof Error, `${mode}：必须记录首次终止失败`);
+      assert.equal(await surface.waitForIngestTermination(), false,
+        `${mode}：集合为空不等于停止已确认`);
+
+      // 后续正常退休不得把历史失败“洗掉”。
+      await surface.retireIngestWorker(fakeResident(async () => 0), new Error("later normal retirement"));
+      assert.equal(surface.ingestTerminations.size, 0);
+      assert.equal(await surface.waitForIngestTermination(), false,
+        `${mode}：后续成功不得清除生命周期内的首次终止失败`);
+
+      await assert.rejects(worker.close(), /termination could not be confirmed/,
+        `${mode}：close() 也必须把历史终止失败当作无法确认停止`);
+    }
+  });
+});
+
+test("同一 resident 重复退休：terminate 只调用一次并返回同一个 Promise", async () => {
+  await fixture(async ({ make }) => {
+    const worker = make();
+    const surface = worker as unknown as TerminationSurface;
+    try {
+      let calls = 0;
+      let release!: (code: number) => void;
+      const resident = fakeResident(() => {
+        calls += 1;
+        return new Promise<number>((resolve) => { release = resolve; });
+      });
+      const first = surface.retireIngestWorker(resident, new Error("first retirement"));
+      const second = surface.retireIngestWorker(resident, new Error("duplicate retirement"));
+      assert.equal(first, second, "重复退休必须返回同一个 termination Promise");
+      assert.equal(calls, 1, "同一个 resident 只允许调用一次 terminate()");
+      release(0);
+      await Promise.all([first, second]);
+      assert.equal(surface.ingestTerminations.size, 0);
+    } finally { await worker.close(); }
+  });
+});
+
+test("连续多轮任务失败并替换线程：终止账本不积累历史", { timeout: 30_000 }, async () => {
+  await fixture(async ({ make, writeInput }) => {
+    const worker = make();
+    const surface = worker as unknown as TerminationSurface;
+    const original = surface.databaseTask.bind(worker);
+    let currentInput: string | null = null;
+    let poisonNext = false;
+    let poisonIndex = 0;
+    surface.databaseTask = async <T>(task: ImportDatabaseTask): Promise<T> => {
+      if (poisonNext && task.operation === "import-lanes" && currentInput) {
+        poisonNext = false;
+        // 准入之后改载荷 ⇒ 车道内容摘要复核抛错 ⇒ 线程被真实替换。
+        writeFileSync(join(currentInput, "export.xml"), recordOnlyXml(20 + poisonIndex));
+      }
+      return original<T>(task);
+    };
+    try {
+      for (let index = 0; index < 3; index += 1) {
+        poisonIndex = index;
+        currentInput = writeInput(10 + index);
+        poisonNext = true;
+        const failed = await runBatch(worker, currentInput, `poison-thread-${index}`);
+        assert.equal(failed.status, "failed", `第 ${index + 1} 轮必须按任务失败结算：${JSON.stringify(failed)}`);
+        assert.equal(surface.ingestTerminations.size, 0,
+          `第 ${index + 1} 轮线程退出后不得把已结算的 termination 留在集合里`);
+      }
+      assert.equal(worker.ingestWorkerStats().retired, 3, "三轮失败必须各替换一条线程");
+
+      const good = await runBatch(worker, writeInput(30), "after-three-retirements");
+      assert.equal(good.status, "succeeded", JSON.stringify(good));
+      assert.equal(worker.ingestWorkerStats().started, 4, "第 4 条线程只应在成功批需要时创建");
+      assert.equal(surface.ingestTerminations.size, 0, "成功批结束后集合仍必须为空");
+      assert.equal(await surface.waitForIngestTermination(), true, "没有终止失败时必须确认停止");
+    } finally { await worker.close(); }
+  });
+});
+
+async function assertTerminateFailureBlocksRecovery(mode: "sync" | "async"): Promise<void> {
+  await fixture(async ({ make, writeInput }) => {
+    const scheduler = new TaskAdmissionScheduler(new MutationCoordinator());
+    const admission = scheduler.owner("import");
+    let recoveryRequired = 0;
+    let targetId = "";
+    let targetTerminalCalls = 0;
+    const worker = make({
+      admission,
+      onRecoveryRequired: () => {
+        recoveryRequired += 1;
+        scheduler.blockUntilRestart("import_recovery_required");
+      },
+      onTerminal: (job) => { if (job.id === targetId) targetTerminalCalls += 1; }
+    });
+    const surface = worker as unknown as TerminationSurface & LifecycleSurface;
+    let resident: ResidentSurface | null = null;
+    let originalTerminate: (() => Promise<number>) | null = null;
+    try {
+      // 先跑一批，留下一条**真实且活跃**的常驻线程；恢复分支必须主动退休它。
+      const seed = await runBatch(worker, writeInput(0), `terminate-failure-seed-${mode}`);
+      assert.equal(seed.status, "succeeded", JSON.stringify(seed));
+      resident = surface.ingest;
+      assert.ok(resident, "seed 批必须留下常驻 ingest 线程");
+      const thread = resident!.thread;
+      originalTerminate = thread.terminate.bind(thread);
+
+      // 让目标批在 writeMayHaveCommitted=true 之后抛错，进入恢复分支；
+      // 此时线程仍然活着，恢复分支会亲自调用 retireIngestWorker()。
+      const originalDatabaseTask = surface.databaseTask.bind(worker);
+      surface.databaseTask = async <T>(task: ImportDatabaseTask): Promise<T> => {
+        if (task.operation === "import-lanes"
+            && (task.input as { jobId?: string }).jobId === targetId) {
+          throw new Error("simulated lost worker reply after commit attempt");
+        }
+        return originalDatabaseTask<T>(task);
+      };
+      thread.terminate = mode === "sync"
+        ? () => { throw new Error(`injected ${mode} terminate failure`); }
+        : async () => { throw new Error(`injected ${mode} terminate failure`); };
+
+      const target = worker.create(writeInput(1), undefined, `terminate-failure-target-${mode}`);
+      targetId = target.id;
+      await waitFor("recovery_required after terminate failure",
+        () => worker.get(target.id)?.phase === "recovery_required", 15_000);
+      await waitFor("withheld run settled", () => !worker.isRunning, 10_000);
+
+      const blocked = worker.get(target.id);
+      assert.equal(blocked?.status, "running", `${mode}: 结果未裁决时不得发布成功/失败终态`);
+      assert.equal(blocked?.phase, "recovery_required");
+      assert.equal(worker.hasPending, true, `${mode}: 作业必须保留在未结束队列里`);
+      assert.equal(recoveryRequired, 1, `${mode}: 必须通知全局恢复阻断一次`);
+      assert.equal(scheduler.isBlocked, true, `${mode}: 全局 TaskAdmissionScheduler 必须被阻断`);
+      assert.equal(admission.acquire(), null, `${mode}: 阻断后任何新的全局写者都不得取得许可`);
+      assert.equal(targetTerminalCalls, 0, `${mode}: 不得执行 onTerminal/source cleanup`);
+      assert.equal(surface.ingestTerminations.size, 0, `${mode}: 失败终止操作也必须移出集合`);
+      assert.ok(surface.ingestTerminationError instanceof Error, `${mode}: 必须记录终止失败`);
+    } finally {
+      // 恢复原方法并**真正**停止线程：注入的 terminate 从未发出终止请求。
+      if (resident && originalTerminate) {
+        resident.thread.terminate = originalTerminate;
+        await originalTerminate().catch(() => {});
+      }
+    }
+  });
+}
+
+test("恢复分支中 terminate 同步抛错：进入恢复阻断，全局写者无法取得许可", { timeout: 30_000 }, async () => {
+  await assertTerminateFailureBlocksRecovery("sync");
+});
+
+test("恢复分支中 terminate 异步拒绝：进入恢复阻断，全局写者无法取得许可", { timeout: 30_000 }, async () => {
+  await assertTerminateFailureBlocksRecovery("async");
 });

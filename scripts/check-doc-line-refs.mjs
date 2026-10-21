@@ -80,15 +80,21 @@ import { fileURLToPath } from "node:url";
  *   **校验了 0 处引用**、却返回 `EXIT=0`。这就是纪律里那句「脚本跑绿 ≠ 门禁存在」的原样复现：
  *   报告里写"`check:doc-refs` 全绿"是**空话**，它没看过任何一行引用。
  * - 含引用的文档共 6 份 / 127 处，**全都在这份清单之外**：其中 3 份是带日期的交付快照
- *   （`deliverables/*_2026-10-11.md`）、`docs/TODAY_PLAN_CARDS_REVIEW.md` 也是带日期的
- *   时点快照（"本轮只诊断，未改任何代码"）—— 按本文件的第 3 条判读陷阱，**时点快照不该进
- *   默认范围**（回写等于伪造历史），应显式传入并自行判读。
+ *   （`deliverables/*_2026-10-11.md`）、另外几份也是带日期的时点快照（"本轮只诊断，未改任何代码"）
+ *   —— 按本文件的第 3 条判读陷阱，**时点快照不该进默认范围**（回写等于伪造历史），
+ *   应显式传入并自行判读。2026-10-20 文档收敛时，这些已完成的时点文档已按
+ *   `docs/PROJECT_REVIEW.md` 的收尾索引删除或并入现行文档。
  * - `deploy/README-UBUNTU.md`（1 处）是**现行文档**，当时属于漏登记。
  *
  * 2026-10-18（深度审查 P3-40）把当时漏登记的现行文档补进默认范围：
  * `deploy/README-UBUNTU.md`、`docs/DECISIONS.md`、`docs/HEALTHKIT_RECORD_SYNC_V2.md`、
  * `docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md`。补入时实测这 5 处引用全部可解析
  * （0 越界 / 0 漂移），所以它们不是"真空但已显式可见"，而是真的被核对。
+ *
+ * 2026-10-20（文档收敛）：三份训练计划实施/方案文档与
+ * `docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md` 已并入现行文档并从仓库删除
+ * （见 `docs/PROJECT_REVIEW.md` 的已收尾批次索引），因此从默认范围移除。
+ * 合并后的 `docs/IOS_NATIVE_PLAN_SCHEDULING.md` 正文不使用绝对行号，不加入本清单。
  */
 const DEFAULT_DOCS = [
   "docs/ARCHITECTURE.md",
@@ -105,28 +111,17 @@ const DEFAULT_DOCS = [
   // 由 `check:docs` 覆盖）。挂载意图：实施期为条目补行号证据时门禁自动生效；
   // 且"0 处"会显式出现在输出里，避免把真空读成已保护。文档手改锚点请同步此说明。
   "docs/IOS_SYNC_PERFORMANCE_REVIEW.md",
-  // 2026-10-18 训练计划审查（R-03/P2-17）：这三份是**现行**计划文档（由
-  // `README.md`、`IOS_NATIVE_API_CONTRACT.md:104/106`、`IMPLEMENTATION.md:3` 链式引用，
-  // 读者会当作当前口径），但当时**全都在默认范围之外** ⇒ 它们的 `文件:行号` 没有任何门禁。
-  // 同一轮实测：把它们显式传给本脚本立刻抓到一处死引用（已修，指向已删除的 `docs/WEB.md`）。
-  // ⚠️ 首跑时三份都打印"0 处引用"：它们当前靠 markdown 链接而非行号引用，
-  // 这是**真空但已显式可见**，不是"已保护"；实施期补行号证据时门禁自动生效。
-  // 反例：`docs/TODAY_PLAN_CARDS_REVIEW.md` 有 23 处行号引用，但它是**带日期的时点快照**
-  // （2026-10-06"本轮只诊断，未改任何代码"）——按上面第 3 条判读陷阱不进默认范围，
-  // 需要时显式传入并自行判读。
-  "docs/IOS_TRAINING_PLAN_STATE_V1.md",
-  "docs/IOS_TRAINING_PLAN_IMPLEMENTATION.md",
-  "docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md",
+  // 2026-10-20 文档收敛：原训练计划三份（STATE_V1 / IMPLEMENTATION /
+  // ARCHITECTURE_PROPOSAL）与 IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN 已删除；
+  // 现行设备侧口径在 `docs/IOS_NATIVE_PLAN_SCHEDULING.md`（不写绝对行号）。
   // 2026-10-18 深度审查（P3-40）：以下 4 份同为**现行**文档，当时在默认范围之外，
   // 它们的 `文件:行号` 没有任何门禁。补入时显式跑过，5 处引用全部可解析（0 越界）。
   // `docs/DECISIONS.md` 的 2 处引用是现行决策依据；`deploy/README-UBUNTU.md` 的 1 处
-  // 是部署核对点；`HEALTHKIT_RECORD_SYNC_V2` 与 `IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN`
-  // 各 1 处。历史时点快照（`deliverables/`、`.archify/`、`TODAY_PLAN_CARDS_REVIEW.md`）
-  // 仍**不进**默认范围——回写等于伪造历史。
+  // 是部署核对点；`HEALTHKIT_RECORD_SYNC_V2` 的 1 处同样是现行合同。
+  // 历史时点快照（`deliverables/`、`.archify/`）仍**不进**默认范围——回写等于伪造历史。
   "deploy/README-UBUNTU.md",
   "docs/DECISIONS.md",
-  "docs/HEALTHKIT_RECORD_SYNC_V2.md",
-  "docs/IOS_SYNC_POST_OPTIMIZATION_FIX_PLAN.md"
+  "docs/HEALTHKIT_RECORD_SYNC_V2.md"
 ];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */

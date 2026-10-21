@@ -6,7 +6,7 @@
  *
  * The failure this guards against is concrete: six 4.4–4.8 MB design boards
  * entered the history, and cleaning them up required rewriting every commit
- * (see `apps/ios/design/technology-v1/README.md`, "仓库体积"). A pattern would
+ * (see `apps/ios/design/README.md`（大设计板原图已移出 Git）). A pattern would
  * have to name a path — and that exact approach is what already failed once: the
  * same boards were cleaned out of one directory and then reappeared under a
  * *new* one. A byte ceiling is path-agnostic, so it survives reorganisation.
@@ -57,7 +57,7 @@ if (oversized.length > 0) {
     `blob 体积闸门：${oversized.length} 个文件超过 ${mb(MAX_BLOB_BYTES)} MB\n` +
       oversized.map((file) => `  ${mb(file.size)} MB  ${file.path}`).join("\n") +
       "\n\n位图一旦进了历史就只能靠重写全部提交来清理" +
-      "（见 apps/ios/design/technology-v1/README.md 的「仓库体积」）。\n" +
+      "（见 apps/ios/design/README.md）。\n" +
       `请改为引用仓库外的资源，或把文件压到 ${MAX_BLOB_BYTES} bytes 以下。\n`
   );
   process.exit(1);

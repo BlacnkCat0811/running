@@ -13,6 +13,8 @@ export {
 export {
   isStructurallyReadable,
   probeDatabaseStructure,
+  quickCheckDatabase,
+  type DatabaseIntegrityReport,
   type DatabaseStructureReport
 } from "./database-structure-probe.js";
 export {

@@ -23,7 +23,8 @@ import { readHealthSyncManifest } from "./sync-manifest.js";
 import {
   acquireDatabasePublicationLock,
   probeDatabaseStructure,
-  publishDatabaseFile
+  publishDatabaseFile,
+  quickCheckDatabase
 } from "@rai/storage-sqlite";
 
 /**
@@ -211,6 +212,14 @@ async function activateStagingDatabase(
   const displaced = `${target}.replaced.${randomUUID()}`;
   const hadTarget = existsSync(target);
   try {
+    // PR-10 (2026-10-21): the private candidate is the last place where a whole
+    // database scan is affordable. `probeDatabaseStructure` (post-install) only
+    // proves the file/header/schema is readable; it deliberately does not walk
+    // data pages. Run the strong check here, before the live file is touched.
+    const integrity = await timedStage("validate_candidate", () => quickCheckDatabase(staging));
+    if (!integrity.ok) {
+      throw new Error(`Staging database failed the pre-publication integrity check: ${integrity.reason}`);
+    }
     await publishDatabaseFile({
       candidatePath: staging,
       targetPath: target,
@@ -225,12 +234,10 @@ async function activateStagingDatabase(
         }
       },
       moveFile: moveFileWithRetry,
-      // 这里原本跑 `PRAGMA quick_check`：一次 506 MB 的全库扫描，真机冷态实测 12.1 s
-      // （热态 0.25 s，48×），而它就落在 `parseImport` 没有任何埋点的尾部。
-      // 换成结构探针的依据见 `@rai/storage-sqlite` 的 `probeDatabaseStructure` 文档：
-      // ① 交付的库是本进程刚写完的，发布后再全库扫描属于重复校验；
-      // ② 发布闸门（`import-worker.ts` 的 `activateDatabase`）仍保留一次 quick_check
-      //    兜底 —— 页内损坏会在那里被拦下并触发回滚。
+      // 安装后的轻量校验（PR-10）：只证明文件/header/schema 基本可读，**不**证明
+      // 所有数据页无损。强校验已在上面 `validate_candidate` 对私有候选库执行一次
+      // `PRAGMA quick_check`；不要在这里重复全库扫描，也不要把本探针说成
+      // “API 发布后还有 quick_check 兜底”——运行期候选链已退役，没有那次兜底。
       validateInstalled: () => timedStage("validate_installed", () => {
         const report = probeDatabaseStructure(target);
         if (!report.readable) {

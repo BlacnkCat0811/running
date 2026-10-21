@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { isStructurallyReadable, probeDatabaseStructure } from "../src/database-structure-probe.js";
+import { isStructurallyReadable, probeDatabaseStructure, quickCheckDatabase } from "../src/database-structure-probe.js";
 
 function withDirectory<T>(run: (directory: string) => T): T {
   const directory = mkdtempSync(join(tmpdir(), "rai-structure-probe-"));
@@ -69,6 +69,10 @@ test("健康库：探针通过，且页几何与文件大小自洽", () => {
     assert.equal(report.sizeBytes, statSync(path).size);
     assert.ok(report.schemaObjects! > 0);
     assert.equal(isStructurallyReadable(path), true);
+    assert.deepEqual(quickCheckDatabase(path), { ok: true });
+    const missing = quickCheckDatabase(join(directory, "absent.sqlite"));
+    assert.equal(missing.ok, false);
+    assert.match(missing.reason ?? "", /quick_check failed/);
   });
 });
 
@@ -170,5 +174,10 @@ test("登记降级：单页被翻转时 quick_check 报错，而结构探针漏�
       true,
       "结构探针读不出页内损坏 —— 这正是它必须留 quick_check 兜底的原因"
     );
+    // PR-10：CLI 候选发布前的强校验必须拒绝同一份文件；否则“弱探针通过”
+    // 会成为页内损坏进入主库的唯一入口。
+    const integrity = quickCheckDatabase(path);
+    assert.equal(integrity.ok, false);
+    assert.match(integrity.reason ?? "", /quick_check/);
   });
 });
