@@ -3,7 +3,7 @@
 **日期：2026-10-22（Asia/Shanghai）**  
 **基线：`main` / `cfc5ba46c87e54add8e083155f54defaa0f03cef`；工作区含阶段 2 未提交改动与本次 A/B/C 改动**  
 **实施依据：`RAI_Phase2_Remaining_Issues_Implementation_and_Acceptance_2026-10-21.md`（仓库外 Downloads，未复制进仓库）**  
-**生产发布：未执行。本报告只做研发验收，不代表生产维护窗口、备份恢复或部署验收已完成。**
+**生产发布：2026-10-22 已部署 `9364270`（主健康库 v46 → v47）。本报告仍是研发验收记录，不代表部署验收；部署与回滚见[阶段 2 发布记录](../PHASE2_SQLITE_RELEASE_2026-10-22.md)。**
 
 ## 1. 结论摘要
 

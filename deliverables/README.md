@@ -9,12 +9,16 @@
 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
 [项目审查](../docs/PROJECT_REVIEW.md) 后删除。
 
+- [PHASE2_SQLITE_RELEASE_2026-10-22.md](PHASE2_SQLITE_RELEASE_2026-10-22.md)：
+  阶段 2 发布记录（`9364270`，2026-10-22 部署生产，主健康库 v46 → v47）——发布前冷备、迁移计数、
+  部署后健康检查/只读冒烟与代码/数据回滚边界；**按用户要求未运行测试套件**。
 - [PHASE2_FOLLOWUP_A_B_C_2026-10-22.md](phase2-followup-2026-10-21/PHASE2_FOLLOWUP_A_B_C_2026-10-22.md)：
   阶段 2 剩余问题 A/B/C——A（assessment 写入 P95 + 自动 checkpoint）、B（外部提交后首次 `/series`，含专属读 worker 与代次隔离）、
-  C（请求内 speedTrack 复用）全部通过；热读五窗口已按“可读训练、200、身份与非空内容”修正并重测；**未执行生产发布**。
+  C（请求内 speedTrack 复用）全部通过；热读五窗口已按“可读训练、200、身份与非空内容”修正并重测；
+  研发验收记录，生产部署见上方发布记录。
 - [PHASE2_SQLITE_QUERY_TRANSACTION_CONNECTION_2026-10-21.md](phase2-sqlite-2026-10-21/PHASE2_SQLITE_QUERY_TRANSACTION_CONNECTION_2026-10-21.md)：
   阶段 2 SQLite 查询/事务/连接优化与验收——隔离 D0–D3 测量、SQL 台账、v47 索引迁移、checkpoint
-  返回值语义修复、差分/迁移/回滚证据；**未执行生产发布**。
+  返回值语义修复、差分/迁移/回滚证据；研发验收记录，生产部署见上方发布记录。
 - [PHASE1_MAIN_THREAD_BLOCKING_2026-10-21.md](PHASE1_MAIN_THREAD_BLOCKING_2026-10-21.md)：
   阶段 1 补修与验收补齐——worker 冷启动关闭、严格回执裁决、真实线程故障回归、可复现源码快照、
   HTTP 5×60 秒锁窗口与 100 批资源证据；满足进入阶段 2 条件（阶段 2 已交付，见上方 PHASE2 记录）。
