@@ -22,6 +22,7 @@ import { migrateModelV43 } from "./v43-migration.js";
 import { migrateModelV44 } from "./v44-migration.js";
 import { migrateModelV45 } from "./v45-migration.js";
 import { migrateModelV46 } from "./v46-migration.js";
+import { migrateModelV47 } from "./v47-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1694,7 +1695,8 @@ const migrations: readonly Migration[] = [
   { version: 43, name: "readable_route_points_view", up: migrateModelV43 },
   { version: 44, name: "coverage_evidence_columns", up: migrateModelV44 },
   { version: 45, name: "batch_analysis_dirty_evidence", up: migrateModelV45 },
-  { version: 46, name: "health_record_availability", up: migrateModelV46 }
+  { version: 46, name: "health_record_availability", up: migrateModelV46 },
+  { version: 47, name: "ability_assessment_session_lookup", up: migrateModelV47 }
 ];
 
 /**
@@ -1783,7 +1785,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   43: "878e51d8d84763824ca5434c6e34234d9c4abae6273e7a839e9772351668ee59",
   44: "468191aa5d7f6742d2b135d797bf8cb4e977ccecf679cb45ebb64c2edcd20970",
   45: "2112d288848cb7b253d0e9f46e45b82da8c676dd3628da14cd04444222f6e9d1",
-  46: "166c725f159a0dfd1f40dd1a529d5adf39a852eabdb31e26f1aaf2c552743973"
+  46: "166c725f159a0dfd1f40dd1a529d5adf39a852eabdb31e26f1aaf2c552743973",
+  47: "4eaa5dc02cab39ff2c35e8fb63bd0c677bc77b6b617189a8d570d07800129242"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */

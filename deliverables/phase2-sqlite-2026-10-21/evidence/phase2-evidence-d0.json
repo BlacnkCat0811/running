@@ -1,0 +1,2101 @@
+{
+  "meta": {
+    "startedAt": "2026-10-21T12:45:46.182Z",
+    "userCwd": "/Users/ta/running",
+    "node": "v22.23.2",
+    "platform": "darwin 25.6.0 x64",
+    "cpu": "AMD Ryzen 5 3600X 6-Core Processor             ",
+    "cores": 6,
+    "sqlite": "3.51.3",
+    "isolation": {
+      "rootReal": "/private/tmp/rai-phase2-review-d0",
+      "repoReal": "/Users/ta/running",
+      "repoVarReal": "/Users/ta/running/var"
+    },
+    "gitHead": "cfc5ba46c87e54add8e083155f54defaa0f03cef",
+    "root": "/tmp/rai-phase2-review-d0",
+    "scenario": "d0",
+    "rounds": 5,
+    "iterations": 200,
+    "finishedAt": "2026-10-21T12:45:46.550Z"
+  },
+  "manifests": {
+    "d0": {
+      "name": "d0",
+      "scale": "d0",
+      "schemaVersion": 46,
+      "label": "D0 语义边界",
+      "seed": 20261021,
+      "path": "/tmp/rai-phase2-review-d0/datasets/d0/rai.sqlite",
+      "bytes": {
+        "main": 958464,
+        "-wal": 0,
+        "-shm": 0,
+        "total": 958464
+      },
+      "sha256": "a536bc5567915c774392c5f6fd730d3597fe5916cb9aee32077407b0e9cee989",
+      "counts": {
+        "health_records": 18,
+        "workouts": 3,
+        "training_sessions": 3,
+        "workout_features": 1,
+        "ability_assessments": 1,
+        "workout_routes": 1
+      },
+      "sqlite": {
+        "version": "3.51.3",
+        "compile": [
+          "ATOMIC_INTRINSICS=1",
+          "COMPILER=clang-16.0.0",
+          "DEFAULT_AUTOVACUUM",
+          "DEFAULT_CACHE_SIZE=-2000",
+          "DEFAULT_FILE_FORMAT=4",
+          "DEFAULT_JOURNAL_SIZE_LIMIT=-1",
+          "DEFAULT_MEMSTATUS=0",
+          "DEFAULT_MMAP_SIZE=0",
+          "DEFAULT_PAGE_SIZE=4096",
+          "DEFAULT_PCACHE_INITSZ=20",
+          "DEFAULT_RECURSIVE_TRIGGERS",
+          "DEFAULT_SECTOR_SIZE=4096",
+          "DEFAULT_SYNCHRONOUS=2",
+          "DEFAULT_WAL_AUTOCHECKPOINT=1000",
+          "DEFAULT_WAL_SYNCHRONOUS=2",
+          "DEFAULT_WORKER_THREADS=0",
+          "DIRECT_OVERFLOW_READ",
+          "ENABLE_COLUMN_METADATA",
+          "ENABLE_DBSTAT_VTAB",
+          "ENABLE_FTS3",
+          "ENABLE_FTS3_PARENTHESIS",
+          "ENABLE_FTS5",
+          "ENABLE_GEOPOLY",
+          "ENABLE_MATH_FUNCTIONS",
+          "ENABLE_PREUPDATE_HOOK",
+          "ENABLE_RBU",
+          "ENABLE_RTREE",
+          "ENABLE_SESSION",
+          "MALLOC_SOFT_LIMIT=1024",
+          "MAX_ATTACHED=10",
+          "MAX_COLUMN=2000",
+          "MAX_COMPOUND_SELECT=500",
+          "MAX_DEFAULT_PAGE_SIZE=8192",
+          "MAX_EXPR_DEPTH=1000",
+          "MAX_FUNCTION_ARG=1000",
+          "MAX_LENGTH=1000000000",
+          "MAX_LIKE_PATTERN_LENGTH=50000",
+          "MAX_MMAP_SIZE=0x7fff0000",
+          "MAX_PAGE_COUNT=0xfffffffe",
+          "MAX_PAGE_SIZE=65536",
+          "MAX_SQL_LENGTH=1000000000",
+          "MAX_TRIGGER_DEPTH=1000",
+          "MAX_VARIABLE_NUMBER=32766",
+          "MAX_VDBE_OP=250000000",
+          "MAX_WORKER_THREADS=8",
+          "MUTEX_PTHREADS",
+          "SYSTEM_MALLOC",
+          "TEMP_STORE=1",
+          "THREADSAFE=1"
+        ],
+        "journal": "wal",
+        "synchronous": 2,
+        "busyTimeout": 0,
+        "pageSize": 4096,
+        "pageCount": 234,
+        "freelist": 1,
+        "hasStat1": false
+      },
+      "indexes": [
+        {
+          "name": "idx_ability_assessments_model_sequence",
+          "table": "ability_assessments",
+          "sql": "CREATE INDEX idx_ability_assessments_model_sequence ON ability_assessments(model_run_id, sequence_number)"
+        },
+        {
+          "name": "idx_analysis_job_merges_covering",
+          "table": "analysis_job_merges",
+          "sql": "CREATE INDEX idx_analysis_job_merges_covering ON analysis_job_merges(covering_job_id, state)"
+        },
+        {
+          "name": "idx_canonical_hrv_days_night",
+          "table": "canonical_hrv_days",
+          "sql": "CREATE INDEX idx_canonical_hrv_days_night ON canonical_hrv_days(night_id)"
+        },
+        {
+          "name": "idx_canonical_nights_kind_wake",
+          "table": "canonical_nights",
+          "sql": "CREATE INDEX idx_canonical_nights_kind_wake ON canonical_nights(kind, wake_date)"
+        },
+        {
+          "name": "idx_canonical_nights_main",
+          "table": "canonical_nights",
+          "sql": "CREATE UNIQUE INDEX idx_canonical_nights_main ON canonical_nights(wake_date, timezone_identifier) WHERE kind = 'main'"
+        },
+        {
+          "name": "idx_canonical_nights_nap",
+          "table": "canonical_nights",
+          "sql": "CREATE UNIQUE INDEX idx_canonical_nights_nap ON canonical_nights(wake_date, timezone_identifier, source_name, sleep_onset_at) WHERE kind = 'nap' AND sleep_onset_at IS NOT NULL"
+        },
+        {
+          "name": "idx_canonical_nights_wake_at",
+          "table": "canonical_nights",
+          "sql": "CREATE INDEX idx_canonical_nights_wake_at ON canonical_nights(wake_at)"
+        },
+        {
+          "name": "idx_coach_feedback_available",
+          "table": "coach_feedback_revisions",
+          "sql": "CREATE INDEX idx_coach_feedback_available ON coach_feedback_revisions(scope, available_at)"
+        },
+        {
+          "name": "idx_coach_prediction_identity",
+          "table": "coach_prediction_summaries",
+          "sql": "CREATE INDEX idx_coach_prediction_identity ON coach_prediction_summaries(scope, identity_hash, available_at)"
+        },
+        {
+          "name": "idx_daily_snapshots_model_date",
+          "table": "daily_ability_snapshots",
+          "sql": "CREATE INDEX idx_daily_snapshots_model_date ON daily_ability_snapshots(model_run_id, local_date)"
+        },
+        {
+          "name": "idx_daily_training_metrics_run_date",
+          "table": "daily_training_metrics",
+          "sql": "CREATE INDEX idx_daily_training_metrics_run_date ON daily_training_metrics(training_metric_run_id, local_date)"
+        },
+        {
+          "name": "idx_daily_zone_profiles_run_date",
+          "table": "daily_zone_profiles",
+          "sql": "CREATE INDEX idx_daily_zone_profiles_run_date ON daily_zone_profiles(training_metric_run_id, local_date)"
+        },
+        {
+          "name": "idx_health_records_source_time",
+          "table": "health_records",
+          "sql": "CREATE INDEX idx_health_records_source_time ON health_records(source_name, start_at, end_at)"
+        },
+        {
+          "name": "idx_health_records_type_end",
+          "table": "health_records",
+          "sql": "CREATE INDEX idx_health_records_type_end ON health_records(type, end_at, start_at)"
+        },
+        {
+          "name": "idx_health_records_type_time",
+          "table": "health_records",
+          "sql": "CREATE INDEX idx_health_records_type_time ON health_records(type, start_at, end_at)"
+        },
+        {
+          "name": "idx_healthkit_record_aliases_source",
+          "table": "healthkit_record_aliases",
+          "sql": "CREATE INDEX idx_healthkit_record_aliases_source ON healthkit_record_aliases(sample_type, sample_uuid, alias_id)"
+        },
+        {
+          "name": "idx_healthkit_record_sources_record",
+          "table": "healthkit_record_sources",
+          "sql": "CREATE INDEX idx_healthkit_record_sources_record ON healthkit_record_sources(record_id)"
+        },
+        {
+          "name": "idx_import_batches_fingerprint",
+          "table": "import_batches",
+          "sql": "CREATE INDEX idx_import_batches_fingerprint ON import_batches(xml_sha256, route_bundle_sha256, status)"
+        },
+        {
+          "name": "idx_import_entity_changes_effective",
+          "table": "import_entity_changes",
+          "sql": "CREATE INDEX idx_import_entity_changes_effective ON import_entity_changes(batch_id, effective_at)"
+        },
+        {
+          "name": "idx_import_entity_generations_generation",
+          "table": "import_entity_generations",
+          "sql": "CREATE INDEX idx_import_entity_generations_generation ON import_entity_generations(entity_kind, generation)"
+        },
+        {
+          "name": "idx_import_entity_tombstones_deleted_at",
+          "table": "import_entity_tombstones",
+          "sql": "CREATE INDEX idx_import_entity_tombstones_deleted_at ON import_entity_tombstones(deleted_at DESC)"
+        },
+        {
+          "name": "idx_import_entity_tombstones_source",
+          "table": "import_entity_tombstones",
+          "sql": "CREATE INDEX idx_import_entity_tombstones_source ON import_entity_tombstones(source_identifier)"
+        },
+        {
+          "name": "idx_import_fact_history_valid_to",
+          "table": "import_fact_history",
+          "sql": "CREATE INDEX idx_import_fact_history_valid_to ON import_fact_history(entity_kind, entity_id, valid_to_generation)"
+        },
+        {
+          "name": "idx_model_checkpoints_run_through",
+          "table": "model_checkpoints",
+          "sql": "CREATE INDEX idx_model_checkpoints_run_through ON model_checkpoints(model_run_id, through_at DESC)"
+        },
+        {
+          "name": "idx_model_domain_snapshot_asof",
+          "table": "model_domain_snapshots",
+          "sql": "CREATE INDEX idx_model_domain_snapshot_asof ON model_domain_snapshots(model_run_id,domain,as_of)"
+        },
+        {
+          "name": "idx_model_release_refusals_run",
+          "table": "model_release_refusals",
+          "sql": "CREATE INDEX idx_model_release_refusals_run ON model_release_refusals(model_run_id, detected_at DESC)"
+        },
+        {
+          "name": "idx_model_release_refusals_stage",
+          "table": "model_release_refusals",
+          "sql": "CREATE INDEX idx_model_release_refusals_stage ON model_release_refusals(stage, detected_at DESC)"
+        },
+        {
+          "name": "idx_model_runs_feature_run",
+          "table": "model_runs",
+          "sql": "CREATE INDEX idx_model_runs_feature_run ON model_runs(feature_run_id, created_at)"
+        },
+        {
+          "name": "idx_model_validation_gates_base",
+          "table": "model_validation_gates",
+          "sql": "CREATE INDEX idx_model_validation_gates_base ON model_validation_gates(base_model_run_id, created_at DESC)"
+        },
+        {
+          "name": "idx_model_validation_gates_candidate",
+          "table": "model_validation_gates",
+          "sql": "CREATE INDEX idx_model_validation_gates_candidate ON model_validation_gates(candidate_model_run_id, created_at DESC)"
+        },
+        {
+          "name": "idx_performance_entries_date",
+          "table": "performance_entries",
+          "sql": "CREATE INDEX idx_performance_entries_date ON performance_entries(local_date)"
+        },
+        {
+          "name": "idx_performance_entries_recorded",
+          "table": "performance_entries",
+          "sql": "CREATE INDEX idx_performance_entries_recorded ON performance_entries(recorded_at)"
+        },
+        {
+          "name": "idx_prediction_model_events_run_created",
+          "table": "prediction_model_events",
+          "sql": "CREATE INDEX idx_prediction_model_events_run_created ON prediction_model_events(prediction_model_run_id, created_at)"
+        },
+        {
+          "name": "idx_prediction_model_runs_completed",
+          "table": "prediction_model_runs",
+          "sql": "CREATE INDEX idx_prediction_model_runs_completed ON prediction_model_runs(completed_at DESC)"
+        },
+        {
+          "name": "idx_prediction_model_runs_lease",
+          "table": "prediction_model_runs",
+          "sql": "CREATE INDEX idx_prediction_model_runs_lease ON prediction_model_runs(status, heartbeat_at)"
+        },
+        {
+          "name": "idx_prediction_model_runs_single_flight",
+          "table": "prediction_model_runs",
+          "sql": "CREATE UNIQUE INDEX idx_prediction_model_runs_single_flight ON prediction_model_runs ((1)) WHERE status IN ('queued', 'running', 'validating')"
+        },
+        {
+          "name": "idx_prediction_model_runs_status_created",
+          "table": "prediction_model_runs",
+          "sql": "CREATE INDEX idx_prediction_model_runs_status_created ON prediction_model_runs(status, created_at)"
+        },
+        {
+          "name": "idx_recompute_job_events_job",
+          "table": "recompute_job_events",
+          "sql": "CREATE INDEX idx_recompute_job_events_job ON recompute_job_events(job_id, created_at)"
+        },
+        {
+          "name": "idx_recompute_jobs_status_created",
+          "table": "recompute_jobs",
+          "sql": "CREATE INDEX idx_recompute_jobs_status_created ON recompute_jobs(status, created_at)"
+        },
+        {
+          "name": "idx_route_points_time",
+          "table": "route_points",
+          "sql": "CREATE INDEX idx_route_points_time ON route_points(route_id, timestamp)"
+        },
+        {
+          "name": "idx_route_versions_route_status",
+          "table": "route_versions",
+          "sql": "CREATE INDEX idx_route_versions_route_status ON route_versions(route_id, status)"
+        },
+        {
+          "name": "idx_training_metric_checkpoints_run",
+          "table": "training_metric_checkpoints",
+          "sql": "CREATE UNIQUE INDEX idx_training_metric_checkpoints_run ON training_metric_checkpoints(training_metric_run_id)"
+        },
+        {
+          "name": "idx_training_metric_runs_status_created",
+          "table": "training_metric_runs",
+          "sql": "CREATE INDEX idx_training_metric_runs_status_created ON training_metric_runs(status, created_at)"
+        },
+        {
+          "name": "idx_training_sessions_activity_time",
+          "table": "training_sessions",
+          "sql": "CREATE INDEX idx_training_sessions_activity_time ON training_sessions(activity_type, anchor_start_at, anchor_end_at)"
+        },
+        {
+          "name": "idx_workout_features_feature_run_start",
+          "table": "workout_features",
+          "sql": "CREATE INDEX idx_workout_features_feature_run_start ON workout_features(feature_run_id, workout_start_at)"
+        },
+        {
+          "name": "idx_workout_features_session",
+          "table": "workout_features",
+          "sql": "CREATE INDEX idx_workout_features_session ON workout_features(training_session_id)"
+        },
+        {
+          "name": "idx_workout_group_members_workout",
+          "table": "workout_group_members",
+          "sql": "CREATE INDEX idx_workout_group_members_workout ON workout_group_members(workout_id)"
+        },
+        {
+          "name": "idx_workout_groups_training_session",
+          "table": "workout_groups",
+          "sql": "CREATE UNIQUE INDEX idx_workout_groups_training_session ON workout_groups(training_session_id) WHERE training_session_id IS NOT NULL"
+        },
+        {
+          "name": "idx_workout_overrides_performance_protocol",
+          "table": "workout_overrides",
+          "sql": "CREATE INDEX idx_workout_overrides_performance_protocol ON workout_overrides(performance_protocol) WHERE performance_protocol IS NOT NULL"
+        },
+        {
+          "name": "idx_workout_overrides_session_revision",
+          "table": "workout_overrides",
+          "sql": "CREATE INDEX idx_workout_overrides_session_revision ON workout_overrides(training_session_id, revision DESC)"
+        },
+        {
+          "name": "idx_workout_routes_workout_point_count",
+          "table": "workout_routes",
+          "sql": "CREATE INDEX idx_workout_routes_workout_point_count ON workout_routes(workout_id, point_count)"
+        },
+        {
+          "name": "idx_workout_statistics_type",
+          "table": "workout_statistics",
+          "sql": "CREATE INDEX idx_workout_statistics_type ON workout_statistics(type, workout_id)"
+        },
+        {
+          "name": "idx_workout_training_loads_run_date",
+          "table": "workout_training_loads",
+          "sql": "CREATE INDEX idx_workout_training_loads_run_date ON workout_training_loads(training_metric_run_id, local_date)"
+        },
+        {
+          "name": "idx_workout_training_loads_session",
+          "table": "workout_training_loads",
+          "sql": "CREATE INDEX idx_workout_training_loads_session ON workout_training_loads(training_session_id)"
+        },
+        {
+          "name": "idx_workout_zone_summaries_run_type",
+          "table": "workout_zone_summaries",
+          "sql": "CREATE INDEX idx_workout_zone_summaries_run_type ON workout_zone_summaries(training_metric_run_id, stimulus_type)"
+        },
+        {
+          "name": "idx_workouts_type_time",
+          "table": "workouts",
+          "sql": "CREATE INDEX idx_workouts_type_time ON workouts(activity_type, start_at, end_at)"
+        },
+        {
+          "name": "idx_zone_profile_settings_effective",
+          "table": "training_zone_profile_settings",
+          "sql": "CREATE INDEX idx_zone_profile_settings_effective ON training_zone_profile_settings(effective_from_local_date, revision DESC)"
+        }
+      ],
+      "workoutSampleIds": [
+        "w-old"
+      ],
+      "sampleWorkoutIds": [
+        "w-old"
+      ],
+      "workoutWindows": [
+        {
+          "id": "w-old",
+          "sessionId": "s-old",
+          "startedAt": "2023-09-02T00:00:00.000Z",
+          "endedAt": "2023-09-02T01:00:00.000Z",
+          "sourceName": "Apple Watch"
+        }
+      ],
+      "denseWindow": {
+        "id": "w-old",
+        "sessionId": "s-old",
+        "startedAt": "2023-09-02T00:00:00.000Z",
+        "endedAt": "2023-09-02T01:00:00.000Z",
+        "sourceName": "Apple Watch"
+      },
+      "recordCount": 18,
+      "denseExtraRows": 0,
+      "createdAt": "2026-10-21T12:45:46.371Z"
+    }
+  },
+  "measurements": {},
+  "indexExperiment": {},
+  "differential": {
+    "d0": {
+      "narrow": {
+        "metricSeries.heartRate.dense": {
+          "equal": true,
+          "aHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "bHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          }
+        },
+        "metricSeries.speed.dense": {
+          "equal": true,
+          "aHash": "e30e2071b9d01e8f6eec7c9c704b9d631b1121501624bd0fd44107279e34e81c",
+          "bHash": "e30e2071b9d01e8f6eec7c9c704b9d631b1121501624bd0fd44107279e34e81c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 2,
+            "totalSamples": 2,
+            "unit": "km/hr"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 2,
+            "totalSamples": 2,
+            "unit": "km/hr"
+          }
+        },
+        "metricSeries.heartRate.regular": {
+          "equal": true,
+          "aHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "bHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          }
+        },
+        "metricSeries.stepCount.broad": {
+          "equal": true,
+          "aHash": "384b080a492d6392203c12e648031558c3a6a77e98e57cf4e0723423d642d896",
+          "bHash": "384b080a492d6392203c12e648031558c3a6a77e98e57cf4e0723423d642d896",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 3,
+            "totalSamples": 3,
+            "unit": "count"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 3,
+            "totalSamples": 3,
+            "unit": "count"
+          }
+        },
+        "metricIntervals.heartRate": {
+          "equal": true,
+          "aHash": "5946f6f36d1b57b8ae6e06c14710b9a61c3802e23329391c1787be598d3b1256",
+          "bHash": "5946f6f36d1b57b8ae6e06c14710b9a61c3802e23329391c1787be598d3b1256",
+          "aRows": 10,
+          "aShape": {
+            "kind": "array",
+            "rows": 10
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 10
+          }
+        },
+        "workouts.list.limit30": {
+          "equal": true,
+          "aHash": "d43c988a050acdb2907804241797edb0c016f756a137a9d4d6e8ba1f30b79da4",
+          "bHash": "d43c988a050acdb2907804241797edb0c016f756a137a9d4d6e8ba1f30b79da4",
+          "aRows": 2,
+          "aShape": {
+            "kind": "array",
+            "rows": 2
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 2
+          }
+        },
+        "workouts.list.offset1000": {
+          "equal": true,
+          "aHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "bHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "aRows": 0,
+          "aShape": {
+            "kind": "array",
+            "rows": 0
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 0
+          }
+        },
+        "workouts.count": {
+          "equal": true,
+          "aHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "bHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "aRows": null,
+          "aShape": {
+            "kind": "number"
+          },
+          "bShape": {
+            "kind": "number"
+          }
+        },
+        "workouts.list.status": {
+          "equal": true,
+          "aHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "bHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "aRows": 1,
+          "aShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          },
+          "bShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          }
+        },
+        "workouts.list.route": {
+          "equal": true,
+          "aHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "bHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "aRows": 1,
+          "aShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          },
+          "bShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          }
+        }
+      },
+      "cover": {
+        "metricSeries.heartRate.dense": {
+          "equal": true,
+          "aHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "bHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          }
+        },
+        "metricSeries.speed.dense": {
+          "equal": true,
+          "aHash": "e30e2071b9d01e8f6eec7c9c704b9d631b1121501624bd0fd44107279e34e81c",
+          "bHash": "e30e2071b9d01e8f6eec7c9c704b9d631b1121501624bd0fd44107279e34e81c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 2,
+            "totalSamples": 2,
+            "unit": "km/hr"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 2,
+            "totalSamples": 2,
+            "unit": "km/hr"
+          }
+        },
+        "metricSeries.heartRate.regular": {
+          "equal": true,
+          "aHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "bHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          }
+        },
+        "metricSeries.stepCount.broad": {
+          "equal": true,
+          "aHash": "384b080a492d6392203c12e648031558c3a6a77e98e57cf4e0723423d642d896",
+          "bHash": "384b080a492d6392203c12e648031558c3a6a77e98e57cf4e0723423d642d896",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 3,
+            "totalSamples": 3,
+            "unit": "count"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 3,
+            "totalSamples": 3,
+            "unit": "count"
+          }
+        },
+        "metricIntervals.heartRate": {
+          "equal": true,
+          "aHash": "5946f6f36d1b57b8ae6e06c14710b9a61c3802e23329391c1787be598d3b1256",
+          "bHash": "5946f6f36d1b57b8ae6e06c14710b9a61c3802e23329391c1787be598d3b1256",
+          "aRows": 10,
+          "aShape": {
+            "kind": "array",
+            "rows": 10
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 10
+          }
+        },
+        "workouts.list.limit30": {
+          "equal": true,
+          "aHash": "d43c988a050acdb2907804241797edb0c016f756a137a9d4d6e8ba1f30b79da4",
+          "bHash": "d43c988a050acdb2907804241797edb0c016f756a137a9d4d6e8ba1f30b79da4",
+          "aRows": 2,
+          "aShape": {
+            "kind": "array",
+            "rows": 2
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 2
+          }
+        },
+        "workouts.list.offset1000": {
+          "equal": true,
+          "aHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "bHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "aRows": 0,
+          "aShape": {
+            "kind": "array",
+            "rows": 0
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 0
+          }
+        },
+        "workouts.count": {
+          "equal": true,
+          "aHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "bHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "aRows": null,
+          "aShape": {
+            "kind": "number"
+          },
+          "bShape": {
+            "kind": "number"
+          }
+        },
+        "workouts.list.status": {
+          "equal": true,
+          "aHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "bHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "aRows": 1,
+          "aShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          },
+          "bShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          }
+        },
+        "workouts.list.route": {
+          "equal": true,
+          "aHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "bHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "aRows": 1,
+          "aShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          },
+          "bShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          }
+        }
+      },
+      "ability": {
+        "metricSeries.heartRate.dense": {
+          "equal": true,
+          "aHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "bHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          }
+        },
+        "metricSeries.speed.dense": {
+          "equal": true,
+          "aHash": "e30e2071b9d01e8f6eec7c9c704b9d631b1121501624bd0fd44107279e34e81c",
+          "bHash": "e30e2071b9d01e8f6eec7c9c704b9d631b1121501624bd0fd44107279e34e81c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 2,
+            "totalSamples": 2,
+            "unit": "km/hr"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 2,
+            "totalSamples": 2,
+            "unit": "km/hr"
+          }
+        },
+        "metricSeries.heartRate.regular": {
+          "equal": true,
+          "aHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "bHash": "4badbc56ad91ebed29738c77a2eecbbb0abfa65eb78cd634c6e4b2b60137392c",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 9,
+            "totalSamples": 9,
+            "unit": "count/min"
+          }
+        },
+        "metricSeries.stepCount.broad": {
+          "equal": true,
+          "aHash": "384b080a492d6392203c12e648031558c3a6a77e98e57cf4e0723423d642d896",
+          "bHash": "384b080a492d6392203c12e648031558c3a6a77e98e57cf4e0723423d642d896",
+          "aRows": null,
+          "aShape": {
+            "kind": "metric-series",
+            "rows": 3,
+            "totalSamples": 3,
+            "unit": "count"
+          },
+          "bShape": {
+            "kind": "metric-series",
+            "rows": 3,
+            "totalSamples": 3,
+            "unit": "count"
+          }
+        },
+        "metricIntervals.heartRate": {
+          "equal": true,
+          "aHash": "5946f6f36d1b57b8ae6e06c14710b9a61c3802e23329391c1787be598d3b1256",
+          "bHash": "5946f6f36d1b57b8ae6e06c14710b9a61c3802e23329391c1787be598d3b1256",
+          "aRows": 10,
+          "aShape": {
+            "kind": "array",
+            "rows": 10
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 10
+          }
+        },
+        "workouts.list.limit30": {
+          "equal": true,
+          "aHash": "d43c988a050acdb2907804241797edb0c016f756a137a9d4d6e8ba1f30b79da4",
+          "bHash": "d43c988a050acdb2907804241797edb0c016f756a137a9d4d6e8ba1f30b79da4",
+          "aRows": 2,
+          "aShape": {
+            "kind": "array",
+            "rows": 2
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 2
+          }
+        },
+        "workouts.list.offset1000": {
+          "equal": true,
+          "aHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "bHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "aRows": 0,
+          "aShape": {
+            "kind": "array",
+            "rows": 0
+          },
+          "bShape": {
+            "kind": "array",
+            "rows": 0
+          }
+        },
+        "workouts.count": {
+          "equal": true,
+          "aHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "bHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+          "aRows": null,
+          "aShape": {
+            "kind": "number"
+          },
+          "bShape": {
+            "kind": "number"
+          }
+        },
+        "workouts.list.status": {
+          "equal": true,
+          "aHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "bHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "aRows": 1,
+          "aShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          },
+          "bShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          }
+        },
+        "workouts.list.route": {
+          "equal": true,
+          "aHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "bHash": "a55a0bbb5f2e2c2d95b091f322806bde8ad0ef62ac61074a34071506eb022939",
+          "aRows": 1,
+          "aShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          },
+          "bShape": {
+            "kind": "list",
+            "rows": 1,
+            "total": 1
+          }
+        },
+        "store.workoutsWithViews": {
+          "equal": true,
+          "aHash": "a173a987f72052d536357dc8e2743e924a1fd2c835fffb1590c44435c515651c",
+          "bHash": "a173a987f72052d536357dc8e2743e924a1fd2c835fffb1590c44435c515651c",
+          "aRows": 2
+        },
+        "store.dataSummary": {
+          "equal": true,
+          "aHash": "ff85c6047751f9321b5be6b6f18472a268e48d6db1ee7c35fc7a3e08df4d84d2",
+          "bHash": "ff85c6047751f9321b5be6b6f18472a268e48d6db1ee7c35fc7a3e08df4d84d2"
+        },
+        "store.dataAudit": {
+          "equal": true,
+          "aHash": "f3db84ed5e48efd5b5091b8060f8cc3a2888a7406b06958537b713616f114907",
+          "bHash": "f3db84ed5e48efd5b5091b8060f8cc3a2888a7406b06958537b713616f114907"
+        }
+      }
+    }
+  },
+  "assertions": {
+    "d0": {
+      "baseline": {
+        "window": {
+          "startedAt": "2023-09-02T00:00:00.000Z",
+          "endedAt": "2023-09-02T01:00:00.000Z",
+          "sourceName": "Apple Watch"
+        },
+        "observations": {
+          "heartRate": {
+            "unit": "count/min",
+            "totalSamples": 9,
+            "pointCount": 9,
+            "values": [
+              135,
+              141,
+              141,
+              140,
+              150,
+              150,
+              190,
+              190,
+              170
+            ]
+          },
+          "speed": {
+            "unit": "km/hr",
+            "totalSamples": 2,
+            "pointCount": 2,
+            "values": [
+              11.2,
+              3.1
+            ]
+          },
+          "stepCount": {
+            "unit": "count",
+            "totalSamples": 3,
+            "pointCount": 3,
+            "values": [
+              10,
+              20,
+              30
+            ]
+          },
+          "intervals": {
+            "rows": 10,
+            "values": [
+              160,
+              130,
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              190,
+              190
+            ]
+          }
+        },
+        "checks": [
+          {
+            "name": "heartRate.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "heartRate.totalSamples",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unit",
+            "expected": "count/min",
+            "actual": "count/min",
+            "pass": true
+          },
+          {
+            "name": "heartRate.pointCount",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.sortedValues",
+            "expected": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "actual": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "pass": true
+          },
+          {
+            "name": "heartRate.offsetTextExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peak",
+            "expected": 190,
+            "actual": 190,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peakTieIncluded",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.rightEdgeIncluded",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.crossStartExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "speed.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "speed.totalSamples",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "speed.unit",
+            "expected": "km/hr",
+            "actual": "km/hr",
+            "pass": true
+          },
+          {
+            "name": "speed.sortedValues",
+            "expected": [
+              3.1,
+              11.2
+            ],
+            "actual": [
+              3.1,
+              11.2
+            ],
+            "pass": true
+          },
+          {
+            "name": "stepCount.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "stepCount.totalSamples",
+            "expected": 3,
+            "actual": 3,
+            "pass": true
+          },
+          {
+            "name": "stepCount.unit",
+            "expected": "count",
+            "actual": "count",
+            "pass": true
+          },
+          {
+            "name": "stepCount.max",
+            "expected": 30,
+            "actual": 30,
+            "pass": true
+          },
+          {
+            "name": "intervals.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rows",
+            "expected": 10,
+            "actual": 10,
+            "pass": true
+          },
+          {
+            "name": "intervals.peakTie",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "intervals.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEnd",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEndShape",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.crossStartClipped",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.offsetTextParsed",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rightEdgeAbsent",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "intervals.bounds",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "intervals.finiteValues",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          }
+        ],
+        "ok": true
+      },
+      "narrow": {
+        "window": {
+          "startedAt": "2023-09-02T00:00:00.000Z",
+          "endedAt": "2023-09-02T01:00:00.000Z",
+          "sourceName": "Apple Watch"
+        },
+        "observations": {
+          "heartRate": {
+            "unit": "count/min",
+            "totalSamples": 9,
+            "pointCount": 9,
+            "values": [
+              135,
+              141,
+              141,
+              140,
+              150,
+              150,
+              190,
+              190,
+              170
+            ]
+          },
+          "speed": {
+            "unit": "km/hr",
+            "totalSamples": 2,
+            "pointCount": 2,
+            "values": [
+              11.2,
+              3.1
+            ]
+          },
+          "stepCount": {
+            "unit": "count",
+            "totalSamples": 3,
+            "pointCount": 3,
+            "values": [
+              10,
+              20,
+              30
+            ]
+          },
+          "intervals": {
+            "rows": 10,
+            "values": [
+              160,
+              130,
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              190,
+              190
+            ]
+          }
+        },
+        "checks": [
+          {
+            "name": "heartRate.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "heartRate.totalSamples",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unit",
+            "expected": "count/min",
+            "actual": "count/min",
+            "pass": true
+          },
+          {
+            "name": "heartRate.pointCount",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.sortedValues",
+            "expected": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "actual": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "pass": true
+          },
+          {
+            "name": "heartRate.offsetTextExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peak",
+            "expected": 190,
+            "actual": 190,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peakTieIncluded",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.rightEdgeIncluded",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.crossStartExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "speed.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "speed.totalSamples",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "speed.unit",
+            "expected": "km/hr",
+            "actual": "km/hr",
+            "pass": true
+          },
+          {
+            "name": "speed.sortedValues",
+            "expected": [
+              3.1,
+              11.2
+            ],
+            "actual": [
+              3.1,
+              11.2
+            ],
+            "pass": true
+          },
+          {
+            "name": "stepCount.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "stepCount.totalSamples",
+            "expected": 3,
+            "actual": 3,
+            "pass": true
+          },
+          {
+            "name": "stepCount.unit",
+            "expected": "count",
+            "actual": "count",
+            "pass": true
+          },
+          {
+            "name": "stepCount.max",
+            "expected": 30,
+            "actual": 30,
+            "pass": true
+          },
+          {
+            "name": "intervals.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rows",
+            "expected": 10,
+            "actual": 10,
+            "pass": true
+          },
+          {
+            "name": "intervals.peakTie",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "intervals.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEnd",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEndShape",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.crossStartClipped",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.offsetTextParsed",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rightEdgeAbsent",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "intervals.bounds",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "intervals.finiteValues",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          }
+        ],
+        "ok": true
+      },
+      "cover": {
+        "window": {
+          "startedAt": "2023-09-02T00:00:00.000Z",
+          "endedAt": "2023-09-02T01:00:00.000Z",
+          "sourceName": "Apple Watch"
+        },
+        "observations": {
+          "heartRate": {
+            "unit": "count/min",
+            "totalSamples": 9,
+            "pointCount": 9,
+            "values": [
+              135,
+              141,
+              141,
+              140,
+              150,
+              150,
+              190,
+              190,
+              170
+            ]
+          },
+          "speed": {
+            "unit": "km/hr",
+            "totalSamples": 2,
+            "pointCount": 2,
+            "values": [
+              11.2,
+              3.1
+            ]
+          },
+          "stepCount": {
+            "unit": "count",
+            "totalSamples": 3,
+            "pointCount": 3,
+            "values": [
+              10,
+              20,
+              30
+            ]
+          },
+          "intervals": {
+            "rows": 10,
+            "values": [
+              160,
+              130,
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              190,
+              190
+            ]
+          }
+        },
+        "checks": [
+          {
+            "name": "heartRate.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "heartRate.totalSamples",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unit",
+            "expected": "count/min",
+            "actual": "count/min",
+            "pass": true
+          },
+          {
+            "name": "heartRate.pointCount",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.sortedValues",
+            "expected": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "actual": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "pass": true
+          },
+          {
+            "name": "heartRate.offsetTextExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peak",
+            "expected": 190,
+            "actual": 190,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peakTieIncluded",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.rightEdgeIncluded",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.crossStartExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "speed.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "speed.totalSamples",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "speed.unit",
+            "expected": "km/hr",
+            "actual": "km/hr",
+            "pass": true
+          },
+          {
+            "name": "speed.sortedValues",
+            "expected": [
+              3.1,
+              11.2
+            ],
+            "actual": [
+              3.1,
+              11.2
+            ],
+            "pass": true
+          },
+          {
+            "name": "stepCount.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "stepCount.totalSamples",
+            "expected": 3,
+            "actual": 3,
+            "pass": true
+          },
+          {
+            "name": "stepCount.unit",
+            "expected": "count",
+            "actual": "count",
+            "pass": true
+          },
+          {
+            "name": "stepCount.max",
+            "expected": 30,
+            "actual": 30,
+            "pass": true
+          },
+          {
+            "name": "intervals.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rows",
+            "expected": 10,
+            "actual": 10,
+            "pass": true
+          },
+          {
+            "name": "intervals.peakTie",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "intervals.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEnd",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEndShape",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.crossStartClipped",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.offsetTextParsed",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rightEdgeAbsent",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "intervals.bounds",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "intervals.finiteValues",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          }
+        ],
+        "ok": true
+      },
+      "ability": {
+        "window": {
+          "startedAt": "2023-09-02T00:00:00.000Z",
+          "endedAt": "2023-09-02T01:00:00.000Z",
+          "sourceName": "Apple Watch"
+        },
+        "observations": {
+          "heartRate": {
+            "unit": "count/min",
+            "totalSamples": 9,
+            "pointCount": 9,
+            "values": [
+              135,
+              141,
+              141,
+              140,
+              150,
+              150,
+              190,
+              190,
+              170
+            ]
+          },
+          "speed": {
+            "unit": "km/hr",
+            "totalSamples": 2,
+            "pointCount": 2,
+            "values": [
+              11.2,
+              3.1
+            ]
+          },
+          "stepCount": {
+            "unit": "count",
+            "totalSamples": 3,
+            "pointCount": 3,
+            "values": [
+              10,
+              20,
+              30
+            ]
+          },
+          "intervals": {
+            "rows": 10,
+            "values": [
+              160,
+              130,
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              190,
+              190
+            ]
+          }
+        },
+        "checks": [
+          {
+            "name": "heartRate.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "heartRate.totalSamples",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unit",
+            "expected": "count/min",
+            "actual": "count/min",
+            "pass": true
+          },
+          {
+            "name": "heartRate.pointCount",
+            "expected": 9,
+            "actual": 9,
+            "pass": true
+          },
+          {
+            "name": "heartRate.sortedValues",
+            "expected": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "actual": [
+              135,
+              140,
+              141,
+              141,
+              150,
+              150,
+              170,
+              190,
+              190
+            ],
+            "pass": true
+          },
+          {
+            "name": "heartRate.offsetTextExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peak",
+            "expected": 190,
+            "actual": 190,
+            "pass": true
+          },
+          {
+            "name": "heartRate.peakTieIncluded",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "heartRate.rightEdgeIncluded",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "heartRate.crossStartExcluded",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "heartRate.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "speed.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "speed.totalSamples",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "speed.unit",
+            "expected": "km/hr",
+            "actual": "km/hr",
+            "pass": true
+          },
+          {
+            "name": "speed.sortedValues",
+            "expected": [
+              3.1,
+              11.2
+            ],
+            "actual": [
+              3.1,
+              11.2
+            ],
+            "pass": true
+          },
+          {
+            "name": "stepCount.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "stepCount.totalSamples",
+            "expected": 3,
+            "actual": 3,
+            "pass": true
+          },
+          {
+            "name": "stepCount.unit",
+            "expected": "count",
+            "actual": "count",
+            "pass": true
+          },
+          {
+            "name": "stepCount.max",
+            "expected": 30,
+            "actual": 30,
+            "pass": true
+          },
+          {
+            "name": "intervals.nonEmpty",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rows",
+            "expected": 10,
+            "actual": 10,
+            "pass": true
+          },
+          {
+            "name": "intervals.peakTie",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.exactDuplicateCollapsed",
+            "expected": 1,
+            "actual": 1,
+            "pass": true
+          },
+          {
+            "name": "intervals.unitVariantRetained",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEnd",
+            "expected": 2,
+            "actual": 2,
+            "pass": true
+          },
+          {
+            "name": "intervals.sameStartDifferentEndShape",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.crossStartClipped",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.offsetTextParsed",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.rightEdgeAbsent",
+            "expected": 0,
+            "actual": 0,
+            "pass": true
+          },
+          {
+            "name": "intervals.bounds",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          },
+          {
+            "name": "intervals.nullExcluded",
+            "expected": false,
+            "actual": false,
+            "pass": true
+          },
+          {
+            "name": "intervals.finiteValues",
+            "expected": true,
+            "actual": true,
+            "pass": true
+          }
+        ],
+        "ok": true
+      }
+    }
+  },
+  "plans": {},
+  "ledger": {},
+  "failures": [],
+  "verdict": {
+    "ok": true,
+    "failureCount": 0
+  }
+}

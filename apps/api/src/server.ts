@@ -71,6 +71,12 @@ import { MobileGoalsRevisionConflictError, MobileGoalsStore, WeeklyPlanConfirmat
 import { mobileLockRejection, mobileRefreshOutcome } from "./mobile-sync.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
+import {
+  SeriesReadOverloadedError,
+  SeriesReadWorker,
+  SeriesReadWorkerUnavailableError,
+  seriesReadFailureAction
+} from "./series-read-worker.js";
 import { registerCommandRoutes } from "./routes/command-routes.js";
 import { registerImportRoutes } from "./routes/import-routes.js";
 import { RuntimeTelemetry } from "./runtime-telemetry.js";
@@ -554,6 +560,7 @@ installMutationLifetime(app, releaseMutation);
 await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedRestore();
 datasetEpoch = readDatasetEpoch(databasePath, configuredDatasetEpoch);
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
+const seriesReadWorker = new SeriesReadWorker(databasePath);
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
 /**
  * Single source for "this dataset is managed by the coach-loop contract".
@@ -672,6 +679,7 @@ app.addHook("onClose", async () => {
     predictionModelWorker.close()
   ]);
   try {
+    seriesReadWorker.close();
     readStores.close();
     mobileGoalsStore.close();
   } finally {
@@ -1226,7 +1234,28 @@ const planSegmentCandidates = (): PlanCandidateDay[] => {
 };
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id/series", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
-  const series = withReadStore((store) => store.workoutSeries(request.params.id, planSegmentCandidates()));
+  const candidates = planSegmentCandidates();
+  let series;
+  try {
+    // 完整 series 组装在专属读 worker 中完成；lease 阻止换库落在请求中间。
+    series = await readStores.lease(async () => {
+      assertDatasetAccepting();
+      return seriesReadWorker.request(request.params.id, candidates);
+    });
+  } catch (error) {
+    const action = seriesReadFailureAction(error);
+    // 过载是显式可重试结果，不能退回主线程同步重算；否则 /health 会再次被堵住。
+    if (action === "overloaded") {
+      const overloaded = error as SeriesReadOverloadedError;
+      reply.header("Retry-After", "1");
+      return reply.code(503).send({ code: overloaded.code, message: overloaded.message });
+    }
+    // 只有 worker 启动/崩溃/退出才回退；lease、数据集状态与 worker 内业务异常
+    // 必须保持原语义，不能被这里误判成可用性故障后重放一遍。
+    if (action === "propagate") throw error;
+    if (!(error instanceof SeriesReadWorkerUnavailableError)) throw error;
+    series = withReadStore((store) => store.workoutSeries(request.params.id, candidates));
+  }
   if (!series) return reply.code(404).send({ message: "未找到该训练的时间序列" });
   return series;
 });

@@ -23,7 +23,7 @@ PR-03/04 仍待所有者做计划所有权决定。证据见 [优化方案 §13]
 |---|---|---|
 | 客户端/部署 | 原生 SwiftUI iOS + 直连 Node API；Web/macOS 已于 2026-10-17 退役（D17/ADR-006） | [决策](DECISIONS.md) D17；[ADR-006](adr/ADR-006-retire-web-and-macos.md) |
 | 生产 | `101.33.202.40`；训练排课 v2 `2f5f2b8`（2026-10-20 部署 + 控制库迁移）；iOS 同步 R1–R6 `62f490b`（同日部署） | [训练排课发布](../deliverables/UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)、[iOS 同步发布](../deliverables/IOS_SYNC_RELEASE_2026-10-20.md) |
-| 存储 | 主健康库 schema v46；控制库 `mobile_control_schema` v2（`mobile_training_state`）；另有 runtime / dataset-epoch / restore-journal 三个 SQLite 文件 | [架构审查](../deliverables/ARCHITECTURE_REVIEW_2026-10-20.md) |
+| 存储 | 主健康库 schema v47（代码基线；生产部署版本见发布记录）；控制库 `mobile_control_schema` v2（`mobile_training_state`）；另有 runtime / dataset-epoch / restore-journal 三个 SQLite 文件 | [架构审查](../deliverables/ARCHITECTURE_REVIEW_2026-10-20.md) |
 | 训练计划 | 统一训练排课 v2：单一模式（coach/race）、剂量政策 v2、控制库 v2、v2 读/命令/预览/刷新；旧计划写面 5 路径 / 7 操作 410 `legacy_surface_retired` | [API 契约](IOS_NATIVE_API_CONTRACT.md)、[排期协议](IOS_NATIVE_PLAN_SCHEDULING.md)、[发布记录](../deliverables/UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md) |
 | 策略政策 | G01-B / G02-C / G03-A 已由仓库所有者（产品/规则所有者）2026-10-20 方向性批准并实现；**无独立临床/教练领域复核** | [政策评审](TRAINING_PLAN_POLICY_REVIEW.md) |
 | 健康同步 | 直连增量 + 硬失败（不回退候选库）；R1–R6 已发布；真机验收未做 | [iOS 同步发布](../deliverables/IOS_SYNC_RELEASE_2026-10-20.md) |

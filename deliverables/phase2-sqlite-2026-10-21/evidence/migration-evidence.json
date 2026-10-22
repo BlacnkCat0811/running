@@ -1,0 +1,98 @@
+{
+  "generatedAt": "2026-10-21T12:49:14.533Z",
+  "source": "/private/tmp/rai-phase2-review-migration/v46-source.sqlite",
+  "target": "/private/tmp/rai-phase2-review-migration/migration-copy.sqlite",
+  "pendingBefore": [
+    47
+  ],
+  "applyMs": 13.732720000000086,
+  "before": {
+    "bytes": {
+      "main": 958464,
+      "-wal": 0,
+      "-shm": 0,
+      "total": 958464
+    },
+    "state": {
+      "pageSize": 4096,
+      "pageCount": 234,
+      "freelist": 1,
+      "logicalBytes": 954368,
+      "maxMigration": 46,
+      "migrations": 46,
+      "hasV47Index": false,
+      "indexes": 57
+    }
+  },
+  "during": {
+    "main": 958464,
+    "-wal": 16512,
+    "-shm": 32768,
+    "total": 1007744
+  },
+  "after": {
+    "bytes": {
+      "main": 958464,
+      "-wal": 0,
+      "-shm": 0,
+      "total": 958464
+    },
+    "state": {
+      "pageSize": 4096,
+      "pageCount": 234,
+      "freelist": 0,
+      "logicalBytes": 958464,
+      "maxMigration": 47,
+      "migrations": 47,
+      "hasV47Index": true,
+      "indexes": 58
+    }
+  },
+  "checksum": "4eaa5dc02cab39ff2c35e8fb63bd0c677bc77b6b617189a8d570d07800129242",
+  "frozenChecksum": "4eaa5dc02cab39ff2c35e8fb63bd0c677bc77b6b617189a8d570d07800129242",
+  "checksumMatches": true,
+  "foreignKeyViolations": 0,
+  "interruptedEvidence": {
+    "indexPresentAfterRollback": false,
+    "ledgerRowsAfterRollback": 0
+  },
+  "rollbackRead": {
+    "ok": true,
+    "items": 2,
+    "total": 2,
+    "healthRecords": 14
+  },
+  "rollbackServer": {
+    "ok": true,
+    "startupMs": 2688.828367,
+    "writeStatus": "ok",
+    "readEntries": 1,
+    "savedEntryId": "performance_entry_igf2h9homvi3zlua",
+    "shutdown": {
+      "exitCode": 0,
+      "signal": null
+    },
+    "persisted": {
+      "count": 1,
+      "indexPresent": true
+    },
+    "error": null,
+    "outputTail": "(node:80151) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:80151) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n"
+  },
+  "migrationCliDryRun": {
+    "status": 0,
+    "stdout": "{\n  \"mode\": \"dry-run\",\n  \"database\": \"/private/tmp/rai-phase2-review-migration/migration-cli-dry-run.sqlite\",\n  \"version\": 46,\n  \"counts\": {\n    \"workouts\": 3,\n    \"health_records\": 14,\n    \"route_points\": 0\n  },\n  \"pending\": [\n    {\n      \"version\": 47,\n      \"name\": \"ability_assessment_session_lookup\"\n    }\n  ]\n}",
+    "stderr": "(node:80160) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)"
+  },
+  "verdict": {
+    "ok": true,
+    "checks": {
+      "checksumMatches": true,
+      "foreignKeyViolations": true,
+      "interruptedMigrationRolledBack": true,
+      "rollbackRead": true,
+      "rollbackServer": true,
+      "migrationCliDryRun": true
+    }
+  }
+}

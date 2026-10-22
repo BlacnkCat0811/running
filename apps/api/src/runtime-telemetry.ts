@@ -3,7 +3,7 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 /** Lightweight process metrics: no URLs, request bodies, tokens, or health samples. */
 export class RuntimeTelemetry {
   private readonly started = performance.now();
-  private readonly loop = monitorEventLoopDelay({ resolution: 20 });
+  private readonly loop = monitorEventLoopDelay({ resolution: 5 });
   private requests = 0;
   private errors = 0;
   private requestMs = 0;

@@ -869,3 +869,57 @@ test("refuses to invent segments when neither producer has anything", () => {
   assert.equal(result.plan, null);
   assert.equal(result.note, null);
 });
+
+test("workoutSeries builds the speed track at most once per request, including an unusable track", async () => {
+  const { root, databasePath, sessionId } = await seedRun([]);
+  const read = new RaiReadStore(databasePath);
+  try {
+    const repository = (read as unknown as {
+      seriesRepository: { metricIntervals: (...args: unknown[]) => unknown };
+    }).seriesRepository;
+    const original = repository.metricIntervals.bind(repository);
+    let speedTrackQueries = 0;
+    repository.metricIntervals = (type: unknown, ...rest: unknown[]) => {
+      if (type === "HKQuantityTypeIdentifierRunningSpeed") speedTrackQueries += 1;
+      return original(type, ...rest);
+    };
+    const first = read.workoutSeries(sessionId, [planDay()]);
+    assert.equal(speedTrackQueries, 1, "segmentRun + measureSegments + workoutSplits share one build");
+    assert.ok((first?.segments.length ?? 0) > 0);
+    assert.ok((first?.splits.length ?? 0) > 0);
+    read.workoutSeries(sessionId, [planDay()]);
+    assert.equal(speedTrackQueries, 2, "the provider is request-local, not a process-wide cache");
+    assert.equal((read as unknown as { database: { isTransaction: boolean } }).database.isTransaction, false,
+      "the short read snapshot must be committed, not left open between requests");
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  // A run whose track is unusable must cache the `null` result as well: the
+  // second consumer cannot turn "no track" into another overlap query.
+  const withoutSpeed = await seedRun([]);
+  const writer = new DatabaseSync(withoutSpeed.databasePath);
+  try {
+    writer.prepare("DELETE FROM health_records WHERE type = 'HKQuantityTypeIdentifierRunningSpeed'").run();
+  } finally { writer.close(); }
+  const nullRead = new RaiReadStore(withoutSpeed.databasePath);
+  try {
+    const repository = (nullRead as unknown as {
+      seriesRepository: { metricIntervals: (...args: unknown[]) => unknown };
+    }).seriesRepository;
+    const original = repository.metricIntervals.bind(repository);
+    let speedTrackQueries = 0;
+    repository.metricIntervals = (type: unknown, ...rest: unknown[]) => {
+      if (type === "HKQuantityTypeIdentifierRunningSpeed") speedTrackQueries += 1;
+      return original(type, ...rest);
+    };
+    const series = nullRead.workoutSeries(withoutSpeed.sessionId, [planDay()]);
+    assert.equal(speedTrackQueries, 1, "null track is memoized too");
+    assert.deepEqual(series?.segments, []);
+    assert.deepEqual(series?.splits, []);
+  } finally {
+    nullRead.close();
+    rmSync(withoutSpeed.root, { recursive: true, force: true });
+  }
+});

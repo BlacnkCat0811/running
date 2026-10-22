@@ -4,14 +4,20 @@
 现行说明统一从 [项目 README](../README.md) 进入；现行状态、未决问题与已收尾批次指针只维护
 [项目审查](../docs/PROJECT_REVIEW.md)。
 
-## 1. 当前证据（2026-10-21）
+## 1. 当前证据（2026-10-22）
 
 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
 [项目审查](../docs/PROJECT_REVIEW.md) 后删除。
 
+- [PHASE2_FOLLOWUP_A_B_C_2026-10-22.md](phase2-followup-2026-10-21/PHASE2_FOLLOWUP_A_B_C_2026-10-22.md)：
+  阶段 2 剩余问题 A/B/C——A（assessment 写入 P95 + 自动 checkpoint）、B（外部提交后首次 `/series`，含专属读 worker 与代次隔离）、
+  C（请求内 speedTrack 复用）全部通过；热读五窗口已按“可读训练、200、身份与非空内容”修正并重测；**未执行生产发布**。
+- [PHASE2_SQLITE_QUERY_TRANSACTION_CONNECTION_2026-10-21.md](phase2-sqlite-2026-10-21/PHASE2_SQLITE_QUERY_TRANSACTION_CONNECTION_2026-10-21.md)：
+  阶段 2 SQLite 查询/事务/连接优化与验收——隔离 D0–D3 测量、SQL 台账、v47 索引迁移、checkpoint
+  返回值语义修复、差分/迁移/回滚证据；**未执行生产发布**。
 - [PHASE1_MAIN_THREAD_BLOCKING_2026-10-21.md](PHASE1_MAIN_THREAD_BLOCKING_2026-10-21.md)：
   阶段 1 补修与验收补齐——worker 冷启动关闭、严格回执裁决、真实线程故障回归、可复现源码快照、
-  HTTP 5×60 秒锁窗口与 100 批资源证据；满足进入阶段 2 条件，阶段 2 未启动。
+  HTTP 5×60 秒锁窗口与 100 批资源证据；满足进入阶段 2 条件（阶段 2 已交付，见上方 PHASE2 记录）。
 - [UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md](UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md)：
   统一训练排课 v2 发布记录（`2f5f2b8`，已部署生产、控制库 `mobile_training_state` 迁移已执行）——
   本机判据、生产 410/v2 读写矩阵、备份与代码/数据回滚边界、已知缺口。

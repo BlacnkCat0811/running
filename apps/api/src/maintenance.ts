@@ -8,7 +8,7 @@ import { ClientRequestError } from "./api-error.js";
 import { RestoreJournal, RestoreRecoveryRequiredError, type RestoreIntent } from "./restore-journal.js";
 
 import type { BackupDto } from "@rai/api-contracts";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, runWalCheckpointTruncate } from "@rai/storage-sqlite";
 
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => {
   database.exec(`PRAGMA busy_timeout = ${milliseconds}`);
@@ -397,7 +397,9 @@ export class DatabaseMaintenance {
             const current = new DatabaseSync(this.databasePath);
             applyBusyTimeout(current);
             try {
-              current.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+              // 恢复/换库前的 checkpoint 必须完成：busy 时继续移走数据库会留下
+              // 未写回主库的 WAL 页，`-wal` 侧车随后被删除就等于丢事务。
+              runWalCheckpointTruncate(current);
             } finally {
               current.close();
             }
@@ -771,7 +773,9 @@ export class DatabaseMaintenance {
     const database = new DatabaseSync(path);
     applyBusyTimeout(database);
     try {
-      database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      // 调用点全部是“恢复/换库/删除前”的必须完成路径；busy 必须阻止后续文件操作，
+      // 不能像可延后的维护那样静默跳过（见 packages/storage-sqlite/src/checkpoint.ts）。
+      runWalCheckpointTruncate(database);
     } finally {
       database.close();
     }

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import type { Worker } from "node:worker_threads";
 
 import {
   HEALTH_RECORD_TEXT_OVERLAP_SLACK_MS,
@@ -22,6 +24,7 @@ import {
   readHealthRecordOverlapDatabaseState,
   readHealthRecordOverlapStats
 } from "../src/read/health-record-overlap-reads.js";
+import { HealthRecordOverlapStatsWorker } from "../src/read/health-record-stats-worker.js";
 
 // 2026-10-18（复查 P2）：`metricIntervals` / `averageRawMetric` / `averageCadence` 的回退读
 // 改成"按该 type 最长记录时长有界"的计划（bounded），替代上一轮按窗口位置二选一的自适应
@@ -179,13 +182,25 @@ const referenceRows = (
   return database.prepare(legacy.sql).all(...legacy.params) as unknown as Record<string, unknown>[];
 };
 
+/**
+ * Production read no longer rebuilds stats on a miss (B). Tests that intend to
+ * exercise the bounded path must explicitly prepare stats for the current
+ * snapshot — exactly the contract described in the follow-up plan §5.2.
+ */
+const primeCache = (database: DatabaseSync, type = HEART_RATE): HealthRecordDurationCache => {
+  const cache = new HealthRecordDurationCache();
+  cache.lookup(database, type);
+  return cache;
+};
+
 test("bounded plan matches the historical predicate row-for-row at every window position", () => {
   const database = openDatabase();
   try {
     seedAdversarialWindows(database, HEART_RATE);
+    const cache = primeCache(database);
     for (const window of Object.values(WINDOWS)) {
       const queryInput = input(window);
-      const result = readHealthRecordOverlap(database, queryInput);
+      const result = readHealthRecordOverlap(database, queryInput, { cache });
       assert.equal(result.shape, "bounded", "有 D 且索引齐全时必须走有界计划");
       assert.deepEqual(result.rows, referenceRows(database, queryInput), JSON.stringify(window));
       // 24h 跨起点长记录必须仍在（这正是"最早可能相交"的行，最容易被下界误排除）。
@@ -201,6 +216,7 @@ test("bounded plan matches the text-only (cadence) predicate row-for-row", () =>
   const database = openDatabase();
   try {
     seedAdversarialWindows(database, STEPS);
+    const cache = primeCache(database, STEPS);
     for (const window of Object.values(WINDOWS)) {
       const queryInput = input({
         ...window,
@@ -208,7 +224,7 @@ test("bounded plan matches the text-only (cadence) predicate row-for-row", () =>
         columns: ["start_at", "end_at", "value_numeric"],
         predicate: "pureOverlap"
       });
-      const result = readHealthRecordOverlap(database, queryInput);
+      const result = readHealthRecordOverlap(database, queryInput, { cache });
       assert.equal(result.shape, "bounded");
       assert.deepEqual(result.rows, referenceRows(database, queryInput), JSON.stringify(window));
     }
@@ -262,7 +278,7 @@ test("exactly one max-duration probe per type until data changes (same connectio
   }
 });
 
-test("bounded read picks up a longer record written by the same connection", () => {
+test("an invalidated cache falls back to the exact adaptive shape and still sees a longer same-connection record", () => {
   const database = openDatabase();
   try {
     const window = { startedAt: utc(BASE + 100 * DAY), endedAt: utc(BASE + 100 * DAY + 3_600_000) };
@@ -272,7 +288,8 @@ test("bounded read picks up a longer record written by the same connection", () 
       { value: 1, start: utc(BASE + 99 * DAY), end: utc(BASE + 99 * DAY + 60_000) },
       { value: 2, start: utc(BASE + 100 * DAY + 60_000), end: utc(BASE + 100 * DAY + 120_000) }
     ]);
-    const first = readHealthRecordOverlap(database, input(window));
+    const cache = primeCache(database);
+    const first = readHealthRecordOverlap(database, input(window), { cache });
     assert.equal(first.shape, "bounded");
     assert.deepEqual(first.rows.map((row) => row.value_numeric), [2]);
 
@@ -282,8 +299,8 @@ test("bounded read picks up a longer record written by the same connection", () 
       start: utc(BASE + 100 * DAY - 2.5 * DAY),
       end: utc(BASE + 100 * DAY + 30 * 60_000)
     }]);
-    const second = readHealthRecordOverlap(database, input(window));
-    assert.equal(second.shape, "bounded");
+    const second = readHealthRecordOverlap(database, input(window), { cache });
+    assert.notEqual(second.shape, "bounded", "stats 缓存失效后不得同步重建，直接走精确自适应形状");
     assert.deepEqual(second.rows, referenceRows(database, input(window)), "写入后必须与历史谓词一致");
     assert.ok(second.rows.some((row) => row.value_numeric === 3), "新增长记录必须被读到");
   } finally {
@@ -291,7 +308,7 @@ test("bounded read picks up a longer record written by the same connection", () 
   }
 });
 
-test("bounded read picks up a longer record committed by another connection", () => {
+test("an invalidated cache falls back to the exact adaptive shape after another connection commits", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-overlap-foreign-"));
   const path = join(root, "rai.sqlite");
   const writer = openDatabase({ path });
@@ -303,7 +320,8 @@ test("bounded read picks up a longer record committed by another connection", ()
       { value: 1, start: window.startedAt, end: utc(Date.parse(window.startedAt) + 60_000) }
     ]);
     reader = new DatabaseSync(path, { readOnly: true });
-    const first = readHealthRecordOverlap(reader, input(window));
+    const cache = primeCache(reader);
+    const first = readHealthRecordOverlap(reader, input(window), { cache });
     assert.equal(first.shape, "bounded");
     assert.equal(first.rows.length, 1);
 
@@ -315,8 +333,8 @@ test("bounded read picks up a longer record committed by another connection", ()
     const state = readHealthRecordOverlapDatabaseState(reader);
     assert.equal(state.totalChanges, 0, "只读连接的 total_changes 恒为 0");
 
-    const second = readHealthRecordOverlap(reader, input(window));
-    assert.equal(second.shape, "bounded");
+    const second = readHealthRecordOverlap(reader, input(window), { cache });
+    assert.notEqual(second.shape, "bounded", "外部提交后不得同步重建全类型统计");
     assert.ok(second.rows.some((row) => row.value_numeric === 2), "外部提交后 data_version 必须让 D 失效");
     assert.deepEqual(second.rows, referenceRows(reader, input(window)));
   } finally {
@@ -552,4 +570,204 @@ test("bounded lower bound pays offset slack only when the type has non-canonical
     legacy.close();
   }
   assert.ok(DAY_MS > 0);
+});
+
+test("tryLookupValid never rebuilds stats after invalidation", () => {
+  const database = openDatabase();
+  let statsReads = 0;
+  try {
+    const cache = new HealthRecordDurationCache(undefined, (db, type) => {
+      statsReads += 1;
+      return readHealthRecordOverlapStats(db, type);
+    });
+    seed(database, [
+      { value: 0, start: utc(BASE - 600 * DAY), end: utc(BASE - 600 * DAY + 60_000) },
+      { value: 1, start: utc(BASE + 60_000), end: utc(BASE + 120_000) }
+    ]);
+    cache.lookup(database, HEART_RATE);
+    assert.equal(statsReads, 1);
+    const prime = readHealthRecordOverlap(database, input({ startedAt: utc(BASE), endedAt: utc(BASE + 3_600_000) }), { cache });
+    assert.equal(prime.shape, "bounded");
+    assert.equal(statsReads, 1);
+
+    seed(database, [{ value: 2, start: utc(BASE + 90_000), end: utc(BASE + 180_000) }]);
+    const after = readHealthRecordOverlap(database, input({ startedAt: utc(BASE), endedAt: utc(BASE + 3_600_000) }), { cache });
+    assert.notEqual(after.shape, "bounded");
+    assert.equal(statsReads, 1, "invalidated cache must not rebuild stats inside the request");
+    assert.deepEqual(after.rows, referenceRows(database, input({ startedAt: utc(BASE), endedAt: utc(BASE + 3_600_000) })));
+    assert.equal(cache.tryLookupValid(database, HEART_RATE), null, "stale entry is removed, not returned");
+    assert.equal(statsReads, 1, "a second miss also does not scan");
+  } finally {
+    database.close();
+  }
+});
+
+test("tryLookupValid returns only cache entries whose connection state still matches", () => {
+  const database = openDatabase();
+  let state = { dataVersion: 7, totalChanges: 0 };
+  let probes = 0;
+  try {
+    const cache = new HealthRecordDurationCache(() => state, () => {
+      probes += 1;
+      return { maxDurationMs: 60_000, hasNonCanonicalTimestamps: false };
+    });
+    assert.equal(cache.tryLookupValid(database, HEART_RATE), null, "empty cache is a miss");
+    assert.equal(probes, 0, "miss does not read stats");
+    cache.lookup(database, HEART_RATE);
+    assert.equal(probes, 1);
+    assert.equal(cache.tryLookupValid(database, HEART_RATE)?.stats.maxDurationMs, 60_000);
+    assert.equal(probes, 1, "a valid hit does not read stats");
+
+    state = { dataVersion: 8, totalChanges: 0 };
+    assert.equal(cache.tryLookupValid(database, HEART_RATE), null, "data_version change invalidates");
+    assert.equal(probes, 1);
+    assert.equal(cache.tryLookupValid(database, HEART_RATE), null, "evicted entry stays absent");
+    assert.equal(probes, 1);
+  } finally {
+    database.close();
+  }
+});
+
+test("a commit between the cache check and the bounded query discards the unprovable result", () => {
+  const database = openDatabase();
+  try {
+    const window = { startedAt: utc(BASE + 100 * DAY), endedAt: utc(BASE + 100 * DAY + 3_600_000) };
+    seed(database, [
+      { value: 0, start: utc(BASE - 600 * DAY), end: utc(BASE - 600 * DAY + 60_000) },
+      { value: 1, start: window.startedAt, end: utc(Date.parse(window.startedAt) + 60_000) }
+    ]);
+    const cache = primeCache(database);
+    const first = readHealthRecordOverlap(database, input(window), { cache });
+    assert.equal(first.shape, "bounded");
+
+    // 模拟“缓存 check 之后、bounded 查询之前”另一连接提交：把写入塞进
+    // tryLookupValid 的返回路径，下一次状态核对必须看到 total_changes 变化。
+    class RacingCache extends HealthRecordDurationCache {
+      override tryLookupValid(db: DatabaseSync, type: string) {
+        const result = super.tryLookupValid(db, type);
+        if (result !== null) {
+          seed(db, [{ value: 2, start: utc(BASE + 100 * DAY - 2 * DAY), end: utc(BASE + 100 * DAY + 30 * 60_000) }]);
+        }
+        return result;
+      }
+    }
+    const racing = new RacingCache();
+    racing.lookup(database, HEART_RATE);
+    const second = readHealthRecordOverlap(database, input(window), { cache: racing });
+    assert.notEqual(second.shape, "bounded", "state changed after the cache check; bounded is unprovable");
+    assert.deepEqual(second.rows, referenceRows(database, input(window)));
+    assert.ok(second.rows.some((row) => row.value_numeric === 2));
+  } finally {
+    database.close();
+  }
+});
+
+test("request-external worker primes bounded stats without blocking the miss", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-overlap-worker-"));
+  const path = join(root, "rai.sqlite");
+  const database = openDatabase({ path });
+  const cache = new HealthRecordDurationCache();
+  const worker = new HealthRecordOverlapStatsWorker(path, database, cache);
+  try {
+    seed(database, [
+      { value: 0, start: utc(BASE - 600 * DAY), end: utc(BASE - 600 * DAY + 60_000) },
+      { value: 1, start: utc(BASE + 60_000), end: utc(BASE + 120_000) }
+    ]);
+    const window = { startedAt: utc(BASE), endedAt: utc(BASE + 3_600_000) };
+    const first = readHealthRecordOverlap(database, input(window), { cache });
+    assert.notEqual(first.shape, "bounded", "first miss uses exact adaptive query");
+    const deadline = Date.now() + 5000;
+    while (cache.tryLookupValid(database, HEART_RATE) === null && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+    }
+    assert.notEqual(cache.tryLookupValid(database, HEART_RATE), null, "worker installed stats for the current state");
+    const second = readHealthRecordOverlap(database, input(window), { cache });
+    assert.equal(second.shape, "bounded", "the next request can use the bounded plan again");
+    assert.deepEqual(second.rows, referenceRows(database, input(window)));
+
+    const state = readHealthRecordOverlapDatabaseState(database);
+    seed(database, [{ value: 2, start: utc(BASE + 90_000), end: utc(BASE + 180_000) }]);
+    assert.equal(cache.prime(database, HEART_RATE, state, { maxDurationMs: 1, hasNonCanonicalTimestamps: false }), false,
+      "a result computed for an older connection state must be rejected");
+  } finally {
+    worker.close();
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+class HeldStatsWorker extends EventEmitter {
+  readonly messages: Array<Record<string, unknown>> = [];
+  postMessage(message: Record<string, unknown>): void { this.messages.push(message); }
+  terminate(): Promise<number> { return Promise.resolve(0); }
+}
+
+const asStatsWorker = (worker: HeldStatsWorker): Worker => worker as unknown as Worker;
+
+async function waitForStats<T>(read: () => T | null, message: string): Promise<T> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const value = read();
+    if (value !== null) return value;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 2));
+  }
+  throw new Error(message);
+}
+
+test("a late exit/message from the previous stats worker cannot clear or overwrite the replacement job", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-overlap-worker-generation-"));
+  const path = join(root, "rai.sqlite");
+  const database = openDatabase({ path });
+  const cache = new HealthRecordDurationCache();
+  const workers: HeldStatsWorker[] = [];
+  const worker = new HealthRecordOverlapStatsWorker(
+    path,
+    database,
+    cache,
+    () => {
+      const fake = new HeldStatsWorker();
+      workers.push(fake);
+      return asStatsWorker(fake);
+    }
+  );
+  try {
+    const state = readHealthRecordOverlapDatabaseState(database);
+    worker.request(HEART_RATE, state);
+    const firstWorker = await waitForStats(() => workers[0] ?? null, "first stats worker was not created");
+    assert.equal(firstWorker.messages[0]?.type, HEART_RATE);
+
+    // Force the worker to be replaced, then give the replacement a new in-flight job.
+    firstWorker.emit("error", new Error("worker crashed"));
+    worker.request(STEPS, state);
+    const secondWorker = await waitForStats(() => workers[1] ?? null, "replacement stats worker was not created");
+    const secondJob = await waitForStats(
+      () => secondWorker.messages.find((message) => message.type === STEPS) ?? null,
+      "replacement job was not dispatched"
+    );
+    assert.equal(secondJob.type, STEPS);
+
+    // The old worker's delayed exit is the review regression: it must not clear
+    // the replacement's inFlight, or the valid result below would be discarded.
+    firstWorker.emit("exit", 0);
+    secondWorker.emit("message", {
+      type: STEPS,
+      stats: { maxDurationMs: 1234, hasNonCanonicalTimestamps: false }
+    });
+    const primed = await waitForStats(
+      () => cache.tryLookupValid(database, STEPS),
+      "replacement worker result was not installed after the old exit"
+    );
+    assert.equal(primed.stats.maxDurationMs, 1234);
+
+    // A late message from the old generation must not install the wrong type.
+    firstWorker.emit("message", {
+      type: HEART_RATE,
+      stats: { maxDurationMs: 9, hasNonCanonicalTimestamps: false }
+    });
+    assert.equal(cache.tryLookupValid(database, HEART_RATE), null, "old worker message leaked into the replacement");
+  } finally {
+    worker.close();
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

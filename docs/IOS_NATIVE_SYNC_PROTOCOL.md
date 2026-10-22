@@ -19,7 +19,7 @@ Route 使用逐 workout 的 UNKNOWN → ACTIVE → COOLING → SETTLED 伴生状
 
 2026-10-09：非 Workout 记录改为逐类型、无事件日期过滤的分页 anchored 增量。
 v2 manifest 携带类型作用域 UUID 删除，服务端从 v30 起用 `(sample_type, sample_uuid)` 映射保留历史数据库 ID
-（当前 schema 已到 v46，见迁移 CLI）；新增能力字段不改变原有同步身份版本。迁移、兼容性及升级边界见
+（当前 schema 已到 v47，见迁移 CLI）；新增能力字段不改变原有同步身份版本。迁移、兼容性及升级边界见
 [HealthKit 记录同步 v2](HEALTHKIT_RECORD_SYNC_V2.md)。
 
 ## 状态机

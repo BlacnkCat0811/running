@@ -1,0 +1,41 @@
+HEAD: cfc5ba46c87e54add8e083155f54defaa0f03cef
+Branch: main
+Node: v22.23.2
+tsx: 4.23.0
+SQLite: 3.51.3
+Host: Darwin 25.6.0 x86_64
+CPUs: 6
+Disk:
+/dev/disk1s1   121Gi    94Gi    11Gi    90%    1.1M  116M    1%   /System/Volumes/Data
+--- anchor sha256 (doc) ---
+023372b22740708b9111db9192c4b419e17402a764c8f110fa17508ad212aafc  scripts/phase2-write-amplification.mjs
+96c6dd739739b612fe9de0d3289286c5557dadf851a3fc71233ef0be907b27f8  packages/storage-sqlite/src/read/health-record-overlap-reads.ts
+24c929eac89789a21ebcfa5481d0b6400481a39c1c56a662ba3b720714fb2ee9  packages/storage-sqlite/src/read/series-read-repository.ts
+e03b9872c573ed45d36eb0d6c0f457afe251cfe4b6e0ab35d63b477f4b19da06  apps/api/src/data.ts
+--- git status ---
+ M apps/api/src/import-database-tasks.ts
+ M apps/api/src/import-publication.ts
+ M apps/api/src/maintenance.ts
+ M apps/api/test/maintenance.test.ts
+ M deliverables/README.md
+ M docs/HEALTHKIT_RECORD_SYNC_V2.md
+ M docs/IOS_NATIVE_SYNC_PROTOCOL.md
+ M docs/PROJECT_REVIEW.md
+ M package.json
+ M packages/health-export-parser/src/cli.ts
+ M packages/storage-sqlite/src/database.ts
+ M packages/storage-sqlite/src/index.ts
+?? apps/api/test/checkpoint-semantics.test.ts
+?? deliverables/phase1-main-thread-blocking/
+?? deliverables/phase2-followup-2026-10-21/
+?? deliverables/phase2-sqlite-2026-10-21/
+?? packages/storage-sqlite/src/checkpoint.ts
+?? packages/storage-sqlite/src/v47-migration.ts
+?? packages/storage-sqlite/test/ability-session-index-migration.test.ts
+?? packages/storage-sqlite/test/checkpoint.test.ts
+?? scripts/bench-sqlite-phase2.mjs
+?? scripts/phase2-http-bench.mjs
+?? scripts/phase2-migration-evidence.mjs
+?? scripts/phase2-report-tables.mjs
+?? scripts/phase2-source-fingerprint.mjs
+?? scripts/phase2-write-amplification.mjs

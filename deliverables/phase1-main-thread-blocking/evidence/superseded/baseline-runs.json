@@ -1,0 +1,157 @@
+[
+  {
+    "mode": "baseline",
+    "status": "succeeded",
+    "elapsedMs": 1172.829678,
+    "eventLoopMaxMs": 1159.725055,
+    "eventLoopP99Ms": 1159.725055,
+    "summary": {
+      "recomputeReasons": [
+        "payload_identity_unchanged"
+      ],
+      "importMode": "unchanged",
+      "insertedWorkouts": 0,
+      "updatedWorkouts": 0,
+      "removedWorkouts": 0,
+      "unchangedWorkouts": 3,
+      "routesUpdated": 0,
+      "featuresReused": 0,
+      "featuresRecomputed": 0,
+      "modelReplayFrom": null,
+      "durationMs": 1155,
+      "backupName": null,
+      "directSync": {
+        "ingestStatus": "committed",
+        "receiptId": "web_import_phase1_1792560862106",
+        "analysisStatus": "not_required",
+        "dependencyGeneration": null,
+        "publishedReleaseId": null,
+        "parentBatchId": null
+      }
+    }
+  },
+  {
+    "mode": "baseline",
+    "status": "succeeded",
+    "elapsedMs": 1174.6037019999999,
+    "eventLoopMaxMs": 1164.967935,
+    "eventLoopP99Ms": 1164.967935,
+    "summary": {
+      "recomputeReasons": [
+        "payload_identity_unchanged"
+      ],
+      "importMode": "unchanged",
+      "insertedWorkouts": 0,
+      "updatedWorkouts": 0,
+      "removedWorkouts": 0,
+      "unchangedWorkouts": 3,
+      "routesUpdated": 0,
+      "featuresReused": 0,
+      "featuresRecomputed": 0,
+      "modelReplayFrom": null,
+      "durationMs": 1160,
+      "backupName": null,
+      "directSync": {
+        "ingestStatus": "committed",
+        "receiptId": "web_import_phase1_1792560864434",
+        "analysisStatus": "not_required",
+        "dependencyGeneration": null,
+        "publishedReleaseId": null,
+        "parentBatchId": null
+      }
+    }
+  },
+  {
+    "mode": "baseline",
+    "status": "succeeded",
+    "elapsedMs": 1184.135781,
+    "eventLoopMaxMs": 1172.307967,
+    "eventLoopP99Ms": 1172.307967,
+    "summary": {
+      "recomputeReasons": [
+        "payload_identity_unchanged"
+      ],
+      "importMode": "unchanged",
+      "insertedWorkouts": 0,
+      "updatedWorkouts": 0,
+      "removedWorkouts": 0,
+      "unchangedWorkouts": 3,
+      "routesUpdated": 0,
+      "featuresReused": 0,
+      "featuresRecomputed": 0,
+      "modelReplayFrom": null,
+      "durationMs": 1167,
+      "backupName": null,
+      "directSync": {
+        "ingestStatus": "committed",
+        "receiptId": "web_import_phase1_1792560866719",
+        "analysisStatus": "not_required",
+        "dependencyGeneration": null,
+        "publishedReleaseId": null,
+        "parentBatchId": null
+      }
+    }
+  },
+  {
+    "mode": "baseline",
+    "status": "succeeded",
+    "elapsedMs": 1173.825884,
+    "eventLoopMaxMs": 1166.016511,
+    "eventLoopP99Ms": 1166.016511,
+    "summary": {
+      "recomputeReasons": [
+        "payload_identity_unchanged"
+      ],
+      "importMode": "unchanged",
+      "insertedWorkouts": 0,
+      "updatedWorkouts": 0,
+      "removedWorkouts": 0,
+      "unchangedWorkouts": 3,
+      "routesUpdated": 0,
+      "featuresReused": 0,
+      "featuresRecomputed": 0,
+      "modelReplayFrom": null,
+      "durationMs": 1159,
+      "backupName": null,
+      "directSync": {
+        "ingestStatus": "committed",
+        "receiptId": "web_import_phase1_1792560869037",
+        "analysisStatus": "not_required",
+        "dependencyGeneration": null,
+        "publishedReleaseId": null,
+        "parentBatchId": null
+      }
+    }
+  },
+  {
+    "mode": "baseline",
+    "status": "succeeded",
+    "elapsedMs": 1173.2745280000001,
+    "eventLoopMaxMs": 1164.967935,
+    "eventLoopP99Ms": 1164.967935,
+    "summary": {
+      "recomputeReasons": [
+        "payload_identity_unchanged"
+      ],
+      "importMode": "unchanged",
+      "insertedWorkouts": 0,
+      "updatedWorkouts": 0,
+      "removedWorkouts": 0,
+      "unchangedWorkouts": 3,
+      "routesUpdated": 0,
+      "featuresReused": 0,
+      "featuresRecomputed": 0,
+      "modelReplayFrom": null,
+      "durationMs": 1159,
+      "backupName": null,
+      "directSync": {
+        "ingestStatus": "committed",
+        "receiptId": "web_import_phase1_1792560871360",
+        "analysisStatus": "not_required",
+        "dependencyGeneration": null,
+        "publishedReleaseId": null,
+        "parentBatchId": null
+      }
+    }
+  }
+]

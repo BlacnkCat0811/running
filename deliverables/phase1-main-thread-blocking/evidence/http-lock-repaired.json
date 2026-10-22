@@ -1,0 +1,528 @@
+{
+  "schema": "rai-phase1-http-evidence-v1",
+  "mode": "repaired",
+  "generatedAt": "2026-10-21T07:04:06.982Z",
+  "source": {
+    "snapshotRoot": "/Users/ta/running/deliverables/phase1-main-thread-blocking/snapshots/repaired",
+    "fingerprintSha256": "b72cc56ebda9f1c5b411b68f38fb9c801eb3c08faebe4aeb8c5c0f3b38d80c0f",
+    "gitHead": "9db450f1ba3ad8b74d6a91c6074336c0c330a198",
+    "workingTreeDiffSha256": null
+  },
+  "environment": {
+    "platform": "darwin",
+    "release": "node",
+    "arch": "x64",
+    "node": "v22.23.2",
+    "cpuCount": 6,
+    "totalMemoryBytes": 17179869184
+  },
+  "config": {
+    "rounds": 5,
+    "roundSeconds": 60,
+    "concurrency": 4,
+    "cyclesPerRound": 1,
+    "lockHoldMs": 1200,
+    "enforce": true,
+    "entry": "HTTP upload -> inspect -> import-jobs -> poll",
+    "drainMs": 150
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "cycles": 1,
+      "before": {
+        "uptimeMs": 4320.826854,
+        "requests": 66,
+        "serverErrors": 0,
+        "meanRequestMs": 3.9252966060605767,
+        "maxRequestMs": 47.974513000000115,
+        "eventLoopP95Ms": 20.971519,
+        "eventLoopMaxMs": 20.971519,
+        "processRssBytes": 239456256,
+        "processHeapUsedBytes": 42496248,
+        "processMaxRssKiB": 236708,
+        "processCpuUserMicros": 3119258,
+        "processCpuSystemMicros": 1263707,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "after": {
+        "uptimeMs": 64351.733227000004,
+        "requests": 15291,
+        "serverErrors": 0,
+        "meanRequestMs": 1.9158952109083753,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 25.149439,
+        "eventLoopMaxMs": 81.985535,
+        "processRssBytes": 240250880,
+        "processHeapUsedBytes": 45778720,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 30778923,
+        "processCpuSystemMicros": 6664994,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "eventLoopMaxMs": 81.985535,
+      "eventLoopP95Ms": 25.149439,
+      "lockWindowEventLoopMaxMs": 60.784639,
+      "lockWindowEventLoopP95Ms": 35.094527,
+      "lockedTraffic": {
+        "requests": 238,
+        "healthRequests": 119,
+        "readRequests": 119,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 6.4224169999997684,
+        "p95Ms": 26.537861999999222,
+        "p99Ms": 48.77620100000058,
+        "maxMs": 55.761349999999766
+      },
+      "unlockedTraffic": {
+        "requests": 14923,
+        "healthRequests": 7462,
+        "readRequests": 7461,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.996321000000535,
+        "p95Ms": 10.375312000000122,
+        "p99Ms": 21.71846000000005,
+        "maxMs": 76.20614899999782
+      },
+      "lockedHealth": {
+        "requests": 119,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.390993999999409,
+        "p95Ms": 21.326751999999942,
+        "p99Ms": 48.77620100000058,
+        "maxMs": 55.761349999999766
+      },
+      "lockedRead": {
+        "requests": 119,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 8.180629999999837,
+        "p95Ms": 30.149984000000586,
+        "p99Ms": 48.13781300000028,
+        "maxMs": 50.14101600000049
+      },
+      "jobs": {
+        "count": 1,
+        "p50Ms": 1333.9303450000007,
+        "p95Ms": 1333.9303450000007,
+        "maxMs": 1333.9303450000007
+      }
+    },
+    {
+      "round": 2,
+      "cycles": 1,
+      "before": {
+        "uptimeMs": 64526.629397,
+        "requests": 15293,
+        "serverErrors": 0,
+        "meanRequestMs": 1.9161847721179601,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 22.134783,
+        "eventLoopMaxMs": 22.134783,
+        "processRssBytes": 240259072,
+        "processHeapUsedBytes": 45825272,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 30782305,
+        "processCpuSystemMicros": 6670590,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "after": {
+        "uptimeMs": 124548.652942,
+        "requests": 30647,
+        "serverErrors": 0,
+        "meanRequestMs": 1.895039768525448,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 24.952831,
+        "eventLoopMaxMs": 90.636287,
+        "processRssBytes": 215965696,
+        "processHeapUsedBytes": 33657568,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 57820238,
+        "processCpuSystemMicros": 11983658,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "eventLoopMaxMs": 90.636287,
+      "eventLoopP95Ms": 24.952831,
+      "lockWindowEventLoopMaxMs": 61.112319,
+      "lockWindowEventLoopP95Ms": 30.359551,
+      "lockedTraffic": {
+        "requests": 273,
+        "healthRequests": 136,
+        "readRequests": 137,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 5.663418999989517,
+        "p95Ms": 16.94793700000446,
+        "p99Ms": 46.366829000005964,
+        "maxMs": 48.5003410000063
+      },
+      "unlockedTraffic": {
+        "requests": 15011,
+        "healthRequests": 7506,
+        "readRequests": 7505,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.916111999991699,
+        "p95Ms": 10.07447300000058,
+        "p99Ms": 21.093582000001334,
+        "maxMs": 103.26450000000477
+      },
+      "lockedHealth": {
+        "requests": 136,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 3.0214490000071237,
+        "p95Ms": 28.35795100001269,
+        "p99Ms": 46.366829000005964,
+        "maxMs": 48.5003410000063
+      },
+      "lockedRead": {
+        "requests": 137,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 7.63883199999691,
+        "p95Ms": 16.779748000000836,
+        "p99Ms": 22.970066000008956,
+        "maxMs": 46.536647999993875
+      },
+      "jobs": {
+        "count": 1,
+        "p50Ms": 1269.1214390000096,
+        "p95Ms": 1269.1214390000096,
+        "maxMs": 1269.1214390000096
+      }
+    },
+    {
+      "round": 3,
+      "cycles": 1,
+      "before": {
+        "uptimeMs": 124724.597274,
+        "requests": 30649,
+        "serverErrors": 0,
+        "meanRequestMs": 1.8950978447910014,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 24.330239,
+        "eventLoopMaxMs": 24.330239,
+        "processRssBytes": 215965696,
+        "processHeapUsedBytes": 33697504,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 57822707,
+        "processCpuSystemMicros": 11988288,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "after": {
+        "uptimeMs": 184744.153433,
+        "requests": 46167,
+        "serverErrors": 0,
+        "meanRequestMs": 1.8839717596335102,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 24.707071,
+        "eventLoopMaxMs": 65.667071,
+        "processRssBytes": 216854528,
+        "processHeapUsedBytes": 33644728,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 85128080,
+        "processCpuSystemMicros": 17342023,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "eventLoopMaxMs": 65.667071,
+      "eventLoopP95Ms": 24.707071,
+      "lockWindowEventLoopMaxMs": 63.766527,
+      "lockWindowEventLoopP95Ms": 28.098559,
+      "lockedTraffic": {
+        "requests": 257,
+        "healthRequests": 128,
+        "readRequests": 129,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 6.246385999998893,
+        "p95Ms": 20.402784999998403,
+        "p99Ms": 53.650072999997064,
+        "maxMs": 56.315142000006745
+      },
+      "unlockedTraffic": {
+        "requests": 15193,
+        "healthRequests": 7597,
+        "readRequests": 7596,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.871901999998954,
+        "p95Ms": 9.884033999987878,
+        "p99Ms": 15.534293000004254,
+        "maxMs": 60.88451499998337
+      },
+      "lockedHealth": {
+        "requests": 128,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.033624999996391,
+        "p95Ms": 17.621544000008726,
+        "p99Ms": 49.36183800001163,
+        "maxMs": 53.650072999997064
+      },
+      "lockedRead": {
+        "requests": 129,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 7.645111999998335,
+        "p95Ms": 20.691678000002867,
+        "p99Ms": 54.19541100000788,
+        "maxMs": 56.315142000006745
+      },
+      "jobs": {
+        "count": 1,
+        "p50Ms": 1292.546377000006,
+        "p95Ms": 1292.546377000006,
+        "maxMs": 1292.546377000006
+      }
+    },
+    {
+      "round": 4,
+      "cycles": 1,
+      "before": {
+        "uptimeMs": 184894.216449,
+        "requests": 46169,
+        "serverErrors": 0,
+        "meanRequestMs": 1.8840116969395104,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 21.856255,
+        "eventLoopMaxMs": 21.856255,
+        "processRssBytes": 216875008,
+        "processHeapUsedBytes": 33684392,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 85130802,
+        "processCpuSystemMicros": 17346336,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "after": {
+        "uptimeMs": 244911.599616,
+        "requests": 62174,
+        "serverErrors": 0,
+        "meanRequestMs": 1.8415711583137593,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 24.133631,
+        "eventLoopMaxMs": 67.371007,
+        "processRssBytes": 218157056,
+        "processHeapUsedBytes": 33402176,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 111372090,
+        "processCpuSystemMicros": 22363769,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "eventLoopMaxMs": 67.371007,
+      "eventLoopP95Ms": 24.133631,
+      "lockWindowEventLoopMaxMs": 54.558719,
+      "lockWindowEventLoopP95Ms": 24.657919,
+      "lockedTraffic": {
+        "requests": 292,
+        "healthRequests": 146,
+        "readRequests": 146,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 5.055661999998847,
+        "p95Ms": 11.192917999986093,
+        "p99Ms": 45.854111000022385,
+        "maxMs": 49.63495599999442
+      },
+      "unlockedTraffic": {
+        "requests": 15633,
+        "healthRequests": 7817,
+        "readRequests": 7816,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.607583000004524,
+        "p95Ms": 8.771047999995062,
+        "p99Ms": 12.260345000016969,
+        "maxMs": 54.42033399999491
+      },
+      "lockedHealth": {
+        "requests": 146,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 3.2434880000073463,
+        "p95Ms": 11.192917999986093,
+        "p99Ms": 42.604243000008864,
+        "maxMs": 45.854111000022385
+      },
+      "lockedRead": {
+        "requests": 146,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 6.213316999987001,
+        "p95Ms": 11.02650900001754,
+        "p99Ms": 47.59568399999989,
+        "maxMs": 49.63495599999442
+      },
+      "jobs": {
+        "count": 1,
+        "p50Ms": 1327.6345480000018,
+        "p95Ms": 1327.6345480000018,
+        "maxMs": 1327.6345480000018
+      }
+    },
+    {
+      "round": 5,
+      "cycles": 1,
+      "before": {
+        "uptimeMs": 245065.82790799998,
+        "requests": 62176,
+        "serverErrors": 0,
+        "meanRequestMs": 1.841606302737385,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 20.987903,
+        "eventLoopMaxMs": 20.987903,
+        "processRssBytes": 218161152,
+        "processHeapUsedBytes": 33441968,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 111374765,
+        "processCpuSystemMicros": 22368422,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "after": {
+        "uptimeMs": 305086.55636700004,
+        "requests": 78074,
+        "serverErrors": 0,
+        "meanRequestMs": 1.8197871118554012,
+        "maxRequestMs": 125.5583970000007,
+        "eventLoopP95Ms": 24.215551,
+        "eventLoopMaxMs": 75.825151,
+        "processRssBytes": 218742784,
+        "processHeapUsedBytes": 31778256,
+        "processMaxRssKiB": 259668,
+        "processCpuUserMicros": 137565015,
+        "processCpuSystemMicros": 27385936,
+        "admission": {
+          "active": null,
+          "waiting": []
+        },
+        "importPending": false,
+        "commandPending": false
+      },
+      "eventLoopMaxMs": 75.825151,
+      "eventLoopP95Ms": 24.215551,
+      "lockWindowEventLoopMaxMs": 63.635455,
+      "lockWindowEventLoopP95Ms": 24.084479,
+      "lockedTraffic": {
+        "requests": 290,
+        "healthRequests": 145,
+        "readRequests": 145,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.830277000000933,
+        "p95Ms": 11.485837999993237,
+        "p99Ms": 51.834158999990905,
+        "maxMs": 55.46590599999763
+      },
+      "unlockedTraffic": {
+        "requests": 15528,
+        "healthRequests": 7764,
+        "readRequests": 7764,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 4.675883000018075,
+        "p95Ms": 9.040012000012212,
+        "p99Ms": 12.5482539999648,
+        "maxMs": 97.37901099998271
+      },
+      "lockedHealth": {
+        "requests": 145,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 2.761419999995269,
+        "p95Ms": 7.28850299998885,
+        "p99Ms": 44.826425000006566,
+        "maxMs": 51.834158999990905
+      },
+      "lockedRead": {
+        "requests": 145,
+        "errors": 0,
+        "serverErrors": 0,
+        "p50Ms": 6.564676000009058,
+        "p95Ms": 11.923561000003247,
+        "p99Ms": 54.15130100000533,
+        "maxMs": 55.46590599999763
+      },
+      "jobs": {
+        "count": 1,
+        "p50Ms": 1327.2297600000165,
+        "p95Ms": 1327.2297600000165,
+        "maxMs": 1327.2297600000165
+      }
+    }
+  ],
+  "summary": {
+    "rounds": 5,
+    "cycles": 5,
+    "lockWindowEventLoopMaxMs": {
+      "median": 61.112319,
+      "worst": 63.766527
+    },
+    "fullRoundEventLoopMaxMs": {
+      "median": 75.825151,
+      "worst": 90.636287
+    },
+    "lockedHealthP95Ms": {
+      "median": 17.621544000008726,
+      "worst": 28.35795100001269
+    },
+    "lockedReadP95Ms": {
+      "median": 16.779748000000836,
+      "worst": 30.149984000000586
+    },
+    "serverErrors": 0,
+    "threshold": {
+      "eventLoopMax": true,
+      "healthP95": true,
+      "noNewServerErrors": true
+    },
+    "passed": true
+  }
+}

@@ -2,6 +2,7 @@ import { existsSync, renameSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ImportJobResponse } from "@rai/api-contracts";
+import { tryWalCheckpointTruncate } from "@rai/storage-sqlite";
 
 interface Publication {
   id: string; databasePath: string; rollbackPath: string;
@@ -95,7 +96,10 @@ export function writeImportReceipt(path: string, id: string, summary: NonNullabl
   try {
     db.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL");
     writeImportReceiptInDatabase(db, id, summary);
-    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    // 回执已经在上面 COMMIT。checkpoint 只是维护动作：忙（长读事务钉住快照）时
+    // 允许延后，不能把“已提交、checkpoint 未完成”误报成事务未提交。
+    // 必须完成的恢复/换库路径走 runWalCheckpointTruncate（busy 即失败）。
+    tryWalCheckpointTruncate(db);
   } finally { db.close(); }
 }
 

@@ -1,4 +1,4 @@
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 import { nullableNumber } from "./read-utils.js";
@@ -50,6 +50,32 @@ export interface StoredSpeedTrack {
   scale: number;
 }
 
+/**
+ * Request-local, lazy provider for the one scaled speed track a `workoutSeries`
+ * assembly is allowed to build.
+ *
+ * The context distinguishes "not computed yet" from "computed and unusable"
+ * (`null`): a missing track is cached too, so a run without usable speed samples
+ * never pays for the same overlap query three times. It must stay local to one
+ * call/snapshot — never store it on `RaiReadStore` or reuse it across requests.
+ */
+export interface SeriesSpeedTrackProvider {
+  get(): StoredSpeedTrack | null;
+}
+
+/** Heart-rate / step averages shared by segments and kilometre splits in one request. */
+export interface StoredSegmentAverages {
+  heartRate: MetricInterval[];
+  steps: MetricInterval[];
+  weightedAverage(startMs: number, endMs: number): number | null;
+  cadence(startMs: number, endMs: number): number | null;
+}
+
+/** Request-local lazy provider for {@link StoredSegmentAverages}. */
+export interface SeriesSegmentAveragesProvider {
+  get(): StoredSegmentAverages;
+}
+
 /** A measured interval on the speed track. */
 export interface StoredMeasuredSegment {
   startMs: number;
@@ -81,9 +107,19 @@ export interface StoredSeriesSession {
 export class SqliteSeriesReadRepository {
   /** 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。 */
   private readonly routePointReader: SqliteRoutePointReader;
+  /** 静态 SQL 的 prepared statement 缓存；repository 生命周期与连接一致。 */
+  private readonly statements = new Map<string, StatementSync>();
 
   constructor(private readonly database: DatabaseSync) {
     this.routePointReader = new SqliteRoutePointReader(database);
+  }
+
+  private statement(sql: string): StatementSync {
+    const cached = this.statements.get(sql);
+    if (cached !== undefined) return cached;
+    const prepared = this.database.prepare(sql);
+    this.statements.set(sql, prepared);
+    return prepared;
   }
 
   sessionForSeries(trainingSessionId: string): StoredSeriesSession | null {
@@ -156,8 +192,15 @@ export class SqliteSeriesReadRepository {
     transform: (value: number, row: Record<string, unknown>) => number = (value) => value,
     forceFallbackUnit = false
   ): StoredMetricSeries {
-    const rows = this.database
-      .prepare(`
+    // 空指标（power/stride/vertical/ground contact 在多数训练上）无需跑窗口函数；
+    // 先用同一谓词的索引查找确认“没有任何行”，返回与旧查询完全相同的空形状。
+    const present = this.statement(`
+        SELECT 1 AS present FROM health_records
+        WHERE type = ? AND source_name = ? AND start_at >= ? AND start_at <= ?
+          AND value_numeric IS NOT NULL LIMIT 1
+      `).get(type, sourceName, startedAt, endedAt);
+    if (!present) return { unit: fallbackUnit, totalSamples: 0, points: [] };
+    const rows = this.statement(`
         WITH deduplicated AS (
           SELECT DISTINCT start_at, end_at, value_numeric, unit
           FROM health_records
@@ -180,8 +223,7 @@ export class SqliteSeriesReadRepository {
           OR sample_number = total_samples
           OR peak_rank = 1
         ORDER BY sample_number
-      `)
-      .all(type, sourceName, startedAt, endedAt) as Record<string, unknown>[];
+      `).all(type, sourceName, startedAt, endedAt) as Record<string, unknown>[];
     return {
       unit: !forceFallbackUnit && typeof rows[0]?.first_unit === "string" ? rows[0].first_unit : fallbackUnit,
       totalSamples: Number(rows[0]?.total_samples ?? 0),
@@ -328,8 +370,52 @@ export class SqliteSeriesReadRepository {
     };
   }
 
+  /**
+   * Lazily build (at most once) the speed track for one request-local snapshot.
+   *
+   * Callers pass the same provider to `measureSegmentsWithTrack` and
+   * `workoutSplitsWithTrack`; no production cache is kept between requests.
+   */
+  speedTrackProvider(
+    startedAt: string,
+    endedAt: string,
+    sourceName: string,
+    distanceKm: number | null
+  ): SeriesSpeedTrackProvider {
+    let loaded = false;
+    let track: StoredSpeedTrack | null = null;
+    return {
+      get: () => {
+        if (!loaded) {
+          loaded = true;
+          track = this.speedTrack(startedAt, endedAt, sourceName, distanceKm);
+        }
+        return track;
+      }
+    };
+  }
+
+  /**
+   * Lazily compute heart-rate/step averages once for the request. `measureSegmentsWithTrack`
+   * and `workoutSplitsWithTrack` both need them; sharing is request-local and never cached
+   * across requests (no HR/step cache responsibility changes).
+   */
+  segmentAveragesProvider(startedAt: string, endedAt: string, sourceName: string): SeriesSegmentAveragesProvider {
+    let loaded = false;
+    let averages: StoredSegmentAverages | null = null;
+    return {
+      get: () => {
+        if (!loaded) {
+          loaded = true;
+          averages = this.intervalAverages(startedAt, endedAt, sourceName);
+        }
+        return averages!;
+      }
+    };
+  }
+
   /** Heart-rate and step-count intervals plus the averages derived from them. */
-  private intervalAverages(startedAt: string, endedAt: string, sourceName: string) {
+  private intervalAverages(startedAt: string, endedAt: string, sourceName: string): StoredSegmentAverages {
     const heartRate = this.metricIntervals(
       "HKQuantityTypeIdentifierHeartRate",
       sourceName,
@@ -379,7 +465,28 @@ export class SqliteSeriesReadRepository {
     distanceKm: number | null,
     boundaries: number[]
   ): StoredMeasuredSegment[] {
-    const track = this.speedTrack(startedAt, endedAt, sourceName, distanceKm);
+    return this.measureSegmentsWithTrack(
+      this.speedTrack(startedAt, endedAt, sourceName, distanceKm),
+      startedAt,
+      endedAt,
+      sourceName,
+      boundaries
+    );
+  }
+
+  /**
+   * Same measurement as {@link measureSegments}, but accepting an already built
+   * track. `null` means "already proven unusable" and returns `[]` without
+   * querying again — the caller's request-local provider records that decision.
+   */
+  measureSegmentsWithTrack(
+    track: StoredSpeedTrack | null,
+    startedAt: string,
+    endedAt: string,
+    sourceName: string,
+    boundaries: number[],
+    averages?: StoredSegmentAverages
+  ): StoredMeasuredSegment[] {
     if (!track) return [];
     const startedMs = Date.parse(startedAt);
     const endedMs = Date.parse(endedAt);
@@ -397,7 +504,7 @@ export class SqliteSeriesReadRepository {
       }
       return meters;
     };
-    const { weightedAverage, cadence } = this.intervalAverages(startedAt, endedAt, sourceName);
+    const { weightedAverage, cadence } = averages ?? this.intervalAverages(startedAt, endedAt, sourceName);
 
     const segments: StoredMeasuredSegment[] = [];
     for (let index = 0; index < ordered.length - 1; index += 1) {
@@ -475,7 +582,25 @@ export class SqliteSeriesReadRepository {
     sourceName: string,
     distanceKm: number | null
   ): StoredWorkoutSplit[] {
-    const track = this.speedTrack(startedAt, endedAt, sourceName, distanceKm);
+    return this.workoutSplitsWithTrack(
+      this.speedTrack(startedAt, endedAt, sourceName, distanceKm),
+      startedAt,
+      endedAt,
+      sourceName
+    );
+  }
+
+  /**
+   * Same kilometre splits as {@link workoutSplits}, accepting the shared track.
+   * `null` means "already proven unusable" and returns `[]`.
+   */
+  workoutSplitsWithTrack(
+    track: StoredSpeedTrack | null,
+    startedAt: string,
+    endedAt: string,
+    sourceName: string,
+    averages?: StoredSegmentAverages
+  ): StoredWorkoutSplit[] {
     if (!track) return [];
     const startedMs = Date.parse(startedAt);
     const endedMs = Date.parse(endedAt);
@@ -495,7 +620,7 @@ export class SqliteSeriesReadRepository {
     }
     boundaries.push(endedMs);
 
-    const { weightedAverage, cadence } = this.intervalAverages(startedAt, endedAt, sourceName);
+    const { weightedAverage, cadence } = averages ?? this.intervalAverages(startedAt, endedAt, sourceName);
     return boundaries
       .slice(0, -1)
       .map((startMs, index) => {

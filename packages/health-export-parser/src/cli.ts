@@ -24,7 +24,8 @@ import {
   acquireDatabasePublicationLock,
   probeDatabaseStructure,
   publishDatabaseFile,
-  quickCheckDatabase
+  quickCheckDatabase,
+  runWalCheckpointTruncate
 } from "@rai/storage-sqlite";
 
 /**
@@ -227,7 +228,7 @@ async function activateStagingDatabase(
       targetExists: () => existsSync(target),
       prepareOriginal: async () => {
         const active = new DatabaseSync(target);
-        try { active.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
+        try { runWalCheckpointTruncate(active); }
         finally { active.close(); }
         for (const sidecar of [`${target}-wal`, `${target}-shm`]) {
           await removeFileWithRetry(sidecar);

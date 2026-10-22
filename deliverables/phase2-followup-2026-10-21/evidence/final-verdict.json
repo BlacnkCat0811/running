@@ -1,0 +1,241 @@
+{
+  "generatedAt": "2026-10-22T02:00:58.424Z",
+  "a": {
+    "ok": true,
+    "rounds": 100,
+    "groups": {
+      "normalized": true,
+      "empty-wal": true,
+      "near-threshold": true
+    }
+  },
+  "b": {
+    "ok": true,
+    "d2": true,
+    "d3Hot": true,
+    "d3": true,
+    "failures": [],
+    "hotWindows": {
+      "d2": {
+        "ok": true,
+        "windows": {
+          "recent": {
+            "sessionId": "s0",
+            "baselineP95": 64.53226300000097,
+            "candidateP95": 67.8769400000001,
+            "deltaMs": 3.3446769999991375,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 1901
+          },
+          "p25": {
+            "sessionId": "s249",
+            "baselineP95": 18.475561999999627,
+            "candidateP95": 17.334445000000414,
+            "deltaMs": -1.1411169999992126,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 403
+          },
+          "p50": {
+            "sessionId": "s498",
+            "baselineP95": 21.10343300000386,
+            "candidateP95": 24.54214000000502,
+            "deltaMs": 3.438707000001159,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 404
+          },
+          "p75": {
+            "sessionId": "s748",
+            "baselineP95": 22.153817999998864,
+            "candidateP95": 19.646206999997958,
+            "deltaMs": -2.5076110000009066,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 404
+          },
+          "oldest": {
+            "sessionId": "s998",
+            "baselineP95": 16.188219999996363,
+            "candidateP95": 20.2549549999967,
+            "deltaMs": 4.066735000000335,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 403
+          }
+        }
+      },
+      "d3": {
+        "ok": true,
+        "windows": {
+          "recent": {
+            "sessionId": "s0",
+            "baselineP95": 49.03294900000037,
+            "candidateP95": 51.64181000000099,
+            "deltaMs": 2.6088610000006156,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 1822
+          },
+          "p25": {
+            "sessionId": "s1249",
+            "baselineP95": 20.395913999993354,
+            "candidateP95": 18.3109620000032,
+            "deltaMs": -2.084951999990153,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 335
+          },
+          "p50": {
+            "sessionId": "s2498",
+            "baselineP95": 28.663933999996516,
+            "candidateP95": 24.784559000006993,
+            "deltaMs": -3.8793749999895226,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 334
+          },
+          "p75": {
+            "sessionId": "s3748",
+            "baselineP95": 17.67982900000061,
+            "candidateP95": 14.35813799999596,
+            "deltaMs": -3.3216910000046482,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 334
+          },
+          "oldest": {
+            "sessionId": "s4998",
+            "baselineP95": 17.203237000008812,
+            "candidateP95": 21.38563200001954,
+            "deltaMs": 4.182395000010729,
+            "limitMs": 20,
+            "pass": true,
+            "bodyEqual": true,
+            "statuses": [
+              200
+            ],
+            "metricSamplesMin": 322
+          }
+        }
+      }
+    }
+  },
+  "c": {
+    "ok": true,
+    "overall": {
+      "blocks": 5,
+      "passingBlocks": 4,
+      "medianMs": 5.064031999999997,
+      "medianPercent": 20.930148019177096
+    },
+    "buildCounts": true,
+    "hotWindows": {
+      "d2": {
+        "recent": {
+          "sessionId": "s0",
+          "baselineP95": 64.53226300000097,
+          "candidateP95": 67.8769400000001,
+          "deltaMs": 3.3446769999991375,
+          "limitMs": 20,
+          "pass": true,
+          "bodyEqual": true,
+          "statuses": [
+            200
+          ],
+          "metricSamplesMin": 1901
+        },
+        "p25": {
+          "sessionId": "s249",
+          "baselineP95": 18.475561999999627,
+          "candidateP95": 17.334445000000414,
+          "deltaMs": -1.1411169999992126,
+          "limitMs": 20,
+          "pass": true,
+          "bodyEqual": true,
+          "statuses": [
+            200
+          ],
+          "metricSamplesMin": 403
+        },
+        "p50": {
+          "sessionId": "s498",
+          "baselineP95": 21.10343300000386,
+          "candidateP95": 24.54214000000502,
+          "deltaMs": 3.438707000001159,
+          "limitMs": 20,
+          "pass": true,
+          "bodyEqual": true,
+          "statuses": [
+            200
+          ],
+          "metricSamplesMin": 404
+        },
+        "p75": {
+          "sessionId": "s748",
+          "baselineP95": 22.153817999998864,
+          "candidateP95": 19.646206999997958,
+          "deltaMs": -2.5076110000009066,
+          "limitMs": 20,
+          "pass": true,
+          "bodyEqual": true,
+          "statuses": [
+            200
+          ],
+          "metricSamplesMin": 404
+        },
+        "oldest": {
+          "sessionId": "s998",
+          "baselineP95": 16.188219999996363,
+          "candidateP95": 20.2549549999967,
+          "deltaMs": 4.066735000000335,
+          "limitMs": 20,
+          "pass": true,
+          "bodyEqual": true,
+          "statuses": [
+            200
+          ],
+          "metricSamplesMin": 403
+        }
+      }
+    },
+    "hotWindowsOk": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@rai/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node ../../scripts/check-node-version.mjs",
+    "dev": "tsx watch src/server.ts",
+    "prestart": "node ../../scripts/check-node-version.mjs",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/multipart": "^10.1.0",
+    "@rai/api-contracts": "*",
+    "@rai/application": "*",
+    "@rai/contracts": "*",
+    "@rai/dynamics": "*",
+    "@rai/health-export-parser": "*",
+    "@rai/model-eval": "*",
+    "@rai/physiology": "*",
+    "@rai/readiness": "*",
+    "@rai/storage-sqlite": "*",
+    "@rai/training-load": "*",
+    "fastify": "^5.12.5",
+    "tsx": "4.23.0",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@rai/scoring": "*",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
+    "yazl": "^3.3.1"
+  }
+}

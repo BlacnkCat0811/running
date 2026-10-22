@@ -1,0 +1,30 @@
+{
+  "schema": "rai-phase1-source-snapshots-v1",
+  "createdAt": "2026-10-21T14:26:04+08:00",
+  "note": "Snapshots preserve the pre-existing dirty workspace. baseline differs from phase1-prefix only in the four phase-1 production files; unrelated working-tree changes are identical in both. All snapshots carry the same benchmark-only /v1/performance?reset=1 instrumentation (guarded by RAI_PHASE1_BENCH_RESET=1).",
+  "baseline": {
+    "sourceRoot": "snapshots/baseline/apps/api/src",
+    "phase1FilesFrom": "HEAD 9db450f1ba3a",
+    "productionFiles": [
+      "import-database-tasks.ts",
+      "import-database-thread.ts",
+      "import-publication.ts",
+      "import-worker.ts"
+    ],
+    "fingerprintSha256": "163e0d9de89db6eec7313dd53f87719644842a92b4605060ba399b33d1a42975"
+  },
+  "phase1Prefix": {
+    "sourceRoot": "snapshots/phase1-prefix/apps/api/src",
+    "phase1FilesFrom": "working tree before 2026-10-21 reliability repairs",
+    "fingerprintSha256": "f198b3a56802e5610d39fb20bace25bb307953c5aa4cc5bdaf450090f4e53575"
+  },
+  "repaired": {
+    "sourceRoot": "snapshots/repaired/apps/api/src",
+    "createdAfter": "reliability repairs and acceptance tests",
+    "fingerprintSha256": "b72cc56ebda9f1c5b411b68f38fb9c801eb3c08faebe4aeb8c5c0f3b38d80c0f"
+  },
+  "diffs": {
+    "phase1PrefixFromBaseline": "snapshots/phase1-prefix-from-baseline.diff",
+    "repairedFromPhase1Prefix": "snapshots/repaired-from-phase1-prefix.diff"
+  }
+}

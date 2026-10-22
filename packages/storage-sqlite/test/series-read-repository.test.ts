@@ -121,3 +121,51 @@ test("metricIntervals keeps overlap semantics while seeking bounded windows", ()
       "a record starting exactly at the workout end is outside the half-open window");
   } finally { database.close(); }
 });
+
+test("a request-local speed track is reusable by segments and splits without changing results", () => {
+  const database = new DatabaseSync(":memory:");
+  const startedAt = "2026-09-02T00:00:00.000Z";
+  const endedAt = "2026-09-02T00:10:00.000Z";
+  const startMs = Date.parse(startedAt);
+  try {
+    database.exec(`
+      CREATE TABLE health_records (type TEXT, source_name TEXT, start_at TEXT, end_at TEXT, value_numeric REAL, unit TEXT);
+      CREATE INDEX idx_health_records_source_time ON health_records(source_name, start_at, end_at);
+    `);
+    const insert = database.prepare("INSERT INTO health_records VALUES (?, 'Watch', ?, ?, 3, 'm/s')");
+    for (let second = 0; second < 600; second += 1) {
+      const from = new Date(startMs + second * 1000).toISOString();
+      const to = new Date(startMs + (second + 1) * 1000).toISOString();
+      insert.run("HKQuantityTypeIdentifierRunningSpeed", from, to);
+    }
+    const repository = new SqliteSeriesReadRepository(database);
+    const track = repository.speedTrack(startedAt, endedAt, "Watch", 1.8);
+    assert.ok(track, "fixture must produce a usable track");
+    const boundaries = [startMs, startMs + 300_000, startMs + 600_000];
+    assert.deepEqual(
+      repository.measureSegmentsWithTrack(track, startedAt, endedAt, "Watch", boundaries),
+      repository.measureSegments(startedAt, endedAt, "Watch", 1.8, boundaries),
+      "passing the shared track must be exactly equivalent to rebuilding it"
+    );
+    assert.deepEqual(
+      repository.workoutSplitsWithTrack(track, startedAt, endedAt, "Watch"),
+      repository.workoutSplits(startedAt, endedAt, "Watch", 1.8),
+      "kilometre splits must be exactly equivalent to rebuilding the track"
+    );
+    assert.deepEqual(repository.measureSegmentsWithTrack(null, startedAt, endedAt, "Watch", boundaries), []);
+    assert.deepEqual(repository.workoutSplitsWithTrack(null, startedAt, endedAt, "Watch"), []);
+  } finally { database.close(); }
+});
+
+test("an absent metric returns the exact empty series shape", () => {
+  const database = new DatabaseSync(":memory:");
+  const startedAt = "2026-09-03T00:00:00.000Z";
+  try {
+    database.exec("CREATE TABLE health_records (type TEXT, source_name TEXT, start_at TEXT, end_at TEXT, value_numeric REAL, unit TEXT)");
+    const repository = new SqliteSeriesReadRepository(database);
+    assert.deepEqual(
+      repository.metricSeries("HKQuantityTypeIdentifierRunningPower", "W", startedAt, "2026-09-03T01:00:00.000Z", "Watch"),
+      { unit: "W", totalSamples: 0, points: [] }
+    );
+  } finally { database.close(); }
+});

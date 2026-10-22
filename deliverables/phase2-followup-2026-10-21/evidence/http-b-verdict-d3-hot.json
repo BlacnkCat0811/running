@@ -1,0 +1,48 @@
+{
+  "ok": true,
+  "dataset": "D3",
+  "generatedAt": "2026-10-22T00:49:29.551Z",
+  "windows": {
+    "recent": {
+      "baselineP95": 70.37523099999817,
+      "candidateP95": 58.97733299999891,
+      "deltaMs": -11.397897999999259,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true
+    },
+    "p25": {
+      "baselineP95": 21.60327099999995,
+      "candidateP95": 21.691733999999997,
+      "deltaMs": 0.08846300000004703,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true
+    },
+    "p50": {
+      "baselineP95": 7.382913000001281,
+      "candidateP95": 6.559965000000375,
+      "deltaMs": -0.8229480000009062,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true
+    },
+    "p75": {
+      "baselineP95": 19.44347800000105,
+      "candidateP95": 18.91031999999541,
+      "deltaMs": -0.533158000005642,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true
+    },
+    "oldest": {
+      "baselineP95": 5.853222999998252,
+      "candidateP95": 7.473462000009022,
+      "deltaMs": 1.6202390000107698,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true
+    }
+  },
+  "failures": []
+}

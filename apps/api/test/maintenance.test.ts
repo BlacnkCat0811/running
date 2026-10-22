@@ -1370,3 +1370,32 @@ test("leaves unrelated files, directories and malformed names alone when reclaim
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("deleteDatabase refuses to delete when a reader pins the WAL snapshot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-checkpoint-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"), { recursive: true });
+  const database = new DatabaseSync(databasePath);
+  database.exec("PRAGMA journal_mode = WAL; CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('must-survive');");
+  database.close();
+  const reader = new DatabaseSync(databasePath);
+  reader.exec("BEGIN DEFERRED");
+  reader.prepare("SELECT value FROM marker").get();
+  // A checkpoint only has work to do when the WAL contains a frame newer than
+  // the reader's snapshot; without this write the WAL is already empty and
+  // TRUNCATE legitimately returns busy=0.
+  const writer = new DatabaseSync(databasePath);
+  writer.exec("PRAGMA busy_timeout = 5000");
+  writer.prepare("INSERT INTO marker VALUES ('newer-frame')").run();
+  writer.close();
+  try {
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    await assert.rejects(maintenance.deleteDatabase(), /checkpoint is busy/i);
+    assert.equal(existsSync(databasePath), true, "a busy checkpoint must not be followed by file deletion");
+    assert.equal(readMarker(databasePath), "must-survive");
+  } finally {
+    reader.exec("COMMIT");
+    reader.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

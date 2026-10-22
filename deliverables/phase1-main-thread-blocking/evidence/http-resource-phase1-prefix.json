@@ -1,0 +1,98 @@
+{
+  "schema": "rai-phase1-http-evidence-v1",
+  "mode": "phase1-prefix",
+  "generatedAt": "2026-10-21T07:22:34.260Z",
+  "source": {
+    "snapshotRoot": "/Users/ta/running/deliverables/phase1-main-thread-blocking/snapshots/phase1-prefix",
+    "fingerprintSha256": "f198b3a56802e5610d39fb20bace25bb307953c5aa4cc5bdaf450090f4e53575",
+    "gitHead": "9db450f1ba3ad8b74d6a91c6074336c0c330a198",
+    "workingTreeDiffSha256": null
+  },
+  "environment": {
+    "platform": "darwin",
+    "release": "node",
+    "arch": "x64",
+    "node": "v22.23.2",
+    "cpuCount": 6,
+    "totalMemoryBytes": 17179869184
+  },
+  "config": {
+    "iterations": 100,
+    "enforce": false,
+    "entry": "HTTP upload -> inspect -> import-jobs -> poll"
+  },
+  "summary": {
+    "coldStartMs": 843.567262,
+    "coldStartUploadMs": 71.48765700000013,
+    "coldStartCreateMs": 18.371372000000065,
+    "batches": 100,
+    "p50Ms": 471.04929399999673,
+    "p95Ms": 569.7850809999982,
+    "maxMs": 814.2794890000005,
+    "eventLoopMaxMs": 397.672447,
+    "importPending": false,
+    "processRssBytesBefore": 194797568,
+    "processRssBytesAfterCold": 250302464,
+    "processRssBytesFinal": 167350272,
+    "processMaxRssKiB": 253044,
+    "uploadTempFiles": [],
+    "runtimeVarFiles": 6,
+    "rssSamples": [
+      {
+        "at": 10,
+        "processRssBytes": 254341120,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 20,
+        "processRssBytes": 256970752,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 30,
+        "processRssBytes": 253640704,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 40,
+        "processRssBytes": 206139392,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 50,
+        "processRssBytes": 172048384,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 60,
+        "processRssBytes": 159506432,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 70,
+        "processRssBytes": 161136640,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 80,
+        "processRssBytes": 162304000,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 90,
+        "processRssBytes": 166912000,
+        "eventLoopMaxMs": 397.672447
+      },
+      {
+        "at": 100,
+        "processRssBytes": 167350272,
+        "eventLoopMaxMs": 397.672447
+      }
+    ],
+    "threshold": {
+      "pendingCleared": true,
+      "noTempFiles": true,
+      "noServerErrors": true
+    }
+  }
+}

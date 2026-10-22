@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { ImportJobResponse } from "@rai/api-contracts";
 import { buildAudit, type DataAudit } from "@rai/health-export-parser";
+import { runWalCheckpointTruncate, WalCheckpointBusyError } from "@rai/storage-sqlite";
 import type { DataOnlyImportResult } from "./data-only-import.js";
 import type { DirectSyncImportResult, DirectSyncRejection } from "./direct-sync-ingest.js";
 
@@ -174,8 +175,14 @@ export function checkpointImportDatabase(path: string): void {
   const database = new DatabaseSync(path);
   try {
     database.exec("PRAGMA busy_timeout = 5000");
-    const result = database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-    if (result?.busy !== 0) throw new Error("Import database checkpoint is busy");
+    try {
+      runWalCheckpointTruncate(database);
+    } catch (error) {
+      if (error instanceof WalCheckpointBusyError) {
+        throw new Error("Import database checkpoint is busy", { cause: error });
+      }
+      throw error;
+    }
   } finally {
     database.close();
   }

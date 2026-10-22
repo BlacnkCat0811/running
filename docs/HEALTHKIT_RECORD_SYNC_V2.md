@@ -115,7 +115,7 @@ HealthKit 无法可靠检测读取权限扩大；扩大权限后，**新可见�
 
 ## 数据库迁移与修正
 
-当前 schema 已到 **v46**（`packages/storage-sqlite/src/database.ts` 的迁移表）。升级只需停 API、
+当前 schema 已到 **v47**（`packages/storage-sqlite/src/database.ts` 的迁移表）。升级只需停 API、
 备份后跑现有迁移 CLI：
 
 ```sh

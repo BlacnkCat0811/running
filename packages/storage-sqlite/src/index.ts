@@ -6,6 +6,12 @@ export {
 } from "./publication-lock.js";
 export { SqliteModelReleaseRepository, semanticHash, REQUIRED_MODEL_DOMAINS } from "./model-release-repository.js";
 export {
+  runWalCheckpointTruncate,
+  tryWalCheckpointTruncate,
+  WalCheckpointBusyError,
+  type WalCheckpointResult
+} from "./checkpoint.js";
+export {
   publishDatabaseFile,
   type DatabaseFilePublication,
   type DatabaseFilePublisherOptions
@@ -110,12 +116,19 @@ export {
   type LoadTimelineComponent
 } from "./read/training-statistics-read-repository.js";
 export {
+  HealthRecordOverlapStatsWorker,
+  warmHealthRecordOverlapStats
+} from "./read/health-record-stats-worker.js";
+export {
   SqliteSeriesReadRepository,
   type MetricInterval,
   type StoredMeasuredSegment,
   type StoredMetricSeries,
   type StoredRoutePoint,
   type StoredSeriesSession,
+  type SeriesSpeedTrackProvider,
+  type SeriesSegmentAveragesProvider,
+  type StoredSegmentAverages,
   type StoredSpeedSample,
   type StoredSpeedTrack,
   type StoredWorkoutEventInterval,

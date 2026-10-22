@@ -1,0 +1,6 @@
+eae983f27f941551898e80a81f90ffc8ff2ad2eb7bc02f041539205ff4c855e5  /private/tmp/rai-phase2-followup-2026-10-21/datasets/d2-candidate-c/rai.sqlite
+068baf4fdfd4cc9f98ee0eb120a78b71db2a9386d075439f509c9f726b0d6989  /private/tmp/rai-phase2-followup-2026-10-21/datasets/d2/rai.sqlite
+# 2026-10-22 corrected hot-window baseline (outside repo; copied from phase2-sqlite evidence)
+a2a65c567df946f5a4be5714a9c7c2189d35773e4fd8bc0da8e65b26b7cf6123  deliverables/phase2-sqlite-2026-10-21/evidence/baseline-cfc5ba4.tar.gz
+ace4da35b41c42f7216f68be53a06a11df69a2aa8f6d5c8ccab01ebaec29f8df  /private/tmp/rai-phase2-followup-2026-10-21/bench-baseline-root/d2.sqlite
+5846225d87b0397805d1f2629eafcf32914cf0a545f14aa9fb2ea47fd5e6995e  /private/tmp/rai-phase2-followup-2026-10-21/bench-baseline-root/d3.sqlite

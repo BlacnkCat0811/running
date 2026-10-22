@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-10-21T16:41:46.632Z",
+  "label": "b-candidate-d3-smoke",
+  "root": "/private/tmp/rai-phase2-followup-2026-10-21",
+  "database": "/private/tmp/rai-phase2-followup-2026-10-21/http-datasets/d3-v46.sqlite",
+  "cycles": 20,
+  "blocks": 2,
+  "warmups": 2,
+  "target": {
+    "id": "s0",
+    "startedAt": "2023-09-01T00:00:00.000Z",
+    "endedAt": "2023-09-01T01:00:00.000Z",
+    "distanceKm": 10,
+    "workoutId": "w0",
+    "sourceName": "RQ Run"
+  },
+  "states": {},
+  "hotWindows": null,
+  "verdict": {
+    "ok": false,
+    "failures": [
+      "Error: API b-candidate-d3-smoke/receipt shutdown exit=null\n    at measureState (file:///Users/ta/running/scripts/phase2-series-cache-bench.mjs:304:40)\n    at async file:///Users/ta/running/scripts/phase2-series-cache-bench.mjs:359:28"
+    ]
+  }
+}

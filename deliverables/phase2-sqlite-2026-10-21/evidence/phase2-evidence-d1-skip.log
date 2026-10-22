@@ -1,0 +1,4 @@
+(node:18918) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[phase2] built d1: 53000 health rows, 100 workouts, 24.4 MiB
+[phase2] all acceptance checks passed; evidence written to /tmp/rai-phase2-review-d1-skip/evidence.json

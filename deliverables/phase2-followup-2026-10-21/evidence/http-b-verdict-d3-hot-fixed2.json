@@ -1,0 +1,73 @@
+{
+  "ok": true,
+  "dataset": "D3",
+  "generatedAt": "2026-10-22T01:57:02.068Z",
+  "windows": {
+    "recent": {
+      "sessionId": "s0",
+      "baselineP95": 49.03294900000037,
+      "candidateP95": 51.64181000000099,
+      "deltaMs": 2.6088610000006156,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true,
+      "statuses": [
+        200
+      ],
+      "metricSamplesMin": 1822
+    },
+    "p25": {
+      "sessionId": "s1249",
+      "baselineP95": 20.395913999993354,
+      "candidateP95": 18.3109620000032,
+      "deltaMs": -2.084951999990153,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true,
+      "statuses": [
+        200
+      ],
+      "metricSamplesMin": 335
+    },
+    "p50": {
+      "sessionId": "s2498",
+      "baselineP95": 28.663933999996516,
+      "candidateP95": 24.784559000006993,
+      "deltaMs": -3.8793749999895226,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true,
+      "statuses": [
+        200
+      ],
+      "metricSamplesMin": 334
+    },
+    "p75": {
+      "sessionId": "s3748",
+      "baselineP95": 17.67982900000061,
+      "candidateP95": 14.35813799999596,
+      "deltaMs": -3.3216910000046482,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true,
+      "statuses": [
+        200
+      ],
+      "metricSamplesMin": 334
+    },
+    "oldest": {
+      "sessionId": "s4998",
+      "baselineP95": 17.203237000008812,
+      "candidateP95": 21.38563200001954,
+      "deltaMs": 4.182395000010729,
+      "limitMs": 20,
+      "pass": true,
+      "bodyEqual": true,
+      "statuses": [
+        200
+      ],
+      "metricSamplesMin": 322
+    }
+  },
+  "failures": []
+}

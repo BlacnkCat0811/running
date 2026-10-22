@@ -55,6 +55,7 @@
     "data:benchmark": "node --import tsx apps/api/src/benchmark-import.ts",
     "predata:benchmark-speed": "npm run check:node",
     "data:benchmark-speed": "node --import tsx scripts/benchmark-speed-windows.mjs",
+    "bench:sqlite-phase2": "node --import tsx scripts/bench-sqlite-phase2.mjs",
     "bench:sync-scaling": "node --import tsx scripts/bench-sync-scaling.mjs",
     "prerust:build": "npm run check:node",
     "rust:build": "node scripts/rust-worker.mjs build",

@@ -9,6 +9,7 @@ import {
   SqliteModelRunRepository,
   SqliteSeriesReadRepository,
   SqliteTrainingStatisticsReadRepository,
+  HealthRecordOverlapStatsWorker,
   SqliteTrendsReadRepository,
   SqliteWorkoutReadRepository,
   SqliteZoneReadRepository,
@@ -26,6 +27,8 @@ import {
   type StoredPerformanceEntry,
   type StoredPrivacyZone,
   type StoredSeriesSession,
+  type SeriesSpeedTrackProvider,
+  type SeriesSegmentAveragesProvider,
   type StoredWorkoutDetailRow,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
@@ -278,6 +281,7 @@ export class RaiReadStore {
   private readonly recoveryRepository: SqliteRecoveryFactsReadRepository;
   private readonly privacyZoneRepository: SqlitePrivacyZoneRepository;
   private readonly performanceEntryRepository: SqlitePerformanceEntryRepository;
+  private readonly overlapStatsWorker: HealthRecordOverlapStatsWorker;
   private cacheVersion = -1;
   private readonly cache = new Map<string, unknown>();
 
@@ -307,9 +311,13 @@ export class RaiReadStore {
     this.recoveryRepository = new SqliteRecoveryFactsReadRepository(this.database);
     this.privacyZoneRepository = new SqlitePrivacyZoneRepository(this.database);
     this.performanceEntryRepository = new SqlitePerformanceEntryRepository(this.database);
+    // Request-external rebuild of the overlap duration stats. A miss only enqueues
+    // work; the API thread continues with the exact adaptive query.
+    this.overlapStatsWorker = new HealthRecordOverlapStatsWorker(this.path, this.database);
   }
 
   close(): void {
+    this.overlapStatsWorker.close();
     this.database.close();
   }
 
@@ -1801,7 +1809,9 @@ export class RaiReadStore {
       distanceKm: number | null;
       canonicalWorkoutId: string;
     },
-    candidates: PlanCandidateDay[]
+    candidates: PlanCandidateDay[],
+    speedTracks: SeriesSpeedTrackProvider,
+    averages: SeriesSegmentAveragesProvider
   ): {
     segments: WorkoutSeriesResponse["segments"];
     plan: WorkoutSeriesResponse["segmentPlan"];
@@ -1822,12 +1832,7 @@ export class RaiReadStore {
       startedAtMs,
       endedAtMs
     );
-    const track = this.seriesRepository.speedTrack(
-      session.startedAt,
-      session.endedAt,
-      session.sourceName,
-      session.distanceKm
-    );
+    const track = speedTracks.get();
     const plan = matchPlanDay({
       candidates,
       startedAtMs,
@@ -1853,21 +1858,29 @@ export class RaiReadStore {
     const measured =
       segmentation.boundaries.length < 2
         ? []
-        : this.seriesRepository.measureSegments(
+        : this.seriesRepository.measureSegmentsWithTrack(
+            track,
             session.startedAt,
             session.endedAt,
             session.sourceName,
-            session.distanceKm,
-            segmentation.boundaries
+            segmentation.boundaries,
+            averages.get()
           );
     const segments = toWorkoutSegments(measured, segmentation.descriptors, startedAtMs);
     if (segments.length === 0) return { segments: [], plan: null, hasMeasuredWorkoutSteps: false, note: missingSegmentsNote(events.length, plan) };
     return { segments, plan: segmentation.plan, note: segmentation.note, hasMeasuredWorkoutSteps: steps.length >= 2 };
   }
 
-  private workoutGradeContext(session: StoredSeriesSession) {
+  private workoutGradeContext(
+    session: StoredSeriesSession,
+    speedTracks?: SeriesSpeedTrackProvider,
+    averages?: SeriesSegmentAveragesProvider
+  ) {
     const { id, startedAt, endedAt, sourceName, distanceKm } = session;
-    const splits = this.seriesRepository.workoutSplits(startedAt, endedAt, sourceName, distanceKm);
+    const tracks = speedTracks ?? this.seriesRepository.speedTrackProvider(startedAt, endedAt, sourceName, distanceKm);
+    const averageProvider = averages ?? this.seriesRepository.segmentAveragesProvider(startedAt, endedAt, sourceName);
+    const splits = this.seriesRepository.workoutSplitsWithTrack(
+      tracks.get(), startedAt, endedAt, sourceName, averageProvider.get());
     const elevationSeries = this.seriesRepository.routeElevationSeries(id);
     // Grade is computed here rather than inside the splits query: the splits read
     // repository is a data accessor, and the cost model lives in @rai/physiology.
@@ -1883,11 +1896,37 @@ export class RaiReadStore {
   }
 
   workoutSeries(id: string, candidates: PlanCandidateDay[] = []): WorkoutSeriesResponse | null {
+    return this.inReadSnapshot(() => this.buildWorkoutSeries(id, candidates));
+  }
+
+  /**
+   * One short read snapshot for a whole `/series` body.
+   *
+   * `workoutSeries` is also called from `coachLoopFacts`, which already holds a
+   * `BEGIN DEFERRED`; nested BEGIN would fail, so the existing outermost
+   * transaction is reused. No await/IO is allowed inside this closure.
+   */
+  private inReadSnapshot<T>(load: () => T): T {
+    if (this.database.isTransaction) return load();
+    this.database.exec("BEGIN DEFERRED");
+    try {
+      const value = load();
+      this.database.exec("COMMIT");
+      return value;
+    } catch (error) {
+      try { this.database.exec("ROLLBACK"); } catch { /* preserve original error */ }
+      throw error;
+    }
+  }
+
+  private buildWorkoutSeries(id: string, candidates: PlanCandidateDay[]): WorkoutSeriesResponse | null {
     const session = this.seriesRepository.sessionForSeries(id);
     if (!session) return null;
     const { startedAt, endedAt, sourceCategory, sourceName } = session;
-    const segmentation = this.segmentRun(session, candidates);
-    const { splits, elevationSeries, grade } = this.workoutGradeContext(session);
+    const speedTracks = this.seriesRepository.speedTrackProvider(startedAt, endedAt, sourceName, session.distanceKm);
+    const averages = this.seriesRepository.segmentAveragesProvider(startedAt, endedAt, sourceName);
+    const segmentation = this.segmentRun(session, candidates, speedTracks, averages);
+    const { splits, elevationSeries, grade } = this.workoutGradeContext(session, speedTracks, averages);
     const series = {
       heartRate: this.asMetricSeries(
         this.seriesRepository.metricSeries(

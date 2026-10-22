@@ -128,15 +128,92 @@ const sameState = (left: HealthRecordOverlapDatabaseState, right: HealthRecordOv
  * 只有状态完全一致才复用，否则重算。对只读连接 `total_changes` 恒为 0，
  * 只靠 `data_version` 失效；对测试/维护路径的可写连接两者都参与。
  */
+export type HealthRecordOverlapMissListener = (
+  database: DatabaseSync,
+  type: string,
+  state: HealthRecordOverlapDatabaseState
+) => void;
+
 export class HealthRecordDurationCache {
   private readonly entries = new WeakMap<DatabaseSync, Map<string, StatsCacheEntry>>();
+  /** Request-external rebuild hook (worker); never called on the request's bounded path. */
+  private readonly missListeners = new WeakMap<DatabaseSync, Set<HealthRecordOverlapMissListener>>();
 
   constructor(
     private readonly state: HealthRecordOverlapStateReader = readHealthRecordOverlapDatabaseState,
     private readonly readStats: HealthRecordOverlapStatsReader = readHealthRecordOverlapStats
   ) {}
 
-  /** 返回该 type 当前状态下的 stats；`maxDurationMs === null` 表示无有效时间戳。 */
+  /**
+   * 只返回**当前连接状态已验证**的缓存；缺失或失效时移除条目并返回 `null`，
+   * **不触发全类型统计扫描**。
+   *
+   * 这是生产相交读的入口：外部提交（包括与健康记录无关的回执/manifest 变化）
+   * 推进 `data_version` 后，本次请求立即走精确的自适应查询，而不是在主线程同步
+   * 重算 MAX(julianday…)（D2 实测 HR 约 177 ms、步数约 72 ms、速度约 43 ms）。
+   * 失效后的首个请求走自适应查询；请求外的 `HealthRecordOverlapStatsWorker` 可在
+   * 后台重建，主线程用捕获状态核对后 `prime`，不会阻塞本次请求。
+   */
+  tryLookupValid(
+    database: DatabaseSync,
+    type: string
+  ): { readonly state: HealthRecordOverlapDatabaseState; readonly stats: HealthRecordOverlapStats } | null {
+    const state = this.state(database);
+    const byType = this.entries.get(database);
+    const cached = byType?.get(type);
+    if (cached === undefined) {
+      this.notifyMiss(database, type, state);
+      return null;
+    }
+    if (!sameState(cached.state, state)) {
+      byType!.delete(type);
+      this.notifyMiss(database, type, state);
+      return null;
+    }
+    return { state, stats: cached.stats };
+  }
+
+  /**
+   * 注册“缓存缺失/失效”通知。用于请求外 worker 重建统计；监听器不得在回调里
+   * 同步扫表，否则又回到 B 要消除的主线程阻塞。
+   */
+  onMiss(database: DatabaseSync, listener: HealthRecordOverlapMissListener): () => void {
+    const listeners = this.missListeners.get(database) ?? new Set<HealthRecordOverlapMissListener>();
+    listeners.add(listener);
+    this.missListeners.set(database, listeners);
+    return () => { listeners.delete(listener); };
+  }
+
+  /**
+   * 安装请求外计算出的 stats，仅当调用方捕获的状态仍是当前状态时生效。
+   * 返回 false 表示计算期间发生了提交（或换库），结果必须丢弃。
+   */
+  prime(
+    database: DatabaseSync,
+    type: string,
+    expectedState: HealthRecordOverlapDatabaseState,
+    stats: HealthRecordOverlapStats
+  ): boolean {
+    if (!sameState(this.state(database), expectedState)) return false;
+    const map = this.entries.get(database) ?? new Map<string, StatsCacheEntry>();
+    if (stats.maxDurationMs === null) map.delete(type);
+    else map.set(type, { state: expectedState, stats });
+    this.entries.set(database, map);
+    return true;
+  }
+
+  private notifyMiss(database: DatabaseSync, type: string, state: HealthRecordOverlapDatabaseState): void {
+    for (const listener of this.missListeners.get(database) ?? []) {
+      try { listener(database, type, state); } catch { /* background rebuild must not break the read */ }
+    }
+  }
+
+  /**
+   * 显式计算入口：返回该 type 当前状态下的 stats；缺失或失效时重算并写入缓存。
+   * `maxDurationMs === null` 表示无有效时间戳。
+   *
+   * 生产读路径不再调用它；保留给明确的离线/维护调用方与缓存行为测试。
+   */
   lookup(database: DatabaseSync, type: string): { readonly state: HealthRecordOverlapDatabaseState; readonly stats: HealthRecordOverlapStats } {
     const state = this.state(database);
     const byType = this.entries.get(database);
@@ -176,20 +253,19 @@ export function readHealthRecordOverlap(
 ): HealthRecordOverlapReadResult {
   const cache = options.cache ?? healthRecordDurationCache;
   const timeline = probeHealthRecordOverlapTimeline(database, input.sourceName, input.type);
-  const before = readHealthRecordOverlapDatabaseState(database);
-  const { stats } = cache.lookup(database, input.type);
-  if (stats.maxDurationMs !== null) {
+  // 只读已验证缓存：失效时不重算统计，直接使用始终精确的自适应形状。
+  const cached = cache.tryLookupValid(database, input.type);
+  if (cached !== null && cached.stats.maxDurationMs !== null) {
     const bounded = buildBoundedHealthRecordOverlapQuery(input, {
-      maxDurationMs: stats.maxDurationMs,
-      hasNonCanonicalTimestamps: stats.hasNonCanonicalTimestamps,
+      maxDurationMs: cached.stats.maxDurationMs,
+      hasNonCanonicalTimestamps: cached.stats.hasNonCanonicalTimestamps,
       timeline
     });
     if (bounded !== null) {
       const rows = execute(database, bounded);
       const after = readHealthRecordOverlapDatabaseState(database);
-      if (sameState(before, after)) return { shape: "bounded", rows };
-      // 计算 D / 执行查询期间有外部提交（或本连接写入）：本次有界结果不可证明，
-      // 丢弃并走始终精确的自适应形状；缓存也一并失效，下一次重新计算。
+      if (sameState(cached.state, after)) return { shape: "bounded", rows };
+      // 读取期间有外部提交（或本连接写入）：本次有界结果不可证明，丢弃并走精确形状。
       cache.invalidate(database, input.type);
     }
   }

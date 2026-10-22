@@ -53,3 +53,12 @@ apps/ios/Configs/AmapKey.xcconfig
 
 # Generated data audit is a runtime report, not maintained project documentation
 /docs/DATA_AUDIT.md
+
+# Load-test / benchmark raw artifacts: large, reproducible from scripts/phase2-*.mjs,
+# and not needed for source review or deployment.
+/deliverables/**/evidence/*.requests.ndjson.gz
+/deliverables/**/evidence/*.tar.gz
+/deliverables/**/evidence/http-benchmark-*.json
+/deliverables/**/evidence/series-dump-*.json
+/deliverables/**/evidence/write-amplification-*.json
+/deliverables/**/evidence/write-amplification-*.log
