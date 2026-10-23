@@ -39,7 +39,17 @@ import {
   TrainingZoneProfileValidationError,
   buildPredictionReportAsync
 } from "@rai/application";
-import { ModelRunActivationError, PendingMigrationsError, SqliteModelReleaseRepository, RaiDatabase, SqliteModelRunRepository, acquireDatabasePublicationLock, recordModelReleaseRefusal } from "@rai/storage-sqlite";
+import {
+  DatabasePathIdentityError,
+  ModelRunActivationError,
+  PendingMigrationsError,
+  SqliteModelReleaseRepository,
+  RaiDatabase,
+  SqliteModelRunRepository,
+  acquireDatabasePublicationLock,
+  recordModelReleaseRefusal,
+  resolveDatabasePathIdentity
+} from "@rai/storage-sqlite";
 import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
@@ -155,8 +165,9 @@ import { assemblePlanCandidates, type PlanCandidateDay } from "./workout-segment
 
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const runtimeRoot = resolve(process.env.RAI_RUNTIME_ROOT ?? projectRoot);
-const databasePath = resolve(process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite"));
-const controlDatabasePath = resolve(process.env.RAI_CONTROL_DATABASE ?? resolve(runtimeRoot, "var/rai-control.sqlite"));
+const configuredDatabasePath = process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite");
+const configuredControlDatabasePath = process.env.RAI_CONTROL_DATABASE
+  ?? resolve(runtimeRoot, "var/rai-control.sqlite");
 const predictionArtifactRoot = resolve(runtimeRoot, "var", "model-artifacts", "prediction");
 const port = Number(process.env.RAI_API_PORT ?? 8787);
 const host = process.env.RAI_API_HOST ?? "127.0.0.1";
@@ -220,11 +231,58 @@ if (!Number.isFinite(maxImportZipBytes) || maxImportZipBytes <= 0) {
 }
 const dataOnlyFastPathSetting = process.env.RAI_IMPORT_DATA_ONLY_FAST_PATH ?? "1";
 if (!["0", "1"].includes(dataOnlyFastPathSetting)) throw new Error("RAI_IMPORT_DATA_ONLY_FAST_PATH must be 0 or 1");
+/**
+ * 阶段 4（R1）：启动期的库身份必须与 publication lock 使用同一规则（真实路径，
+ * 不是词法 `resolve`）。任何无法解析的路径都失败关闭：否则主库/控制库比较和锁
+ * 都只保护了一个词法名字，而不是实际会被写入的物理库。
+ */
+function resolveStartupDatabaseIdentity(
+  environmentName: "RAI_DATABASE" | "RAI_CONTROL_DATABASE",
+  configuredPath: string
+): string {
+  try {
+    return resolveDatabasePathIdentity(configuredPath);
+  } catch (error) {
+    if (error instanceof DatabasePathIdentityError) {
+      throw new Error(
+        `Refusing to start: ${environmentName} identity cannot be established. ${error.message}`
+      );
+    }
+    throw new Error(
+      `Refusing to start: ${environmentName} identity cannot be established for ${configuredPath}: `
+        + (error instanceof Error ? error.message : String(error))
+    );
+  }
+}
+const databaseIdentity = resolveStartupDatabaseIdentity("RAI_DATABASE", configuredDatabasePath);
+const controlDatabaseIdentity = resolveStartupDatabaseIdentity("RAI_CONTROL_DATABASE", configuredControlDatabasePath);
+if (controlDatabaseIdentity === databaseIdentity) {
+  throw new Error(
+    "Refusing to start: RAI_CONTROL_DATABASE must differ from RAI_DATABASE; "
+      + `both resolve to the same physical database file (${databaseIdentity}). `
+      + `RAI_DATABASE=${configuredDatabasePath}, RAI_CONTROL_DATABASE=${configuredControlDatabasePath}`
+  );
+}
+const databasePath = databaseIdentity;
+const controlDatabasePath = controlDatabaseIdentity;
 const releaseDatabasePublicationLock = acquireDatabasePublicationLock(databasePath, "api");
+// 阶段 4（I1/T11）：控制库自己的跨进程发布锁。主库锁只保护主库文件；
+// `migrate-training-planner.mts --apply` 只打开控制库，因此它可以与在线 API
+// 同时写同一个控制库。API 在构造 `MobileGoalsStore`（其构造会执行控制库
+// schema 自动追加）之前取得此锁，CLI apply 取同一路径的锁 —— 锁顺序固定为
+// 主库 → 控制库，CLI 只取控制库，不形成环。
+let releaseControlDatabasePublicationLock: () => void;
+try {
+  releaseControlDatabasePublicationLock = acquireDatabasePublicationLock(controlDatabasePath, "api");
+} catch (error) {
+  releaseDatabasePublicationLock();
+  throw error;
+}
 let publicationLockReleased = false;
 const releasePublicationLock = (): void => {
   if (publicationLockReleased) return;
   publicationLockReleased = true;
+  releaseControlDatabasePublicationLock();
   releaseDatabasePublicationLock();
 };
 process.once("exit", releasePublicationLock);

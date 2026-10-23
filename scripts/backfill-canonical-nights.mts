@@ -13,10 +13,10 @@
 //   （也可用 npm run data:backfill-canonical-nights -- --apply）
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { backfillCanonicalNights } from "@rai/application";
+import { acquireDatabasePublicationLock, resolveDatabasePathIdentity } from "@rai/storage-sqlite";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
 
 const args = process.argv.slice(2);
@@ -25,7 +25,7 @@ const readArg = (name: string, fallback: string): string => {
   const value = index >= 0 ? args[index + 1] : undefined;
   return value && !value.startsWith("--") ? value : fallback;
 };
-const databasePath = resolve(readArg("--database", "var/rai.sqlite"));
+const databasePath = resolveDatabasePathIdentity(readArg("--database", "var/rai.sqlite"));
 const timezone = readArg("--timezone", DATABASE_TIMEZONE);
 const apply = args.includes("--apply");
 if (!existsSync(databasePath)) {
@@ -60,18 +60,24 @@ if (!apply) {
 }
 
 // 回填要写库，所以用可写连接；不打开应用服务，也不触发重算。
-const handle = new DatabaseSync(databasePath);
+// 阶段 4（I1）：这是可写 CLI，必须与 API 的 publication lock 互斥。
+const releasePublication = acquireDatabasePublicationLock(databasePath, "cli");
 try {
-  const result = backfillCanonicalNights(handle, timezone);
-  process.stdout.write(`${JSON.stringify({ mode: "apply", databasePath, ...result }, null, 2)}\n`);
-  if (result.status === "backfilled") {
-    process.stderr.write(
-      `\n已回填：主夜 ${result.canonicalization?.mainCount}、午睡 ${result.canonicalization?.napCount}、` +
-      `HRV 日 ${result.canonicalization?.hrvCount}。\n` +
-      "注意：这些 canonical 行的 `computed_at` 是**现在**。它们不代表历史某天当时已经知道这些事实，\n" +
-      "所以 `as_known_then` 回放仍然不可用（见 deliverables/READINESS_REPLAY_COVERAGE.json）。\n"
-    );
+  const handle = new DatabaseSync(databasePath);
+  try {
+    const result = backfillCanonicalNights(handle, timezone);
+    process.stdout.write(`${JSON.stringify({ mode: "apply", databasePath, ...result }, null, 2)}\n`);
+    if (result.status === "backfilled") {
+      process.stderr.write(
+        `\n已回填：主夜 ${result.canonicalization?.mainCount}、午睡 ${result.canonicalization?.napCount}、` +
+        `HRV 日 ${result.canonicalization?.hrvCount}。\n` +
+        "注意：这些 canonical 行的 `computed_at` 是**现在**。它们不代表历史某天当时已经知道这些事实，\n" +
+        "所以 `as_known_then` 回放仍然不可用（见 deliverables/READINESS_REPLAY_COVERAGE.json）。\n"
+      );
+    }
+  } finally {
+    handle.close();
   }
 } finally {
-  handle.close();
+  releasePublication();
 }

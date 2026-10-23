@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -62,6 +62,25 @@ const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
 /** Separate from runtime.sqlite: corruption recovery must never discard this intent. */
+
+/** Compare restore-intent paths by physical identity, not lexical spelling. */
+function physicalPath(path: string): string {
+  const absolute = resolve(path);
+  const suffix: string[] = [];
+  let current = absolute;
+  for (;;) {
+    try {
+      return resolve(realpathSync.native(current), ...suffix);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" || dirname(current) === current) {
+        return absolute;
+      }
+      suffix.unshift(basename(current));
+      current = dirname(current);
+    }
+  }
+}
+
 export class RestoreJournal {
   private readonly path: string;
   constructor(private readonly target: string, private readonly runtimeRoot: string) {
@@ -108,13 +127,14 @@ export class RestoreJournal {
       } catch {
         throw new RestoreRecoveryRequiredError("Invalid restore journal; manual recovery required");
       }
-      const snapshotRoot = resolve(this.runtimeRoot, value.snapshotIsQuarantine === true ? "var/quarantine" : "var/backups");
-      if (value.target !== resolve(this.target) ||
+      const targetPhysical = physicalPath(this.target);
+      const snapshotRoot = physicalPath(resolve(this.runtimeRoot, value.snapshotIsQuarantine === true ? "var/quarantine" : "var/backups"));
+      if (typeof value.target !== "string" || physicalPath(value.target) !== targetPhysical ||
           typeof value.staging !== "string" ||
           typeof value.snapshotIsQuarantine !== "boolean" ||
-          !value.staging.startsWith(`${resolve(this.target)}.restoring.`) ||
-          dirname(value.staging) !== dirname(resolve(this.target)) ||
-          (value.snapshot !== null && (typeof value.snapshot !== "string" || dirname(value.snapshot) !== snapshotRoot)) ||
+          !physicalPath(value.staging).startsWith(`${targetPhysical}.restoring.`) ||
+          dirname(physicalPath(value.staging)) !== dirname(targetPhysical) ||
+          (value.snapshot !== null && (typeof value.snapshot !== "string" || dirname(physicalPath(value.snapshot)) !== snapshotRoot)) ||
           !["prepared", "installed", "committed"].includes(String(value.phase))) {
         throw new RestoreRecoveryRequiredError("Invalid restore journal; manual recovery required");
       }

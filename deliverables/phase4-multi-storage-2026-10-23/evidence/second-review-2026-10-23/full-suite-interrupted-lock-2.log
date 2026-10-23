@@ -1,0 +1,1232 @@
+
+> rai-running-intelligence@0.1.0 pretest
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 test
+> node scripts/run-tests.mjs
+
+TAP version 13
+# (node:60863) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:60863) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvksc7h4_95aa114e-93f0-47bb-ae33-0e028a3a7dc9: continuing to the direct-sync receiver
+# (node:60863) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvksc8wc_87a0f8fb-3c41-4032-a26b-b3cfc6283e06: continuing to the direct-sync receiver
+# Subtest: A10：分析故障隔离——原回执不变、失败独立可见、重试只计算（不重新导出/不备份）
+ok 1 - A10：分析故障隔离——原回执不变、失败独立可见、重试只计算（不重新导出/不备份）
+  ---
+  duration_ms: 3095.132981
+  type: 'test'
+  ...
+# (node:60864) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果
+ok 2 - 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果
+  ---
+  duration_ms: 1854.809285
+  type: 'test'
+  ...
+# Subtest: 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次
+ok 3 - 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次
+  ---
+  duration_ms: 1144.581882
+  type: 'test'
+  ...
+# Subtest: 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算
+ok 4 - 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算
+  ---
+  duration_ms: 1129.423228
+  type: 'test'
+  ...
+# Subtest: 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断
+ok 5 - 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断
+  ---
+  duration_ms: 171.004929
+  type: 'test'
+  ...
+# Subtest: 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度
+ok 6 - 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度
+  ---
+  duration_ms: 187.403224
+  type: 'test'
+  ...
+# (node:60876) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: does not infer not-found responses from internal error messages
+ok 7 - does not infer not-found responses from internal error messages
+  ---
+  duration_ms: 2.261791
+  type: 'test'
+  ...
+# Subtest: preserves explicit framework status codes
+ok 8 - preserves explicit framework status codes
+  ---
+  duration_ms: 0.270069
+  type: 'test'
+  ...
+# Subtest: redacts explicit server errors and their internal codes
+ok 9 - redacts explicit server errors and their internal codes
+  ---
+  duration_ms: 0.299459
+  type: 'test'
+  ...
+# Subtest: import source not-found keeps a distinguishable 404 code
+ok 10 - import source not-found keeps a distinguishable 404 code
+  ---
+  duration_ms: 0.282729
+  type: 'test'
+  ...
+# Subtest: mutation conflict keeps a distinguishable 409 code
+ok 11 - mutation conflict keeps a distinguishable 409 code
+  ---
+  duration_ms: 0.985225
+  type: 'test'
+  ...
+# Subtest: invalid error statuses are redacted as internal errors
+ok 12 - invalid error statuses are redacted as internal errors
+  ---
+  duration_ms: 0.655138
+  type: 'test'
+  ...
+# Subtest: designed 5xx domain outcomes keep their code and message
+ok 13 - designed 5xx domain outcomes keep their code and message
+  ---
+  duration_ms: 0.518119
+  type: 'test'
+  ...
+# Subtest: the 5xx detail allowlist does not leak unknown internal codes
+ok 14 - the 5xx detail allowlist does not leak unknown internal codes
+  ---
+  duration_ms: 0.718598
+  type: 'test'
+  ...
+# (node:60877) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: benchmark is opt-in and restores the same isolated baseline for the engine
+ok 15 - benchmark is opt-in and restores the same isolated baseline for the engine
+  ---
+  duration_ms: 5248.60276
+  type: 'test'
+  ...
+# (node:60879) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: G02-C 常量与衰减：0.5 衰减、0.7 封顶、连续 4 周才释放
+ok 16 - G02-C 常量与衰减：0.5 衰减、0.7 封顶、连续 4 周才释放
+  ---
+  duration_ms: 2.904729
+  type: 'test'
+  ...
+# Subtest: 稳定窗口与观测周都按自然周计算，缺口本身不抬高容量
+ok 17 - 稳定窗口与观测周都按自然周计算，缺口本身不抬高容量
+  ---
+  duration_ms: 2.65506
+  type: 'test'
+  ...
+# Subtest: weeklyCapacity：冷启动 + 已释放的旧历史 → legacy_history；未释放仍是 5 km
+ok 18 - weeklyCapacity：冷启动 + 已释放的旧历史 → legacy_history；未释放仍是 5 km
+  ---
+  duration_ms: 0.491958
+  type: 'test'
+  ...
+# Subtest: line-reference checks report an empty scan as NOT CHECKED, not validation evidence
+ok 19 - line-reference checks report an empty scan as NOT CHECKED, not validation evidence
+  ---
+  duration_ms: 365.031155
+  type: 'test'
+  ...
+# (node:60911) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a checkpoint required before publication fails loudly when a reader pins the snapshot
+ok 20 - a checkpoint required before publication fails loudly when a reader pins the snapshot
+  ---
+  duration_ms: 5296.087756
+  type: 'test'
+  ...
+# Subtest: a committed receipt survives a deferred checkpoint instead of being reported as uncommitted
+ok 21 - a committed receipt survives a deferred checkpoint instead of being reported as uncommitted
+  ---
+  duration_ms: 5273.491344
+  type: 'test'
+  ...
+# (node:60916) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 41 missing mappings have runnable assertions: 77/78 without explicit compile evidence, not a fake AC8-05 pass
+ok 22 - 41 missing mappings have runnable assertions: 77/78 without explicit compile evidence, not a fake AC8-05 pass
+  ---
+  duration_ms: 21490.141656
+  type: 'test'
+  ...
+# Subtest: AC8-05 only consumes current, intact, complete compiled named mutation results
+ok 23 - AC8-05 only consumes current, intact, complete compiled named mutation results
+  ---
+  duration_ms: 7.349858
+  type: 'test'
+  ...
+# Subtest: release requires the same linked compile artifact before accepting AC8-05
+ok 24 - release requires the same linked compile artifact before accepting AC8-05
+  ---
+  duration_ms: 1.744154
+  type: 'test'
+  ...
+# Subtest: failed/non-deterministic scenario cannot certify its earlier passing assertion
+ok 25 - failed/non-deterministic scenario cannot certify its earlier passing assertion
+  ---
+  duration_ms: 9.572049
+  type: 'test'
+  ...
+# Subtest: C01: the V2 output is a projection of the same decision, not a second computation
+ok 26 - C01: the V2 output is a projection of the same decision, not a second computation
+  ---
+  duration_ms: 5.197605
+  type: 'test'
+  ...
+# Subtest: C01: the projection never reads display text — only tone, codes and triggers
+ok 27 - C01: the projection never reads display text — only tone, codes and triggers
+  ---
+  duration_ms: 1.659573
+  type: 'test'
+  ...
+# Subtest: C01: a day with no stored plan reports action=null instead of stretching the enum
+ok 28 - C01: a day with no stored plan reports action=null instead of stretching the enum
+  ---
+  duration_ms: 0.550408
+  type: 'test'
+  ...
+# Subtest: C01: keeping a stored plan reports keep_plan without re-deriving it
+ok 29 - C01: keeping a stored plan reports keep_plan without re-deriving it
+  ---
+  duration_ms: 1.235561
+  type: 'test'
+  ...
+# Subtest: C01: an insufficient-data verdict maps to collect_evidence, not to a plan action
+ok 30 - C01: an insufficient-data verdict maps to collect_evidence, not to a plan action
+  ---
+  duration_ms: 1.259425
+  type: 'test'
+  ...
+# Subtest: C01: every disposition maps to a declared action, and null is reserved for one case
+ok 31 - C01: every disposition maps to a declared action, and null is reserved for one case
+  ---
+  duration_ms: 1.747314
+  type: 'test'
+  ...
+# Subtest: C01: inputSnapshotIds carry real identities and never an empty placeholder
+ok 32 - C01: inputSnapshotIds carry real identities and never an empty placeholder
+  ---
+  duration_ms: 0.547368
+  type: 'test'
+  ...
+# Subtest: C01: the snapshot entry path is the one that produces the versioned decision
+ok 33 - C01: the snapshot entry path is the one that produces the versioned decision
+  ---
+  duration_ms: 1.156485
+  type: 'test'
+  ...
+# Subtest: C01: a race day with no stored plan still says no plan was stored
+ok 34 - C01: a race day with no stored plan still says no plan was stored
+  ---
+  duration_ms: 1.323235
+  type: 'test'
+  ...
+# Subtest: C01: a budget-exhausted rest is labelled rest, not reduce_duration
+ok 35 - C01: a budget-exhausted rest is labelled rest, not reduce_duration
+  ---
+  duration_ms: 1.394424
+  type: 'test'
+  ...
+# Subtest: C01: evidence insufficiency does not pre-empt the plan outcome
+ok 36 - C01: evidence insufficiency does not pre-empt the plan outcome
+  ---
+  duration_ms: 0.439388
+  type: 'test'
+  ...
+# Subtest: AC2-01/04: observed light running and reconstructed groups cannot certify intervals
+ok 37 - AC2-01/04: observed light running and reconstructed groups cannot certify intervals
+  ---
+  duration_ms: 21.497041
+  type: 'test'
+  ...
+# Subtest: AC2-02/03: no record is unknown; strong dose with no signal stays unconfirmed
+ok 38 - AC2-02/03: no record is unknown; strong dose with no signal stays unconfirmed
+  ---
+  duration_ms: 1.174556
+  type: 'test'
+  ...
+# Subtest: AC2-05: 89.9/90% per-group dose and 79.9/80% signal coverage boundaries are independent
+ok 39 - AC2-05: 89.9/90% per-group dose and 79.9/80% signal coverage boundaries are independent
+  ---
+  duration_ms: 3.499127
+  type: 'test'
+  ...
+# Subtest: AC2-06: recovery run too fast is too hard, never improved completion credit
+ok 40 - AC2-06: recovery run too fast is too hard, never improved completion credit
+  ---
+  duration_ms: 0.978327
+  type: 'test'
+  ...
+# Subtest: AC2-07: one associated run is not combined with another; many obligations cannot reuse a run
+ok 41 - AC2-07: one associated run is not combined with another; many obligations cannot reuse a run
+  ---
+  duration_ms: 3.673646
+  type: 'test'
+  ...
+# Subtest: AC2-08: late training/signals, retracted receipts and after-the-run prescriptions cannot rewrite past evidence
+ok 42 - AC2-08: late training/signals, retracted receipts and after-the-run prescriptions cannot rewrite past evidence
+  ---
+  duration_ms: 1.748413
+  type: 'test'
+  ...
+# Subtest: actual work cannot pool one long group into four reps; missing recoveries and partial steps remain bounded
+ok 43 - actual work cannot pool one long group into four reps; missing recoveries and partial steps remain bounded
+  ---
+  duration_ms: 1.665344
+  type: 'test'
+  ...
+# Subtest: corrupt/overlapping signals cannot fake 80% coverage; interval HR without lag policy does not confirm
+ok 44 - corrupt/overlapping signals cannot fake 80% coverage; interval HR without lag policy does not confirm
+  ---
+  duration_ms: 2.69202
+  type: 'test'
+  ...
+# Subtest: rest is not applicable; input stays immutable and candidate conclusions are deterministic
+ok 45 - rest is not applicable; input stays immutable and candidate conclusions are deterministic
+  ---
+  duration_ms: 2.188502
+  type: 'test'
+  ...
+# Subtest: candidate quality summary preserves observed semantics, unknown denominator and one frozen fact clock
+ok 46 - candidate quality summary preserves observed semantics, unknown denominator and one frozen fact clock
+  ---
+  duration_ms: 1.809003
+  type: 'test'
+  ...
+# Subtest: AC3-07/09: seven dates and all 2187 combinations agree with evaluator-owned oracle twice
+ok 47 - AC3-07/09: seven dates and all 2187 combinations agree with evaluator-owned oracle twice
+  ---
+  duration_ms: 10545.860772
+  type: 'test'
+  ...
+# Subtest: O8 continuation: O2 and O3 cross-week candidate sequences are deterministic and asserted
+ok 48 - O8 continuation: O2 and O3 cross-week candidate sequences are deterministic and asserted
+  ---
+  duration_ms: 98.432602
+  type: 'test'
+  ...
+# Subtest: O8 continuation: feedback, goal-gap and three-distance protection have frozen cross-week traces
+ok 49 - O8 continuation: feedback, goal-gap and three-distance protection have frozen cross-week traces
+  ---
+  duration_ms: 77.036211
+  type: 'test'
+  ...
+# Subtest: O8 generic event adapter keeps future and late facts out of earlier checkpoints
+ok 50 - O8 generic event adapter keeps future and late facts out of earlier checkpoints
+  ---
+  duration_ms: 1.069126
+  type: 'test'
+  ...
+# (node:60998) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: O5 real feedback HTTP command is append-only, CAS/idempotent, reversible and independent of goals/Fitness
+ok 51 - O5 real feedback HTTP command is append-only, CAS/idempotent, reversible and independent of goals/Fitness
+  ---
+  duration_ms: 567.832723
+  type: 'test'
+  ...
+# Subtest: O6 companion publication leaves sealed bundle untouched and invalidates on facts/model identity
+ok 52 - O6 companion publication leaves sealed bundle untouched and invalidates on facts/model identity
+  ---
+  duration_ms: 4.342814
+  type: 'test'
+  ...
+# Subtest: O5 fact operation rolls back append on failure and rejects reuse for a different request
+ok 53 - O5 fact operation rolls back append on failure and rejects reuse for a different request
+  ---
+  duration_ms: 130.201761
+  type: 'test'
+  ...
+# Subtest: AC6-01/02 candidate: +300/0/-300 seconds, never a success probability or calibrated guarantee
+ok 54 - AC6-01/02 candidate: +300/0/-300 seconds, never a success probability or calibrated guarantee
+  ---
+  duration_ms: 18.026444
+  type: 'test'
+  ...
+# Subtest: AC6-03/04 candidate: time goal changes no source facts; no goal/summary/unsupported distance stay distinct
+ok 55 - AC6-03/04 candidate: time goal changes no source facts; no goal/summary/unsupported distance stay distinct
+  ---
+  duration_ms: 1.182256
+  type: 'test'
+  ...
+# Subtest: AC6-04 candidate: 6/7/8 Shanghai days use dataThrough, not a fresh calculation timestamp
+ok 56 - AC6-04 candidate: 6/7/8 Shanghai days use dataThrough, not a fresh calculation timestamp
+  ---
+  duration_ms: 1.134366
+  type: 'test'
+  ...
+# Subtest: AC6-05/07/08 candidate: every compatibility identity, future availability and scenario is checked
+ok 57 - AC6-05/07/08 candidate: every compatibility identity, future availability and scenario is checked
+  ---
+  duration_ms: 1.980153
+  type: 'test'
+  ...
+# Subtest: AC6-06 candidate helper: repeated reads are pure and deterministic; it does not own a report builder
+ok 58 - AC6-06 candidate helper: repeated reads are pure and deterministic; it does not own a report builder
+  ---
+  duration_ms: 13.021012
+  type: 'test'
+  ...
+# (node:61002) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: AC0-17/21: safety occupancy and withdrawal lookup cannot be truncated by 250 newer unrelated receipts
+ok 59 - AC0-17/21: safety occupancy and withdrawal lookup cannot be truncated by 250 newer unrelated receipts
+  ---
+  duration_ms: 313.829414
+  type: 'test'
+  ...
+# Subtest: AC0-12/17/21 R22: new receipt registers exact today authorization; retries, pause and withdrawal preserve occupancy
+ok 60 - AC0-12/17/21 R22: new receipt registers exact today authorization; retries, pause and withdrawal preserve occupancy
+  ---
+  duration_ms: 666.17309
+  type: 'test'
+  ...
+# Subtest: AC0-22/AC3-08: new receipt rejects identity/structure/auth forgeries and rolls back inserted evidence on failure
+ok 61 - AC0-22/AC3-08: new receipt rejects identity/structure/auth forgeries and rolls back inserted evidence on failure
+  ---
+  duration_ms: 436.558906
+  type: 'test'
+  ...
+# Subtest: AC0-17/21: stale verified device evidence is historical, duplicate schedules are not current, future outlook is not device authority
+ok 62 - AC0-17/21: stale verified device evidence is historical, duplicate schedules are not current, future outlook is not device authority
+  ---
+  duration_ms: 888.158598
+  type: 'test'
+  ...
+# Subtest: AC0-12/22: HTTP capability/schema refuses unknown receipt versions and concurrent enable loses CAS, not half authorization
+ok 63 - AC0-12/22: HTTP capability/schema refuses unknown receipt versions and concurrent enable loses CAS, not half authorization
+  ---
+  duration_ms: 658.909143
+  type: 'test'
+  ...
+# Subtest: AC0-12: regular courses with null authority/unknown targets use the new HTTP contract without inventing pace or HR
+ok 64 - AC0-12: regular courses with null authority/unknown targets use the new HTTP contract without inventing pace or HR
+  ---
+  duration_ms: 210.065626
+  type: 'test'
+  ...
+# (node:61003) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: memo key: every field is load-bearing, guard failures never match
+ok 65 - memo key: every field is load-bearing, guard failures never match
+  ---
+  duration_ms: 4.051596
+  type: 'test'
+  ...
+# Subtest: memo class: TTL expiry and key changes invalidate; constant is 1s
+ok 66 - memo class: TTL expiry and key changes invalidate; constant is 1s
+  ---
+  duration_ms: 0.322919
+  type: 'test'
+  ...
+# Subtest: readCached reuses one stable snapshot within the TTL, read() always recomputes
+ok 67 - readCached reuses one stable snapshot within the TTL, read() always recomputes
+  ---
+  duration_ms: 278.3263
+  type: 'test'
+  ...
+# Subtest: readCached invalidates immediately on main data_version and control writes
+ok 68 - readCached invalidates immediately on main data_version and control writes
+  ---
+  duration_ms: 369.461244
+  type: 'test'
+  ...
+# Subtest: readCached does not reuse a snapshot after the identity scope changes
+ok 69 - readCached does not reuse a snapshot after the identity scope changes
+  ---
+  duration_ms: 146.008042
+  type: 'test'
+  ...
+# Subtest: readCached fails closed while a publication guard is pending
+ok 70 - readCached fails closed while a publication guard is pending
+  ---
+  duration_ms: 22.295898
+  type: 'test'
+  ...
+# Subtest: without a data_version provider readCached degrades to read()
+ok 71 - without a data_version provider readCached degrades to read()
+  ---
+  duration_ms: 123.871363
+  type: 'test'
+  ...
+# Subtest: GET /v1/mobile/coach-loop actually serves the memoized snapshot
+ok 72 - GET /v1/mobile/coach-loop actually serves the memoized snapshot
+  ---
+  duration_ms: 428.064187
+  type: 'test'
+  ...
+# (node:61004) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unsupported-race protection rejects both new and retained long runs in the last two days
+ok 73 - unsupported-race protection rejects both new and retained long runs in the last two days
+  ---
+  duration_ms: 621.6129
+  type: 'test'
+  ...
+# Subtest: today's locked rest is authoritative with or without a conflicting stored day
+ok 74 - today's locked rest is authoritative with or without a conflicting stored day
+  ---
+  duration_ms: 1275.215796
+  type: 'test'
+  ...
+# Subtest: a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+ok 75 - a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+  ---
+  duration_ms: 1093.854695
+  type: 'test'
+  ...
+# Subtest: locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+ok 76 - locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+  ---
+  duration_ms: 272.323987
+  type: 'test'
+  ...
+# Subtest: frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+ok 77 - frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+  ---
+  duration_ms: 190.11147
+  type: 'test'
+  ...
+# Subtest: HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+ok 78 - HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+  ---
+  duration_ms: 1278.208735
+  type: 'test'
+  ...
+# Subtest: an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+ok 79 - an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+  ---
+  duration_ms: 408.361571
+  type: 'test'
+  ...
+# Subtest: G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+ok 80 - G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+  ---
+  duration_ms: 206.014972
+  type: 'test'
+  ...
+# (node:61007) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: AC0-13 real control transaction publishes 20+5 extension, GET is readonly, retries do not add sessions
+ok 81 - AC0-13 real control transaction publishes 20+5 extension, GET is readonly, retries do not add sessions
+  ---
+  duration_ms: 982.799883
+  type: 'test'
+  ...
+# Subtest: AC0-22 failed receipt rolls back goals, stale facts and scope are rejected
+ok 82 - AC0-22 failed receipt rolls back goals, stale facts and scope are rejected
+  ---
+  duration_ms: 79.857891
+  type: 'test'
+  ...
+# Subtest: R20 high load, actual 22+5, completion and pause block unsafe extra training
+ok 83 - R20 high load, actual 22+5, completion and pause block unsafe extra training
+  ---
+  duration_ms: 424.122648
+  type: 'test'
+  ...
+# Subtest: new HTTP contract negotiates explicit policy and publishes actual extension
+ok 84 - new HTTP contract negotiates explicit policy and publishes actual extension
+  ---
+  duration_ms: 7216.860659
+  type: 'test'
+  ...
+# Subtest: O4 runtime can select a quality course in a complete supported week, not only offline templates
+ok 85 - O4 runtime can select a quality course in a complete supported week, not only offline templates
+  ---
+  duration_ms: 157.35608
+  type: 'test'
+  ...
+# Subtest: completed extension keeps its rolling count and original stored prescription; expired intentions are not completed
+ok 86 - completed extension keeps its rolling count and original stored prescription; expired intentions are not completed
+  ---
+  duration_ms: 235.169504
+  type: 'test'
+  ...
+# Subtest: AC3-01/AC0-21: fractional real-world zones are canonical before authorization, so same-facts refresh never manufactures a revision
+ok 87 - AC3-01/AC0-21: fractional real-world zones are canonical before authorization, so same-facts refresh never manufactures a revision
+  ---
+  duration_ms: 512.048304
+  type: 'test'
+  ...
+# Subtest: F04: a daily-adaptive programme never writes the public race goal, so enable/update/pause/resume/end preserve it
+ok 88 - F04: a daily-adaptive programme never writes the public race goal, so enable/update/pause/resume/end preserve it
+  ---
+  duration_ms: 358.14399
+  type: 'test'
+  ...
+# Subtest: F04: a race-mode enable still publishes its declared race and end keeps that published goal
+ok 89 - F04: a race-mode enable still publishes its declared race and end keeps that published goal
+  ---
+  duration_ms: 115.890442
+  type: 'test'
+  ...
+# Subtest: F06: an ended receipt is not managed, end keeps the stored week, and same-key replay stays idempotent
+ok 90 - F06: an ended receipt is not managed, end keeps the stored week, and same-key replay stays idempotent
+  ---
+  duration_ms: 164.204315
+  type: 'test'
+  ...
+# Subtest: F06: the managed predicate fails closed except for an explicit ended receipt
+ok 91 - F06: the managed predicate fails closed except for an explicit ended receipt
+  ---
+  duration_ms: 0.225659
+  type: 'test'
+  ...
+# Subtest: AC0-05: exact duration, fastest distance bound, availability and open goals
+ok 92 - AC0-05: exact duration, fastest distance bound, availability and open goals
+  ---
+  duration_ms: 5.957939
+  type: 'test'
+  ...
+# Subtest: AC0-06/07: cold start is an estimate, padding cannot impersonate work
+ok 93 - AC0-06/07: cold start is an estimate, padding cannot impersonate work
+  ---
+  duration_ms: 0.643898
+  type: 'test'
+  ...
+# Subtest: AC0-13 candidate positive: S stays 20; H is 26; 30-minute cost is 5; GET cannot authorize
+ok 94 - AC0-13 candidate positive: S stays 20; H is 26; 30-minute cost is 5; GET cannot authorize
+  ---
+  duration_ms: 38.910586
+  type: 'test'
+  ...
+# Subtest: AC0-14/16: actual over S is not itself a veto, hard and cross-week limits are
+ok 95 - AC0-14/16: actual over S is not itself a veto, hard and cross-week limits are
+  ---
+  duration_ms: 7.291593
+  type: 'test'
+  ...
+# Subtest: AC0-15/18/19: pre-week anchor is immutable to this week's runs; spike cannot self-justify
+ok 96 - AC0-15/18/19: pre-week anchor is immutable to this week's runs; spike cannot self-justify
+  ---
+  duration_ms: 4.733133
+  type: 'test'
+  ...
+# Subtest: AC0-17 candidate count: completed, cancelled and unresolved device slots retain correct occupancy
+ok 97 - AC0-17 candidate count: completed, cancelled and unresolved device slots retain correct occupancy
+  ---
+  duration_ms: 4.932242
+  type: 'test'
+  ...
+# Subtest: AC0-18/20: no recovery devices required, but explicit evidence/sync/lifecycle restrictions cannot be bypassed
+ok 98 - AC0-18/20: no recovery devices required, but explicit evidence/sync/lifecycle restrictions cannot be bypassed
+  ---
+  duration_ms: 16.38454
+  type: 'test'
+  ...
+# Subtest: AC0-03: automatic regular generator allocates complete sessions, not seven mileage fragments
+ok 99 - AC0-03: automatic regular generator allocates complete sessions, not seven mileage fragments
+  ---
+  duration_ms: 2.335091
+  type: 'test'
+  ...
+# Subtest: O0-B/C partial production chain: S20 with Monday10 keeps complete future doses after final clamping
+ok 100 - O0-B/C partial production chain: S20 with Monday10 keeps complete future doses after final clamping
+  ---
+  duration_ms: 6.701926
+  type: 'test'
+  ...
+# Subtest: AC1-02/04/05: SYN-01 phase is peak; 14-day protection is independent and idempotent
+ok 101 - AC1-02/04/05: SYN-01 phase is peak; 14-day protection is independent and idempotent
+  ---
+  duration_ms: 0.798607
+  type: 'test'
+  ...
+# Subtest: AC1-06 partial: unsupported race metadata keeps the existing two-day compatibility policy, not a fake 14-day distance cap
+ok 102 - AC1-06 partial: unsupported race metadata keeps the existing two-day compatibility policy, not a fake 14-day distance cap
+  ---
+  duration_ms: 0.273239
+  type: 'test'
+  ...
+# Subtest: O2 partial: unobserved quality dates never independently recommend replanning
+ok 103 - O2 partial: unobserved quality dates never independently recommend replanning
+  ---
+  duration_ms: 1.303116
+  type: 'test'
+  ...
+# Subtest: O8: fixed cross-week event streams repeat deterministically; no late-arrival leakage
+ok 104 - O8: fixed cross-week event streams repeat deterministically; no late-arrival leakage
+  ---
+  duration_ms: 166.867795
+  type: 'test'
+  ...
+# Subtest: O8: corrupted identities/unknown arrival and inert future config are not valid certificates
+ok 105 - O8: corrupted identities/unknown arrival and inert future config are not valid certificates
+  ---
+  duration_ms: 23.235845
+  type: 'test'
+  ...
+# (node:61011) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:61011) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: manual writes cannot retain a heuristic provenance; settings-only writes retain their existing audit
+ok 106 - manual writes cannot retain a heuristic provenance; settings-only writes retain their existing audit
+  ---
+  duration_ms: 15.021084
+  type: 'test'
+  ...
+# Subtest: AC0-10 partial: explicit 20-minute manual structure is retained in storage and effective exports, not certified as automatic
+ok 107 - AC0-10 partial: explicit 20-minute manual structure is retained in storage and effective exports, not certified as automatic
+  ---
+  duration_ms: 201.527977
+  type: 'test'
+  ...
+# Subtest: AC3-02/07: a still-feasible overlap keeps original bytes even when evidence or explanation changes
+ok 108 - AC3-02/07: a still-feasible overlap keeps original bytes even when evidence or explanation changes
+  ---
+  duration_ms: 41.267518
+  type: 'test'
+  ...
+# Subtest: AC3-03: only constrained dates are changed and final rather than pre-clamp content is logged
+ok 109 - AC3-03: only constrained dates are changed and final rather than pre-clamp content is logged
+  ---
+  duration_ms: 5.152111
+  type: 'test'
+  ...
+# Subtest: AC3-04: locked storage is fixed, not a bypass of effective safety
+ok 110 - AC3-04: locked storage is fixed, not a bypass of effective safety
+  ---
+  duration_ms: 1.931042
+  type: 'test'
+  ...
+# Subtest: AC3-05: outside-window saved rows are passed to the one validator and remain stored
+ok 111 - AC3-05: outside-window saved rows are passed to the one validator and remain stored
+  ---
+  duration_ms: 20.372295
+  type: 'test'
+  ...
+# Subtest: AC3-06: unknown previous training never expands the supplied intent/candidate space
+ok 112 - AC3-06: unknown previous training never expands the supplied intent/candidate space
+  ---
+  duration_ms: 1.541045
+  type: 'test'
+  ...
+# Subtest: authorizing identical steps is an execution change, not no_change; automatic rest upgrade needs explicit intent
+ok 113 - authorizing identical steps is an execution change, not no_change; automatic rest upgrade needs explicit intent
+  ---
+  duration_ms: 3.481648
+  type: 'test'
+  ...
+# Subtest: moves count once and duplicate origin candidates cannot duplicate a workout
+ok 114 - moves count once and duplicate origin candidates cannot duplicate a workout
+  ---
+  duration_ms: 3.524727
+  type: 'test'
+  ...
+# Subtest: AC3-09: small-window independent exhaustive oracle agrees with the lexicographic winner
+ok 115 - AC3-09: small-window independent exhaustive oracle agrees with the lexicographic winner
+  ---
+  duration_ms: 12.518874
+  type: 'test'
+  ...
+# Subtest: search exhaustion/mutation cannot publish an unchecked winner; safety outranks stability
+ok 116 - search exhaustion/mutation cannot publish an unchecked winner; safety outranks stability
+  ---
+  duration_ms: 9.017546
+  type: 'test'
+  ...
+# Subtest: closure does not expand stored modifications outside the rolling window; comparator cannot buy safety with preferences
+ok 117 - closure does not expand stored modifications outside the rolling window; comparator cannot buy safety with preferences
+  ---
+  duration_ms: 0.578757
+  type: 'test'
+  ...
+# Subtest: equivalent candidate deduplication is stable under enumeration order, including template metadata
+ok 118 - equivalent candidate deduplication is stable under enumeration order, including template metadata
+  ---
+  duration_ms: 1.472555
+  type: 'test'
+  ...
+# Subtest: AC8-01/04/06: all 78 acceptance IDs are inventoried; missing evidence and human/device gates never pass
+ok 119 - AC8-01/04/06: all 78 acceptance IDs are inventoried; missing evidence and human/device gates never pass
+  ---
+  duration_ms: 3.276148
+  type: 'test'
+  ...
+# Subtest: release audit rejects stale/tampered artifacts and does not equate one passing assertion with full requirement signoff
+ok 120 - release audit rejects stale/tampered artifacts and does not equate one passing assertion with full requirement signoff
+  ---
+  duration_ms: 15.543587
+  type: 'test'
+  ...
+# Subtest: AC5-01 candidate: skipping creates no record and does not invent normal or poor recovery
+ok 121 - AC5-01 candidate: skipping creates no record and does not invent normal or poor recovery
+  ---
+  duration_ms: 38.197769
+  type: 'test'
+  ...
+# Subtest: AC5-02/03 candidate: fixed Shanghai midnight, late availability and post-run comments cannot become tomorrow's pre-run state
+ok 122 - AC5-02/03 candidate: fixed Shanghai midnight, late availability and post-run comments cannot become tomorrow's pre-run state
+  ---
+  duration_ms: 4.021725
+  type: 'test'
+  ...
+# Subtest: AC5-04 candidate: explicit rest/easy requests and discomfort remain separate from device opinions
+ok 123 - AC5-04 candidate: explicit rest/easy requests and discomfort remain separate from device opinions
+  ---
+  duration_ms: 7.604308
+  type: 'test'
+  ...
+# Subtest: AC5-05/06 candidate: RPE remains an existing override reference, not a duplicate feedback value
+ok 124 - AC5-05/06 candidate: RPE remains an existing override reference, not a duplicate feedback value
+  ---
+  duration_ms: 1.977063
+  type: 'test'
+  ...
+# Subtest: AC5-07 candidate: append-only tombstones respect the decision clock and never fill gaps
+ok 125 - AC5-07 candidate: append-only tombstones respect the decision clock and never fill gaps
+  ---
+  duration_ms: 3.039738
+  type: 'test'
+  ...
+# Subtest: O4 templates have actual dose differences, minimum full sessions and mixed fartlek targets
+ok 126 - O4 templates have actual dose differences, minimum full sessions and mixed fartlek targets
+  ---
+  duration_ms: 4.849702
+  type: 'test'
+  ...
+# Subtest: O4 gates prohibit quality without eligibility and extensions are only complete easy
+ok 127 - O4 gates prohibit quality without eligibility and extensions are only complete easy
+  ---
+  duration_ms: 2.457196
+  type: 'test'
+  ...
+# (node:61058) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Command acknowledgement/execution unavailable Error: fixture acknowledgement failure
+#     at <anonymous> (/Users/ta/running/apps/api/src/command-queue.ts:85:8)
+#     at CommandQueue.use (/Users/ta/running/apps/api/src/command-queue.ts:79:80)
+#     at CommandQueue.save (/Users/ta/running/apps/api/src/command-queue.ts:83:10)
+#     at CommandQueue.executeNext (/Users/ta/running/apps/api/src/command-queue.ts:185:10) {
+#   code: 'ERR_SQLITE_ERROR',
+#   errcode: 1811,
+#   errstr: 'constraint failed'
+# }
+# Subtest: business effect and receipt commit together; failed acknowledgement cannot duplicate an override
+ok 128 - business effect and receipt commit together; failed acknowledgement cannot duplicate an override
+  ---
+  duration_ms: 1019.879456
+  type: 'test'
+  ...
+# Subtest: command route validates payload before acceptance and cancellation works while main writer is busy
+ok 129 - command route validates payload before acceptance and cancellation works while main writer is busy
+  ---
+  duration_ms: 310.074983
+  type: 'test'
+  ...
+# Subtest: changing dataset scope cannot replay a successful receipt from the previous dataset
+ok 130 - changing dataset scope cannot replay a successful receipt from the previous dataset
+  ---
+  duration_ms: 607.166953
+  type: 'test'
+  ...
+# Command command_223fa495bd812158f0f309ae444095847fba252ab39293c86a66f2566647b5ec failed WorkoutNotFoundError: Unknown training session: session_fixture
+#     at RaiApplicationService.appendWorkoutOverride (/Users/ta/running/packages/application/src/service.ts:248:15)
+#     at applyMutationCommand (/Users/ta/running/apps/api/src/command-queue.ts:219:28)
+#     at async CommandQueue.executeNext (/Users/ta/running/apps/api/src/command-queue.ts:174:20) {
+#   trainingSessionId: 'session_fixture',
+#   code: 'workout_not_found',
+#   statusCode: 404
+# }
+# Subtest: an operation failure rolls back both business writes and its receipt
+ok 131 - an operation failure rolls back both business writes and its receipt
+  ---
+  duration_ms: 474.418652
+  type: 'test'
+  ...
+# Command command_e12c26dfd654404d2b540c1739da8489bf0d113d54695cf84ecba84b08701b48 failed WorkoutOverrideRevisionConflictError: 训练反馈已在别处更新，你的输入仍保留，请读取最新记录后再提交
+#     at RaiApplicationService.appendWorkoutOverride (/Users/ta/running/packages/application/src/service.ts:257:15)
+#     at applyMutationCommand (/Users/ta/running/apps/api/src/command-queue.ts:219:28)
+#     at async CommandQueue.executeNext (/Users/ta/running/apps/api/src/command-queue.ts:174:20) {
+#   statusCode: 409,
+#   code: 'workout_override_revision_conflict'
+# }
+# Subtest: feedback CAS is checked at execution, conflicts do not mutate, receipt replay bypasses only its own CAS
+ok 132 - feedback CAS is checked at execution, conflicts do not mutate, receipt replay bypasses only its own CAS
+  ---
+  duration_ms: 1092.213916
+  type: 'test'
+  ...
+# (node:61063) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:61063) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: real queued v2 deltas use no backup, candidate, audit, recompute or publication gate and invalidate cached reads
+ok 133 - real queued v2 deltas use no backup, candidate, audit, recompute or publication gate and invalidate cached reads
+  ---
+  duration_ms: 946.332313
+  type: 'test'
+  ...
+# (node:61063) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Recovered committed import web_import_mvksd9f6_834094c4-c407-4edc-a7e6-8fdae47e3653 after its worker reply was lost.
+# Subtest: a reply lost after the real SQLite COMMIT is recovered as success, not reported as failed
+ok 134 - a reply lost after the real SQLite COMMIT is recovered as success, not reported as failed
+  ---
+  duration_ms: 945.275768
+  type: 'test'
+  ...
+# Subtest: restart acknowledges a committed delta whose runtime job was never completed, without reading the missing upload
+ok 135 - restart acknowledges a committed delta whose runtime job was never completed, without reading the missing upload
+  ---
+  duration_ms: 289.288444
+  type: 'test'
+  ...
+# Direct sync lane rejected for web_import_mvksdadt_55b2a487-9d96-4a70-9c7a-b1ff99b3f05c: fast_path_disabled
+# Import job web_import_mvksdadt_55b2a487-9d96-4a70-9c7a-b1ff99b3f05c refused by the direct-sync lane: fast_path_disabled
+# Subtest: 回退开关关闭直连通路 ⇒ 显式失败 direct_sync_unavailable；候选链路不得回来
+ok 136 - 回退开关关闭直连通路 ⇒ 显式失败 direct_sync_unavailable；候选链路不得回来
+  ---
+  duration_ms: 292.925385
+  type: 'test'
+  ...
+# (node:61063) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvksdalx_8ebe11cb-c407-479a-bdfe-cf7435de5b4d: continuing to the direct-sync receiver
+# Direct sync rejected for web_import_mvksdalx_8ebe11cb-c407-479a-bdfe-cf7435de5b4d: baseline_rebuild_required (stage=identity)
+# Import job web_import_mvksdalx_8ebe11cb-c407-479a-bdfe-cf7435de5b4d refused by the direct-sync lane: baseline_rebuild_required detail={"directSyncRejected":true,"reason":"baseline_rebuild_required","stage":"identity","detail":"主库有身份痕迹但与当前契约/身份算法不符；需运维全量重建（CLI）或回退服务端版本"}
+# Subtest: 缺身份代际的库 ⇒ 显式失败 direct_sync_baseline_rebuild_required；不再走任何候选/备份路径
+ok 137 - 缺身份代际的库 ⇒ 显式失败 direct_sync_baseline_rebuild_required；不再走任何候选/备份路径
+  ---
+  duration_ms: 967.411701
+  type: 'test'
+  ...
+# (node:61064) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads
+ok 138 - bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads
+  ---
+  duration_ms: 5.37543
+  type: 'test'
+  ...
+# Subtest: raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement
+ok 139 - raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement
+  ---
+  duration_ms: 277.175713
+  type: 'test'
+  ...
+# Subtest: a durable same-batch replay performs no writes and refuses a changed payload identity
+ok 140 - a durable same-batch replay performs no writes and refuses a changed payload identity
+  ---
+  duration_ms: 281.865492
+  type: 'test'
+  ...
+# Subtest: SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state
+ok 141 - SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state
+  ---
+  duration_ms: 997.162356
+  type: 'test'
+  ...
+# Subtest: deletion before arrival cannot resurrect a carried or later UUID
+ok 142 - deletion before arrival cannot resurrect a carried or later UUID
+  ---
+  duration_ms: 286.268734
+  type: 'test'
+  ...
+# Subtest: a deletion-only delta restores a surviving shared UUID and records the correction
+ok 143 - a deletion-only delta restores a surviving shared UUID and records the correction
+  ---
+  duration_ms: 201.655178
+  type: 'test'
+  ...
+# Subtest: UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 144 - UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 231.730536
+  type: 'test'
+  ...
+# Subtest: change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 145 - change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 235.715321
+  type: 'test'
+  ...
+# Subtest: silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 146 - silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 227.991141
+  type: 'test'
+  ...
+# Subtest: silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 147 - silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 247.136339
+  type: 'test'
+  ...
+# Subtest: silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 148 - silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 227.979431
+  type: 'test'
+  ...
+# Subtest: silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 149 - silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 214.35027
+  type: 'test'
+  ...
+# Subtest: silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 150 - silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 216.235643
+  type: 'test'
+  ...
+# Subtest: silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 151 - silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 288.484306
+  type: 'test'
+  ...
+# Subtest: silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 152 - silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 231.848705
+  type: 'test'
+  ...
+# Subtest: receipt write failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 153 - receipt write failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 241.61045
+  type: 'test'
+  ...
+# Subtest: silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 154 - silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 220.498087
+  type: 'test'
+  ...
+# Subtest: silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 155 - silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 222.889199
+  type: 'test'
+  ...
+# Subtest: late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 156 - late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 247.569698
+  type: 'test'
+  ...
+# Subtest: late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 157 - late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 238.582885
+  type: 'test'
+  ...
+# Subtest: late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 158 - late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 222.49548
+  type: 'test'
+  ...
+# Subtest: ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 159 - ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 235.807777
+  type: 'test'
+  ...
+# Subtest: late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 160 - late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 210.461925
+  type: 'test'
+  ...
+# Subtest: a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated
+ok 161 - a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated
+  ---
+  duration_ms: 213.250259
+  type: 'test'
+  ...
+# Subtest: profile drift rolls back earlier records and returns a no-write fallback
+ok 162 - profile drift rolls back earlier records and returns a no-write fallback
+  ---
+  duration_ms: 256.54465
+  type: 'test'
+  ...
+# Subtest: an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards
+ok 163 - an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards
+  ---
+  duration_ms: 212.128788
+  type: 'test'
+  ...
+# Subtest: missing/old parser attestation and uninitialized legacy hashes use the normal path without writes
+ok 164 - missing/old parser attestation and uninitialized legacy hashes use the normal path without writes
+  ---
+  duration_ms: 249.348782
+  type: 'test'
+  ...
+# Subtest: a missing UUID lookup index cannot qualify for data-only
+ok 165 - a missing UUID lookup index cannot qualify for data-only
+  ---
+  duration_ms: 183.154695
+  type: 'test'
+  ...
+# Subtest: workout deletions, routes and unknown record types cannot take the fast path
+ok 166 - workout deletions, routes and unknown record types cannot take the fast path
+  ---
+  duration_ms: 166.265847
+  type: 'test'
+  ...
+# (node:61066) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: recent weekly volume uses four complete calendar weeks without dropping empty weeks
+ok 167 - recent weekly volume uses four complete calendar weeks without dropping empty weeks
+  ---
+  duration_ms: 4.200385
+  type: 'test'
+  ...
+# Subtest: recent weekly volume keeps a stable Monday boundary across weekdays and years
+ok 168 - recent weekly volume keeps a stable Monday boundary across weekdays and years
+  ---
+  duration_ms: 0.326279
+  type: 'test'
+  ...
+# Subtest: recovery trends batch date ranges without losing gaps, leap days or timezone isolation
+ok 169 - recovery trends batch date ranges without losing gaps, leap days or timezone isolation
+  ---
+  duration_ms: 175.427103
+  type: 'test'
+  ...
+# Subtest: maps active SQLite results into Web API DTOs
+ok 170 - maps active SQLite results into Web API DTOs
+  ---
+  duration_ms: 492.490275
+  type: 'test'
+  ...
+# Subtest: diagnostics aggregates tombstone and supersede counts from import batch summaries
+ok 171 - diagnostics aggregates tombstone and supersede counts from import batch summaries
+  ---
+  duration_ms: 367.537896
+  type: 'test'
+  ...
+# Subtest: uses stored Shanghai local dates for trend windows and context
+ok 172 - uses stored Shanghai local dates for trend windows and context
+  ---
+  duration_ms: 335.273405
+  type: 'test'
+  ...
+# Subtest: omits kilometer splits when running-speed coverage cannot represent the workout
+ok 173 - omits kilometer splits when running-speed coverage cannot represent the workout
+  ---
+  duration_ms: 315.190803
+  type: 'test'
+  ...
+# Subtest: does not double-count overlapping running-speed records in kilometer splits
+ok 174 - does not double-count overlapping running-speed records in kilometer splits
+  ---
+  duration_ms: 311.520102
+  type: 'test'
+  ...
+# Subtest: includes metric intervals crossing the workout start in the first kilometer split
+ok 175 - includes metric intervals crossing the workout start in the first kilometer split
+  ---
+  duration_ms: 341.884665
+  type: 'test'
+  ...
+# Subtest: infers intervals for point and invalid end timestamps inside a workout
+ok 176 - infers intervals for point and invalid end timestamps inside a workout
+  ---
+  duration_ms: 330.470783
+  type: 'test'
+  ...
+# Subtest: refreshes cached summaries after another connection commits
+ok 177 - refreshes cached summaries after another connection commits
+  ---
+  duration_ms: 316.206735
+  type: 'test'
+  ...
+# Subtest: bounds workout route and metric samples in SQL while preserving totals and endpoints
+ok 178 - bounds workout route and metric samples in SQL while preserving totals and endpoints
+  ---
+  duration_ms: 427.771174
+  type: 'test'
+  ...
+# Subtest: record type audit is answered by a covering type-prefixed index
+ok 179 - record type audit is answered by a covering type-prefixed index
+  ---
+  duration_ms: 311.239033
+  type: 'test'
+  ...
+# Subtest: PR5 C3：软删的训练从**事实侧**汇总里消失，数字等于删除前减去该训练
+ok 180 - PR5 C3：软删的训练从**事实侧**汇总里消失，数字等于删除前减去该训练
+  ---
+  duration_ms: 320.546188
+  type: 'test'
+  ...
+# (node:61067) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P2-1 首次安装：显式初始化写当前生效 scope 的唯一许可；首包一次；第二次初始化拒绝
+ok 181 - P2-1 首次安装：显式初始化写当前生效 scope 的唯一许可；首包一次；第二次初始化拒绝
+  ---
+  duration_ms: 4934.959527
+  type: 'test'
+  ...
+# Subtest: P1-1b 存量无 epoch 主库：启动回填 configured epoch
+ok 182 - P1-1b 存量无 epoch 主库：启动回填 configured epoch
+  ---
+  duration_ms: 2151.396432
+  type: 'test'
+  ...
+# Subtest: P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch
+ok 183 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch
+  ---
+  duration_ms: 9109.553414
+  type: 'test'
+  ...
+# Subtest: P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 scope 恢复 established，删库意图收口
+ok 184 - P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 scope 恢复 established，删库意图收口
+  ---
+  duration_ms: 4850.198039
+  type: 'test'
+  ...
+# Subtest: P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包
+not ok 185 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包
+  ---
+  duration_ms: 8631.796775
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/dataset-deletion-recovery.test.ts:11:10964'
+  failureType: 'testCodeFailure'
+  error: 'database is locked'
+  code: 'ERR_SQLITE_ERROR'
+  stack: |-
+    readEvidence (/Users/ta/running/apps/api/test/dataset-deletion-recovery.test.ts:185:22)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/dataset-deletion-recovery.test.ts:592:20)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次
+ok 186 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次
+  ---
+  duration_ms: 7485.953091
+  type: 'test'
+  ...
+# Subtest: P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活
+ok 187 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活
+  ---
+  duration_ms: 10731.901982
+  type: 'test'
+  ...
+# Subtest: P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复
+ok 188 - P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复
+  ---
+  duration_ms: 2869.544147
+  type: 'test'
+  ...
+# Subtest: P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pristine、不建新空库
+ok 189 - P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pristine、不建新空库
+  ---
+  duration_ms: 5889.391474
+  type: 'test'
+  ...

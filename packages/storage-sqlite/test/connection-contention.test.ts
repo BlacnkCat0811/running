@@ -129,7 +129,10 @@ test("open() retries past a concurrent writer and reaches WAL once the lock is r
   const path = join(root, "rai.sqlite");
   makeDeleteModeDatabase(path);
 
-  const holder = startHolder(root, path, 600);
+  // 2000 ms > 10 次重试中的单次窗口；并发跑全量时 tsx/子进程启动可能超过 600 ms，
+  // 旧值会让“等待方启动时锁已经释放”造成假红（实测 148 ms）。这是测试夹具的
+  // 启动开销，不是 RaiDatabase.open 的行为变化。
+  const holder = startHolder(root, path, 2_000);
   try {
     const child = spawnSync(process.execPath, ["--import", "tsx", "-e", OPENER_SCRIPT, path],
       { cwd: projectRoot, encoding: "utf8", timeout: CHILD_TIMEOUT_MS });
@@ -141,7 +144,7 @@ test("open() retries past a concurrent writer and reaches WAL once the lock is r
     const matched = /OPENED_MS=(\d+) MODE=wal/.exec(output);
     assert.ok(matched, `等待方没有报告成功切到 WAL：${output}`);
     // 它必须**真的等过**：立刻成功说明根本没去要独占锁（那是"库已 WAL"，前置条件已排除）。
-    // 阈值刻意低于持锁窗口（600 ms）：子进程的 tsx/import 启动开销会吃掉前一段时间。
+    // 阈值刻意低于持锁窗口（2000 ms）：子进程的 tsx/import 启动开销会吃掉前一段时间。
     const waited = Number(matched[1]);
     assert.ok(waited >= 200,
       `open() 只用了 ${waited} ms —— 没有在锁上等过（期望跨过持锁窗口）`);

@@ -22,6 +22,7 @@ import { stableId } from "./utils.js";
 import { readHealthSyncManifest } from "./sync-manifest.js";
 import {
   acquireDatabasePublicationLock,
+  resolveDatabasePathIdentity,
   probeDatabaseStructure,
   publishDatabaseFile,
   quickCheckDatabase,
@@ -97,16 +98,22 @@ function parseArguments(argv: string[]): ParsedArguments {
     );
   }
 
+  const configuredDatabase = optionValue(argv, "--database", "var/rai.sqlite");
+  const configuredSpoolRoot = argv.includes("--native-spool-root")
+    ? optionValue(argv, "--native-spool-root", "") : null;
   const parsed: ParsedArguments = {
     native: {
-      spoolRoot: resolve(optionValue(argv, "--native-spool-root", dirname(resolve(optionValue(argv, "--database", "var/rai.sqlite"))))),
+      spoolRoot: configuredSpoolRoot === null ? dirname(resolve(configuredDatabase)) : resolve(configuredSpoolRoot),
       engine: importEngine(optionValue(argv, "--engine", process.env.RAI_IMPORT_ENGINE ?? "typescript")),
       fallback: nativeFallback(optionValue(argv, "--native-fallback", process.env.RAI_RUST_FALLBACK ?? "none")),
       version: optionValue(argv, "--native-version", NATIVE_VERSION)
     },
     command,
     input: resolve(optionValue(argv, "--input", "apple_health_export")),
-    database: resolve(optionValue(argv, "--database", "var/rai.sqlite")),
+    // Validate --owned-candidate (including hard-link aliases of the live DB)
+    // before resolving the physical identity: the alias error must win over a
+    // generic publication-lock hard-link error.
+    database: configuredDatabase,
     report: resolve(optionValue(argv, "--report", "docs/DATA_AUDIT.md")),
     jsonReport: resolve(
       optionValue(argv, "--json-report", "var/reports/data-audit.json")
@@ -130,6 +137,10 @@ function parseArguments(argv: string[]): ParsedArguments {
       : null
   };
   if (parsed.candidateOwner !== null) validateOwnedCandidate(parsed);
+  // Keep the original spelling until the native resolver sees it: resolving
+  // `link/../db.sqlite` lexically can select a different file from the API.
+  parsed.database = resolveDatabasePathIdentity(configuredDatabase);
+  if (configuredSpoolRoot === null) parsed.native.spoolRoot = dirname(parsed.database);
   return parsed;
 }
 
@@ -141,7 +152,7 @@ function validateOwnedCandidate(args: ParsedArguments): void {
   const suffix = name.slice(prefix.length);
   if (args.command === "audit" || !/^[A-Za-z0-9_-]+$/.test(owner)
       || !name.startsWith(prefix) || !/^(?:\.attempt-[1-9]\d*)?\.sqlite$/.test(suffix)
-      || args.sourceDatabase === null || resolve(args.sourceDatabase) === args.database) {
+      || args.sourceDatabase === null || resolve(args.sourceDatabase) === resolve(args.database)) {
     throw new Error("--owned-candidate requires a private rai.importing.<owner>.sqlite and a distinct --source-database");
   }
   const entry = lstatSync(args.database, { throwIfNoEntry: false });

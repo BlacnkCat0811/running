@@ -1,0 +1,657 @@
+{
+  "format": "rai-phase4-backup-restore-rehearsal-v2",
+  "at": "2026-10-23T07:52:47.296Z",
+  "root": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH",
+  "archive": {
+    "path": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/archive/runtime.tar",
+    "bytes": 2270208,
+    "sha256": "8dcae82bd3ee86852ed7632f991c916b8622032ccff52360c79702899ebecf1b",
+    "entries": 28
+  },
+  "files": {
+    "var/rai.sqlite": "present",
+    "var/rai-control.sqlite": "present",
+    "var/runtime.sqlite": "present",
+    "var/rai.sqlite.dataset-epoch.sqlite": "present",
+    "var/rai.sqlite.restore-journal.sqlite": "present",
+    "var/quarantine/wal-sample.sqlite": "present",
+    "var/backups/rehearsal-protection.sqlite": "present"
+  },
+  "pathManifest": {
+    "format": "rai-runtime-path-manifest-v2",
+    "generatedAt": "2026-10-23T07:52:34.332Z",
+    "runtimeRoot": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source",
+    "configuredRuntimeRoot": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source",
+    "envFile": null,
+    "databaseSources": {
+      "main": "command-line",
+      "control": "command-line"
+    },
+    "stores": {
+      "main": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite",
+        "relativePath": "var/rai.sqlite",
+        "status": "present",
+        "required": true,
+        "source": "command-line",
+        "kind": "file",
+        "sizeBytes": 958464,
+        "modifiedAt": "2026-10-23T07:52:33.450Z",
+        "sha256": "f3015e00517209c5dd1cc3407a4b0c1bdf3529ac73e58c8a7b2170f433415943",
+        "wal": {
+          "present": true,
+          "bytes": 0
+        },
+        "shm": {
+          "present": true,
+          "bytes": 32768
+        },
+        "walPresent": true,
+        "shmPresent": true,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "control": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai-control.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai-control.sqlite",
+        "relativePath": "var/rai-control.sqlite",
+        "status": "present",
+        "required": true,
+        "source": "command-line",
+        "kind": "file",
+        "sizeBytes": 94208,
+        "modifiedAt": "2026-10-23T07:52:33.478Z",
+        "sha256": "a133274c36663566d2d43326431950bf0936ff6a3b2e15650ccde8b157a93d04",
+        "wal": {
+          "present": false
+        },
+        "shm": {
+          "present": false
+        },
+        "walPresent": false,
+        "shmPresent": false
+      },
+      "runtime": {
+        "configured": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/runtime.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/runtime.sqlite",
+        "relativePath": "var/runtime.sqlite",
+        "status": "present",
+        "required": true,
+        "source": "runtime-root",
+        "kind": "file",
+        "sizeBytes": 77824,
+        "modifiedAt": "2026-10-23T07:52:33.539Z",
+        "sha256": "82ce1c64ab207d0c9ec08263609b3c84178585b8cd3a02359e770c2285262258",
+        "wal": {
+          "present": false
+        },
+        "shm": {
+          "present": false
+        },
+        "walPresent": false,
+        "shmPresent": false
+      },
+      "epochSidecar": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.dataset-epoch.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.dataset-epoch.sqlite",
+        "relativePath": "var/rai.sqlite.dataset-epoch.sqlite",
+        "status": "present",
+        "required": false,
+        "source": null,
+        "kind": "file",
+        "sizeBytes": 12288,
+        "modifiedAt": "2026-10-23T07:52:33.444Z",
+        "sha256": "845fcaa0968889d1ac9b20080426a32943ff368b6a6bbed5d60f869bb5cfc6f6",
+        "wal": {
+          "present": false
+        },
+        "shm": {
+          "present": false
+        },
+        "walPresent": false,
+        "shmPresent": false
+      },
+      "restoreJournal": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.restore-journal.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.restore-journal.sqlite",
+        "relativePath": "var/rai.sqlite.restore-journal.sqlite",
+        "status": "present",
+        "required": false,
+        "source": null,
+        "kind": "file",
+        "sizeBytes": 8192,
+        "modifiedAt": "2026-10-23T07:52:33.640Z",
+        "sha256": "bdd4efc7b4cb861df1a2dc85bd9d42049099855d4a30c2c4b14a146636f63786",
+        "wal": {
+          "present": false
+        },
+        "shm": {
+          "present": false
+        },
+        "walPresent": false,
+        "shmPresent": false
+      }
+    },
+    "artifacts": {
+      "var/imports": {
+        "status": "present"
+      },
+      "var/model-artifacts/prediction": {
+        "status": "present"
+      },
+      "var/backups": {
+        "status": "present"
+      },
+      "var/quarantine": {
+        "status": "present"
+      },
+      "var/reports": {
+        "status": "present"
+      }
+    },
+    "inventory": {
+      "trees": [
+        {
+          "path": "var/imports",
+          "status": "present"
+        },
+        {
+          "path": "var/model-artifacts/prediction",
+          "status": "present"
+        },
+        {
+          "path": "var/backups",
+          "status": "present"
+        },
+        {
+          "path": "var/quarantine",
+          "status": "present"
+        },
+        {
+          "path": "var/reports",
+          "status": "present"
+        }
+      ],
+      "entries": [
+        {
+          "path": "var/backups",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.452Z"
+        },
+        {
+          "path": "var/backups/rehearsal-protection.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "f3015e00517209c5dd1cc3407a4b0c1bdf3529ac73e58c8a7b2170f433415943",
+          "sizeBytes": 958464,
+          "modifiedAt": "2026-10-23T07:52:33.454Z"
+        },
+        {
+          "path": "var/imports",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.278Z"
+        },
+        {
+          "path": "var/imports/upload_pending",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.542Z"
+        },
+        {
+          "path": "var/imports/upload_pending/extracted",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.543Z"
+        },
+        {
+          "path": "var/imports/upload_pending/extracted/export.xml",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "ee9a2439390e321f8662f43b481f68c3e3d3133eb7b58950d202c35580b0fbe8",
+          "sizeBytes": 21,
+          "modifiedAt": "2026-10-23T07:52:33.543Z"
+        },
+        {
+          "path": "var/imports/upload_pending/source.zip",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "c53c88ccb9c303c8f2e42c9c5143deb532d1d30ff6b4ba7e9d7313cd3d501dd8",
+          "sizeBytes": 17,
+          "modifiedAt": "2026-10-23T07:52:33.543Z"
+        },
+        {
+          "path": "var/imports/upload_rehearsal",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.541Z"
+        },
+        {
+          "path": "var/imports/upload_rehearsal/extracted",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.542Z"
+        },
+        {
+          "path": "var/imports/upload_rehearsal/extracted/export.xml",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "619287481df561fae2925c252c628fdb9e852d30596cb4a7c7e94f4b211dffb5",
+          "sizeBytes": 13,
+          "modifiedAt": "2026-10-23T07:52:33.542Z"
+        },
+        {
+          "path": "var/imports/upload_rehearsal/source.zip",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "3f4891c646fbe95a22c2c0184529210a7c97eec773bdc1e2e1a245374ea1fe23",
+          "sizeBytes": 19,
+          "modifiedAt": "2026-10-23T07:52:33.541Z"
+        },
+        {
+          "path": "var/model-artifacts/prediction",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.540Z"
+        },
+        {
+          "path": "var/model-artifacts/prediction/model.onnx",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "3ff49d5b44b2dd683d89e3b410042571ebe91a6139b2c200353be2f076ee2ab3",
+          "sizeBytes": 20,
+          "modifiedAt": "2026-10-23T07:52:33.541Z"
+        },
+        {
+          "path": "var/quarantine",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.629Z"
+        },
+        {
+          "path": "var/quarantine/wal-sample.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "f1c1d714b195aa1795c50ed2db1795613d868a07340cbf0b1a563384fdfebdcf",
+          "sizeBytes": 4096,
+          "modifiedAt": "2026-10-23T07:52:33.628Z"
+        },
+        {
+          "path": "var/quarantine/wal-sample.sqlite-shm",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "7282d8211890521130c7764bbce7ca2ece01522ce7dca5c1eef8a3a574c95f0e",
+          "sizeBytes": 32768,
+          "modifiedAt": "2026-10-23T07:52:33.629Z"
+        },
+        {
+          "path": "var/quarantine/wal-sample.sqlite-wal",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "702a458072d5c5db36b2920c8be7818156902a7e106cf1cbc9efaeecd9ea2849",
+          "sizeBytes": 12392,
+          "modifiedAt": "2026-10-23T07:52:33.631Z"
+        },
+        {
+          "path": "var/rai-control.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:control",
+          "sizeBytes": 94208,
+          "sha256": "a133274c36663566d2d43326431950bf0936ff6a3b2e15650ccde8b157a93d04"
+        },
+        {
+          "path": "var/rai.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:main",
+          "sizeBytes": 958464,
+          "sha256": "f3015e00517209c5dd1cc3407a4b0c1bdf3529ac73e58c8a7b2170f433415943"
+        },
+        {
+          "path": "var/rai.sqlite-shm",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:main-shm",
+          "sizeBytes": 32768,
+          "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+        },
+        {
+          "path": "var/rai.sqlite-wal",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:main-wal",
+          "sizeBytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "var/rai.sqlite.dataset-epoch.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:epochSidecar",
+          "sizeBytes": 12288,
+          "sha256": "845fcaa0968889d1ac9b20080426a32943ff368b6a6bbed5d60f869bb5cfc6f6"
+        },
+        {
+          "path": "var/rai.sqlite.restore-journal.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:restoreJournal",
+          "sizeBytes": 8192,
+          "sha256": "bdd4efc7b4cb861df1a2dc85bd9d42049099855d4a30c2c4b14a146636f63786"
+        },
+        {
+          "path": "var/reports",
+          "type": "directory",
+          "authoritative": true,
+          "sizeBytes": null,
+          "sha256": null,
+          "modifiedAt": "2026-10-23T07:52:33.544Z"
+        },
+        {
+          "path": "var/reports/rehearsal.json",
+          "type": "file",
+          "authoritative": true,
+          "sha256": "218589323cbe80b7ed077e3ee36f1663e7cb5f8f4e4ad02c938ad8a5c2c5a6b9",
+          "sizeBytes": 17,
+          "modifiedAt": "2026-10-23T07:52:33.544Z"
+        },
+        {
+          "path": "var/runtime.sqlite",
+          "type": "file",
+          "authoritative": true,
+          "role": "store:runtime",
+          "sizeBytes": 77824,
+          "sha256": "82ce1c64ab207d0c9ec08263609b3c84178585b8cd3a02359e770c2285262258"
+        }
+      ],
+      "fileCount": 17,
+      "directoryCount": 9,
+      "totalBytes": 2191571,
+      "digestsIncluded": true
+    },
+    "closure": "complete",
+    "problems": []
+  },
+  "linkAdjudication": [
+    {
+      "name": "external",
+      "decision": "reject",
+      "exit": 2
+    },
+    {
+      "name": "dangling",
+      "decision": "reject",
+      "exit": 2
+    },
+    {
+      "name": "root-internal",
+      "decision": "reject",
+      "exit": 2
+    }
+  ],
+  "checks": [
+    {
+      "name": "wal:sample_nonempty",
+      "ok": true,
+      "detail": "signal=SIGKILL walBytes=12392"
+    },
+    {
+      "name": "links:external:rejected",
+      "ok": true,
+      "detail": "exit=2 var/imports/job/source.zip: symbolic link (-> /var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/negative-outside/outside.zip) is not allowed in an authoritative tree"
+    },
+    {
+      "name": "links:dangling:rejected",
+      "ok": true,
+      "detail": "exit=2 var/imports/job/source.zip: symbolic link (-> /var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/negative-dangling/var/imports/job/missing.zip, dangling) is not allowed in an authoritative tree"
+    },
+    {
+      "name": "links:root-internal:rejected",
+      "ok": true,
+      "detail": "exit=2 var/imports/job/source.zip: symbolic link (-> /var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/negative-root-internal/var/imports/job/real.zip) is not allowed in an authoritative tree"
+    },
+    {
+      "name": "path-closure:complete",
+      "ok": true,
+      "detail": "all stores inside runtime root"
+    },
+    {
+      "name": "manifest:format",
+      "ok": true,
+      "detail": "rai-runtime-path-manifest-v2"
+    },
+    {
+      "name": "manifest:main:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite"
+    },
+    {
+      "name": "manifest:control:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai-control.sqlite"
+    },
+    {
+      "name": "manifest:runtime:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/runtime.sqlite"
+    },
+    {
+      "name": "manifest:epochSidecar:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.dataset-epoch.sqlite"
+    },
+    {
+      "name": "manifest:restoreJournal:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.restore-journal.sqlite"
+    },
+    {
+      "name": "manifest:restore_journal_present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/rai.sqlite.restore-journal.sqlite"
+    },
+    {
+      "name": "manifest:tree:var/imports",
+      "ok": true,
+      "detail": "var/imports"
+    },
+    {
+      "name": "manifest:tree:var/model-artifacts/prediction",
+      "ok": true,
+      "detail": "var/model-artifacts/prediction"
+    },
+    {
+      "name": "manifest:tree:var/backups",
+      "ok": true,
+      "detail": "var/backups"
+    },
+    {
+      "name": "manifest:tree:var/quarantine",
+      "ok": true,
+      "detail": "var/quarantine"
+    },
+    {
+      "name": "manifest:inventory_digests",
+      "ok": true,
+      "detail": "17 files, 2191571 bytes"
+    },
+    {
+      "name": "archive:tar",
+      "ok": true,
+      "detail": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/archive/runtime.tar"
+    },
+    {
+      "name": "archive:semantic_closure",
+      "ok": true,
+      "detail": "116 checks"
+    },
+    {
+      "name": "restore:extract",
+      "ok": true,
+      "detail": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/restored"
+    },
+    {
+      "name": "restore:manifest_entries_readable",
+      "ok": true,
+      "detail": "26/26"
+    },
+    {
+      "name": "restore:archive_matches_restored_root",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "quick_check:var/rai.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/rai-control.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/runtime.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/rai.sqlite.dataset-epoch.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/rai.sqlite.restore-journal.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/quarantine/wal-sample.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/backups/rehearsal-protection.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "restore:wal_sample_preserved",
+      "ok": true,
+      "detail": "non-empty WAL restored"
+    },
+    {
+      "name": "control:plan_revision",
+      "ok": true,
+      "detail": 7
+    },
+    {
+      "name": "control:operation_receipt",
+      "ok": true,
+      "detail": "{\"ok\":true,\"revision\":7}"
+    },
+    {
+      "name": "runtime:scope_established",
+      "ok": true,
+      "detail": "established"
+    },
+    {
+      "name": "runtime:job_terminal",
+      "ok": true,
+      "detail": "succeeded"
+    },
+    {
+      "name": "runtime:pending_job_preserved",
+      "ok": true,
+      "detail": "{\"status\":\"running\",\"phase\":\"importing\"}"
+    },
+    {
+      "name": "runtime:pending_source_preserved",
+      "ok": true,
+      "detail": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-Ii5XsH/source/var/imports/upload_pending/source.zip"
+    },
+    {
+      "name": "main:active_bundle",
+      "ok": true,
+      "detail": "run_rehearsal_active"
+    },
+    {
+      "name": "main:restore_journal_present",
+      "ok": true,
+      "detail": "prepared intent restored"
+    },
+    {
+      "name": "api:health",
+      "ok": true,
+      "detail": "{\"status\":\"ok\",\"databaseReady\":true}"
+    },
+    {
+      "name": "api:dataset_epoch",
+      "ok": true,
+      "detail": "epoch-2026-10-23-rehearsal-a"
+    },
+    {
+      "name": "api:workouts_restored",
+      "ok": true,
+      "detail": "status=200 count=1"
+    },
+    {
+      "name": "artifact:onnx_bytes",
+      "ok": true,
+      "detail": "byte-identical"
+    },
+    {
+      "name": "artifact:upload_bytes",
+      "ok": true,
+      "detail": "byte-identical"
+    },
+    {
+      "name": "source:pending_original_readable",
+      "ok": true,
+      "detail": "pending source byte-identical"
+    },
+    {
+      "name": "main:import_receipt",
+      "ok": true,
+      "detail": "receipt present"
+    },
+    {
+      "name": "main:active_bundle_after_startup",
+      "ok": true,
+      "detail": "run_rehearsal_active"
+    },
+    {
+      "name": "main:restore_journal_closed",
+      "ok": true,
+      "detail": "startup recovery consumed the prepared journal"
+    }
+  ],
+  "passed": true,
+  "rpo": "0 for the stopped-writer window (no writes accepted after archive started)",
+  "rtoMs": 12416,
+  "environment": {
+    "platform": "darwin",
+    "arch": "x64",
+    "node": "v22.23.2",
+    "note": "isolated temp root; systemctl stop/start and real production config were not exercised"
+  }
+}

@@ -173,6 +173,6 @@
 
 - **唯一写入口**：`/v1/mobile/training-plan/commands`（preview/submit/refresh）；读取走 `/v1/mobile/training-plan-state`（v1 兼容读取保留，v2 通过 `X-RAI-Training-Contract: 2` 协商）。`/v1/mobile/lock` 保留。
 - **旧计划写面退役**：`/v1/mobile/goals`（GET/PUT）、`/v1/mobile/run-coach`（GET/POST）、`/v1/mobile/workout-plan/{preview,confirm,generate}`（POST）共 **5 条路径、7 个操作**，路由保留挂载但一律 `410 Gone` + `legacy_surface_retired`（带 replacement）；不可达旧实现删除。旧客户端无法再编辑计划，410 与 404 必须可区分。
-- **控制库 schema v2**：`mobile_training_state` / `_history` / `_migration_audit` 为**加表**，不改历史行；schema 由 API 启动时幂等追加。**数据**迁移只由 `scripts/migrate-training-planner.mts` 执行（默认 dry-run；`--apply` 必须带 dry-run 的 `sourceDigest`；只开控制库，不参与 publication lock，需停服窗口）。
+- **控制库 schema v2**：`mobile_training_state` / `_history` / `_migration_audit` 为**加表**，不改历史行；schema 由 API 启动时幂等追加。**数据**迁移只由 `scripts/migrate-training-planner.mts` 执行（默认 dry-run；`--apply` 必须带 dry-run 的 `sourceDigest`；只开控制库）。**2026-10-23（阶段 4）起**：API 启动即持有控制库 publication lock（`<control>.import.lock`），planner `--apply` 取同一把锁，因此在 API 在线时会以 `control_database_locked` 拒绝；仍要求停服窗口，锁只负责“拒绝交叉”，不替运维决定数据语义。
 - **iOS 统一入口是客户端路径**：统一训练页是正式入口。已知缺口（发布记录 §5 已承认）：统一页仍保留「手动课表」入口，其保存仍调用已退役的 `PUT /v1/mobile/goals`，在该构建上会失败；后续应重接统一命令或隐藏该入口。**不得**因为该缺口恢复旧端点。
 

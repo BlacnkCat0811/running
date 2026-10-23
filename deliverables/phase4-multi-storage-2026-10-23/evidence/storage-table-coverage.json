@@ -1,0 +1,14 @@
+{
+  "format": "rai-phase4-table-coverage-v1",
+  "source": "evidence/baseline-five-stores.json",
+  "counts": {
+    "mainTables": 71,
+    "mainViews": 8,
+    "controlTables": 10,
+    "runtimeTables": 8,
+    "sidecarTables": 2,
+    "journalTables": 1
+  },
+  "missingFromMatrix": [],
+  "complete": true
+}

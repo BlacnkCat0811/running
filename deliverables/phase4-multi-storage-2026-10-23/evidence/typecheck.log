@@ -1,0 +1,9 @@
+
+> rai-running-intelligence@0.1.0 pretypecheck
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json
+
+EXIT=0

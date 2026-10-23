@@ -1,0 +1,51 @@
+TAP version 13
+# (node:13216) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: T04 发布事务 COMMIT 前 SIGKILL：active 指针与 job 结算同进同退，重放一次成功
+ok 1 - T04 发布事务 COMMIT 前 SIGKILL：active 指针与 job 结算同进同退，重放一次成功
+  ---
+  duration_ms: 2355.4418
+  type: 'test'
+  ...
+# (node:13239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 控制库锁：另一个进程持有时 planner --apply 拒绝且不写状态
+ok 2 - 控制库锁：另一个进程持有时 planner --apply 拒绝且不写状态
+  ---
+  duration_ms: 3523.632267
+  type: 'test'
+  ...
+# Subtest: 控制库锁：API 启动拒绝已被持有的控制库，并让在线期间 CLI apply 无法交叉
+ok 3 - 控制库锁：API 启动拒绝已被持有的控制库，并让在线期间 CLI apply 无法交叉
+  ---
+  duration_ms: 10200.339215
+  type: 'test'
+  ...
+# Subtest: 主库锁：data:migrate --apply 在 API 锁被持有时非零退出且不执行迁移
+ok 4 - 主库锁：data:migrate --apply 在 API 锁被持有时非零退出且不执行迁移
+  ---
+  duration_ms: 2266.547128
+  type: 'test'
+  ...
+# Subtest: 可写 CLI 审计：每个能写权威库的入口都取 publication lock
+ok 5 - 可写 CLI 审计：每个能写权威库的入口都取 publication lock
+  ---
+  duration_ms: 1.420545
+  type: 'test'
+  ...
+# Subtest: 冷备路径闭包：默认可验、外置主库拒绝、缺侧车记 absent、Token 不回显
+ok 6 - 冷备路径闭包：默认可验、外置主库拒绝、缺侧车记 absent、Token 不回显
+  ---
+  duration_ms: 1173.371496
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 26942.901861
+EXIT=0

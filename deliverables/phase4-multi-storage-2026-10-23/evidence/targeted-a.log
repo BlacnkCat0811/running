@@ -1,0 +1,1149 @@
+TAP version 13
+# (node:13178) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads
+ok 1 - bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads
+  ---
+  duration_ms: 15.967561
+  type: 'test'
+  ...
+# Subtest: raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement
+ok 2 - raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement
+  ---
+  duration_ms: 573.837256
+  type: 'test'
+  ...
+# Subtest: a durable same-batch replay performs no writes and refuses a changed payload identity
+ok 3 - a durable same-batch replay performs no writes and refuses a changed payload identity
+  ---
+  duration_ms: 409.784401
+  type: 'test'
+  ...
+# Subtest: SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state
+ok 4 - SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state
+  ---
+  duration_ms: 2251.635263
+  type: 'test'
+  ...
+# Subtest: deletion before arrival cannot resurrect a carried or later UUID
+ok 5 - deletion before arrival cannot resurrect a carried or later UUID
+  ---
+  duration_ms: 488.030492
+  type: 'test'
+  ...
+# Subtest: a deletion-only delta restores a surviving shared UUID and records the correction
+ok 6 - a deletion-only delta restores a surviving shared UUID and records the correction
+  ---
+  duration_ms: 446.962154
+  type: 'test'
+  ...
+# Subtest: UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 7 - UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 474.229853
+  type: 'test'
+  ...
+# Subtest: change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 8 - change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 322.320652
+  type: 'test'
+  ...
+# Subtest: silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 9 - silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 384.682073
+  type: 'test'
+  ...
+# Subtest: silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 10 - silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 399.640277
+  type: 'test'
+  ...
+# Subtest: silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 11 - silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 414.565783
+  type: 'test'
+  ...
+# Subtest: silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 12 - silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 420.64872
+  type: 'test'
+  ...
+# Subtest: silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 13 - silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 461.46677
+  type: 'test'
+  ...
+# Subtest: silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 14 - silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 659.122221
+  type: 'test'
+  ...
+# Subtest: silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 15 - silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 521.04314
+  type: 'test'
+  ...
+# Subtest: receipt write failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 16 - receipt write failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 502.930167
+  type: 'test'
+  ...
+# Subtest: silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 17 - silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 422.251904
+  type: 'test'
+  ...
+# Subtest: silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 18 - silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 401.92692
+  type: 'test'
+  ...
+# Subtest: late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 19 - late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 464.546909
+  type: 'test'
+  ...
+# Subtest: late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 20 - late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 420.406911
+  type: 'test'
+  ...
+# Subtest: late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 21 - late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 714.124519
+  type: 'test'
+  ...
+# Subtest: ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 22 - ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 423.212511
+  type: 'test'
+  ...
+# Subtest: late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 23 - late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 413.136678
+  type: 'test'
+  ...
+# Subtest: a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated
+ok 24 - a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated
+  ---
+  duration_ms: 424.200237
+  type: 'test'
+  ...
+# Subtest: profile drift rolls back earlier records and returns a no-write fallback
+ok 25 - profile drift rolls back earlier records and returns a no-write fallback
+  ---
+  duration_ms: 517.165744
+  type: 'test'
+  ...
+# Subtest: an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards
+ok 26 - an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards
+  ---
+  duration_ms: 498.056865
+  type: 'test'
+  ...
+# Subtest: missing/old parser attestation and uninitialized legacy hashes use the normal path without writes
+ok 27 - missing/old parser attestation and uninitialized legacy hashes use the normal path without writes
+  ---
+  duration_ms: 506.525924
+  type: 'test'
+  ...
+# Subtest: a missing UUID lookup index cannot qualify for data-only
+ok 28 - a missing UUID lookup index cannot qualify for data-only
+  ---
+  duration_ms: 345.709086
+  type: 'test'
+  ...
+# Subtest: workout deletions, routes and unknown record types cannot take the fast path
+ok 29 - workout deletions, routes and unknown record types cannot take the fast path
+  ---
+  duration_ms: 368.486261
+  type: 'test'
+  ...
+# (node:13271) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: restart rolls back uncommitted rename
+ok 30 - restart rolls back uncommitted rename
+  ---
+  duration_ms: 155.013614
+  type: 'test'
+  ...
+# Subtest: restart acknowledges committed candidate without reimport
+ok 31 - restart acknowledges committed candidate without reimport
+  ---
+  duration_ms: 179.30255
+  type: 'test'
+  ...
+# Subtest: committed journal + temporarily missing database: no false 'receipt missing', intent survives
+ok 32 - committed journal + temporarily missing database: no false 'receipt missing', intent survives
+  ---
+  duration_ms: 47.397835
+  type: 'test'
+  ...
+# Subtest: prepared rename with no remaining original fails closed instead of accepting candidate
+ok 33 - prepared rename with no remaining original fails closed instead of accepting candidate
+  ---
+  duration_ms: 99.292113
+  type: 'test'
+  ...
+# Subtest: prepared rollback with missing main restores the displaced old database
+ok 34 - prepared rollback with missing main restores the displaced old database
+  ---
+  duration_ms: 40.62565
+  type: 'test'
+  ...
+# Subtest: prepared rollback that fails integrity validation blocks instead of installing it
+ok 35 - prepared rollback that fails integrity validation blocks instead of installing it
+  ---
+  duration_ms: 29.229117
+  type: 'test'
+  ...
+# Subtest: runtime acknowledgement and publication intent removal are atomic
+ok 36 - runtime acknowledgement and publication intent removal are atomic
+  ---
+  duration_ms: 153.42611
+  type: 'test'
+  ...
+# Subtest: recovery never overwrites an unfamiliar active database
+ok 37 - recovery never overwrites an unfamiliar active database
+  ---
+  duration_ms: 99.832041
+  type: 'test'
+  ...
+# Subtest: initial import recovery refuses an unexpected database without a candidate receipt
+ok 38 - initial import recovery refuses an unexpected database without a candidate receipt
+  ---
+  duration_ms: 74.801415
+  type: 'test'
+  ...
+# Subtest: initial import recovery refuses a rollback point even when the active database has its receipt
+ok 39 - initial import recovery refuses a rollback point even when the active database has its receipt
+  ---
+  duration_ms: 169.998644
+  type: 'test'
+  ...
+# Import queue execution failed: Error: fixture source cleanup unavailable
+# Import publication intent blocked-job (committed) needs recovery: Import database file is missing
+# Subtest: committed imports remain pending through failed cleanup and restart until acknowledgement
+ok 40 - committed imports remain pending through failed cleanup and restart until acknowledgement
+  ---
+  duration_ms: 552.05309
+  type: 'test'
+  ...
+# Subtest: strict receipt read returns null only after a successful query with no receipt row
+ok 41 - strict receipt read returns null only after a successful query with no receipt row
+  ---
+  duration_ms: 13.725805
+  type: 'test'
+  ...
+# Subtest: strict receipt read rejects a missing database and never creates an empty one
+ok 42 - strict receipt read rejects a missing database and never creates an empty one
+  ---
+  duration_ms: 1.798634
+  type: 'test'
+  ...
+# Subtest: strict receipt read rejects corrupt databases, malformed JSON, and JSON null receipts
+ok 43 - strict receipt read rejects corrupt databases, malformed JSON, and JSON null receipts
+  ---
+  duration_ms: 88.085125
+  type: 'test'
+  ...
+# Subtest: P1-6 committed intent + 损坏主库：保留 journal、报告恢复阻断、不创建空库
+ok 44 - P1-6 committed intent + 损坏主库：保留 journal、报告恢复阻断、不创建空库
+  ---
+  duration_ms: 29.93025
+  type: 'test'
+  ...
+# Subtest: P1-6 prepared intent + 不可读主库：不得用回滚点覆盖现场
+ok 45 - P1-6 prepared intent + 不可读主库：不得用回滚点覆盖现场
+  ---
+  duration_ms: 45.961801
+  type: 'test'
+  ...
+# Subtest: P1-6 构造函数不因可恢复的 missing/unreadable intent 退出，且暴露结构化阻断
+ok 46 - P1-6 构造函数不因可恢复的 missing/unreadable intent 退出，且暴露结构化阻断
+  ---
+  duration_ms: 85.760984
+  type: 'test'
+  ...
+# Subtest: P1-7 停在 recovery_required 的任务不算写者，但仍是恢复阻断证据
+ok 47 - P1-7 停在 recovery_required 的任务不算写者，但仍是恢复阻断证据
+  ---
+  duration_ms: 102.299617
+  type: 'test'
+  ...
+# Subtest: 旧 scope 已完成但未确认的作业在启动时 superseded 并释放写者
+ok 48 - 旧 scope 已完成但未确认的作业在启动时 superseded 并释放写者
+  ---
+  duration_ms: 142.796553
+  type: 'test'
+  ...
+# Subtest: 显式恢复持久取代旧发布意图：重启不再把旧意图当作当前主库冲突
+ok 49 - 显式恢复持久取代旧发布意图：重启不再把旧意图当作当前主库冲突
+  ---
+  duration_ms: 65.402155
+  type: 'test'
+  ...
+# Subtest: 取代记录已提交但意图尚未删除：重启只补齐第二步，不再阻断
+ok 50 - 取代记录已提交但意图尚未删除：重启只补齐第二步，不再阻断
+  ---
+  duration_ms: 56.370217
+  type: 'test'
+  ...
+# (node:13289) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）
+ok 51 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）
+  ---
+  duration_ms: 94.175777
+  type: 'test'
+  ...
+# (node:13289) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实
+ok 52 - 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实
+  ---
+  duration_ms: 2099.53809
+  type: 'test'
+  ...
+# Subtest: 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源
+ok 53 - 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源
+  ---
+  duration_ms: 131.534945
+  type: 'test'
+  ...
+# Subtest: 损坏数据库 + attempts=3：恢复阻断而非 failed
+ok 54 - 损坏数据库 + attempts=3：恢复阻断而非 failed
+  ---
+  duration_ms: 153.429124
+  type: 'test'
+  ...
+# Subtest: onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ）
+ok 55 - onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ）
+  ---
+  duration_ms: 134.722884
+  type: 'test'
+  ...
+# Subtest: 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消
+ok 56 - 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消
+  ---
+  duration_ms: 144.690877
+  type: 'test'
+  ...
+# Subtest: 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断
+ok 57 - 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断
+  ---
+  duration_ms: 128.933705
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import first-import.
+# (node:13289) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for first-import: continuing to the direct-sync receiver
+# Subtest: 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入
+ok 58 - 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入
+  ---
+  duration_ms: 1818.092921
+  type: 'test'
+  ...
+# Subtest: create 入队时把主库缺失写进持久队列证据
+ok 59 - create 入队时把主库缺失写进持久队列证据
+  ---
+  duration_ms: 98.818975
+  type: 'test'
+  ...
+# Subtest: 只有任务自己的 databaseAbsentAtEnqueue、没有作用域账本：缺失库仍阻断
+ok 60 - 只有任务自己的 databaseAbsentAtEnqueue、没有作用域账本：缺失库仍阻断
+  ---
+  duration_ms: 82.530657
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import web_import_mvkmhe3g_30d176b3-b546-43ab-a0ad-00e223a74582.
+# (node:13289) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvkmhe3g_30d176b3-b546-43ab-a0ad-00e223a74582: continuing to the direct-sync receiver
+# (node:13289) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1：A、B 双任务空库序列——A 成功后移走主库，B 不得运行/建库/清理来源，恢复后只提交一次
+ok 61 - P1：A、B 双任务空库序列——A 成功后移走主库，B 不得运行/建库/清理来源，恢复后只提交一次
+  ---
+  duration_ms: 3510.278145
+  type: 'test'
+  ...
+# Subtest: 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行
+ok 62 - 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行
+  ---
+  duration_ms: 86.509351
+  type: 'test'
+  ...
+# (node:13289) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执
+ok 63 - 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执
+  ---
+  duration_ms: 1755.856881
+  type: 'test'
+  ...
+# Subtest: 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope
+ok 64 - 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope
+  ---
+  duration_ms: 139.897005
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# [WP-41 实测] 20 小批：ingest 线程 started=1 retired=0 tasks=20；一次启动 startupMs=2145.9 ms；RSS 首批=160428 KiB 末批=178092 KiB max=178092 KiB；import_lanes_transaction 首批=157.3 ms 末批=86.9 ms；dataOnlyApply 首批=122.1 ms 末批=76.0 ms
+# Subtest: 20 个连续小批：ingest 线程只起 1 条，且启动成本只付一次（实测计数与毫秒）
+ok 65 - 20 个连续小批：ingest 线程只起 1 条，且启动成本只付一次（实测计数与毫秒）
+  ---
+  duration_ms: 13032.860444
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: no-op 回执在常驻线程执行：连续 10 批复用一条线程，不落回主线程事务
+ok 66 - no-op 回执在常驻线程执行：连续 10 批复用一条线程，不落回主线程事务
+  ---
+  duration_ms: 4422.44606
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Recovered committed import web_import_mvkmhxyx_ba171574-4365-441d-8a51-83da7591ab30 after its worker reply was lost.
+# Subtest: 提交后回复丢失：从持久回执恢复同一个 no-op 成功结果
+ok 67 - 提交后回复丢失：从持久回执恢复同一个 no-op 成功结果
+  ---
+  duration_ms: 1622.202383
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: no-op 提交等待期间取消返回 publishing，不终止线程，提交后仍成功
+ok 68 - no-op 提交等待期间取消返回 publishing，不终止线程，提交后仍成功
+  ---
+  duration_ms: 1518.542634
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmi0c5_e6020e8b-6e82-442c-a2c0-e2596672f946 failed: Error: Import worker is shutting down before its ingest worker became ready
+#     at ImportWorker.databaseTask (/Users/ta/running/apps/api/src/import-worker.ts:1691:33)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1050:22)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:676:11)
+# Subtest: worker 冷启动期间 close：ready 与任务结算，关闭完成且不重建线程
+ok 69 - worker 冷启动期间 close：ready 与任务结算，关闭完成且不重建线程
+  ---
+  duration_ms: 1515.866834
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmi1ld_249220d1-dfe1-4140-ae28-461019201af0 failed: Error: Ingest worker thread exited with code 0
+#     at Worker.<anonymous> (/Users/ta/running/apps/api/src/import-worker.ts:1512:11)
+#     at Object.onceWrapper (node:events:634:26)
+#     at Worker.emit (node:events:531:35)
+#     at [kOnExit] (node:internal/worker:318:10)
+#     at Worker.<computed>.onexit (node:internal/worker:232:20)
+# Subtest: ready 前真实退出：启动等待被结算，任务不悬挂
+ok 70 - ready 前真实退出：启动等待被结算，任务不悬挂
+  ---
+  duration_ms: 1622.110524
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmi2ub_f69e5d88-34dc-470e-9bd0-ef9422aeb776 failed: Error: Import worker is shutting down before its ingest worker became ready
+#     at ImportWorker.databaseTask (/Users/ta/running/apps/api/src/import-worker.ts:1691:33)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1050:22)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:676:11)
+# Subtest: ready 前 error 事件：启动等待同样被拒绝，close 不悬挂
+ok 71 - ready 前 error 事件：启动等待同样被拒绝，close 不悬挂
+  ---
+  duration_ms: 1654.006295
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Recovered committed import web_import_mvkmi4ap_f4e13239-f60f-4134-8568-f62dbfc8130e after its worker reply was lost.
+# Subtest: 真实 worker 提交后回复丢失：线程终止后从持久回执恢复同一成功结果
+ok 72 - 真实 worker 提交后回复丢失：线程终止后从持久回执恢复同一成功结果
+  ---
+  duration_ms: 2927.620203
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmi6ju_58f0ef6d-4208-4320-8c6b-bcdf402344fc failed: Error: Ingest worker thread exited with code 1 (ingest task 1 did not complete)
+#     at ImportWorker.retireIngestWorker (/Users/ta/running/apps/api/src/import-worker.ts:1587:22)
+#     at Worker.<anonymous> (/Users/ta/running/apps/api/src/import-worker.ts:1511:19)
+#     at Object.onceWrapper (node:events:634:26)
+#     at Worker.emit (node:events:531:35)
+#     at [kOnExit] (node:internal/worker:318:10)
+#     at Worker.<computed>.onexit (node:internal/worker:232:20)
+# Subtest: 真实 worker 提交前失败：线程终止、无回执、无半提交
+ok 73 - 真实 worker 提交前失败：线程终止、无回执、无半提交
+  ---
+  duration_ms: 2791.772033
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmi98x_aafbc3b0-aed2-49ac-baed-69ebea3ddb49 could not verify its committed receipt: Error: unable to open database file
+#     at readImportReceiptStrict (/Users/ta/running/apps/api/src/import-publication.ts:84:14)
+#     at ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1228:23)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:676:11)
+# Subtest: 提交结果不确定且数据库不可访问：进入恢复阻断，不发布终态也不清理来源
+ok 74 - 提交结果不确定且数据库不可访问：进入恢复阻断，不发布终态也不清理来源
+  ---
+  duration_ms: 3900.610968
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvkmiand_f58858ff-7758-48c1-8e97-5eab61674113: continuing to the direct-sync receiver
+# Subtest: full 载荷：两条车道在**同一个**任务里跑完（一次投递，序列仍是 data-only → direct-sync）
+ok 75 - full 载荷：两条车道在**同一个**任务里跑完（一次投递，序列仍是 data-only → direct-sync）
+  ---
+  duration_ms: 1451.553367
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmibs0_1aa350e8-a9df-4905-9c2a-9c70517934d9 failed: Error: Data-only payload changed after admission (ingest task 1)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1566:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1523:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 任务异常只污染那一批：线程被替换，下一批拿到新线程且回执互不串
+ok 76 - 任务异常只污染那一批：线程被替换，下一批拿到新线程且回执互不串
+  ---
+  duration_ms: 2408.665571
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 载荷身份（整棵输入树）每批只算 1 次：预检未命中的增量批不再重算第二遍
+ok 77 - 载荷身份（整棵输入树）每批只算 1 次：预检未命中的增量批不再重算第二遍
+  ---
+  duration_ms: 1712.029871
+  type: 'test'
+  ...
+# Subtest: 忘了 close 的常驻 ingest 线程不得把进程钉在事件循环里（子进程必须自己退出）
+ok 78 - 忘了 close 的常驻 ingest 线程不得把进程钉在事件循环里（子进程必须自己退出）
+  ---
+  duration_ms: 2815.386976
+  type: 'test'
+  ...
+# Subtest: 车道计划的 fail-closed 校验：颠倒或未知顺序一律拒绝执行（不做任何尝试）
+ok 79 - 车道计划的 fail-closed 校验：颠倒或未知顺序一律拒绝执行（不做任何尝试）
+  ---
+  duration_ms: 1.066636
+  type: 'test'
+  ...
+# Subtest: 每个任务的数据库调查：同路径换文件（恢复/换库）必须被看见
+ok 80 - 每个任务的数据库调查：同路径换文件（恢复/换库）必须被看见
+  ---
+  duration_ms: 391.532577
+  type: 'test'
+  ...
+# Subtest: 连续 25 轮正常退休：已结算的 termination 立即移出集合，不随历史增长
+ok 81 - 连续 25 轮正常退休：已结算的 termination 立即移出集合，不随历史增长
+  ---
+  duration_ms: 194.131825
+  type: 'test'
+  ...
+# Subtest: 两条终止操作交错完成：第一条完成不得被判为整体停止
+ok 82 - 两条终止操作交错完成：第一条完成不得被判为整体停止
+  ---
+  duration_ms: 209.585267
+  type: 'test'
+  ...
+# Subtest: 等待期间新增退休操作：新增的 termination 同样被等待
+ok 83 - 等待期间新增退休操作：新增的 termination 同样被等待
+  ---
+  duration_ms: 236.276199
+  type: 'test'
+  ...
+# Subtest: terminate 同步抛错/异步拒绝：集合清空后仍返回停止未确认，后续成功不得清除失败
+ok 84 - terminate 同步抛错/异步拒绝：集合清空后仍返回停止未确认，后续成功不得清除失败
+  ---
+  duration_ms: 219.665441
+  type: 'test'
+  ...
+# Subtest: 同一 resident 重复退休：terminate 只调用一次并返回同一个 Promise
+ok 85 - 同一 resident 重复退休：terminate 只调用一次并返回同一个 Promise
+  ---
+  duration_ms: 230.66346
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmii75_17239903-141a-4221-bfec-7d746cde5f6c failed: Error: Data-only payload changed after admission (ingest task 1)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1566:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1523:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmiizg_6f5ddb04-271c-431c-91f4-eeafa8af43cf failed: Error: Data-only payload changed after admission (ingest task 2)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1566:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1523:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmijwh_7fbe00c3-fdc4-4b80-bcda-4e9a77b7a4d1 failed: Error: Data-only payload changed after admission (ingest task 3)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1566:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1523:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 连续多轮任务失败并替换线程：终止账本不积累历史
+ok 86 - 连续多轮任务失败并替换线程：终止账本不积累历史
+  ---
+  duration_ms: 4797.163583
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkmimn8_6fb3fe6b-585b-4ffd-bea9-8a313b4ffa74 could not retire its ingest worker: Error: injected sync terminate failure
+#     at Worker.thread.terminate (/Users/ta/running/apps/api/test/import-worker-reuse.test.ts:1105:25)
+#     at ImportWorker.retireIngestWorker (/Users/ta/running/apps/api/src/import-worker.ts:1593:53)
+#     at ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1209:24)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:676:11)
+# Import job web_import_mvkmimn8_6fb3fe6b-585b-4ffd-bea9-8a313b4ffa74 has an unconfirmed commit: ingest worker did not terminate
+# Subtest: 恢复分支中 terminate 同步抛错：进入恢复阻断，全局写者无法取得许可
+ok 87 - 恢复分支中 terminate 同步抛错：进入恢复阻断，全局写者无法取得许可
+  ---
+  duration_ms: 1327.512779
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvkminob_cae569e7-3271-40df-af73-a6a3c38657e1 could not retire its ingest worker: Error: injected async terminate failure
+#     at Worker.thread.terminate (/Users/ta/running/apps/api/test/import-worker-reuse.test.ts:1106:31)
+#     at ImportWorker.retireIngestWorker (/Users/ta/running/apps/api/src/import-worker.ts:1593:53)
+#     at ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1209:24)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:676:11)
+# Import job web_import_mvkminob_cae569e7-3271-40df-af73-a6a3c38657e1 has an unconfirmed commit: ingest worker did not terminate
+# Subtest: 恢复分支中 terminate 异步拒绝：进入恢复阻断，全局写者无法取得许可
+ok 88 - 恢复分支中 terminate 异步拒绝：进入恢复阻断，全局写者无法取得许可
+  ---
+  duration_ms: 1331.070576
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 恢复冻结是独立句柄：普通恢复尝试不写 recoveryBlocked，幂等且只按身份释放
+ok 89 - 恢复冻结是独立句柄：普通恢复尝试不写 recoveryBlocked，幂等且只按身份释放
+  ---
+  duration_ms: 2480.552379
+  type: 'test'
+  ...
+# (node:13353) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 恢复后重裁决：旧 scope 作业持久 superseded，新 scope 作业可实际运行
+ok 90 - 恢复后重裁决：旧 scope 作业持久 superseded，新 scope 作业可实际运行
+  ---
+  duration_ms: 1450.200687
+  type: 'test'
+  ...
+# Subtest: 恢复后仍有无法核实的回执：reload 返回阻断而不是 true
+ok 91 - 恢复后仍有无法核实的回执：reload 返回阻断而不是 true
+  ---
+  duration_ms: 244.849467
+  type: 'test'
+  ...
+# (node:13710) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: F10 候选已生成但发布前中断：旧发布稳定、候选不可见；补发同一发布幂等且无重复 release
+ok 92 - F10 候选已生成但发布前中断：旧发布稳定、候选不可见；补发同一发布幂等且无重复 release
+  ---
+  duration_ms: 195.141881
+  type: 'test'
+  ...
+# (node:13714) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13714) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: a stable control snapshot is read twice and built once
+ok 93 - a stable control snapshot is read twice and built once
+  ---
+  duration_ms: 16.954347
+  type: 'test'
+  ...
+# Subtest: one control change retries against the newer snapshot and returns its build
+ok 94 - one control change retries against the newer snapshot and returns its build
+  ---
+  duration_ms: 0.540828
+  type: 'test'
+  ...
+# Subtest: a control that keeps changing fails closed after three attempts
+ok 95 - a control that keeps changing fails closed after three attempts
+  ---
+  duration_ms: 0.893117
+  type: 'test'
+  ...
+# Subtest: attempts: 1 builds once and throws without a second attempt
+ok 96 - attempts: 1 builds once and throws without a second attempt
+  ---
+  duration_ms: 1.662034
+  type: 'test'
+  ...
+# Subtest: the attempt budget is clamped to 1..5
+ok 97 - the attempt budget is clamped to 1..5
+  ---
+  duration_ms: 1.085676
+  type: 'test'
+  ...
+# Subtest: G: a publication that starts during the build discards the attempt and rebuilds
+ok 98 - G: a publication that starts during the build discards the attempt and rebuilds
+  ---
+  duration_ms: 0.986097
+  type: 'test'
+  ...
+# Subtest: G: a live publication marker blocks the build and fails closed after three attempts
+ok 99 - G: a live publication marker blocks the build and fails closed after three attempts
+  ---
+  duration_ms: 3.052018
+  type: 'test'
+  ...
+# Subtest: G: a stale pending marker left by a crashed publisher no longer blocks reads
+ok 100 - G: a stale pending marker left by a crashed publisher no longer blocks reads
+  ---
+  duration_ms: 0.515258
+  type: 'test'
+  ...
+# Subtest: P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+ok 101 - P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+  ---
+  duration_ms: 0.543538
+  type: 'test'
+  ...
+# Subtest: P3-02: a guard that starts failing after the build also fails closed
+ok 102 - P3-02: a guard that starts failing after the build also fails closed
+  ---
+  duration_ms: 0.799277
+  type: 'test'
+  ...
+# Subtest: P3-02: a store without any guard still degrades to the digest-only check
+ok 103 - P3-02: a store without any guard still degrades to the digest-only check
+  ---
+  duration_ms: 1.413565
+  type: 'test'
+  ...
+# Subtest: G: optionalPublicationGuard binds a store method and is absent when unsupported
+ok 104 - G: optionalPublicationGuard binds a store method and is absent when unsupported
+  ---
+  duration_ms: 0.677038
+  type: 'test'
+  ...
+# Subtest: read amplification: one successful attempt reads control twice and digests twice
+ok 105 - read amplification: one successful attempt reads control twice and digests twice
+  ---
+  duration_ms: 0.468249
+  type: 'test'
+  ...
+# Subtest: P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+ok 106 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+  ---
+  duration_ms: 4.379074
+  type: 'test'
+  ...
+# Subtest: P2-02: only an inode change counts as a replaced database file
+ok 107 - P2-02: only an inode change counts as a replaced database file
+  ---
+  duration_ms: 0.17384
+  type: 'test'
+  ...
+# Subtest: benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+ok 108 - benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+  ---
+  duration_ms: 13.279622
+  type: 'test'
+  ...
+# readStableSnapshot p50=0.034ms p95=0.092ms (n=200)
+# Subtest: trainingPlanState reads one control pair before and one after the build
+ok 109 - trainingPlanState reads one control pair before and one after the build
+  ---
+  duration_ms: 261.214538
+  type: 'test'
+  ...
+# Subtest: P3-03: planReadGuard never disables itself, even inside the store's own publication
+ok 110 - P3-03: planReadGuard never disables itself, even inside the store's own publication
+  ---
+  duration_ms: 0.410399
+  type: 'test'
+  ...
+# Subtest: P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+ok 111 - P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+  ---
+  duration_ms: 33.601635
+  type: 'test'
+  ...
+# Subtest: P3-15: a publication that keeps changing bounds the cost to attempts x build
+ok 112 - P3-15: a publication that keeps changing bounds the cost to attempts x build
+  ---
+  duration_ms: 1.144051
+  type: 'test'
+  ...
+# 3-attempt fail-closed span: 0.290ms (no sleep by design)
+# (node:13723) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: reports missing and replacing databases as stable 409 states
+ok 113 - reports missing and replacing databases as stable 409 states
+  ---
+  duration_ms: 2.984149
+  type: 'test'
+  ...
+# Subtest: rejects a concurrent database replacement owner
+ok 114 - rejects a concurrent database replacement owner
+  ---
+  duration_ms: 0.840666
+  type: 'test'
+  ...
+# Subtest: database replacement waits for asynchronous read leases and blocks new reads
+ok 115 - database replacement waits for asynchronous read leases and blocks new reads
+  ---
+  duration_ms: 26.776862
+  type: 'test'
+  ...
+# Subtest: beginReplace times out when read leases do not drain
+ok 116 - beginReplace times out when read leases do not drain
+  ---
+  duration_ms: 62.735229
+  type: 'test'
+  ...
+# Subtest: P3-4: the cached read store reopens when the database file is replaced
+ok 117 - P3-4: the cached read store reopens when the database file is replaced
+  ---
+  duration_ms: 17.928034
+  type: 'test'
+  ...
+# Subtest: P3-4+: utimes-only mtime change must not reopen the cached read store
+ok 118 - P3-4+: utimes-only mtime change must not reopen the cached read store
+  ---
+  duration_ms: 11.101958
+  type: 'test'
+  ...
+# Subtest: P3-4+: a WAL checkpoint (mtime change, same inode) keeps the connection and still sees new commits
+ok 119 - P3-4+: a WAL checkpoint (mtime change, same inode) keeps the connection and still sees new commits
+  ---
+  duration_ms: 24.48038
+  type: 'test'
+  ...
+# WAL checkpoint: ino=19891713 mtime 1792739016267.468 -> 1792739016272.824 ms, storeOpenCount=1
+# Subtest: latency: cold open vs same-inode mtime path (p50/p95, diagnostic)
+ok 120 - latency: cold open vs same-inode mtime path (p50/p95, diagnostic)
+  ---
+  duration_ms: 38.521408
+  type: 'test'
+  ...
+# cold RaiReadStore open n=30 p50=0.214ms p95=1.142ms
+# same-inode mtime path n=200 p50=0.018ms p95=0.072ms
+# Subtest: dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it
+ok 121 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it
+  ---
+  duration_ms: 21.259601
+  type: 'test'
+  ...
+# (node:13725) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: startup replays restore interruption at prepared
+ok 122 - startup replays restore interruption at prepared
+  ---
+  duration_ms: 274.698977
+  type: 'test'
+  ...
+# Subtest: startup replays restore interruption at moved
+ok 123 - startup replays restore interruption at moved
+  ---
+  duration_ms: 280.557161
+  type: 'test'
+  ...
+# Subtest: startup replays restore interruption at installed
+ok 124 - startup replays restore interruption at installed
+  ---
+  duration_ms: 252.989398
+  type: 'test'
+  ...
+# Subtest: startup replays restore interruption at committed
+ok 125 - startup replays restore interruption at committed
+  ---
+  duration_ms: 304.191869
+  type: 'test'
+  ...
+# Subtest: a committed intent never infers success from a readable main with another epoch
+ok 126 - a committed intent never infers success from a readable main with another epoch
+  ---
+  duration_ms: 214.11906
+  type: 'test'
+  ...
+# Subtest: restoreBackup writes a bound intent and keeps it until finalization
+ok 127 - restoreBackup writes a bound intent and keeps it until finalization
+  ---
+  duration_ms: 498.326784
+  type: 'test'
+  ...
+# Subtest: a failed restore over an absent original keeps the candidate but replays the absence on restart
+ok 128 - a failed restore over an absent original keeps the candidate but replays the absence on restart
+  ---
+  duration_ms: 422.644482
+  type: 'test'
+  ...
+# Subtest: a legacy committed journal without a bound epoch requires manual recovery
+ok 129 - a legacy committed journal without a bound epoch requires manual recovery
+  ---
+  duration_ms: 209.360218
+  type: 'test'
+  ...
+# Subtest: a bound intent whose deletion sidecar disappeared is refused, not closed
+ok 130 - a bound intent whose deletion sidecar disappeared is refused, not closed
+  ---
+  duration_ms: 276.880539
+  type: 'test'
+  ...
+# Subtest: a process killed between original move and candidate install recovers on restart
+ok 131 - a process killed between original move and candidate install recovers on restart
+  ---
+  duration_ms: 2183.819514
+  type: 'test'
+  ...
+# Subtest: invalid recovery metadata cannot remove arbitrary files
+ok 132 - invalid recovery metadata cannot remove arbitrary files
+  ---
+  duration_ms: 7.197473
+  type: 'test'
+  ...
+# Subtest: an empty journal file is not silently treated as no restore intent
+ok 133 - an empty journal file is not silently treated as no restore intent
+  ---
+  duration_ms: 2.54785
+  type: 'test'
+  ...
+# (node:13753) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: refuse pending preserves delete database bytes
+ok 134 - refuse pending preserves delete database bytes
+  ---
+  duration_ms: 279.510229
+  type: 'test'
+  ...
+# Subtest: refuse pending preserves wal database bytes
+ok 135 - refuse pending preserves wal database bytes
+  ---
+  duration_ms: 239.638332
+  type: 'test'
+  ...
+# Subtest: refuse missing and unversioned databases never bootstraps them
+ok 136 - refuse missing and unversioned databases never bootstraps them
+  ---
+  duration_ms: 2.51449
+  type: 'test'
+  ...
+# Subtest: refuse does not repair legacy metadata or accept checksum corruption
+ok 137 - refuse does not repair legacy metadata or accept checksum corruption
+  ---
+  duration_ms: 180.83151
+  type: 'test'
+  ...
+# Subtest: migration CLI dry-run, explicit apply, idempotence and publication lock
+ok 138 - migration CLI dry-run, explicit apply, idempotence and publication lock
+  ---
+  duration_ms: 3202.898038
+  type: 'test'
+  ...
+# Subtest: production runs and migrates through tsx, the channel frozen checksums are pinned to
+ok 139 - production runs and migrates through tsx, the channel frozen checksums are pinned to
+  ---
+  duration_ms: 1.205096
+  type: 'test'
+  ...
+# Subtest: every migration has a frozen checksum
+ok 140 - every migration has a frozen checksum
+  ---
+  duration_ms: 0.588108
+  type: 'test'
+  ...
+# Subtest: frozen checksums still match the transpiled source they were pinned to
+ok 141 - frozen checksums still match the transpiled source they were pinned to
+  ---
+  duration_ms: 1.162716
+  type: 'test'
+  ...
+# (node:13799) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: epoch origins survive while current or rollback releases need them, then retire normally
+ok 142 - epoch origins survive while current or rollback releases need them, then retire normally
+  ---
+  duration_ms: 279.788985
+  type: 'test'
+  ...
+# Subtest: S01: v23 releases atomically publish/rollback and reject failed, stale and changed snapshots
+ok 143 - S01: v23 releases atomically publish/rollback and reject failed, stale and changed snapshots
+  ---
+  duration_ms: 198.009771
+  type: 'test'
+  ...
+# Subtest: switching back to an already published release is a rollback; unsealed or failed candidates stay blocked
+ok 144 - switching back to an already published release is a rollback; unsealed or failed candidates stay blocked
+  ---
+  duration_ms: 290.50686
+  type: 'test'
+  ...
+# (node:13805) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: maps model-run summaries, counts related rows, and resolves the active run
+ok 145 - maps model-run summaries, counts related rows, and resolves the active run
+  ---
+  duration_ms: 4.001265
+  type: 'test'
+  ...
+# Subtest: activates only succeeded model runs with a succeeded training metric run
+ok 146 - activates only succeeded model runs with a succeeded training metric run
+  ---
+  duration_ms: 3.323468
+  type: 'test'
+  ...
+# Subtest: persists a failed model-version gate and rejects activation without replacing incumbent
+ok 147 - persists a failed model-version gate and rejects activation without replacing incumbent
+  ---
+  duration_ms: 5.154435
+  type: 'test'
+  ...
+# Subtest: engineVersion stays unknown when the column is absent, instead of falling back to the current engine
+ok 148 - engineVersion stays unknown when the column is absent, instead of falling back to the current engine
+  ---
+  duration_ms: 1.40819
+  type: 'test'
+  ...
+# (node:13815) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: publication lock owns its lifecycle and rejects a live owner
+ok 149 - publication lock owns its lifecycle and rejects a live owner
+  ---
+  duration_ms: 27.804058
+  type: 'test'
+  ...
+# Subtest: publication lock replaces a stale owner
+ok 150 - publication lock replaces a stale owner
+  ---
+  duration_ms: 26.730841
+  type: 'test'
+  ...
+# Subtest: publication lock is rejected by a competing process
+ok 151 - publication lock is rejected by a competing process
+  ---
+  duration_ms: 1258.497273
+  type: 'test'
+  ...
+# Subtest: publication lock does not remove an incompletely written lock file
+ok 152 - publication lock does not remove an incompletely written lock file
+  ---
+  duration_ms: 3.477247
+  type: 'test'
+  ...
+# Subtest: publication lock reclaims an abandoned incomplete lock after the safety grace period
+ok 153 - publication lock reclaims an abandoned incomplete lock after the safety grace period
+  ---
+  duration_ms: 7.164423
+  type: 'test'
+  ...
+# Subtest: publication lock never replaces an existing empty legacy directory
+ok 154 - publication lock never replaces an existing empty legacy directory
+  ---
+  duration_ms: 2.848899
+  type: 'test'
+  ...
+# Subtest: publication lock resumes stale recovery after an empty tombstone interruption
+ok 155 - publication lock resumes stale recovery after an empty tombstone interruption
+  ---
+  duration_ms: 8.484659
+  type: 'test'
+  ...
+# Subtest: publication lock recovers a stale legacy directory
+ok 156 - publication lock recovers a stale legacy directory
+  ---
+  duration_ms: 7.017824
+  type: 'test'
+  ...
+# Subtest: publication lock rejects PID reuse when the process identity differs
+ok 157 - publication lock rejects PID reuse when the process identity differs
+  ---
+  duration_ms: 25.119517
+  type: 'test'
+  ...
+# Subtest: publication lock detects PID reuse for a legacy owner from startedAt
+ok 158 - publication lock detects PID reuse for a legacy owner from startedAt
+  ---
+  duration_ms: 7.967681
+  type: 'test'
+  ...
+# Subtest: publication lock reclaims a reused PID only when the identity proves it
+ok 159 - publication lock reclaims a reused PID only when the identity proves it
+  ---
+  duration_ms: 1.371715
+  type: 'test'
+  ...
+# Subtest: publication lock falls back to startedAt only when no identity was recorded
+ok 160 - publication lock falls back to startedAt only when no identity was recorded
+  ---
+  duration_ms: 0.707047
+  type: 'test'
+  ...
+# Subtest: publication lock refuses a malformed owner and treats EPERM as alive
+ok 161 - publication lock refuses a malformed owner and treats EPERM as alive
+  ---
+  duration_ms: 1.011626
+  type: 'test'
+  ...
+1..161
+# tests 161
+# suites 0
+# pass 161
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 109499.013994
+EXIT=0

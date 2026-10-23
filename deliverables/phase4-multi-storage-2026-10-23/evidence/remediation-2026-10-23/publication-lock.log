@@ -1,0 +1,150 @@
+TAP version 13
+# (node:27164) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: publication lock owns its lifecycle and rejects a live owner
+ok 1 - publication lock owns its lifecycle and rejects a live owner
+  ---
+  duration_ms: 16.880878
+  type: 'test'
+  ...
+# Subtest: publication lock replaces a stale owner
+ok 2 - publication lock replaces a stale owner
+  ---
+  duration_ms: 7.265884
+  type: 'test'
+  ...
+# Subtest: publication lock is rejected by a competing process
+ok 3 - publication lock is rejected by a competing process
+  ---
+  duration_ms: 543.589326
+  type: 'test'
+  ...
+# Subtest: publication lock does not remove an incompletely written lock file
+ok 4 - publication lock does not remove an incompletely written lock file
+  ---
+  duration_ms: 2.937979
+  type: 'test'
+  ...
+# Subtest: publication lock reclaims an abandoned incomplete lock after the safety grace period
+ok 5 - publication lock reclaims an abandoned incomplete lock after the safety grace period
+  ---
+  duration_ms: 7.858431
+  type: 'test'
+  ...
+# Subtest: publication lock never replaces an existing empty legacy directory
+ok 6 - publication lock never replaces an existing empty legacy directory
+  ---
+  duration_ms: 3.249857
+  type: 'test'
+  ...
+# Subtest: publication lock resumes stale recovery after an empty tombstone interruption
+ok 7 - publication lock resumes stale recovery after an empty tombstone interruption
+  ---
+  duration_ms: 7.883911
+  type: 'test'
+  ...
+# Subtest: publication lock recovers a stale legacy directory
+ok 8 - publication lock recovers a stale legacy directory
+  ---
+  duration_ms: 11.696217
+  type: 'test'
+  ...
+# Subtest: publication lock rejects PID reuse when the process identity differs
+ok 9 - publication lock rejects PID reuse when the process identity differs
+  ---
+  duration_ms: 19.528048
+  type: 'test'
+  ...
+# Subtest: publication lock detects PID reuse for a legacy owner from startedAt
+ok 10 - publication lock detects PID reuse for a legacy owner from startedAt
+  ---
+  duration_ms: 7.80764
+  type: 'test'
+  ...
+# Subtest: publication lock reclaims a reused PID only when the identity proves it
+ok 11 - publication lock reclaims a reused PID only when the identity proves it
+  ---
+  duration_ms: 0.517298
+  type: 'test'
+  ...
+# Subtest: publication lock falls back to startedAt only when no identity was recorded
+ok 12 - publication lock falls back to startedAt only when no identity was recorded
+  ---
+  duration_ms: 0.304469
+  type: 'test'
+  ...
+# Subtest: publication lock refuses a malformed owner and treats EPERM as alive
+ok 13 - publication lock refuses a malformed owner and treats EPERM as alive
+  ---
+  duration_ms: 0.202699
+  type: 'test'
+  ...
+# Subtest: publication lock: competing process on the direct path exits non-zero and leaves the owner intact
+ok 14 - publication lock: competing process on the direct path exits non-zero and leaves the owner intact
+  ---
+  duration_ms: 618.975809
+  type: 'test'
+  ...
+# Subtest: publication lock: a file symlink cannot take a second lock in either direction
+ok 15 - publication lock: a file symlink cannot take a second lock in either direction
+  ---
+  duration_ms: 1121.321169
+  type: 'test'
+  ...
+# Subtest: publication lock: a parent-directory symlink shares the physical lock identity
+ok 16 - publication lock: a parent-directory symlink shares the physical lock identity
+  ---
+  duration_ms: 1250.777867
+  type: 'test'
+  ...
+# Subtest: publication lock: a symlink followed by .. resolves in filesystem order, not lexically
+ok 17 - publication lock: a symlink followed by .. resolves in filesystem order, not lexically
+  ---
+  duration_ms: 19.413074
+  type: 'test'
+  ...
+# Subtest: publication lock: first install through two parent aliases has one missing-database identity
+ok 18 - publication lock: first install through two parent aliases has one missing-database identity
+  ---
+  duration_ms: 786.313853
+  type: 'test'
+  ...
+# Subtest: publication lock: a hard-linked database is rejected with a stable hard-link error
+ok 19 - publication lock: a hard-linked database is rejected with a stable hard-link error
+  ---
+  duration_ms: 609.629343
+  type: 'test'
+  ...
+# Subtest: publication lock: a dangling symlink is refused without reclaiming a lexical lock
+ok 20 - publication lock: a dangling symlink is refused without reclaiming a lexical lock
+  ---
+  duration_ms: 543.571107
+  type: 'test'
+  ...
+# Subtest: publication lock: a symlink loop is refused without reclaiming a lexical lock
+ok 21 - publication lock: a symlink loop is refused without reclaiming a lexical lock
+  ---
+  duration_ms: 532.742467
+  type: 'test'
+  ...
+# Subtest: publication lock: a directory is not a database identity
+ok 22 - publication lock: a directory is not a database identity
+  ---
+  duration_ms: 1.370145
+  type: 'test'
+  ...
+# Subtest: publication lock: identity stays on the same lock path across database file replacement
+ok 23 - publication lock: identity stays on the same lock path across database file replacement
+  ---
+  duration_ms: 17.564965
+  type: 'test'
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6700.871565

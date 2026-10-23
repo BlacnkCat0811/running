@@ -163,6 +163,7 @@ function readSidecar(harness: Harness): SidecarState {
   if (!existsSync(harness.sidecarPath)) return { epoch: null, deletion: null };
   const db = new DatabaseSync(harness.sidecarPath, { readOnly: true });
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
     const epochRow = db.prepare("SELECT payload FROM dataset_epoch WHERE id=1").get() as
       { payload: string } | undefined;
     const deletionTable = db.prepare(
@@ -182,6 +183,7 @@ function readEvidence(harness: Harness, scope: string): Record<string, unknown> 
   if (!existsSync(harness.runtimePath)) return null;
   const db = new DatabaseSync(harness.runtimePath, { readOnly: true });
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
     const table = db.prepare(
       "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='import_scope_evidence'"
     ).get() as { present: number } | undefined;
@@ -197,6 +199,7 @@ function allEvidence(harness: Harness): Array<Record<string, unknown>> {
   if (!existsSync(harness.runtimePath)) return [];
   const db = new DatabaseSync(harness.runtimePath, { readOnly: true });
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
     const table = db.prepare(
       "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='import_scope_evidence'"
     ).get() as { present: number } | undefined;
@@ -565,11 +568,14 @@ test("P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认
       const inspection = JSON.parse(inspect.stdout) as { persistedEpoch: string; deletion: { stage: string } | null };
       assert.equal(inspection.persistedEpoch, nextEpoch);
       assert.equal(inspection.deletion?.stage, "prepared");
-      const refused = runCli(harness, ["--apply", "--deletion-id", deletionId]);
-      assert.notEqual(refused.status, 0, "prepared 阶段没有明确确认时必须拒绝");
-      assert.match(refused.stderr, /confirm-main-removed/i);
     } finally { await blockedServer.stop(); }
 
+    // 阶段 4（I1）：--apply 现在必须先取主库 publication lock。上面故意让
+    // API 在线时只跑只读 inspect；业务层的“未确认必须拒绝”要在停服后验证，
+    // 否则测到的是锁拒绝而不是确认判据。
+    const refused = runCli(harness, ["--apply", "--deletion-id", deletionId]);
+    assert.notEqual(refused.status, 0, "prepared 阶段没有明确确认时必须拒绝");
+    assert.match(refused.stderr, /confirm-main-removed/i);
     const confirmed = runCli(harness, ["--apply", "--deletion-id", deletionId, "--confirm-main-removed"]);
     assert.equal(confirmed.status, 0, confirmed.stderr);
     assert.equal(readSidecar(harness).deletion?.stage, "permit_issued");
@@ -1011,13 +1017,14 @@ test("P2-10 permit_issued 丢失 scope 行但账本实例不变：CLI 不得重�
         databaseReady: boolean;
       };
       assert.equal(health.databaseReady, false);
-      const cli = runCli(harness, ["--apply", "--deletion-id", deletionId]);
-      assert.notEqual(cli.status, 0);
-      assert.match(cli.stderr, /missing or consumed/i);
-      // P1-2: nothing to revoke and nothing to mint; the ledger row stays absent.
-      assert.equal(readEvidence(harness, nextScope), null);
-      assert.equal(existsSync(harness.databasePath), false);
     } finally { await blocked.stop(); }
+    // 阶段 4（I1）：--apply 需要主库 publication lock，必须在停服后验证业务判据。
+    const cli = runCli(harness, ["--apply", "--deletion-id", deletionId]);
+    assert.notEqual(cli.status, 0);
+    assert.match(cli.stderr, /missing or consumed/i);
+    // P1-2: nothing to revoke and nothing to mint; the ledger row stays absent.
+    assert.equal(readEvidence(harness, nextScope), null);
+    assert.equal(existsSync(harness.databasePath), false);
   } finally { harness.remove(); }
 });
 
@@ -1102,11 +1109,12 @@ test("P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许
       assert.equal(health.databaseReady, false);
       assert.equal(readSidecar(harness).deletion?.stage, "main_removed");
       assert.notEqual(readEvidence(harness, nextScope)?.state, "pristine");
-      const cli = runCli(harness, ["--apply", "--deletion-id", deletionId]);
-      assert.notEqual(cli.status, 0);
-      assert.match(cli.stderr, /snapshot bytes changed/i);
-      assert.equal(existsSync(harness.databasePath), false);
     } finally { await restarted.stop(); }
+    // 阶段 4（I1）：CLI --apply 必须在停服后运行；停服不改变已损坏快照的事实。
+    const cli = runCli(harness, ["--apply", "--deletion-id", deletionId]);
+    assert.notEqual(cli.status, 0);
+    assert.match(cli.stderr, /snapshot bytes changed/i);
+    assert.equal(existsSync(harness.databasePath), false);
   } finally { harness.remove(); }
 });
 
@@ -1728,6 +1736,9 @@ test("P2-17 恢复前已阻断的发布意图：恢复后持久记为取代，�
 
       const settled = new DatabaseSync(harness.runtimePath, { readOnly: true });
       try {
+        // The API may briefly hold a write lock while closing the restored
+        // scope. Wait for that transaction rather than racing the assertion.
+        settled.exec("PRAGMA busy_timeout = 5000");
         const importJob = settled.prepare("SELECT phase FROM import_jobs WHERE id='queued-behind-recovery'")
           .get() as { phase: string } | undefined;
         assert.equal(importJob?.phase, "superseded", "等待中的旧 scope 导入必须随恢复收口");

@@ -177,11 +177,13 @@ sudo systemctl show rai-api -p Type -p WatchdogUSec    # 期望 Type=simple，�
 
 ## 数据目录与备份
 
-- 数据目录：`/var/lib/rai`（`RAI_RUNTIME_ROOT`）。同一恢复边界内共 **4 个持久化文件**：
+- 数据目录：`/var/lib/rai`（`RAI_RUNTIME_ROOT`）。同一恢复边界内共 **5 类持久 SQLite**：
   主库 `/var/lib/rai/var/rai.sqlite`、控制库 `/var/lib/rai/var/rai-control.sqlite`（schema v2）、
   运行时状态 `/var/lib/rai/var/runtime.sqlite`、dataset epoch 侧车
-  `/var/lib/rai/var/rai.sqlite.dataset-epoch.sqlite`；导入与报告在
-  `/var/lib/rai/imports/`、`/var/lib/rai/reports/`。
+  `/var/lib/rai/var/rai.sqlite.dataset-epoch.sqlite`、restore journal 侧车
+  `/var/lib/rai/var/rai.sqlite.restore-journal.sqlite`（只在恢复未收口时存在）。
+  每个库都可能带 `-wal`/`-shm`/`-journal`；导入与报告在 `/var/lib/rai/var/imports/`、
+  `/var/lib/rai/var/reports/`，预测工件在 `/var/lib/rai/var/model-artifacts/`。
 
 ### 备份责任边界（2026-10-13 起；2026-10-20 修订）
 
@@ -201,17 +203,36 @@ sudo systemctl show rai-api -p Type -p WatchdogUSec    # 期望 Type=simple，�
 ⛔ 因此**不要**再为本机部署 `POST /v1/backups` 的 systemd timer —— 那个接口已退役，
 定时任务只会每 40 分钟拿到一次 410。常规一致性备份改为运维自己的责任：
 
+备份脚本会以 root 停服、读取 `/etc/rai/rai.env` 并执行校验代码；仓库目录属于 `rai` 用户，
+**不要直接 `sudo bash deploy/...`**。先把脚本安装到 root 拥有的目录：
+
+```bash
+sudo install -d -o root -g root -m 0755 /usr/local/libexec/rai-backup
+sudo install -o root -g root -m 0755 \
+  deploy/backup-runtime.sh \
+  scripts/check-runtime-backup-paths.mjs \
+  scripts/verify-runtime-backup-archive.mjs \
+  scripts/runtime-tar-safe.mjs \
+  scripts/resolve-runtime-backup-service.mjs \
+  scripts/runtime-backup-env.mjs \
+  scripts/verify-live-service-env.mjs \
+  /usr/local/libexec/rai-backup/
+```
+
 ```bash
 # 整 runtime 冷备（停服 → tar → sha256；默认 dry-run，二次确认后加 --apply）
-sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups
-sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups --apply
+sudo /usr/local/libexec/rai-backup/backup-runtime.sh --output-dir /srv/rai-backups \
+  --env-file /etc/rai/rai.env --manifest-out /root/rai-path-manifest.json
+# 核对 manifest 五类状态与维护窗口后才执行：
+sudo /usr/local/libexec/rai-backup/backup-runtime.sh --output-dir /srv/rai-backups \
+  --env-file /etc/rai/rai.env --apply
 ```
 
 - 该脚本**停服后**整目录打包，不在运行中的服务上复制 SQLite 文件；输出目录必须在
   runtime 树之外。它打印 `contains private health data; not encrypted`，压缩/加密与异机
   副本请自行在停服窗口之外完成。
 - 若确实需要更短停机窗口的**在线**备份，请用 SQLite 一致性备份 API 或与存储协调的快照；
-  §11.1 明确：活跃 WAL 库**不能**只 `cp rai.sqlite`，也不得为“提速”删掉 `-wal`/`-shm`。
+  §11.1 明确：活跃 WAL 库**不能**只 `cp rai.sqlite`，也不得为“提速”删掉 `-wal`/`-shm`/`-journal`。
   在线备份多个库**不**自动等于跨库一致（主库 / 控制库 / runtime / dataset-epoch 侧车 /
   上传工件 / 配置身份要在同一恢复边界内）；运行期跨库一致性由 publication guard +
   detect/retry 保证，不是备份事务。
@@ -292,7 +313,7 @@ API 与后台 worker 不再自动迁移主库。API 启动发现**待迁移版�
 cd /opt/rai
 sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite
 # 先由运维自行完成保护（应用不再代做备份，POST /v1/backups 已退役回 410）：
-sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups --apply
+sudo /usr/local/libexec/rai-backup/backup-runtime.sh --output-dir /srv/rai-backups --env-file /etc/rai/rai.env --apply
 sudo systemctl stop rai-api
 sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite --apply
 # 成功后解除可能已触发的启动频率限制，并启动：
@@ -347,13 +368,29 @@ MemoryHigh=1100M、MemoryMax=1400M、MemorySwapMax=512M、CPUQuota=150%；Node�
 不迁移N100、不安装FRP、不新增第二个可写主库（`deploy/n100/` 只是仓库钉住的备选 profile，差异见文首）。可选Rust路径见[Rust说明](../docs/RUST_DATA_ENGINE.md)，不能只改env而不部署匹配工件；注意 API 两条导入车道要求 TypeScript 引擎——把 `RAI_IMPORT_ENGINE` 设成 `rust` 会让 API 导入以 `engine_<name>` 被拒绝，Rust 路径只用于 CLI/benchmark。
 
 升级前停手机同步、等待任务结束、禁止独立CLI写者，保留代码/环境/身份配置和回滚版本。
-[backup-runtime.sh](backup-runtime.sh)默认dry-run，对整个runtime做冷备；所有自定义DB/工件目录都需纳入实际备份范围。
+[backup-runtime.sh](backup-runtime.sh)默认 dry-run，对整个 runtime 做冷备；所有自定义 DB/工件目录都需纳入实际备份范围。阶段 4 复核后（2026-10-23）：
+
+- 必须用单份必需的 `--env-file /etc/rai/rai.env`（通常仅 root 可读），其中明确写出 runtime 根、主库、控制库；此模式不能同时传 `--database`/`--control-database`。也可不用 env 文件，同时传两个库路径，但 service 必须只用 `Environment=` 明确声明相同的三个路径。**缺一个就拒绝**，不按模板猜默认主库。
+- `--apply` 会在停服前核对 service 的 `EnvironmentFiles`/`Environment`/`UnsetEnvironment`，并对 active service 读取 `/proc/<MainPID>/environ` 核对实际进程路径；`MainPID` 缺失或无效、env 文件在启动后被改动时都会拒绝备份，`RootDirectory=`/`BindPaths=` 也会拒绝。多份或可选 env 文件、unit/drop-in 路径覆盖、UnsetEnvironment、路径键的引号/空格/转义及其他未支持形式均拒绝。最终采用的规范化路径写入 manifest（不含 Token）。
+- `var/imports`、`var/model-artifacts/prediction`、`var/backups`、`var/quarantine` 递归扫描（`var/reports` 仍归档，但不纳入权威闭包）；任一符号链接（外部/悬空/根内）、不可读文件都**拒绝备份**。
+- 停服后生成 manifest v2，tar 后先拒绝危险/重复条目、链接和特殊类型，再受限解包并逐项比对；重扫所有权威树（包括原先不存在的树），确认归档窗口内无新增、删除、改写。失败不发布最终归档，恢复原服务状态；仍要停掉独立 CLI 写者。
+
+只读核对（不会停服、不会生成最终归档）：
+
+```bash
+sudo /usr/local/libexec/rai-backup/check-runtime-backup-paths.mjs --runtime-root /var/lib/rai \
+  --deployment-env /etc/rai/rai.env --out /root/rai-path-manifest.json --json
+```
+
+manifest 含部署路径（不含 Token），放受控位置。
 
 ```bash
 sudo install -d -m 700 /var/backups/rai
-sudo bash deploy/backup-runtime.sh --output-dir /var/backups/rai
+sudo /usr/local/libexec/rai-backup/backup-runtime.sh --output-dir /var/backups/rai \
+  --env-file /etc/rai/rai.env --manifest-out /root/rai-path-manifest.json
 # 确认路径、空间、服务状态和维护窗口后才执行：
-sudo bash deploy/backup-runtime.sh --output-dir /var/backups/rai --apply
+sudo /usr/local/libexec/rai-backup/backup-runtime.sh --output-dir /var/backups/rai \
+  --env-file /etc/rai/rai.env --apply
 ```
 
 备份结束会恢复原服务状态；升级迁移前再明确停服。迁移默认检查、显式apply，流程见[运维](../docs/OPERATIONS.md)。

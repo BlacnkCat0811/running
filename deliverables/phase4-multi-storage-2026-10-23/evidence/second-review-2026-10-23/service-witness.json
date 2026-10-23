@@ -1,0 +1,77 @@
+{
+  "format": "rai-phase4-service-witness-v1",
+  "environment": "isolated temporary files and systemctl/flock stubs; no production service",
+  "positive": {
+    "exitCode": 0,
+    "serviceStateAfter": "active",
+    "systemctlLog": [
+      "show rai-api.service -p EnvironmentFiles --value",
+      "show rai-api.service -p Environment --value",
+      "show rai-api.service -p UnsetEnvironment --value",
+      "show rai-api.service -p RootDirectory --value",
+      "show rai-api.service -p BindPaths --value",
+      "show rai-api.service -p LoadState --value",
+      "show rai-api.service -p ActiveState --value",
+      "show rai-api.service -p MainPID --value",
+      "stop rai-api.service",
+      "show rai-api.service -p ActiveState --value",
+      "start rai-api.service",
+      "show rai-api.service -p ActiveState --value"
+    ],
+    "closure": "complete",
+    "serviceConfiguration": {
+      "source": "service-environment-file",
+      "envFile": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-service-witness-RUg6tR/rai.env",
+      "normalizedPaths": {
+        "runtime": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-service-witness-RUg6tR/runtime",
+        "main": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-service-witness-RUg6tR/runtime/var/rai.sqlite",
+        "control": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-service-witness-RUg6tR/runtime/var/rai-control.sqlite"
+      }
+    },
+    "stores": {
+      "main": {
+        "status": "present",
+        "relativePath": "var/rai.sqlite",
+        "sha256": "74ad58adb94f99c495d43dc50fe1aacd7b6c318b5e0fa18ce497cf579cb46b33"
+      },
+      "control": {
+        "status": "present",
+        "relativePath": "var/rai-control.sqlite",
+        "sha256": "4ec24e5aeb542b5a25409b78ad38b994d1ad16f10f6faff4b4471ead38c43da4"
+      },
+      "runtime": {
+        "status": "present",
+        "relativePath": "var/runtime.sqlite",
+        "sha256": "cf636d1eaffecc09926a3ab74d7c8016b9c97e090a77325a31c3bb02f7741e4c"
+      },
+      "epochSidecar": {
+        "status": "absent",
+        "relativePath": "var/rai.sqlite.dataset-epoch.sqlite",
+        "sha256": null
+      },
+      "restoreJournal": {
+        "status": "absent",
+        "relativePath": "var/rai.sqlite.restore-journal.sqlite",
+        "sha256": null
+      }
+    },
+    "archiveEntries": [
+      "./",
+      "./var/",
+      "./var/runtime.sqlite",
+      "./var/model-artifacts/",
+      "./var/rai-control.sqlite",
+      "./var/rai.sqlite",
+      "./var/model-artifacts/prediction/",
+      "./var/model-artifacts/prediction/model.onnx"
+    ],
+    "archiveSha256": "7a250676eaf6f94c81deb8817344115d7b2dd7cf9ce9a72d95b0454723a04ae1"
+  },
+  "rejectedOverride": {
+    "exitCode": 2,
+    "stderr": "Refusing backup: --env-file cannot be combined with --database or --control-database.",
+    "serviceStateAfter": "active",
+    "systemctlLog": "",
+    "finalArchives": []
+  }
+}

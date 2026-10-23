@@ -1,0 +1,964 @@
+{
+  "root": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-baseline-ueJ3Me",
+  "healthStatus": 200,
+  "healthBody": {
+    "status": "ok",
+    "databaseReady": true,
+    "localOnly": true,
+    "serverId": "local",
+    "athleteId": "athlete_1",
+    "datasetEpoch": "default",
+    "syncProtocolVersion": 1,
+    "now": "2026-10-23T06:06:57.217Z"
+  },
+  "files": {
+    "var/rai.sqlite": {
+      "exists": true,
+      "size": 958464,
+      "sha256": "d828b039ac947c6f6ae40f33e028ed3cf8fb47f5df0c36f321b5d39f593ab26b",
+      "journalMode": {
+        "journal_mode": "wal"
+      },
+      "objects": [
+        {
+          "type": "index",
+          "name": "idx_ability_assessments_model_sequence"
+        },
+        {
+          "type": "index",
+          "name": "idx_ability_assessments_session"
+        },
+        {
+          "type": "index",
+          "name": "idx_analysis_job_merges_covering"
+        },
+        {
+          "type": "index",
+          "name": "idx_canonical_hrv_days_night"
+        },
+        {
+          "type": "index",
+          "name": "idx_canonical_nights_kind_wake"
+        },
+        {
+          "type": "index",
+          "name": "idx_canonical_nights_main"
+        },
+        {
+          "type": "index",
+          "name": "idx_canonical_nights_nap"
+        },
+        {
+          "type": "index",
+          "name": "idx_canonical_nights_wake_at"
+        },
+        {
+          "type": "index",
+          "name": "idx_coach_feedback_available"
+        },
+        {
+          "type": "index",
+          "name": "idx_coach_prediction_identity"
+        },
+        {
+          "type": "index",
+          "name": "idx_daily_snapshots_model_date"
+        },
+        {
+          "type": "index",
+          "name": "idx_daily_training_metrics_run_date"
+        },
+        {
+          "type": "index",
+          "name": "idx_daily_zone_profiles_run_date"
+        },
+        {
+          "type": "index",
+          "name": "idx_health_records_source_time"
+        },
+        {
+          "type": "index",
+          "name": "idx_health_records_type_end"
+        },
+        {
+          "type": "index",
+          "name": "idx_health_records_type_time"
+        },
+        {
+          "type": "index",
+          "name": "idx_healthkit_record_aliases_source"
+        },
+        {
+          "type": "index",
+          "name": "idx_healthkit_record_sources_record"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_batches_fingerprint"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_entity_changes_effective"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_entity_generations_generation"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_entity_tombstones_deleted_at"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_entity_tombstones_source"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_fact_history_valid_to"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_checkpoints_run_through"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_domain_snapshot_asof"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_release_refusals_run"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_release_refusals_stage"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_runs_feature_run"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_validation_gates_base"
+        },
+        {
+          "type": "index",
+          "name": "idx_model_validation_gates_candidate"
+        },
+        {
+          "type": "index",
+          "name": "idx_performance_entries_date"
+        },
+        {
+          "type": "index",
+          "name": "idx_performance_entries_recorded"
+        },
+        {
+          "type": "index",
+          "name": "idx_prediction_model_events_run_created"
+        },
+        {
+          "type": "index",
+          "name": "idx_prediction_model_runs_completed"
+        },
+        {
+          "type": "index",
+          "name": "idx_prediction_model_runs_lease"
+        },
+        {
+          "type": "index",
+          "name": "idx_prediction_model_runs_single_flight"
+        },
+        {
+          "type": "index",
+          "name": "idx_prediction_model_runs_status_created"
+        },
+        {
+          "type": "index",
+          "name": "idx_recompute_job_events_job"
+        },
+        {
+          "type": "index",
+          "name": "idx_recompute_jobs_status_created"
+        },
+        {
+          "type": "index",
+          "name": "idx_route_points_time"
+        },
+        {
+          "type": "index",
+          "name": "idx_route_versions_route_status"
+        },
+        {
+          "type": "index",
+          "name": "idx_training_metric_checkpoints_run"
+        },
+        {
+          "type": "index",
+          "name": "idx_training_metric_runs_status_created"
+        },
+        {
+          "type": "index",
+          "name": "idx_training_sessions_activity_time"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_features_feature_run_start"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_features_session"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_group_members_workout"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_groups_training_session"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_overrides_performance_protocol"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_overrides_session_revision"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_routes_workout_point_count"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_statistics_type"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_training_loads_run_date"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_training_loads_session"
+        },
+        {
+          "type": "index",
+          "name": "idx_workout_zone_summaries_run_type"
+        },
+        {
+          "type": "index",
+          "name": "idx_workouts_type_time"
+        },
+        {
+          "type": "index",
+          "name": "idx_zone_profile_settings_effective"
+        },
+        {
+          "type": "table",
+          "name": "ability_assessments"
+        },
+        {
+          "type": "table",
+          "name": "active_model_release"
+        },
+        {
+          "type": "table",
+          "name": "active_model_run"
+        },
+        {
+          "type": "table",
+          "name": "active_prediction_model"
+        },
+        {
+          "type": "table",
+          "name": "activity_summaries"
+        },
+        {
+          "type": "table",
+          "name": "analysis_job_coverage"
+        },
+        {
+          "type": "table",
+          "name": "analysis_job_merges"
+        },
+        {
+          "type": "table",
+          "name": "analysis_run_input_bindings"
+        },
+        {
+          "type": "table",
+          "name": "baseline_rebase_reviews"
+        },
+        {
+          "type": "table",
+          "name": "canonical_hrv_days"
+        },
+        {
+          "type": "table",
+          "name": "canonical_nights"
+        },
+        {
+          "type": "table",
+          "name": "coach_fact_operations"
+        },
+        {
+          "type": "table",
+          "name": "coach_feedback_revisions"
+        },
+        {
+          "type": "table",
+          "name": "coach_prediction_summaries"
+        },
+        {
+          "type": "table",
+          "name": "daily_ability_snapshots"
+        },
+        {
+          "type": "table",
+          "name": "daily_training_metrics"
+        },
+        {
+          "type": "table",
+          "name": "daily_zone_profiles"
+        },
+        {
+          "type": "table",
+          "name": "entity_inventory"
+        },
+        {
+          "type": "table",
+          "name": "feature_runs"
+        },
+        {
+          "type": "table",
+          "name": "health_records"
+        },
+        {
+          "type": "table",
+          "name": "healthkit_record_aliases"
+        },
+        {
+          "type": "table",
+          "name": "healthkit_record_facts"
+        },
+        {
+          "type": "table",
+          "name": "healthkit_record_sources"
+        },
+        {
+          "type": "table",
+          "name": "import_batch_files"
+        },
+        {
+          "type": "table",
+          "name": "import_batch_partitions"
+        },
+        {
+          "type": "table",
+          "name": "import_batches"
+        },
+        {
+          "type": "table",
+          "name": "import_entity_changes"
+        },
+        {
+          "type": "table",
+          "name": "import_entity_generations"
+        },
+        {
+          "type": "table",
+          "name": "import_entity_tombstones"
+        },
+        {
+          "type": "table",
+          "name": "import_fact_history"
+        },
+        {
+          "type": "table",
+          "name": "import_generations"
+        },
+        {
+          "type": "table",
+          "name": "import_issues"
+        },
+        {
+          "type": "table",
+          "name": "import_manifest"
+        },
+        {
+          "type": "table",
+          "name": "import_source_tombstones"
+        },
+        {
+          "type": "table",
+          "name": "model_checkpoints"
+        },
+        {
+          "type": "table",
+          "name": "model_domain_snapshots"
+        },
+        {
+          "type": "table",
+          "name": "model_release_bundles"
+        },
+        {
+          "type": "table",
+          "name": "model_release_refusals"
+        },
+        {
+          "type": "table",
+          "name": "model_runs"
+        },
+        {
+          "type": "table",
+          "name": "model_v2_runs"
+        },
+        {
+          "type": "table",
+          "name": "model_validation_gates"
+        },
+        {
+          "type": "table",
+          "name": "performance_entries"
+        },
+        {
+          "type": "table",
+          "name": "prediction_calibration_artifacts"
+        },
+        {
+          "type": "table",
+          "name": "prediction_label_state"
+        },
+        {
+          "type": "table",
+          "name": "prediction_model_events"
+        },
+        {
+          "type": "table",
+          "name": "prediction_model_runs"
+        },
+        {
+          "type": "table",
+          "name": "privacy_zone_revisions"
+        },
+        {
+          "type": "table",
+          "name": "privacy_zones"
+        },
+        {
+          "type": "table",
+          "name": "profile"
+        },
+        {
+          "type": "table",
+          "name": "recompute_job_events"
+        },
+        {
+          "type": "table",
+          "name": "recompute_jobs"
+        },
+        {
+          "type": "table",
+          "name": "recompute_validations"
+        },
+        {
+          "type": "table",
+          "name": "route_file_fingerprints"
+        },
+        {
+          "type": "table",
+          "name": "route_points"
+        },
+        {
+          "type": "table",
+          "name": "route_version_points"
+        },
+        {
+          "type": "table",
+          "name": "route_versions"
+        },
+        {
+          "type": "table",
+          "name": "schema_migrations"
+        },
+        {
+          "type": "table",
+          "name": "training_metric_checkpoints"
+        },
+        {
+          "type": "table",
+          "name": "training_metric_runs"
+        },
+        {
+          "type": "table",
+          "name": "training_sessions"
+        },
+        {
+          "type": "table",
+          "name": "training_zone_profile_settings"
+        },
+        {
+          "type": "table",
+          "name": "workout_events"
+        },
+        {
+          "type": "table",
+          "name": "workout_features"
+        },
+        {
+          "type": "table",
+          "name": "workout_group_members"
+        },
+        {
+          "type": "table",
+          "name": "workout_groups"
+        },
+        {
+          "type": "table",
+          "name": "workout_overrides"
+        },
+        {
+          "type": "table",
+          "name": "workout_routes"
+        },
+        {
+          "type": "table",
+          "name": "workout_statistics"
+        },
+        {
+          "type": "table",
+          "name": "workout_training_loads"
+        },
+        {
+          "type": "table",
+          "name": "workout_zone_summaries"
+        },
+        {
+          "type": "table",
+          "name": "workouts"
+        },
+        {
+          "type": "trigger",
+          "name": "immutable_baseline_rebase_review"
+        },
+        {
+          "type": "trigger",
+          "name": "immutable_model_domain_snapshot"
+        },
+        {
+          "type": "trigger",
+          "name": "immutable_model_v2_lineage"
+        },
+        {
+          "type": "trigger",
+          "name": "immutable_prediction_calibration"
+        },
+        {
+          "type": "trigger",
+          "name": "performance_entry_delete_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "performance_entry_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "performance_entry_link_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "performance_session_delete_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "performance_session_update_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "workout_label_delete_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "workout_label_invalidation"
+        },
+        {
+          "type": "trigger",
+          "name": "workout_label_update_invalidation"
+        },
+        {
+          "type": "view",
+          "name": "active_ability_assessments"
+        },
+        {
+          "type": "view",
+          "name": "active_daily_ability_snapshots"
+        },
+        {
+          "type": "view",
+          "name": "active_daily_training_metrics"
+        },
+        {
+          "type": "view",
+          "name": "active_daily_zone_profiles"
+        },
+        {
+          "type": "view",
+          "name": "active_workout_training_loads"
+        },
+        {
+          "type": "view",
+          "name": "active_workout_zone_summaries"
+        },
+        {
+          "type": "view",
+          "name": "effective_workout_overrides"
+        },
+        {
+          "type": "view",
+          "name": "readable_route_points"
+        }
+      ],
+      "migrations": [
+        {
+          "version": 1,
+          "name": "initial_canonical_health_schema"
+        },
+        {
+          "version": 2,
+          "name": "derived_ability_schema_and_stable_sessions"
+        },
+        {
+          "version": 3,
+          "name": "structured_performance_protocol"
+        },
+        {
+          "version": 4,
+          "name": "prediction_model_runs_and_direct_activation"
+        },
+        {
+          "version": 5,
+          "name": "prediction_model_worker_leases_and_single_flight"
+        },
+        {
+          "version": 6,
+          "name": "training_load_metrics_and_statistics_participation"
+        },
+        {
+          "version": 7,
+          "name": "complete_training_load_workout_evidence"
+        },
+        {
+          "version": 8,
+          "name": "allow_unknown_daily_load_confidence"
+        },
+        {
+          "version": 9,
+          "name": "harden_active_run_views"
+        },
+        {
+          "version": 10,
+          "name": "incremental_import_lineage"
+        },
+        {
+          "version": 11,
+          "name": "reserved_migration_11"
+        },
+        {
+          "version": 12,
+          "name": "raw_entity_generations_and_route_fingerprints"
+        },
+        {
+          "version": 13,
+          "name": "model_checkpoints_and_shadow_validation"
+        },
+        {
+          "version": 14,
+          "name": "training_zones_stimulus_and_composite_load_v3"
+        },
+        {
+          "version": 15,
+          "name": "composite_training_load_source"
+        },
+        {
+          "version": 16,
+          "name": "prediction_model_ability_baseline_fingerprint"
+        },
+        {
+          "version": 17,
+          "name": "canonical_nights_and_hrv_days"
+        },
+        {
+          "version": 18,
+          "name": "model_validation_gates"
+        },
+        {
+          "version": 19,
+          "name": "import_entity_tombstones"
+        },
+        {
+          "version": 20,
+          "name": "import_source_tombstones"
+        },
+        {
+          "version": 21,
+          "name": "workout_route_and_group_member_lookup_indexes"
+        },
+        {
+          "version": 22,
+          "name": "realign_health_record_stable_ids_and_remove_duplicates"
+        },
+        {
+          "version": 23,
+          "name": "model_v2_snapshots_release_and_calibration"
+        },
+        {
+          "version": 24,
+          "name": "engine_version_gate_three_state_refusals_and_epoch"
+        },
+        {
+          "version": 25,
+          "name": "baseline_rebase_review_history"
+        },
+        {
+          "version": 26,
+          "name": "privacy_zones_for_shared_route_cards"
+        },
+        {
+          "version": 27,
+          "name": "manual_performance_entries_for_labels"
+        },
+        {
+          "version": 28,
+          "name": "performance_event_identity_and_label_invalidation"
+        },
+        {
+          "version": 29,
+          "name": "unlinked_performance_event_label_invalidation"
+        },
+        {
+          "version": 30,
+          "name": "healthkit_record_source_identity"
+        },
+        {
+          "version": 31,
+          "name": "healthkit_record_aliases_and_source_facts"
+        },
+        {
+          "version": 32,
+          "name": "coach_feedback_and_prediction_companions"
+        },
+        {
+          "version": 33,
+          "name": "healthkit_alias_source_lookup"
+        },
+        {
+          "version": 34,
+          "name": "sparse_fact_history_and_generation_counters"
+        },
+        {
+          "version": 35,
+          "name": "route_versions_and_analysis_job_bindings"
+        },
+        {
+          "version": 36,
+          "name": "workout_soft_delete_marker"
+        },
+        {
+          "version": 37,
+          "name": "ledger_before_ranges"
+        },
+        {
+          "version": 38,
+          "name": "recompute_job_retry_attempts"
+        },
+        {
+          "version": 39,
+          "name": "analysis_input_bindings_and_coverage"
+        },
+        {
+          "version": 40,
+          "name": "night_range_read_index"
+        },
+        {
+          "version": 41,
+          "name": "training_metric_domain_checkpoints"
+        },
+        {
+          "version": 42,
+          "name": "analysis_job_merge_links"
+        },
+        {
+          "version": 43,
+          "name": "readable_route_points_view"
+        },
+        {
+          "version": 44,
+          "name": "coverage_evidence_columns"
+        },
+        {
+          "version": 45,
+          "name": "batch_analysis_dirty_evidence"
+        },
+        {
+          "version": 46,
+          "name": "health_record_availability"
+        },
+        {
+          "version": 47,
+          "name": "ability_assessment_session_lookup"
+        }
+      ]
+    },
+    "var/rai-control.sqlite": {
+      "exists": true,
+      "size": 94208,
+      "sha256": "b6657ea52d8996be20a08d6ff44e67bbec97b1358d7cb8b6accb96984c6d54ee",
+      "journalMode": {
+        "journal_mode": "wal"
+      },
+      "objects": [
+        {
+          "type": "index",
+          "name": "idx_mobile_plan_pushes_pushed_at"
+        },
+        {
+          "type": "index",
+          "name": "idx_mobile_plan_pushes_scope_idempotency"
+        },
+        {
+          "type": "index",
+          "name": "idx_mobile_plan_pushes_unscoped_idempotency"
+        },
+        {
+          "type": "index",
+          "name": "idx_mobile_plan_pushes_workout"
+        },
+        {
+          "type": "table",
+          "name": "mobile_coach_loop_receipts"
+        },
+        {
+          "type": "table",
+          "name": "mobile_control_schema"
+        },
+        {
+          "type": "table",
+          "name": "mobile_goals"
+        },
+        {
+          "type": "table",
+          "name": "mobile_goals_history"
+        },
+        {
+          "type": "table",
+          "name": "mobile_plan_operations"
+        },
+        {
+          "type": "table",
+          "name": "mobile_plan_pushes"
+        },
+        {
+          "type": "table",
+          "name": "mobile_publication_guard"
+        },
+        {
+          "type": "table",
+          "name": "mobile_training_migration_audit"
+        },
+        {
+          "type": "table",
+          "name": "mobile_training_state"
+        },
+        {
+          "type": "table",
+          "name": "mobile_training_state_history"
+        }
+      ],
+      "controlSchema": [
+        {
+          "version": 1,
+          "applied_at": "2026-10-23T06:06:56.717Z"
+        },
+        {
+          "version": 2,
+          "applied_at": "2026-10-23T06:06:56.718Z"
+        }
+      ]
+    },
+    "var/runtime.sqlite": {
+      "exists": true,
+      "size": 114688,
+      "sha256": "32d44e5831d02756b062da9e0721fe67c3e988a32dfa7ea2817b830fdfc7e1e3",
+      "journalMode": {
+        "journal_mode": "wal"
+      },
+      "objects": [
+        {
+          "type": "index",
+          "name": "idx_import_jobs_created"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_jobs_source"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_sources_last_used"
+        },
+        {
+          "type": "index",
+          "name": "idx_import_sources_sha"
+        },
+        {
+          "type": "index",
+          "name": "idx_mutation_commands_pending"
+        },
+        {
+          "type": "index",
+          "name": "idx_scope_abandonments_old"
+        },
+        {
+          "type": "index",
+          "name": "idx_scope_abandonments_old_unique"
+        },
+        {
+          "type": "table",
+          "name": "import_jobs"
+        },
+        {
+          "type": "table",
+          "name": "import_publication_supersessions"
+        },
+        {
+          "type": "table",
+          "name": "import_publications"
+        },
+        {
+          "type": "table",
+          "name": "import_scope_evidence"
+        },
+        {
+          "type": "table",
+          "name": "import_sources"
+        },
+        {
+          "type": "table",
+          "name": "mutation_commands"
+        },
+        {
+          "type": "table",
+          "name": "runtime_meta"
+        },
+        {
+          "type": "table",
+          "name": "scope_abandonments"
+        }
+      ]
+    },
+    "var/rai.sqlite.dataset-epoch.sqlite": {
+      "exists": false
+    },
+    "var/rai.sqlite.restore-journal.sqlite": {
+      "exists": false
+    }
+  }
+}

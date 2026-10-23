@@ -1,0 +1,7 @@
+check-docs EXIT=0
+check-doc-refs EXIT=0
+check-acceptance-matrix EXIT=0
+check-scripts EXIT=0
+check-package-boundaries EXIT=0
+check-training-plan-single-writer EXIT=0
+git-diff-check EXIT=0

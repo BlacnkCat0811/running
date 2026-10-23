@@ -1,0 +1,7 @@
+
+> rai-running-intelligence@0.1.0 check:package-boundaries
+> node scripts/check-package-boundaries.mjs
+
+包边界：16 个包 / 31 条 src 边；禁线 4 条
+包边界检查通过。
+EXIT=0

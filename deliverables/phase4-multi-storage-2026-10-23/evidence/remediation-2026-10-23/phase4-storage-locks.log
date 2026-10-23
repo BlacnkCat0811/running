@@ -1,0 +1,66 @@
+TAP version 13
+# (node:27249) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 控制库锁：另一个进程持有时 planner --apply 拒绝且不写状态
+ok 1 - 控制库锁：另一个进程持有时 planner --apply 拒绝且不写状态
+  ---
+  duration_ms: 1813.2895
+  type: 'test'
+  ...
+# Subtest: 控制库锁：API 启动拒绝已被持有的控制库，并让在线期间 CLI apply 无法交叉
+ok 2 - 控制库锁：API 启动拒绝已被持有的控制库，并让在线期间 CLI apply 无法交叉
+  ---
+  duration_ms: 4688.466214
+  type: 'test'
+  ...
+# Subtest: 主库锁：data:migrate --apply 在 API 锁被持有时非零退出且不执行迁移
+ok 3 - 主库锁：data:migrate --apply 在 API 锁被持有时非零退出且不执行迁移
+  ---
+  duration_ms: 1105.470896
+  type: 'test'
+  ...
+# Subtest: 可写 CLI 审计：每个能写权威库的入口都取 publication lock
+ok 4 - 可写 CLI 审计：每个能写权威库的入口都取 publication lock
+  ---
+  duration_ms: 1.750104
+  type: 'test'
+  ...
+# Subtest: 冷备路径闭包：显式路径必需、manifest v2、外置拒绝、缺库拒绝、Token 不回显
+ok 5 - 冷备路径闭包：显式路径必需、manifest v2、外置拒绝、缺库拒绝、Token 不回显
+  ---
+  duration_ms: 874.321999
+  type: 'test'
+  ...
+# Subtest: 冷备路径闭包：权威树内外部/悬空/根内符号链接一律拒绝备份
+ok 6 - 冷备路径闭包：权威树内外部/悬空/根内符号链接一律拒绝备份
+  ---
+  duration_ms: 617.925793
+  type: 'test'
+  ...
+# Subtest: 控制库锁：planner --apply 通过符号链接别名仍被拒绝，owner/行/哈希不变，释放后别名可重试
+ok 7 - 控制库锁：planner --apply 通过符号链接别名仍被拒绝，owner/行/哈希不变，释放后别名可重试
+  ---
+  duration_ms: 1732.878434
+  type: 'test'
+  ...
+# Subtest: 主库/控制库同物理文件：API 启动非零退出并点名冲突
+ok 8 - 主库/控制库同物理文件：API 启动非零退出并点名冲突
+  ---
+  duration_ms: 1160.853783
+  type: 'test'
+  ...
+# Subtest: 主库/控制库身份不可解析：API 启动失败关闭且不触碰数据库
+ok 9 - 主库/控制库身份不可解析：API 启动失败关闭且不触碰数据库
+  ---
+  duration_ms: 1169.90367
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 16482.184509

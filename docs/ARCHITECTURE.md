@@ -51,16 +51,17 @@ CLI 仍保留完整链路：SQLite 在线 backup 生成私有候选库 → TS/Ru
 
 应用**不再提供备份创建/删除 API**：`POST /v1/backups` 与 `DELETE /v1/backups/:name` 返回 `410`（`backup_creation_retired` / `backup_deletion_retired`），路由仍挂载以便旧客户端区分「刻意退役」与「路径写错」。但「删除数据集」与「恢复备份」两个危险操作仍会各自写一份安全快照（`before-delete` / `before-restore`），失败路径不消耗保留槽位。日常一致性备份由运维用 SQLite backup API 或存储快照完成，活跃 WAL 库不能只 `cp` 主库文件（见 §4 与 [运维](OPERATIONS.md)）。
 
-## 4. 四个存储与所有权
+## 4. 五类持久 SQLite 存储与所有权
 
 | 存储 | 内容 | 写入者 |
 |---|---|---|
-| 主库 `var/rai.sqlite` | 健康事实、训练、覆盖修订、不可变派生 run、已发布指针；迁移注册表是 schema 版本唯一来源 | API 请求/worker（同一时刻一个写者）；CLI 离线迁移 |
-| 控制库 `var/rai-control.sqlite` | 计划状态与历史、发布结果、排期回执；schema 表 `mobile_control_schema` 当前为 **v2**：`mobile_training_state` / `_history` / `_migration_audit`，另有 legacy `mobile_goals`/`_history`、`mobile_plan_pushes`、`mobile_plan_operations`、`mobile_coach_loop_receipts` | 只有 API 主线程（同步写，无自己的跨进程发布锁） |
-| 运行时 `var/runtime.sqlite` | 来源/任务状态、导入回执索引与发布 journal | API 主线程/worker |
-| epoch 侧车 `var/rai.sqlite.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 阶段日志；独立于可删除的事实库与运行时库的损坏恢复 | 恢复/替换/删库时写入；删库阶段含 `deletionId`、保护快照与 runtime 账本实例；缺失/损坏时失败关闭 |
+| 主库 `var/rai.sqlite`（`RAI_DATABASE`） | 健康事实、训练、覆盖修订、不可变派生 run、已发布指针、主库内 dataset epoch 行；迁移注册表是 schema 版本唯一来源 | API 请求/worker（同一时刻一个写者）；CLI 离线迁移/导入（持主库 publication lock） |
+| 控制库 `var/rai-control.sqlite`（`RAI_CONTROL_DATABASE`） | 计划状态与历史、发布结果、排期回执、操作幂等、`mobile_publication_guard`；schema 表 `mobile_control_schema` 当前为 **v2**：`mobile_training_state` / `_history` / `_migration_audit`，另有 legacy `mobile_goals`/`_history`、`mobile_plan_pushes`、`mobile_plan_operations`、`mobile_coach_loop_receipts` | API 主线程（同步写）；API 启动即持有控制库 publication lock 直到退出；`migrate-training-planner --apply` 取同一把锁，在线时拒绝执行 |
+| 运行时 `var/runtime.sqlite` | 来源/任务状态、导入回执索引、导入发布 journal、作用域账本、runtime 实例 ID | API 主线程/worker；无独立迁移 CLI（启动维护） |
+| epoch 侧车 `<RAI_DATABASE>.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 阶段日志；独立于可删除的事实库与运行时库的损坏恢复 | 恢复/替换/删库/放弃作用域时写入；删库阶段含 `deletionId`、保护快照与 runtime 账本实例；缺失/损坏时失败关闭；**正常首次安装可不存在** |
+| restore journal 侧车 `<RAI_DATABASE>.restore-journal.sqlite` | 一次显式备份恢复的持久意图：阶段 `prepared/installed/committed`、备份字节身份、planned epoch、deletion 绑定、安装后主库摘要 | 只由恢复流程写入；**正常运行时不存在**，存在即代表恢复未收口；空文件与不存在不能混同 |
 
-四者都可能含敏感信息，属于同一维护/备份边界；迁移与恢复按 [运维](OPERATIONS.md) 协调，不能只复制一个活跃 `.sqlite` 文件。
+五者都可能含敏感信息，且各自可能有 `-wal` / `-shm` 侧车，属于同一维护/备份边界；迁移与恢复按 [运维](OPERATIONS.md) 协调，不能只复制一个活跃 `.sqlite` 文件，也不能把 restore journal 合并进 runtime 库（runtime 的损坏隔离会丢掉恢复意图）。
 
 ## 5. 请求与一致性边界
 
@@ -68,7 +69,7 @@ CLI 仍保留完整链路：SQLite 在线 backup 生成私有候选库 → TS/Ru
 
 **写路径**：写命令具备 revision/idempotency/generation 约束；反馈保存与其后分析成功是两个状态；`202 queued` 不是成功。单写者由五层叠加强制，失败方向一律 fail-closed：
 
-1. **publication lock**：跨进程、按 DB 路径；API 进程整个生命周期持有，CLI 迁移/导入短暂持有，后启动者拒绝启动。
+1. **publication lock**：跨进程、按 DB 路径；API 进程整个生命周期持有主库锁与控制库锁，CLI 迁移/导入/作用域恢复短暂持有对应锁，后启动者拒绝启动。控制库锁不改变“跨库 detect+retry”的语义，只排除在线 API 与离线控制库 apply 的交叉。
 2. **TaskAdmissionScheduler**：进程内作业级 FIFO 准入（import/recompute/prediction/command），拿不到以 409 收场。
 3. **MutationCoordinator**：进程内单 HTTP 请求级互斥（`mutation_conflict`），请求生命周期内保证释放。
 4. **write-lease**：跨线程短写租约（一个租约窗口 = 一笔短事务）；授权超时是**撤回请求并抛可重试错误**，不是无保护地继续写。
@@ -76,7 +77,7 @@ CLI 仍保留完整链路：SQLite 在线 backup 生成私有候选库 → TS/Ru
 
 **跨库一致性是 detect + retry，不是分布式事务**：主库与控制库不能原子提交，正确性靠 guard/epoch/摘要的前后比对与重试，读端必须能接受「读期间事实变化，请重读」。模型发布是另一层：run/快照/指针在同库内，删除/回滚/保留策略见[算法§14](ALGORITHM.md#14-发布删除与回滚)；原始健康记录不随模型回滚重写。
 
-**datasetEpoch**：恢复备份或替换数据集必须改变 epoch，不能继续复用旧缓存/同步游标；epoch 侧车的存在就是为了在事实库被删除/恢复后仍能读到它。
+**datasetEpoch**：恢复备份或替换数据集必须改变 epoch，不能继续复用旧缓存/同步游标；epoch 侧车的存在就是为了在事实库被删除/恢复后仍能读到它。主库内的 `rai.dataset-epoch` 行与侧车是同一 epoch 的两个端点：二者不一致时恢复入口失败关闭，不能靠猜选一个。
 
 ## 6. Workspace 职责与依赖边界
 

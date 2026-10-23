@@ -69,7 +69,7 @@ ZIP 先检查路径、大小、数量、重复条目与导出根目录：不能�
 Override 保存修订和可得性。反馈保存之后的重算失败不应撤销已保存反馈；客户端要分别展示两种结果。
 对已删训练，旧 run 可保留作历史证据，新 published run 不能继续使用其派生贡献。
 
-## 8. 四个存储、schema 与版本
+## 8. 五类持久 SQLite 存储、schema 与版本
 
 [主库](../packages/storage-sqlite/src/database.ts) 的迁移注册表是 schema 版本的**唯一来源**（导出的 `MIGRATION_VERSIONS` / `FROZEN_MIGRATION_CHECKSUMS`；本文**不写死**版本区间或条数，避免随每次新增迁移过期）；历史 migration 正文/checksum 冻结，不允许原地修改以「修复」旧库。
 
@@ -77,8 +77,9 @@ Override 保存修订和可得性。反馈保存之后的重算失败不应撤�
 |---|---|
 | 主库 `var/rai.sqlite` | 健康事实、训练、覆盖修订、不可变派生 run、发布指针；迁移注册表唯一来源 |
 | 控制库 `var/rai-control.sqlite` | 计划状态与历史、发布结果、排期回执；schema 表 `mobile_control_schema` 当前 v2（`mobile_training_state` / `_history` / `_migration_audit` + legacy `mobile_goals`/`_history`、`mobile_plan_pushes`、`mobile_plan_operations`、`mobile_coach_loop_receipts`） |
-| 运行时 `var/runtime.sqlite` | 来源/任务状态、导入回执索引与发布 journal |
-| epoch 侧车 `var/rai.sqlite.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 阶段日志；独立于可删除的事实库与 runtime 的损坏恢复，损坏/身份不匹配时失败关闭 |
+| 运行时 `var/runtime.sqlite` | 来源/任务状态、导入回执索引与发布 journal、作用域账本、runtime 实例 ID |
+| epoch 侧车 `<RAI_DATABASE>.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 阶段日志；独立于可删除的事实库与 runtime 的损坏恢复，损坏/身份不匹配时失败关闭；正常首次安装可不存在 |
+| restore journal 侧车 `<RAI_DATABASE>.restore-journal.sqlite` | 显式备份恢复的持久意图（阶段、备份字节身份、planned epoch、deletion 绑定、安装后主库摘要）；正常运行时不存在，存在即未收口；空文件与不存在不能混同 |
 
 主库表族（语义分组，不是完整清单）：
 
@@ -109,7 +110,7 @@ API 运行期的「发布」是**同库事务 + 受控指针 + publication guard
 
 两条路径都不在 API 请求路径上。回滚窗口有限，已清理工件不可凭指针名「复活」。
 
-**备份边界**：四个存储（主库、控制库、运行时、epoch 侧车）+ 上传 + 工件属于同一维护边界。应用**不提供备份创建/删除 API**（`POST /v1/backups` 与 `DELETE /v1/backups/:name` 返回 `410`）；但「删除数据集」与「恢复备份」仍各自写 `before-delete` / `before-restore` 安全快照，失败路径不消耗保留槽位。日常一致性备份由运维用 SQLite backup API 或存储快照完成；活跃 WAL 库不能只 `cp`，也不能漏掉 epoch 侧车。
+**备份边界**：五类持久 SQLite（主库、控制库、运行时、epoch 侧车、restore journal 侧车）+ 各自的 `-wal`/`-shm`/`-journal` + 上传 + 工件属于同一维护边界。restore journal 只在恢复未收口时出现；备份必须原样保留它，不能把“没有 journal”当作“恢复已完成”。应用**不提供备份创建/删除 API**（`POST /v1/backups` 与 `DELETE /v1/backups/:name` 返回 `410`）；但「删除数据集」与「恢复备份」仍各自写 `before-delete` / `before-restore` 安全快照，失败路径不消耗保留槽位。日常一致性备份由运维用 SQLite backup API 或存储快照完成；活跃 WAL 库不能只 `cp`，也不能漏掉 epoch 侧车。
 
 ## 10. 报告
 

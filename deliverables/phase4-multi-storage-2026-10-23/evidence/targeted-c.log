@@ -1,0 +1,442 @@
+TAP version 13
+# (node:13179) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13179) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: legacy-day protection survives confirmation and restart, expires by Shanghai date, and keeps live gates
+ok 1 - legacy-day protection survives confirmation and restart, expires by Shanghai date, and keeps live gates
+  ---
+  duration_ms: 601.945636
+  type: 'test'
+  ...
+# Subtest: the week read model reports a past prescription as planned and unobserved
+ok 2 - the week read model reports a past prescription as planned and unobserved
+  ---
+  duration_ms: 191.583039
+  type: 'test'
+  ...
+# Subtest: mobileToday returns zero-filled today with week series and recent workouts
+ok 3 - mobileToday returns zero-filled today with week series and recent workouts
+  ---
+  duration_ms: 1441.717588
+  type: 'test'
+  ...
+# Subtest: the top-level data date and the coverage date cannot drift apart
+ok 4 - the top-level data date and the coverage date cannot drift apart
+  ---
+  duration_ms: 856.131395
+  type: 'test'
+  ...
+# Subtest: mobileToday aggregates today distance, energy and pace from active loads
+ok 5 - mobileToday aggregates today distance, energy and pace from active loads
+  ---
+  duration_ms: 714.022859
+  type: 'test'
+  ...
+# Subtest: mobile week averages cover all runs and distributions exclude other weeks and low coverage
+ok 6 - mobile week averages cover all runs and distributions exclude other weeks and low coverage
+  ---
+  duration_ms: 632.22536
+  type: 'test'
+  ...
+# Subtest: mobile week without current runs has missing averages rather than zero
+ok 7 - mobile week without current runs has missing averages rather than zero
+  ---
+  duration_ms: 477.882744
+  type: 'test'
+  ...
+# Subtest: mobileStatistics returns month buckets, totals and zone distribution shape
+ok 8 - mobileStatistics returns month buckets, totals and zone distribution shape
+  ---
+  duration_ms: 565.321553
+  type: 'test'
+  ...
+# Subtest: mobileStatistics rolls 28-day totals anchored on the latest data date
+ok 9 - mobileStatistics rolls 28-day totals anchored on the latest data date
+  ---
+  duration_ms: 567.25253
+  type: 'test'
+  ...
+# Subtest: mobileTrends returns weeks, personal records and insights
+ok 10 - mobileTrends returns weeks, personal records and insights
+  ---
+  duration_ms: 668.931216
+  type: 'test'
+  ...
+# Subtest: mobile goals store persists, clamps and recovers from corrupt files
+ok 11 - mobile goals store persists, clamps and recovers from corrupt files
+  ---
+  duration_ms: 38.524897
+  type: 'test'
+  ...
+# Subtest: race goals reject impossible calendar dates instead of normalizing them
+ok 12 - race goals reject impossible calendar dates instead of normalizing them
+  ---
+  duration_ms: 1.778314
+  type: 'test'
+  ...
+# Subtest: recommendation explainability reports same-kind distance adjustments
+ok 13 - recommendation explainability reports same-kind distance adjustments
+  ---
+  duration_ms: 0.18475
+  type: 'test'
+  ...
+# Subtest: recovery trends use the configured local calendar date at the day boundary
+ok 14 - recovery trends use the configured local calendar date at the day boundary
+  ---
+  duration_ms: 427.014596
+  type: 'test'
+  ...
+# Subtest: control goals migration commits the current goal and its history together
+ok 15 - control goals migration commits the current goal and its history together
+  ---
+  duration_ms: 93.664599
+  type: 'test'
+  ...
+# Subtest: mobile goals store can lock today's session without dropping other goals
+ok 16 - mobile goals store can lock today's session without dropping other goals
+  ---
+  duration_ms: 6.82877
+  type: 'test'
+  ...
+# Subtest: weekly plan keeps valid structures and drops malformed ones
+ok 17 - weekly plan keeps valid structures and drops malformed ones
+  ---
+  duration_ms: 2.69758
+  type: 'test'
+  ...
+# Subtest: a goals edit keeps the generated structure and its distance unless the session kind changes
+ok 18 - a goals edit keeps the generated structure and its distance unless the session kind changes
+  ---
+  duration_ms: 10.78353
+  type: 'test'
+  ...
+# Subtest: mobile recovery reports a historical night as a reference, never as today's reading
+ok 19 - mobile recovery reports a historical night as a reference, never as today's reading
+  ---
+  duration_ms: 663.447616
+  type: 'test'
+  ...
+# Subtest: workout plan covers today plus the rest of the window
+ok 20 - workout plan covers today plus the rest of the window
+  ---
+  duration_ms: 0.849487
+  type: 'test'
+  ...
+# Subtest: workout plan re-measures every day from its own structure
+ok 21 - workout plan re-measures every day from its own structure
+  ---
+  duration_ms: 0.392539
+  type: 'test'
+  ...
+# Subtest: rest days and completed days are never marked executable
+ok 22 - rest days and completed days are never marked executable
+  ---
+  duration_ms: 0.361489
+  type: 'test'
+  ...
+# Subtest: a day without a stored structure still derives one from its kind
+ok 23 - a day without a stored structure still derives one from its kind
+  ---
+  duration_ms: 1.031786
+  type: 'test'
+  ...
+# Subtest: ranges come from the zone profile per session kind
+ok 24 - ranges come from the zone profile per session kind
+  ---
+  duration_ms: 0.315399
+  type: 'test'
+  ...
+# Subtest: a goals row written before weekPlanAudit existed still reads back as null
+ok 25 - a goals row written before weekPlanAudit existed still reads back as null
+  ---
+  duration_ms: 50.219415
+  type: 'test'
+  ...
+# Subtest: a merged plan day stores the distance its structure measures, not the editor's hint
+ok 26 - a merged plan day stores the distance its structure measures, not the editor's hint
+  ---
+  duration_ms: 50.065886
+  type: 'test'
+  ...
+# Subtest: without a zone prescription the merge keeps the prior distance, never the hint
+ok 27 - without a zone prescription the merge keeps the prior distance, never the hint
+  ---
+  duration_ms: 26.386733
+  type: 'test'
+  ...
+# Subtest: a day typed into the editor without a structure is persisted with the one its kind builds
+ok 28 - a day typed into the editor without a structure is persisted with the one its kind builds
+  ---
+  duration_ms: 33.499667
+  type: 'test'
+  ...
+# Subtest: a rest day stores neither a distance nor a structure
+ok 29 - a rest day stores neither a distance nor a structure
+  ---
+  duration_ms: 38.056909
+  type: 'test'
+  ...
+# Subtest: a locked snapshot is re-measured on the way out of the store
+ok 30 - a locked snapshot is re-measured on the way out of the store
+  ---
+  duration_ms: 91.948746
+  type: 'test'
+  ...
+# Subtest: a structure sent for a different kind than the stored day is discarded
+ok 31 - a structure sent for a different kind than the stored day is discarded
+  ---
+  duration_ms: 64.303978
+  type: 'test'
+  ...
+# Subtest: editing the distance of a target-sized day rebuilds it, and a fixed-dose day ignores it
+ok 32 - editing the distance of a target-sized day rebuilds it, and a fixed-dose day ignores it
+  ---
+  duration_ms: 47.146987
+  type: 'test'
+  ...
+# Subtest: a client-supplied structure over the single-day ceiling is rebuilt, never stored
+ok 33 - a client-supplied structure over the single-day ceiling is rebuilt, never stored
+  ---
+  duration_ms: 61.190194
+  type: 'test'
+  ...
+# Subtest: a structure already inside the ceiling is stored untouched
+ok 34 - a structure already inside the ceiling is stored untouched
+  ---
+  duration_ms: 21.65257
+  type: 'test'
+  ...
+# Subtest: a structure built for the new kind is trusted even when the stored kind differs
+ok 35 - a structure built for the new kind is trusted even when the stored kind differs
+  ---
+  duration_ms: 25.530386
+  type: 'test'
+  ...
+# Subtest: race goals create, edit and clear survive control database reopen without replacing weekly plans
+ok 36 - race goals create, edit and clear survive control database reopen without replacing weekly plans
+  ---
+  duration_ms: 47.496485
+  type: 'test'
+  ...
+# (node:13237) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: guard protocol: two real processes never observe a consistent mixed snapshot
+ok 37 - guard protocol: two real processes never observe a consistent mixed snapshot
+  ---
+  duration_ms: 1958.874028
+  type: 'test'
+  ...
+# guard invariant: rounds=2000 consistent=1055 (52.8%) detected=945 (47.3%) detected_outside_concurrency=0 p50=0.077ms p95=0.483ms child=(node:13240) ExperimentalWarning: SQLite is an experimental feature and might change at any time\\n(Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: HTTP load: readers stay consistent, 503s are retryable, latency stays bounded
+ok 38 - HTTP load: readers stay consistent, 503s are retryable, latency stays bounded
+  ---
+  duration_ms: 9902.673822
+  type: 'test'
+  ...
+# cross-process publisher: publications=60 window=4ms gap=2ms
+# HTTP readers n=200: 200=133 503=67 p50=178.5ms p95=484.9ms (200-only p95=493.8ms) inconsistent_200=0
+# HTTP retired writers n=50: 410=50
+# reader 503 codes: {"plan_snapshot_changed":67}
+# (node:13300) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13300) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: a stable control snapshot is read twice and built once
+ok 39 - a stable control snapshot is read twice and built once
+  ---
+  duration_ms: 34.884358
+  type: 'test'
+  ...
+# Subtest: one control change retries against the newer snapshot and returns its build
+ok 40 - one control change retries against the newer snapshot and returns its build
+  ---
+  duration_ms: 0.484269
+  type: 'test'
+  ...
+# Subtest: a control that keeps changing fails closed after three attempts
+ok 41 - a control that keeps changing fails closed after three attempts
+  ---
+  duration_ms: 2.363321
+  type: 'test'
+  ...
+# Subtest: attempts: 1 builds once and throws without a second attempt
+ok 42 - attempts: 1 builds once and throws without a second attempt
+  ---
+  duration_ms: 1.132076
+  type: 'test'
+  ...
+# Subtest: the attempt budget is clamped to 1..5
+ok 43 - the attempt budget is clamped to 1..5
+  ---
+  duration_ms: 1.619135
+  type: 'test'
+  ...
+# Subtest: G: a publication that starts during the build discards the attempt and rebuilds
+ok 44 - G: a publication that starts during the build discards the attempt and rebuilds
+  ---
+  duration_ms: 0.866416
+  type: 'test'
+  ...
+# Subtest: G: a live publication marker blocks the build and fails closed after three attempts
+ok 45 - G: a live publication marker blocks the build and fails closed after three attempts
+  ---
+  duration_ms: 7.582172
+  type: 'test'
+  ...
+# Subtest: G: a stale pending marker left by a crashed publisher no longer blocks reads
+ok 46 - G: a stale pending marker left by a crashed publisher no longer blocks reads
+  ---
+  duration_ms: 7.701263
+  type: 'test'
+  ...
+# Subtest: P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+ok 47 - P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+  ---
+  duration_ms: 1.530204
+  type: 'test'
+  ...
+# Subtest: P3-02: a guard that starts failing after the build also fails closed
+ok 48 - P3-02: a guard that starts failing after the build also fails closed
+  ---
+  duration_ms: 1.188016
+  type: 'test'
+  ...
+# Subtest: P3-02: a store without any guard still degrades to the digest-only check
+ok 49 - P3-02: a store without any guard still degrades to the digest-only check
+  ---
+  duration_ms: 0.277559
+  type: 'test'
+  ...
+# Subtest: G: optionalPublicationGuard binds a store method and is absent when unsupported
+ok 50 - G: optionalPublicationGuard binds a store method and is absent when unsupported
+  ---
+  duration_ms: 0.15922
+  type: 'test'
+  ...
+# Subtest: read amplification: one successful attempt reads control twice and digests twice
+ok 51 - read amplification: one successful attempt reads control twice and digests twice
+  ---
+  duration_ms: 0.229699
+  type: 'test'
+  ...
+# Subtest: P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+ok 52 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+  ---
+  duration_ms: 3.785806
+  type: 'test'
+  ...
+# Subtest: P2-02: only an inode change counts as a replaced database file
+ok 53 - P2-02: only an inode change counts as a replaced database file
+  ---
+  duration_ms: 0.17606
+  type: 'test'
+  ...
+# Subtest: benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+ok 54 - benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+  ---
+  duration_ms: 32.835699
+  type: 'test'
+  ...
+# readStableSnapshot p50=0.033ms p95=0.152ms (n=200)
+# Subtest: trainingPlanState reads one control pair before and one after the build
+ok 55 - trainingPlanState reads one control pair before and one after the build
+  ---
+  duration_ms: 392.844822
+  type: 'test'
+  ...
+# Subtest: P3-03: planReadGuard never disables itself, even inside the store's own publication
+ok 56 - P3-03: planReadGuard never disables itself, even inside the store's own publication
+  ---
+  duration_ms: 0.612268
+  type: 'test'
+  ...
+# Subtest: P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+ok 57 - P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+  ---
+  duration_ms: 39.809983
+  type: 'test'
+  ...
+# Subtest: P3-15: a publication that keeps changing bounds the cost to attempts x build
+ok 58 - P3-15: a publication that keeps changing bounds the cost to attempts x build
+  ---
+  duration_ms: 1.014256
+  type: 'test'
+  ...
+# 3-attempt fail-closed span: 0.150ms (no sleep by design)
+# (node:13319) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: control-schema migration 2 is appended after version 1 and keeps legacy rows readable
+ok 59 - control-schema migration 2 is appended after version 1 and keeps legacy rows readable
+  ---
+  duration_ms: 1285.739308
+  type: 'test'
+  ...
+# Subtest: apply writes state, one history row and one audit row together, and read returns the same state
+ok 60 - apply writes state, one history row and one audit row together, and read returns the same state
+  ---
+  duration_ms: 60.202439
+  type: 'test'
+  ...
+# Subtest: replaying the same source digest is a no-op; a different digest is an explicit conflict
+ok 61 - replaying the same source digest is a no-op; a different digest is an explicit conflict
+  ---
+  duration_ms: 73.038131
+  type: 'test'
+  ...
+# Subtest: CAS conflict on a concurrent revision is detected and does not overwrite
+ok 62 - CAS conflict on a concurrent revision is detected and does not overwrite
+  ---
+  duration_ms: 88.462015
+  type: 'test'
+  ...
+# Subtest: state validation fails closed on unknown schemaVersion, non-canonical scope and ended/active state
+ok 63 - state validation fails closed on unknown schemaVersion, non-canonical scope and ended/active state
+  ---
+  duration_ms: 55.635685
+  type: 'test'
+  ...
+# Subtest: a pre-existing public race goal is preserved into the state (F04 data half)
+ok 64 - a pre-existing public race goal is preserved into the state (F04 data half)
+  ---
+  duration_ms: 72.127964
+  type: 'test'
+  ...
+# Subtest: an ended coach loop is stored as paused/ended and its all-rest window is not recorded as intent
+ok 65 - an ended coach loop is stored as paused/ended and its all-rest window is not recorded as intent
+  ---
+  duration_ms: 66.43767
+  type: 'test'
+  ...
+# Subtest: conflicting legacy sources are reported as conflicts and refused without writing
+ok 66 - conflicting legacy sources are reported as conflicts and refused without writing
+  ---
+  duration_ms: 1265.850771
+  type: 'test'
+  ...
+# Subtest: CLI dry-run writes nothing and delegates the derived mode to training-mode-policy
+ok 67 - CLI dry-run writes nothing and delegates the derived mode to training-mode-policy
+  ---
+  duration_ms: 1066.7249
+  type: 'test'
+  ...
+# Subtest: CLI apply requires the dry-run digest, writes once, replays idempotently and rejects a mismatch
+ok 68 - CLI apply requires the dry-run digest, writes once, replays idempotently and rejects a mismatch
+  ---
+  duration_ms: 6620.929769
+  type: 'test'
+  ...
+# Subtest: store refuses a schema-less database instead of creating tables implicitly
+ok 69 - store refuses a schema-less database instead of creating tables implicitly
+  ---
+  duration_ms: 14.932005
+  type: 'test'
+  ...
+1..69
+# tests 69
+# suites 0
+# pass 69
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 37659.549148
+EXIT=0

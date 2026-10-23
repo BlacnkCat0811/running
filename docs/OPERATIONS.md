@@ -41,7 +41,7 @@ npm run check:package-boundaries
 | `RAI_ALLOW_ANONYMOUS_ROUTES` | `0` | 仅本地匿名原始轨迹；生产不得设置 |
 | `RAI_LOG_LEVEL` | `info` | 调成 `warn` 会丢掉 Fastify 的 `incoming request`/`request completed` 证据 |
 | `RAI_RUNTIME_ROOT` | 仓库根 | 整 runtime 根；云端 `/var/lib/rai`，备份以它为边界 |
-| `RAI_DATABASE` | `<runtime>/var/rai.sqlite` | 主健康库 |
+| `RAI_DATABASE` | `<projectRoot>/var/rai.sqlite`（生产 env 必须显式设为 `<runtime>/var/rai.sqlite`） | 主健康库 |
 | `RAI_CONTROL_DATABASE` | `<runtime>/var/rai-control.sqlite` | 控制库（计划/目标/回执）；schema v2 在 API 启动时自动追加 |
 | `RAI_SERVER_ID` / `RAI_ATHLETE_ID` / `RAI_DATASET_EPOCH` | `local` / `athlete_1` / `default` | 同步身份三元组；升级时必须沿用旧值，否则客户端 anchor/cache scope 变化 |
 | `RAI_IMPORT_MAX_ZIP_BYTES` | `67108864`（64 MiB） | 单批上传 ZIP 上界；与 nginx `/v1/imports/uploads` 的 `client_max_body_size` 成对 |
@@ -162,14 +162,15 @@ sudo journalctl -u rai-api --since '-20 min' -o cat | jq -R 'fromjson? | select(
 
 ## 迁移：先检查，备份后才 apply
 
-四个持久化文件的边界（备份/迁移/恢复都要一起考虑）：
+五类持久 SQLite 的边界（备份/迁移/恢复都要一起考虑；各自还可能有 `-wal`/`-shm`/`-journal`）：
 
 | 文件 | 内容 | 迁移方式 |
 |---|---|---|
-| `<runtime>/var/rai.sqlite` | 主健康库（事实、路线、Fitness、模型发布） | `data:migrate` 显式 `--apply`；API 发现待迁移会退出 78 |
-| `<runtime>/var/rai-control.sqlite` | 控制库（目标、计划/历史、回执、操作幂等） | schema 由 API 启动时自动追加（当前 v2）；**数据**迁移走 `migrate-training-planner.mts` |
-| `<runtime>/var/runtime.sqlite` | 导入来源/任务/运行时状态 | 无独立迁移 CLI；随 API 启动维护 |
-| `<rai.sqlite>.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 删库操作日志 | 恢复/删库路径自动维护；阶段记录含 `deletionId`/快照名/runtime 实例标识；备份时不得漏 |
+| `<runtime>/var/rai.sqlite`（`RAI_DATABASE`） | 主健康库（事实、路线、Fitness、模型发布、主库 epoch 行） | `data:migrate` 显式 `--apply`（持主库 publication lock）；API 发现待迁移会退出 78 |
+| `<runtime>/var/rai-control.sqlite`（`RAI_CONTROL_DATABASE`） | 控制库（目标、计划/历史、回执、操作幂等、publication guard） | schema 由 API 启动时自动追加（当前 v2）；**数据**迁移走 `migrate-training-planner.mts`；API 启动持有控制库锁，CLI `--apply` 取同一把锁 |
+| `<runtime>/var/runtime.sqlite` | 导入来源/任务/运行时状态、作用域账本 | 无独立迁移 CLI；随 API 启动维护 |
+| `<rai.sqlite>.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 删库操作日志 | 恢复/删库/放弃作用域路径自动维护；阶段记录含 `deletionId`/快照名/runtime 实例标识；备份时不得漏；正常首次安装可不存在 |
+| `<rai.sqlite>.restore-journal.sqlite` | 显式备份恢复的持久意图（prepared/installed/committed、备份字节身份、planned epoch） | 只由恢复流程自动维护；正常运行时不存在，存在即恢复未收口；**不得**合并进 runtime 库，备份时原样保留 |
 
 ```bash
 npm run data:migrate -- --database /absolute/path/rai.sqlite
@@ -184,7 +185,7 @@ npm run data:migrate -- --database /absolute/path/rai.sqlite --apply
 ## 控制库训练计划迁移（2026-10-20 起）
 
 - **schema 自动、数据显式**：控制库 schema 到 v2（`mobile_training_state`/`_history`/`_migration_audit`）由 API 启动时幂等追加；旧 `mobile_goals` 行不改写。控制库**数据**迁移（legacy goals/run_coach/coach_loop → 统一状态）只由运维 CLI 执行，不随启动自动跑。
-- 工具：[scripts/migrate-training-planner.mts](../scripts/migrate-training-planner.mts)。**默认 dry-run**；只打开 `--control-db` 指定的控制库，**从不打开主健康库**；不参与 API 的 publication lock，因此**必须在停服窗口执行**。
+- 工具：[scripts/migrate-training-planner.mts](../scripts/migrate-training-planner.mts)。**默认 dry-run**；只打开 `--control-db` 指定的控制库，**从不打开主健康库**；`--apply` 取控制库自己的 publication lock（`<control>.import.lock`），API 在线时直接拒绝，因此**仍必须在停服窗口执行**。控制库锁与主库锁的顺序固定为“主库 → 控制库”，planner 只取控制库，不会形成锁环。
 - 流程：先做控制库一致性备份 → dry-run 记录 `sourceDigest` 与分类/conflicts → 停 `rai-api` → `--apply --expect-source-digest <sha256>` → 启动 API → 核对 v2 读取/状态 revision 与 410 矩阵。详细实测见[统一训练排课 v2 发布记录](../deliverables/UNIFIED_TRAINING_PLAN_RELEASE_2026-10-20.md) §4。
 
 ```bash
@@ -274,7 +275,37 @@ curl -fsS -X POST -H "Authorization: Bearer $RAI_API_TOKEN" -H "content-type: ap
 curl -fsS -H "Authorization: Bearer $RAI_API_TOKEN" https://<domain>/v1/health
 ```
 
-云端[backup-runtime.sh](../deploy/backup-runtime.sh)是现成的外部备份工具：停服、整runtime冷备，默认dry-run；要求所有数据库/工件处于该runtime且没有独立CLI写者。
+云端[backup-runtime.sh](../deploy/backup-runtime.sh)是现成的外部备份工具：停服、整 runtime 冷备，默认 dry-run；要求所有数据库/工件处于该 runtime 且没有独立 CLI 写者。阶段 4 复核后（2026-10-23）脚本按以下顺序失败关闭：
+
+1. **路径必须显式且来源唯一**：`--env-file /etc/rai/rai.env` 中必须同时有 `RAI_RUNTIME_ROOT`、`RAI_DATABASE`、`RAI_CONTROL_DATABASE`；不能同时传 `--database` 或 `--control-database`。不用 env 文件时，必须同时传两个库路径，且 service 的 `Environment=` 直接声明相同的三个绝对路径。缺一个即拒绝。检查器不按 `<runtime>/var/rai.sqlite` 猜默认值。
+2. **停服前证明 service 配置**：`--apply` 读取 `EnvironmentFiles`、`Environment`、`UnsetEnvironment`，只接受单份必需的 EnvironmentFile、无路径覆盖、无 UnsetEnvironment，或完全不用 EnvironmentFile 的直接配置。多份/可选文件、路径键重复、引号/空格/转义等未支持写法在停服前失败。active service 还会读取 `/proc/<MainPID>/environ` 并核对实际进程的三个路径；`MainPID` 缺失或无效、env 文件在服务启动后被改动或与实际进程不一致时，都在停服前拒绝备份。`RootDirectory=`/`BindPaths=` 也会被拒绝，因为无法证明服务命名空间与主机路径一致。同一组三条 service 配置路径用于 preflight 和停服后的 manifest，检查器规范化路径并拒绝链接；manifest 记录来源和规范化路径，不记录 Token。
+3. **递归路径闭包**：对 `var/imports`、`var/model-artifacts/prediction`、`var/backups`、`var/quarantine` 递归枚举；`var/reports` 仍随整根归档，但属于可重建报告，不纳入权威闭包；任一符号链接（外部、悬空、根内）、不可读文件、FIFO/设备项都拒绝备份，并在诊断中给出相对路径。五类 SQLite 及其 `-wal`/`-shm`/`-journal` 也必须是普通文件。
+4. **归档语义校验**：停服后生成 `path-manifest.json`（格式 v2，逐文件相对路径/类型/大小/SHA-256）。校验器先拒绝危险/重复 tar 条目、链接与特殊类型，再受限解包；权威树即使原为 `absent` 也重扫源根及恢复根，与清单精确比较。任一新增、删改或类型变化均在发布最终归档前失败，服务恢复原状态。仍须确保没有独立 CLI 写者。
+5. **root-owned 安装**：备份脚本以 root 执行，但仓库目录由 `rai` 用户可写，不能直接 `sudo bash deploy/...` 或 `sudo node scripts/...`。先安装到 root 拥有的目录：
+
+```bash
+sudo install -d -o root -g root -m 0755 /usr/local/libexec/rai-backup
+sudo install -o root -g root -m 0755 \
+  deploy/backup-runtime.sh \
+  scripts/check-runtime-backup-paths.mjs \
+  scripts/verify-runtime-backup-archive.mjs \
+  scripts/runtime-tar-safe.mjs \
+  scripts/resolve-runtime-backup-service.mjs \
+  scripts/runtime-backup-env.mjs \
+  scripts/verify-live-service-env.mjs \
+  /usr/local/libexec/rai-backup/
+```
+
+6. **只读预检**：dry-run 加 `--manifest-out FILE` 会生成同一份 manifest（不启动备份、不停服）：
+
+```bash
+sudo /usr/local/libexec/rai-backup/check-runtime-backup-paths.mjs --runtime-root /var/lib/rai \
+  --deployment-env /etc/rai/rai.env --out /root/rai-path-manifest.json --json
+# 或：sudo /usr/local/libexec/rai-backup/backup-runtime.sh --output-dir /var/backups/rai \
+#       --env-file /etc/rai/rai.env --manifest-out /root/rai-path-manifest.json
+```
+
+manifest 含部署路径（不含 Token），应保存在受控位置，不要放进仓库或工单附件。
 恢复前记录原版本与配置，验证备份hash/格式，在维护窗口按原目录权限恢复并检查完整性、身份与datasetEpoch。仓库没有名为restore-runtime.sh的自动整runtime恢复脚本，不应臆造命令。
 备份本身含健康数据/路线/Token相关配置，离线保存、严格权限、按容量策略保留；不上传到Git或外部分析服务。
 
@@ -282,7 +313,7 @@ curl -fsS -H "Authorization: Bearer $RAI_API_TOKEN" https://<domain>/v1/health
 
 普通同步/导入/重算**不做**项目级整库备份、全库完整性扫描、整库候选复制或换库，也**不等待**外部备份完成；**升级脚本同样不再代做备份**，只打印责任提示且不校验运维是否已完成。备份由服务器运维独立负责。以下约束现在就成立：
 
-- 活跃的WAL库**不能**只`cp rai.sqlite`当一致备份；也**不得**为“提速”删掉`-wal`/`-shm`侧车。正确做法是SQLite一致性备份API、与存储协调的快照，或暂停全部写者后完整备份相关文件。
+- 活跃的WAL库**不能**只`cp rai.sqlite`当一致备份；也**不得**为“提速”删掉`-wal`/`-shm`/`-journal`侧车。正确做法是SQLite一致性备份API、与存储协调的快照，或暂停全部写者后完整备份相关文件。
 - 要整个项目状态一致，主库、控制库、runtime、dataset-epoch 侧车、上传与工件、配置/身份必须落在**同一个恢复边界**内。多个库各自在线备份**不**自动等于跨库一致；跨库一致性靠 API 的 publication guard + detect/retry 在运行期保证，不靠备份事务。
 - 备份凭证与数据由运维保护；健康原文、精确轨迹与Token不进入仓库。
 - 恢复或替换数据集必须显式处理schema兼容与`datasetEpoch`。旧备份还原后**不得**让客户端继续复用新游标——那会把“接收状态已丢失”伪装成没丢。

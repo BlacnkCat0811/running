@@ -1,0 +1,3 @@
+check-docs EXIT=0
+check-doc-refs EXIT=0
+check-acceptance-matrix EXIT=0

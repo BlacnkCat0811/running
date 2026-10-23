@@ -1,0 +1,284 @@
+{
+  "format": "rai-phase4-backup-restore-rehearsal-v1",
+  "at": "2026-10-23T06:41:04.421Z",
+  "root": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0",
+  "archive": {
+    "path": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/archive/runtime.tar",
+    "bytes": 1224704,
+    "sha256": "4bb89f1ec04d9d75de6378adf3112f4dca1356acbb0f3354e77dff62e34244bc",
+    "entries": 18
+  },
+  "files": {
+    "var/rai.sqlite": "present",
+    "var/rai-control.sqlite": "present",
+    "var/runtime.sqlite": "present",
+    "var/rai.sqlite.dataset-epoch.sqlite": "present",
+    "var/rai.sqlite.restore-journal.sqlite": "absent"
+  },
+  "pathManifest": {
+    "format": "rai-runtime-path-manifest-v1",
+    "generatedAt": "2026-10-23T06:40:59.241Z",
+    "runtimeRoot": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source",
+    "configuredRuntimeRoot": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source",
+    "envFile": null,
+    "stores": {
+      "main": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite",
+        "status": "present",
+        "required": true,
+        "kind": "file",
+        "sizeBytes": 958464,
+        "modifiedAt": "2026-10-23T06:40:58.895Z",
+        "walPresent": true,
+        "shmPresent": true,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "control": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai-control.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai-control.sqlite",
+        "status": "present",
+        "required": true,
+        "kind": "file",
+        "sizeBytes": 94208,
+        "modifiedAt": "2026-10-23T06:40:58.966Z",
+        "walPresent": false,
+        "shmPresent": false
+      },
+      "epochSidecar": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite.dataset-epoch.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite.dataset-epoch.sqlite",
+        "status": "present",
+        "required": false,
+        "kind": "file",
+        "sizeBytes": 12288,
+        "modifiedAt": "2026-10-23T06:40:58.888Z",
+        "walPresent": false,
+        "shmPresent": false
+      },
+      "restoreJournal": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite.restore-journal.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite.restore-journal.sqlite",
+        "status": "absent",
+        "required": false
+      },
+      "runtime": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/runtime.sqlite",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/runtime.sqlite",
+        "status": "present",
+        "required": true,
+        "kind": "file",
+        "sizeBytes": 77824,
+        "modifiedAt": "2026-10-23T06:40:59.029Z",
+        "walPresent": false,
+        "shmPresent": false
+      }
+    },
+    "artifacts": {
+      "imports": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/imports",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/imports",
+        "status": "present",
+        "required": false,
+        "kind": "directory",
+        "sizeBytes": null,
+        "modifiedAt": "2026-10-23T06:40:58.350Z"
+      },
+      "importSourcesJson": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/imports/sources.json",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/imports/sources.json",
+        "status": "absent",
+        "required": false
+      },
+      "reports": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/reports",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/reports",
+        "status": "present",
+        "required": false,
+        "kind": "directory",
+        "sizeBytes": null,
+        "modifiedAt": "2026-10-23T06:40:59.045Z"
+      },
+      "predictionArtifacts": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/model-artifacts/prediction",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/model-artifacts/prediction",
+        "status": "present",
+        "required": false,
+        "kind": "directory",
+        "sizeBytes": null,
+        "modifiedAt": "2026-10-23T06:40:59.041Z"
+      },
+      "backups": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/backups",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/backups",
+        "status": "absent",
+        "required": false
+      },
+      "quarantine": {
+        "configured": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/quarantine",
+        "resolved": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/quarantine",
+        "status": "absent",
+        "required": false
+      }
+    },
+    "closure": "complete",
+    "problems": []
+  },
+  "checks": [
+    {
+      "name": "path-closure:complete",
+      "ok": true,
+      "detail": "all stores inside runtime root"
+    },
+    {
+      "name": "manifest:main:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite"
+    },
+    {
+      "name": "manifest:control:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai-control.sqlite"
+    },
+    {
+      "name": "manifest:runtime:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/runtime.sqlite"
+    },
+    {
+      "name": "manifest:epochSidecar:present",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite.dataset-epoch.sqlite"
+    },
+    {
+      "name": "manifest:restoreJournal:absent",
+      "ok": true,
+      "detail": "/private/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/source/var/rai.sqlite.restore-journal.sqlite"
+    },
+    {
+      "name": "archive:tar",
+      "ok": true,
+      "detail": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/archive/runtime.tar"
+    },
+    {
+      "name": "archive:contains:./var/rai.sqlite",
+      "ok": true,
+      "detail": "./var/rai.sqlite"
+    },
+    {
+      "name": "archive:contains:./var/rai-control.sqlite",
+      "ok": true,
+      "detail": "./var/rai-control.sqlite"
+    },
+    {
+      "name": "archive:contains:./var/runtime.sqlite",
+      "ok": true,
+      "detail": "./var/runtime.sqlite"
+    },
+    {
+      "name": "archive:contains:./var/rai.sqlite.dataset-epoch.sqlite",
+      "ok": true,
+      "detail": "./var/rai.sqlite.dataset-epoch.sqlite"
+    },
+    {
+      "name": "archive:contains:./var/model-artifacts/prediction/model.onnx",
+      "ok": true,
+      "detail": "./var/model-artifacts/prediction/model.onnx"
+    },
+    {
+      "name": "archive:contains:./var/imports/upload_rehearsal/source.zip",
+      "ok": true,
+      "detail": "./var/imports/upload_rehearsal/source.zip"
+    },
+    {
+      "name": "restore:extract",
+      "ok": true,
+      "detail": "/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-phase4-rehearsal-QxTjd0/restored"
+    },
+    {
+      "name": "quick_check:var/rai.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/rai-control.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/runtime.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/rai.sqlite.dataset-epoch.sqlite",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "quick_check:var/rai.sqlite.restore-journal.sqlite:absent",
+      "ok": true,
+      "detail": "optional/missing"
+    },
+    {
+      "name": "control:plan_revision",
+      "ok": true,
+      "detail": 7
+    },
+    {
+      "name": "control:operation_receipt",
+      "ok": true,
+      "detail": "{\"ok\":true,\"revision\":7}"
+    },
+    {
+      "name": "runtime:scope_established",
+      "ok": true,
+      "detail": "established"
+    },
+    {
+      "name": "runtime:job_terminal",
+      "ok": true,
+      "detail": "succeeded"
+    },
+    {
+      "name": "api:health",
+      "ok": true,
+      "detail": "{\"status\":\"ok\",\"databaseReady\":true}"
+    },
+    {
+      "name": "api:dataset_epoch",
+      "ok": true,
+      "detail": "epoch-2026-10-23-rehearsal-a"
+    },
+    {
+      "name": "api:workouts_restored",
+      "ok": true,
+      "detail": "status=200 count=1"
+    },
+    {
+      "name": "artifact:onnx_bytes",
+      "ok": true,
+      "detail": "byte-identical"
+    },
+    {
+      "name": "artifact:upload_bytes",
+      "ok": true,
+      "detail": "byte-identical"
+    },
+    {
+      "name": "main:import_receipt",
+      "ok": true,
+      "detail": "receipt present"
+    }
+  ],
+  "passed": true,
+  "rpo": "0 for the stopped-writer window (no writes accepted after archive started)",
+  "rtoMs": 4899,
+  "environment": {
+    "platform": "darwin",
+    "arch": "x64",
+    "node": "v22.23.2",
+    "note": "isolated temp root; systemctl stop/start and real production config were not exercised"
+  }
+}

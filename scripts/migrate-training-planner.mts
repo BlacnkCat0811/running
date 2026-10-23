@@ -29,7 +29,6 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import { resolve } from "node:path";
 
 import { parseArgs } from "node:util";
 
@@ -47,6 +46,7 @@ import {
 import { resolveTrainingMode } from "../apps/api/src/training-mode-policy.js";
 import { digest } from "../apps/api/src/plan-digest.js";
 import type { MobilePlanOperationScope } from "@rai/api-contracts";
+import { DatabasePathIdentityError, acquireDatabasePublicationLock, resolveDatabasePathIdentity } from "@rai/storage-sqlite";
 
 interface CliError {
   code: string;
@@ -184,7 +184,7 @@ function main(argv: string[]): number {
     return 0;
   }
   try {
-    const controlDb = resolve(requireString(values, "control-db"));
+    const controlDb = resolveDatabasePathIdentity(requireString(values, "control-db"));
     const identity: MobilePlanOperationScope = {
       serverId: requireString(values, "server-id"),
       athleteId: requireString(values, "athlete-id"),
@@ -197,56 +197,86 @@ function main(argv: string[]): number {
     const apply = values.apply === true;
     const expectedDigest = typeof values["expect-source-digest"] === "string" ? values["expect-source-digest"] : null;
 
-    const database = openControlDatabase(controlDb, !apply);
+    // 阶段 4（I1/T11）：`--apply` 与控制库的在线 API 不能交叉。API 在启动时
+    // 取得 `<control>.import.lock` 并持有整个生命周期；这里取同一把锁，锁冲突
+    // 直接失败而不是“SQLite 忙时等 2 秒再猜”。dry-run 保持纯只读，不取锁。
+    const releaseControlLock = apply ? acquireControlLockOrFail(controlDb) : null;
     try {
-      const scopeKey = trainingPlanScopeKey(identity);
-      const sources = readTrainingPlanMigrationSources(database, identity);
-      const classification = classifyTrainingPlanMigration({
-        scope: identity,
-        sources,
-        businessDate,
-        now: new Date().toISOString()
-      });
-      const report = reportBase(classification, businessDate, identity);
-      if (!apply) {
-        process.stdout.write(`${JSON.stringify({ ...report, mode: "dry-run" }, null, 2)}\n`);
-        return 0;
-      }
+      const database = openControlDatabase(controlDb, !apply);
+      try {
+        const scopeKey = trainingPlanScopeKey(identity);
+        const sources = readTrainingPlanMigrationSources(database, identity);
+        const classification = classifyTrainingPlanMigration({
+          scope: identity,
+          sources,
+          businessDate,
+          now: new Date().toISOString()
+        });
+        const report = reportBase(classification, businessDate, identity);
+        if (!apply) {
+          process.stdout.write(`${JSON.stringify({ ...report, mode: "dry-run" }, null, 2)}\n`);
+          return 0;
+        }
 
-      const applyReport = { ...report, mode: "apply" };
-      if (expectedDigest === null) {
-        return emitFailure("expect_source_digest_required",
-          "--apply 必须带 --expect-source-digest，且等于 dry-run 打印的 sourceDigest", applyReport);
-      }
-      if (expectedDigest !== classification.sourceDigest) {
-        return emitFailure("source_digest_mismatch",
-          `--expect-source-digest 与当前来源不符（期望 ${expectedDigest}，实际 ${classification.sourceDigest}），未写入任何数据`,
-          { ...applyReport, expectedSourceDigest: expectedDigest });
-      }
-      if (!classification.applyAllowed || classification.state === null) {
-        return emitFailure("migration_conflicts",
-          "来源存在冲突或无效载荷，拒绝写入；请先按 conflicts/notes 处理数据", applyReport);
-      }
+        const applyReport = { ...report, mode: "apply" };
+        if (expectedDigest === null) {
+          return emitFailure("expect_source_digest_required",
+            "--apply 必须带 --expect-source-digest，且等于 dry-run 打印的 sourceDigest", applyReport);
+        }
+        if (expectedDigest !== classification.sourceDigest) {
+          return emitFailure("source_digest_mismatch",
+            `--expect-source-digest 与当前来源不符（期望 ${expectedDigest}，实际 ${classification.sourceDigest}），未写入任何数据`,
+            { ...applyReport, expectedSourceDigest: expectedDigest });
+        }
+        if (!classification.applyAllowed || classification.state === null) {
+          return emitFailure("migration_conflicts",
+            "来源存在冲突或无效载荷，拒绝写入；请先按 conflicts/notes 处理数据", applyReport);
+        }
 
-      // Schema creation is idempotent and happens only after every read-only
-      // refusal above, so a refused apply never writes a table.
-      ensureTrainingPlanSchema(database);
-      const store = new TrainingPlanStore(database);
-      const result = store.applyMigration({
-        scope: scopeKey,
-        expectedAbsentOrRevision: classification.existingRevision,
-        sourceDigest: classification.sourceDigest,
-        state: classification.state
-      });
-      const applied = appliedReport(result, store, scopeKey);
-      process.stdout.write(`${JSON.stringify({ ...report, ...applied, mode: "apply" }, null, 2)}\n`);
-      return applied.ok === true ? 0 : 1;
+        // Schema creation is idempotent and happens only after every read-only
+        // refusal above, so a refused apply never writes a table.
+        ensureTrainingPlanSchema(database);
+        const store = new TrainingPlanStore(database);
+        const result = store.applyMigration({
+          scope: scopeKey,
+          expectedAbsentOrRevision: classification.existingRevision,
+          sourceDigest: classification.sourceDigest,
+          state: classification.state
+        });
+        const applied = appliedReport(result, store, scopeKey);
+        process.stdout.write(`${JSON.stringify({ ...report, ...applied, mode: "apply" }, null, 2)}\n`);
+        return applied.ok === true ? 0 : 1;
+      } finally {
+        database.close();
+      }
     } finally {
-      database.close();
+      releaseControlLock?.();
     }
   } catch (error) {
     if (error instanceof CliFailure) return emitFailure(error.code, error.message, null);
     return emitFailure("internal_error", error instanceof Error ? error.message : String(error), null);
+  }
+}
+
+/**
+ * 取得控制库的跨进程发布锁；失败时转成稳定的 CLI 错误码。
+ *
+ * `acquireDatabasePublicationLock` 的锁文件是 `<db>.import.lock`（历史命名，
+ * 所有写入者共用）。这里只包一层错误翻译，不改变锁本身的 liveness/PID 复用规则。
+ */
+function acquireControlLockOrFail(controlDb: string): () => void {
+  try {
+    return acquireDatabasePublicationLock(controlDb, "cli");
+  } catch (error) {
+    if (error instanceof DatabasePathIdentityError) {
+      // Path identity refusals are not lock contention: hardlinks, dangling
+      // symlinks and unresolved paths must keep their actionable code.
+      fail(error.code,
+        `控制库路径无法建立可证明的物理身份：${error.message}`);
+    }
+    fail("control_database_locked",
+      `控制库正在被另一个进程使用（通常是在线 API）：${error instanceof Error ? error.message : String(error)}。`
+      + "请先停止 rai-api 再执行 --apply。");
   }
 }
 

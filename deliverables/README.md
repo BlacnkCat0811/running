@@ -9,6 +9,19 @@
 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
 [项目审查](../docs/PROJECT_REVIEW.md) 后删除。
 
+- [阶段 4 多存储与发布一致性实施与验收](phase4-multi-storage-2026-10-23/PHASE4_REPORT.md)：
+  按[实施方案](PHASE4_MULTI_STORAGE_PUBLICATION_IMPLEMENTATION_PLAN_2026-10-23.md)完成存储所有权矩阵、
+  一致性窗口、T01–T12 故障矩阵、冷备/整套恢复演练与最小修复（五库文档口径、冷备路径闭包、
+  控制库跨进程锁）；**停在阶段门，未部署生产**。后续[复核与优化实施方案](phase4-multi-storage-2026-10-23/PHASE4_REVIEW_REMEDIATION_PLAN.md)
+  发现锁路径别名、冷备路径闭包与默认路径不一致等发布阻断项；修复批次 A–C 已完成，G2/T11/I1 与 G4/T12/I8
+  在隔离环境完成当轮复验（报告 §13；新增 `verify-runtime-backup-archive.mjs` 与 47/47 扩展演练）。
+  [二次审查与优化验收方案](phase4-multi-storage-2026-10-23/PHASE4_SECOND_REVIEW_AND_ACCEPTANCE_PLAN.md)
+  复现了备份配置覆盖导致的漏库路径及归档校验窗口；N1–N3 已按方案修复，本轮隔离定向测试 41/41、恢复演练 47/47（报告 §14）。生产前人工门仍未完成。分册：
+  [所有权矩阵](phase4-multi-storage-2026-10-23/STORAGE_OWNERSHIP_MATRIX.md)、
+  [一致性窗口](phase4-multi-storage-2026-10-23/CONSISTENCY_WINDOWS.md)、
+  [故障矩阵](phase4-multi-storage-2026-10-23/FAULT_MATRIX.md)、
+  [冷备恢复演练](phase4-multi-storage-2026-10-23/BACKUP_RESTORE_REHEARSAL.md)、
+  [初验证据](phase4-multi-storage-2026-10-23/evidence/SHA256SUMS)、[复核复验证据](phase4-multi-storage-2026-10-23/evidence/remediation-2026-10-23/SHA256SUMS)、[二次审查修复证据](phase4-multi-storage-2026-10-23/evidence/second-review-2026-10-23/SHA256SUMS)。
 - [PHASE3_IMPORT_ANALYSIS_RELEASE_2026-10-23.md](PHASE3_IMPORT_ANALYSIS_RELEASE_2026-10-23.md)：
   阶段 3 发布记录（`d03f4ae`，2026-10-23 部署生产）——发布前冷备、主库无迁移、
   runtime schema 启动维护、健康检查/只读冒烟与回滚边界；**按用户要求未运行测试套件**。

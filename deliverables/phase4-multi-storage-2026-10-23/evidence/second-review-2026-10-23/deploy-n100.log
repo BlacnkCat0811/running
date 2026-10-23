@@ -1,0 +1,256 @@
+TAP version 13
+# Subtest: whole-runtime backup defaults dry-run and rejects output inside runtime
+ok 1 - whole-runtime backup defaults dry-run and rejects output inside runtime
+  ---
+  duration_ms: 515.404201
+  type: 'test'
+  ...
+# Subtest: whole-runtime backup includes control/artifacts and restores active service state
+ok 2 - whole-runtime backup includes control/artifacts and restores active service state
+  ---
+  duration_ms: 9369.149308
+  type: 'test'
+  ...
+# Subtest: whole-runtime backup includes control/artifacts and restores inactive service state
+ok 3 - whole-runtime backup includes control/artifacts and restores inactive service state
+  ---
+  duration_ms: 7293.391246
+  type: 'test'
+  ...
+# Subtest: external authoritative database path is refused before stopping the service
+ok 4 - external authoritative database path is refused before stopping the service
+  ---
+  duration_ms: 2039.660385
+  type: 'test'
+  ...
+# Subtest: backup records a five-store path manifest and refuses unverifiable apply
+ok 5 - backup records a five-store path manifest and refuses unverifiable apply
+  ---
+  duration_ms: 5656.09391
+  type: 'test'
+  ...
+# Subtest: archive verifier rejects a store sidecar that appears after the manifest
+ok 6 - archive verifier rejects a store sidecar that appears after the manifest
+  ---
+  duration_ms: 473.577075
+  type: 'test'
+  ...
+# Subtest: active CLI publication lock is refused after stopping the service
+ok 7 - active CLI publication lock is refused after stopping the service
+  ---
+  duration_ms: 3573.750882
+  type: 'test'
+  ...
+# Subtest: failed backup removes partial output and restarts previously active service
+ok 8 - failed backup removes partial output and restarts previously active service
+  ---
+  duration_ms: 4125.14563
+  type: 'test'
+  ...
+# Subtest: backup reports service restart failure even when the archive was created
+ok 9 - backup reports service restart failure even when the archive was created
+  ---
+  duration_ms: 4835.029355
+  type: 'test'
+  ...
+# Subtest: dry-run writes an explicit read-only path manifest
+ok 10 - dry-run writes an explicit read-only path manifest
+  ---
+  duration_ms: 276.83463
+  type: 'test'
+  ...
+# Subtest: runtime-only env without explicit database paths is refused
+ok 11 - runtime-only env without explicit database paths is refused
+  ---
+  duration_ms: 1261.96609
+  type: 'test'
+  ...
+# Subtest: symbolic link in an authoritative path is refused before stopping: top-level external file link
+ok 12 - symbolic link in an authoritative path is refused before stopping: top-level external file link
+  ---
+  duration_ms: 1786.822011
+  type: 'test'
+  ...
+# Subtest: symbolic link in an authoritative path is refused before stopping: authoritative tree root link
+ok 13 - symbolic link in an authoritative path is refused before stopping: authoritative tree root link
+  ---
+  duration_ms: 2346.047371
+  type: 'test'
+  ...
+# Subtest: symbolic link in an authoritative path is refused before stopping: nested external directory link
+ok 14 - symbolic link in an authoritative path is refused before stopping: nested external directory link
+  ---
+  duration_ms: 2030.489708
+  type: 'test'
+  ...
+# Subtest: symbolic link in an authoritative path is refused before stopping: dangling link
+ok 15 - symbolic link in an authoritative path is refused before stopping: dangling link
+  ---
+  duration_ms: 1513.000675
+  type: 'test'
+  ...
+# Subtest: symbolic link in an authoritative path is refused before stopping: database WAL link
+ok 16 - symbolic link in an authoritative path is refused before stopping: database WAL link
+  ---
+  duration_ms: 1549.362812
+  type: 'test'
+  ...
+# Subtest: unreadable authoritative file is refused before stopping
+ok 17 - unreadable authoritative file is refused before stopping
+  ---
+  duration_ms: 1561.544131
+  type: 'test'
+  ...
+# Subtest: service env different from the backup env is refused before stopping
+ok 18 - service env different from the backup env is refused before stopping
+  ---
+  duration_ms: 1179.648898
+  type: 'test'
+  ...
+# Subtest: env file plus CLI override is refused before stop: outside actual main database
+ok 19 - env file plus CLI override is refused before stop: outside actual main database
+  ---
+  duration_ms: 39.250616
+  type: 'test'
+  ...
+# Subtest: env file plus CLI override is refused before stop: different inside main database
+ok 20 - env file plus CLI override is refused before stop: different inside main database
+  ---
+  duration_ms: 30.727331
+  type: 'test'
+  ...
+# Subtest: multiple and optional EnvironmentFiles are rejected before stop
+ok 21 - multiple and optional EnvironmentFiles are rejected before stop
+  ---
+  duration_ms: 2159.562458
+  type: 'test'
+  ...
+# Subtest: UnsetEnvironment and quoted path syntax are rejected before stop
+ok 22 - UnsetEnvironment and quoted path syntax are rejected before stop
+  ---
+  duration_ms: 1613.403615
+  type: 'test'
+  ...
+# Subtest: service database path through a symlink is refused
+ok 23 - service database path through a symlink is refused
+  ---
+  duration_ms: 1839.114103
+  type: 'test'
+  ...
+# Subtest: direct Environment configuration matching three paths produces a verified archive
+ok 24 - direct Environment configuration matching three paths produces a verified archive
+  ---
+  duration_ms: 5105.338609
+  type: 'test'
+  ...
+# Subtest: source change during the archive window refuses to publish the archive
+ok 25 - source change during the archive window refuses to publish the archive
+  ---
+  duration_ms: 3994.035423
+  type: 'test'
+  ...
+# Subtest: archive window rejects absent tree becomes external link
+ok 26 - archive window rejects absent tree becomes external link
+  ---
+  duration_ms: 4505.35766
+  type: 'test'
+  ...
+# Subtest: archive window rejects absent tree becomes internal link
+ok 27 - archive window rejects absent tree becomes internal link
+  ---
+  duration_ms: 3808.724286
+  type: 'test'
+  ...
+# Subtest: archive window rejects absent tree becomes dangling link
+ok 28 - archive window rejects absent tree becomes dangling link
+  ---
+  duration_ms: 4706.332789
+  type: 'test'
+  ...
+# Subtest: archive window rejects absent tree becomes directory
+ok 29 - archive window rejects absent tree becomes directory
+  ---
+  duration_ms: 3588.059789
+  type: 'test'
+  ...
+# Subtest: archive window rejects absent tree becomes file
+ok 30 - archive window rejects absent tree becomes file
+  ---
+  duration_ms: 3612.807308
+  type: 'test'
+  ...
+# Subtest: archive window rejects present tree gains file
+ok 31 - archive window rejects present tree gains file
+  ---
+  duration_ms: 3464.393315
+  type: 'test'
+  ...
+# Subtest: archive window rejects present tree loses file
+ok 32 - archive window rejects present tree loses file
+  ---
+  duration_ms: 3426.969942
+  type: 'test'
+  ...
+# Subtest: archive window rejects present tree rewrites same-size file
+ok 33 - archive window rejects present tree rewrites same-size file
+  ---
+  duration_ms: 3881.393403
+  type: 'test'
+  ...
+# Subtest: post-tar creation of an absent tree is caught by source rescan
+ok 34 - post-tar creation of an absent tree is caught by source rescan
+  ---
+  duration_ms: 3420.86924
+  type: 'test'
+  ...
+# Subtest: post-tar symlink replacement of a tree parent is caught
+ok 35 - post-tar symlink replacement of a tree parent is caught
+  ---
+  duration_ms: 3418.14474
+  type: 'test'
+  ...
+# Subtest: unsafe tar is rejected before extraction: absolute path
+ok 36 - unsafe tar is rejected before extraction: absolute path
+  ---
+  duration_ms: 319.885587
+  type: 'test'
+  ...
+# Subtest: unsafe tar is rejected before extraction: parent traversal
+ok 37 - unsafe tar is rejected before extraction: parent traversal
+  ---
+  duration_ms: 329.356597
+  type: 'test'
+  ...
+# Subtest: unsafe tar is rejected before extraction: link parent
+ok 38 - unsafe tar is rejected before extraction: link parent
+  ---
+  duration_ms: 324.057085
+  type: 'test'
+  ...
+# Subtest: unsafe tar is rejected before extraction: duplicate name
+ok 39 - unsafe tar is rejected before extraction: duplicate name
+  ---
+  duration_ms: 338.210549
+  type: 'test'
+  ...
+# Subtest: unsafe tar is rejected before extraction: FIFO member
+ok 40 - unsafe tar is rejected before extraction: FIFO member
+  ---
+  duration_ms: 317.899009
+  type: 'test'
+  ...
+# Subtest: home deployment templates keep private bind addresses and safe defaults
+ok 41 - home deployment templates keep private bind addresses and safe defaults
+  ---
+  duration_ms: 1.161306
+  type: 'test'
+  ...
+1..41
+# tests 41
+# suites 0
+# pass 41
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 106773.429277

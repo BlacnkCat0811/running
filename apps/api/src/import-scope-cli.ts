@@ -36,11 +36,13 @@ import {
   protectionSnapshotProblem, quarantineUnreadableMainDatabase
 } from "./deletion-recovery.js";
 import { RuntimeStateStore, type ImportScopeEvidenceRow } from "./runtime-state.js";
+import { acquireDatabasePublicationLock, resolveDatabasePathIdentity } from "@rai/storage-sqlite";
 import { faultPoint } from "./fault-injection.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const runtimeRoot = resolve(process.env.RAI_RUNTIME_ROOT ?? projectRoot);
-const databasePath = resolve(process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite"));
+const databasePath = resolveDatabasePathIdentity(
+  process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite"));
 const serverId = process.env.RAI_SERVER_ID?.trim() || "local";
 const athleteId = process.env.RAI_ATHLETE_ID?.trim() || "athlete_1";
 const configuredEpoch = process.env.RAI_DATASET_EPOCH?.trim() || "default";
@@ -682,35 +684,46 @@ function quarantineUnreadableMain(state: DatasetEpochState, deletionId: string):
 }
 
 try {
-  const state = readDatasetEpochState(databasePath, configuredEpoch, {
-    strictConfigured: true, identity
-  });
-  if (has("--list-quarantine")) {
-    listQuarantine(state);
-  } else if (!has("--apply")) {
-    inspect(state);
-  } else {
-    // Every apply branch that may create a scope permit shares one exclusive
-    // boundary: two operators cannot both pass the pre-checks.
-    withInitializationLock(() => {
-      if (has("--fresh-install")) {
-        applyFreshInstall(state);
-      } else if (has("--abandon-and-create-new-epoch")) {
-        applyAbandonAndCreateNewEpoch(state);
-      } else if (has("--quarantine-unreadable-main")) {
-        const deletionId = valueOf("--deletion-id");
-        if (deletionId === null || deletionId.trim() === "") {
-          throw new Error("--quarantine-unreadable-main requires --deletion-id <id>");
-        }
-        quarantineUnreadableMain(state, deletionId.trim());
-      } else {
-        const deletionId = valueOf("--deletion-id");
-        if (deletionId === null || deletionId.trim() === "") {
-          throw new Error("--apply requires --fresh-install, --deletion-id <id>, --abandon-and-create-new-epoch or --quarantine-unreadable-main");
-        }
-        applyDeletionRecovery(state, deletionId.trim());
-      }
+  // 阶段 4（I1）：`--apply` 必须在**读取任何 state 之前**取得主库 publication
+  // lock —— 否则 API 可以在“读 state”和“取锁”之间写库，预检看到的就不是
+  // 真正要修改的快照。只读分支（检查/列举）不取锁。
+  const apply = has("--apply");
+  const releasePublication = apply ? acquireDatabasePublicationLock(databasePath, "cli") : null;
+  try {
+    const state = readDatasetEpochState(databasePath, configuredEpoch, {
+      strictConfigured: true, identity
     });
+    if (has("--list-quarantine")) {
+      listQuarantine(state);
+    } else if (!apply) {
+      inspect(state);
+    } else {
+      // Every apply branch that may create a scope permit shares one exclusive
+      // boundary: two operators cannot both pass the pre-checks. It is nested
+      // inside the main-database publication lock acquired above.
+      // Lock order is fixed: main DB lock → runtime initialization lock.
+      withInitializationLock(() => {
+        if (has("--fresh-install")) {
+          applyFreshInstall(state);
+        } else if (has("--abandon-and-create-new-epoch")) {
+          applyAbandonAndCreateNewEpoch(state);
+        } else if (has("--quarantine-unreadable-main")) {
+          const deletionId = valueOf("--deletion-id");
+          if (deletionId === null || deletionId.trim() === "") {
+            throw new Error("--quarantine-unreadable-main requires --deletion-id <id>");
+          }
+          quarantineUnreadableMain(state, deletionId.trim());
+        } else {
+          const deletionId = valueOf("--deletion-id");
+          if (deletionId === null || deletionId.trim() === "") {
+            throw new Error("--apply requires --fresh-install, --deletion-id <id>, --abandon-and-create-new-epoch or --quarantine-unreadable-main");
+          }
+          applyDeletionRecovery(state, deletionId.trim());
+        }
+      });
+    }
+  } finally {
+    releasePublication?.();
   }
 } catch (error) {
   process.stderr.write(`Dataset scope initialization refused: ${error instanceof Error ? error.message : String(error)}\n`);

@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 
 import type { RecomputePlan } from "@rai/health-export-parser";
 import { importEngine, nativeFallback, nativeElevationGains, NATIVE_VERSION } from "@rai/health-export-parser";
-import { RaiDatabase, acquireDatabasePublicationLock } from "@rai/storage-sqlite";
+import { RaiDatabase, acquireDatabasePublicationLock, resolveDatabasePathIdentity } from "@rai/storage-sqlite";
 
 import { RaiApplicationService } from "./service.js";
 
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
         "   or: data:refresh-snapshots -- --database <sqlite>"
     );
   }
-  const databasePath = resolve(optionValue(args, "--database", "var/rai.sqlite"));
+  const databasePath = resolveDatabasePathIdentity(optionValue(args, "--database", "var/rai.sqlite"));
   if (!existsSync(databasePath)) throw new Error(`Database not found: ${databasePath}`);
   const evaluatedAt = optionValue(args, "--evaluated-at", new Date().toISOString());
   const timezoneIdentifier = optionValue(args, "--timezone", DATABASE_TIMEZONE);

@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 
 import { RaiDatabase } from "./database.js";
-import { acquireDatabasePublicationLock } from "./publication-lock.js";
+import { acquireDatabasePublicationLock, resolveDatabasePathIdentity } from "./publication-lock.js";
 import { SqliteRoutePointReader } from "./read/route-point-reader.js";
 
 try {
@@ -14,7 +14,7 @@ try {
   } });
   // Require an explicit target so an environment/cwd mistake cannot migrate the wrong database.
   if (!values.database) throw new Error("Usage: npm run data:migrate -- --database PATH [--apply]");
-  const path = resolve(values.database);
+  const path = resolveDatabasePathIdentity(values.database);
   const inspect = () => {
     const pending = RaiDatabase.pendingMigrations(path);
     if (!existsSync(path)) return { version: 0, counts: {}, pending };

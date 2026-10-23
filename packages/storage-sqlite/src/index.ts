@@ -1,6 +1,9 @@
 export {
   acquireDatabasePublicationLock,
+  DatabasePathIdentityError,
+  resolveDatabasePathIdentity,
   processIsAlive,
+  type DatabasePathIdentityErrorCode,
   type ProcessProbe,
   type PublicationLockOwner
 } from "./publication-lock.js";

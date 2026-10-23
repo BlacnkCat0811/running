@@ -2,7 +2,7 @@ import { PredictionModelService } from "./prediction-model-service.js";
 import { catBoostCalibrationKey } from "./prediction-policy.js";
 import {existsSync,readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import {SqliteCalibrationRepository,RaiDatabase,SqliteModelReleaseRepository,acquireDatabasePublicationLock} from '@rai/storage-sqlite';
+import {SqliteCalibrationRepository,RaiDatabase,SqliteModelReleaseRepository,acquireDatabasePublicationLock,resolveDatabasePathIdentity} from '@rai/storage-sqlite';
 import {defaultRaiModelConfig} from '@rai/scoring';
 import {RaiApplicationService} from './service.js';
 import {prepareCalibration,compareStoredModelSnapshots,type CalibrationSubmission} from './model-v2-maintenance.js';
@@ -19,7 +19,7 @@ for(let i=0;i<args.length;i++){
   options.set(key,value);
 }
 const value=(key:string)=>{const v=options.get(key);return typeof v==='string'?v:undefined;};
-const databasePath=resolve(value('--database')??'var/rai.sqlite');
+const databasePath=resolveDatabasePathIdentity(value('--database')??'var/rai.sqlite');
 const action=value('--action')??'inspect';
 const instant=value('--as-of')??new Date().toISOString();
 if(!Number.isFinite(Date.parse(instant)))throw new Error('Invalid --as-of');

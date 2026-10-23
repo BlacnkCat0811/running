@@ -8,6 +8,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +18,45 @@ import test from "node:test";
 
 import { RaiDatabase } from "../src/database.js";
 import { retryTransientFileOperation } from "../src/file-operations.js";
+import { acquireDatabasePublicationLock } from "@rai/storage-sqlite";
+
+test("CLI resolves a symlink followed by .. to the API database before acquiring its lock", {
+  skip: process.platform === "win32" ? "symbolic-link fixtures need privileges on Windows" : false
+}, async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-cli-physical-path-"));
+  const physical = join(root, "db.sqlite");
+  const lexical = join(root, "nested/db.sqlite");
+  const report = join(root, "audit.md");
+  const jsonReport = join(root, "audit.json");
+  try {
+    mkdirSync(join(root, "nested"));
+    mkdirSync(join(root, "other"));
+    symlinkSync(join(root, "other"), join(root, "nested/alias"), "dir");
+    for (const path of [physical, lexical]) {
+      const store = await RaiDatabase.open(path);
+      store.close();
+    }
+    const configured = `${root}/nested/alias/../db.sqlite`;
+    const args = [
+      "--import", "tsx", resolve("packages/health-export-parser/src/cli.ts"),
+      "audit", "--database", configured, "--report", report, "--json-report", jsonReport
+    ];
+    const release = acquireDatabasePublicationLock(physical, "api");
+    try {
+      const blocked = spawnSync(process.execPath, args, { cwd: resolve("."), encoding: "utf8" });
+      assert.notEqual(blocked.status, 0);
+      assert.match(blocked.stderr, /Another api process is using/);
+      assert.equal(existsSync(report), false);
+    } finally {
+      release();
+    }
+    const audit = spawnSync(process.execPath, args, { cwd: resolve("."), encoding: "utf8" });
+    assert.equal(audit.status, 0, audit.stderr);
+    assert.equal(existsSync(report), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("API-owned candidate is updated without another whole-database clone or premature audit", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-cli-owned-"));

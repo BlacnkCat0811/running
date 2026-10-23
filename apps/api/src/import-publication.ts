@@ -1,5 +1,5 @@
-import { existsSync, renameSync, rmSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ImportJobResponse } from "@rai/api-contracts";
 import { tryWalCheckpointTruncate } from "@rai/storage-sqlite";
@@ -8,6 +8,25 @@ interface Publication {
   id: string; databasePath: string; rollbackPath: string;
   originalExisted: boolean; phase: "prepared" | "committed";
 }
+
+/** Compare persisted publication paths by physical identity, not spelling. */
+function physicalPath(path: string): string {
+  const absolute = resolve(path);
+  const suffix: string[] = [];
+  let current = absolute;
+  for (;;) {
+    try {
+      return resolve(realpathSync.native(current), ...suffix);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT" || dirname(current) === current) {
+        return absolute;
+      }
+      suffix.unshift(basename(current));
+      current = dirname(current);
+    }
+  }
+}
+
 const receiptKey = (id: string): string => `rai.applied-import.${id}`;
 
 export function readImportReceiptInDatabase(db: DatabaseSync, id: string): ImportJobResponse["summary"] | null {
@@ -274,9 +293,11 @@ export class ImportPublicationJournal {
         continue;
       }
       // Corrupt metadata is a stop, not authority to remove arbitrary files.
-      if (record.databasePath !== resolve(this.databasePath) ||
-          dirname(record.rollbackPath) !== resolve(this.runtimeRoot, "var/backups") ||
-          !record.rollbackPath.startsWith(resolve(this.runtimeRoot, "var/backups/rai.import-rollback.")) ||
+      const databasePhysical = physicalPath(this.databasePath);
+      const rollbackRoot = physicalPath(resolve(this.runtimeRoot, "var/backups"));
+      if (physicalPath(record.databasePath) !== databasePhysical ||
+          dirname(physicalPath(record.rollbackPath)) !== rollbackRoot ||
+          !physicalPath(record.rollbackPath).startsWith(join(rollbackRoot, "rai.import-rollback.")) ||
           !["prepared", "committed"].includes(record.phase)) throw new Error("Invalid import publication journal");
       if (record.phase === "committed") {
         // A committed intent means the facts transaction committed. Only a
