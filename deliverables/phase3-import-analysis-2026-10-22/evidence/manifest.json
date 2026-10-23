@@ -1,0 +1,1130 @@
+{
+  "generatedAt": "2026-10-23T03:48:38.430Z",
+  "phase": "2026-10-23 review implementation: P1-1..P1-9, P2-1..P2-9, P3, evidence rebuild, third review fixes 1-5",
+  "head": "16a12296d62a77b45be9a96a38d90163ce2f5b13",
+  "branch": "main",
+  "worktree": "dirty: 2026-10-23 review implementation; status+diff+content sha256=647df8fb841545bb159c3528da29d5ef752d82da581268f12199632e3a6569f7",
+  "environment": {
+    "node": "v24.21.0",
+    "npm": "10.9.8",
+    "platform": "darwin",
+    "arch": "x64",
+    "os": "macOS 26.6.2 (25G83)",
+    "timezone": "Asia/Shanghai",
+    "schemaVersion": 47,
+    "schemaChanged": false,
+    "nodePath": "/Users/ta/.nvm/versions/node/v22.23.2/bin"
+  },
+  "fixtures": {
+    "description": "Synthetic Apple Health XML only; deterministic program-generated days/records, no RNG, no production health data.",
+    "equivalenceSeed": "day index only; BASE_DAYS=40, 15 HR records per workout; T12 52 real-arrival days with injected clock; timezone Asia/Shanghai",
+    "importFixtures": "record-only / workout / GPX / deletion / unknown-type synthetic XML in temp dirs; no real DB copied"
+  },
+  "concurrency": 2,
+  "commands": [
+    {
+      "id": "full-suite",
+      "command": "RAI_TEST_CONCURRENCY=2 npm test",
+      "exitCode": 0,
+      "tests": 2419,
+      "pass": 2406,
+      "fail": 0,
+      "skipped": 13,
+      "durationMs": 626362,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-2026-10-23.log",
+      "notes": "Final clean run after 2026-10-23 review fixes; Node v22.23.2 / npm 10.9.8; includes all new P1/P2/P3 regressions.",
+      "cancelled": 0
+    },
+    {
+      "id": "target-import-core",
+      "command": "RAI_TEST_CONCURRENCY=2 node --import tsx --test --test-concurrency=2 apps/api/test/direct-sync-ingest.test.ts apps/api/test/phase3-import-matrix.test.ts apps/api/test/phase3-analysis-publication.test.ts apps/api/test/analysis-job-merge.test.ts apps/api/test/import-worker-reuse.test.ts",
+      "exitCode": 0,
+      "tests": 67,
+      "pass": 67,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 41347,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g1-g6-target-final-2026-10-23.log",
+      "notes": "Ingest/matrix/publication/merge/reuse regressions; rerun 2026-10-23."
+    },
+    {
+      "id": "target-equivalence-t12-release",
+      "command": "RAI_TEST_CONCURRENCY=2 node --import tsx --test --test-concurrency=2 packages/application/test/training-metric-domain-reuse.test.ts packages/application/test/phase3-business-artifact-differential.test.ts",
+      "exitCode": 0,
+      "tests": 42,
+      "pass": 42,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 73916,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g4-t12-projection-final-3.log",
+      "notes": "Application A/B, 15-table projection, 22 comparator negative controls."
+    },
+    {
+      "id": "target-t12-real-lane",
+      "command": "RAI_TEST_CONCURRENCY=2 node --import tsx --test --test-concurrency=1 apps/api/test/phase3-t12-real-lane.test.ts",
+      "exitCode": 0,
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 14251,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g10-t12-real-lane-final-2.log",
+      "notes": "Exact loads/zones/daily reused=4 assertions; controlled-full B side."
+    },
+    {
+      "id": "target-deletion-recovery",
+      "command": "RAI_TEST_CONCURRENCY=1 node --import tsx --test --test-concurrency=1 apps/api/test/dataset-deletion-recovery.test.ts",
+      "exitCode": 0,
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 109076,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g11-dataset-deletion-recovery-final.log",
+      "notes": "Deletion recovery incl. P1-2/P1-4/P1-5/P2-5/P2-9 and P1-7 restore bypass."
+    },
+    {
+      "id": "target-server-worker",
+      "command": "RAI_TEST_CONCURRENCY=1 node --import tsx --test --test-concurrency=1 apps/api/test/analysis-job-merge.test.ts apps/api/test/analysis-failure-isolation.test.ts apps/api/test/import-publication.test.ts apps/api/test/recompute-worker.test.ts apps/api/test/dataset-epoch.test.ts packages/application/test/analysis-coverage-merge.test.ts",
+      "exitCode": 0,
+      "tests": 42,
+      "pass": 42,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 17254,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g3-server-worker-final-2026-10-23.log",
+      "notes": "Stable at concurrency 1; the 2-way run hit a known worker-event-loop timing flake in recompute-worker.test.ts.",
+      "concurrency": 1
+    },
+    {
+      "id": "gates",
+      "command": "npm run typecheck && npm run check:acceptance-matrix && npm run check:docs && npm run check:scripts && npm run check:doc-refs && npm run smoke:api && npm run check:package-boundaries && npm run check:training-plan-single-writer && npm run check:ios-gates",
+      "exitCode": 0,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "skipped": null,
+      "durationMs": null,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-final-2026-10-23.log",
+      "notes": "All listed gates exit 0; logs: typecheck-final.log, gates-acceptance-matrix-final.log, gates-docs-final.log, gates-scripts-final.log, gates-doc-refs-final.log, smoke-api-final.log, gates-package-boundaries-final.log, gates-single-writer-final.log, gates-ios-final.log (11 cross-platform gates; 2 external-condition gates skipped by design).（历史轮次记录；本报告结论以 full-suite 与新增最终日志为准）",
+      "historicalOnly": true
+    },
+    {
+      "id": "target-recovery-review-fixes",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/dataset-deletion-recovery.test.ts apps/api/test/import-scope-evidence.test.ts apps/api/test/maintenance.test.ts apps/api/test/dataset-epoch.test.ts apps/api/test/server-runtime.test.ts",
+      "exitCode": 0,
+      "tests": 100,
+      "pass": 99,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 1,
+      "durationMs": 205637,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g12-recovery-review-fixes.log",
+      "notes": "Four new P2-9..P2-12 recovery cases, scope migration, WAL restart and maintenance integration.（历史轮次记录；本报告结论以 full-suite 与新增最终日志为准）",
+      "historicalOnly": true
+    },
+    {
+      "id": "target-snapshot-digest-equal-size",
+      "command": "node --import tsx --test --test-name-pattern='P2-12' apps/api/test/dataset-deletion-recovery.test.ts",
+      "exitCode": 0,
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 16847,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/snapshot-digest-equal-size-g12.log",
+      "notes": "Same-size one-byte snapshot tamper is rejected by SHA-256 verification.（历史轮次记录；本报告结论以 full-suite 与新增最终日志为准）",
+      "historicalOnly": true
+    },
+    {
+      "id": "target-recompute-close",
+      "command": "node --import tsx --test --test-name-pattern='组合验证：登记后经唤醒真的被消费者跑完' apps/api/test/recompute-worker.test.ts",
+      "exitCode": 0,
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 2499,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/recompute-wake-fixed-g12.log",
+      "notes": "Idle resident worker shutdown holds a thread reference until termination completes.（历史轮次记录；本报告结论以 full-suite 与新增最终日志为准）",
+      "historicalOnly": true
+    },
+    {
+      "id": "target-f01-lock-probe",
+      "command": "node --import tsx --test --test-name-pattern='A05/F01' apps/api/test/direct-sync-http-acceptance.test.ts",
+      "exitCode": 0,
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 18495,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/direct-sync-f01-lock-fixed-g12.log",
+      "notes": "Read-only acceptance probe waits for a concurrent recompute SQLite writer.（历史轮次记录；本报告结论以 full-suite 与新增最终日志为准）",
+      "historicalOnly": true
+    },
+    {
+      "id": "typecheck-final",
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "skipped": null,
+      "durationMs": null,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/typecheck-final-2026-10-23.log",
+      "notes": "Final code and document state; exit 0."
+    },
+    {
+      "id": "acceptance-final",
+      "command": "npm run check:acceptance-matrix",
+      "exitCode": 0,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "skipped": null,
+      "durationMs": null,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/acceptance-final-2026-10-23.log",
+      "notes": "Final code and document state; exit 0."
+    },
+    {
+      "id": "docs-final",
+      "command": "npm run check:docs",
+      "exitCode": 0,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "skipped": null,
+      "durationMs": null,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/docs-final-2026-10-23.log",
+      "notes": "Final code and document state; exit 0."
+    },
+    {
+      "id": "doc-refs-final",
+      "command": "npm run check:doc-refs",
+      "exitCode": 0,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "skipped": null,
+      "durationMs": null,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/doc-refs-final-2026-10-23.log",
+      "notes": "Final code and document state; exit 0."
+    },
+    {
+      "id": "smoke-api-final",
+      "command": "npm run smoke:api",
+      "exitCode": 0,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "skipped": null,
+      "durationMs": null,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/smoke-api-final-2026-10-23.log",
+      "notes": "Final code and document state; exit 0."
+    },
+    {
+      "id": "check-scripts-final",
+      "command": "npm run check:scripts",
+      "exitCode": 0,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/scripts-final-2026-10-23.log"
+    },
+    {
+      "id": "check-ios-gates-final",
+      "command": "npm run check:ios-gates",
+      "exitCode": 0,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/ios-gates-final-2026-10-23.log",
+      "notes": "11 cross-platform gates; 2 manual-only gates skipped loudly."
+    },
+    {
+      "id": "review-regressions",
+      "command": "node --import tsx --test apps/api/test/dataset-epoch-legacy.test.ts apps/api/test/deletion-failure-evidence.test.ts apps/api/test/import-scope-fresh-install.test.ts",
+      "exitCode": 0,
+      "tests": 13,
+      "pass": 13,
+      "fail": 0,
+      "notes": "P1-1/P1-8/P1-9/P2-3/P2-4/P2-7 focused regressions; included in the full-suite run as well."
+    },
+    {
+      "id": "ios-tests-final",
+      "command": "npm run test:ios",
+      "exitCode": 0,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/ios-tests-final-2026-10-23.log",
+      "notes": "Swift type-check + pure-logic regressions + cross-platform source gates; includes the new route-ownership-conflict non-retryable disposition."
+    }
+  ],
+  "notExecuted": [
+    "Production import / full recompute / load test / production fault injection / VACUUM / migration / deployment",
+    "iOS build, Simulator or physical-device acceptance",
+    "Production-level performance, RSS, P95 or capacity measurement",
+    "Rust worker rebuild (native equivalence tests skip because the bundled binary is older than its sources)",
+    "Real production health data or production database deletion/recovery (isolated temp databases only)",
+    "P1-7 HTTP restore bypass is covered in-process; an OS-level SIGKILL during restore finalization remains a manual drill",
+    "P2-4 writer_entered restore finalization is covered by a unit regression; a process-level crash drill remains manual"
+  ],
+  "changedFiles": [
+    {
+      "path": "README.md",
+      "sha256": "8f16f2f5f4f82e046dbf14ecbed5cb6a1a20ff725a98ad433da1422ace3c2cb4",
+      "bytes": 9622
+    },
+    {
+      "path": "apps/api/src/command-queue.ts",
+      "sha256": "7d40526b13da7a438ae23b7be3ae10f8d7d95cc883ce9548242f6d14bb3f9956",
+      "bytes": 12070
+    },
+    {
+      "path": "apps/api/src/dataset-epoch.ts",
+      "sha256": "1653854f3ac157ea531ec5dc8a13b49a5b1067f9cd1cf5e644bdf9ea775275a9",
+      "bytes": 35897
+    },
+    {
+      "path": "apps/api/src/deletion-recovery.ts",
+      "sha256": "328099104aabfdd4b8e389953a5b84d6a59cddbb7a846243f40a8c4c873a0fbe",
+      "bytes": 28338
+    },
+    {
+      "path": "apps/api/src/direct-sync-ingest.ts",
+      "sha256": "a2539cb88b8cc3d190c396385bd673ee93e37223dbcec590a02303d3a2f376f5",
+      "bytes": 77715
+    },
+    {
+      "path": "apps/api/src/fault-injection.ts",
+      "sha256": "37bb5d48e09174ff847f5d944d9aeaff1c37f494497d1700faeaa00ae6ef0980",
+      "bytes": 1989
+    },
+    {
+      "path": "apps/api/src/import-database-thread.ts",
+      "sha256": "55b37fa169b1caed5e532a3ae8886579f5ce4a0109e7c9442f5c0a6cdba470f1",
+      "bytes": 15949
+    },
+    {
+      "path": "apps/api/src/import-publication.ts",
+      "sha256": "85daffb682a6e1b3eec3cebe048ffd981edfac9ea536c0d5e86eb86f2648c6eb",
+      "bytes": 19289
+    },
+    {
+      "path": "apps/api/src/import-scope-cli.ts",
+      "sha256": "a4394c6dd5d84da90ecd42818f38abe94cffa44b1d5022544b4920281cf828ae",
+      "bytes": 32261
+    },
+    {
+      "path": "apps/api/src/import-worker.ts",
+      "sha256": "a2980d04ad02468911ee03dda07823176b45152cb372fe663a0245f64ef6d1a0",
+      "bytes": 147962
+    },
+    {
+      "path": "apps/api/src/maintenance.ts",
+      "sha256": "0e919f9b2c9cbd08456e8ca8719a01bdc66edb0677defccebb1e40a9c1a1ade1",
+      "bytes": 54815
+    },
+    {
+      "path": "apps/api/src/recompute-worker.ts",
+      "sha256": "7e7e08a5fb3cd284674093d2bbb927adbf6889365120eecf2c7293fb1ef38641",
+      "bytes": 19829
+    },
+    {
+      "path": "apps/api/src/restore-evidence.ts",
+      "sha256": "0081b953b75c45f9e042aae07e6c6b33a3280c1b58dc3eebf09c5d9e1ecdfd94",
+      "bytes": 5807
+    },
+    {
+      "path": "apps/api/src/restore-journal.ts",
+      "sha256": "e3f8671e7e1cfea5e5ec4860a2027152116d00fd5f49a6cd1a12f05ad562d9bc",
+      "bytes": 5746
+    },
+    {
+      "path": "apps/api/src/runtime-state.ts",
+      "sha256": "7510854730e2def1e6bac703371e8e4b6cd58952dba2620243af1b9e9448e5cb",
+      "bytes": 49219
+    },
+    {
+      "path": "apps/api/src/server.ts",
+      "sha256": "1bdc953fad28f399e7cb33ff76b9bcc73eed65c0ecb3a1c9605f82af7f66bd8e",
+      "bytes": 137744
+    },
+    {
+      "path": "apps/api/src/task-admission.ts",
+      "sha256": "845962fbff3d28735823b422080af5e6537855a08e1845472d23b63ab4c9851f",
+      "bytes": 9701
+    },
+    {
+      "path": "apps/api/test/dataset-deletion-recovery.test.ts",
+      "sha256": "709d3593df23b59883b84cd1ac85a7722f5f6109cdc102dbf8c13d88c87d2b28",
+      "bytes": 96918
+    },
+    {
+      "path": "apps/api/test/dataset-epoch-legacy.test.ts",
+      "sha256": "5271665aff07765d7826645a8e276a724ae19ec92e30b989f0949f520d64a586",
+      "bytes": 7849
+    },
+    {
+      "path": "apps/api/test/deletion-failure-evidence.test.ts",
+      "sha256": "044538e3ec7f9c0f121ed2ad9172448712a8ddfee79bf5a4ed9278e3321f27f3",
+      "bytes": 21090
+    },
+    {
+      "path": "apps/api/test/direct-sync-http-acceptance.test.ts",
+      "sha256": "b45635dff182eeb8114bbdc6f27f25fa81328b61c023de6e585764e22048be2d",
+      "bytes": 84770
+    },
+    {
+      "path": "apps/api/test/direct-sync-ingest.test.ts",
+      "sha256": "2f615783af6a00f05270ba2952b57a73ac4aadf115637e2b0de221e57eb7e433",
+      "bytes": 60029
+    },
+    {
+      "path": "apps/api/test/fixtures/pre-commit-barrier.mjs",
+      "sha256": "a0ccfda747b9e0b8ea462833b7758ca344733e887dcaed93e16cf888a087c6fa",
+      "bytes": 2256
+    },
+    {
+      "path": "apps/api/test/import-publication.test.ts",
+      "sha256": "2a1fa77f78ab06d1b268c471cd2eea06c371621c0cccee3ba6c53b568ea82e6d",
+      "bytes": 24074
+    },
+    {
+      "path": "apps/api/test/import-queue.test.ts",
+      "sha256": "0f6c7a0a51a5f87448781a5a3d719c4d3096fefa1b45ad6ac37dc0964e3fbf34",
+      "bytes": 7713
+    },
+    {
+      "path": "apps/api/test/import-receipt-fields.test.ts",
+      "sha256": "c786df38446e38cad46de25e2e8530d9d0ea286c6c3283d0f8253c4573dbd38a",
+      "bytes": 16419
+    },
+    {
+      "path": "apps/api/test/import-restart-receipt-recovery.test.ts",
+      "sha256": "cdd470cbd77d119e208ef6e50a9df3baeca047477083ac9575f522d93ef1dbf9",
+      "bytes": 34846
+    },
+    {
+      "path": "apps/api/test/import-scope-evidence.test.ts",
+      "sha256": "f2700ad35f39ea59e50017d3f9272a564ff5ef12b9b172c23c87a113cdd527f5",
+      "bytes": 23231
+    },
+    {
+      "path": "apps/api/test/import-scope-fresh-install.test.ts",
+      "sha256": "765cae354faf9c3b27ba2c48a6e8e7a679334c976714c8da22fb88a1e2feff76",
+      "bytes": 4379
+    },
+    {
+      "path": "apps/api/test/import-worker-direct-sync.test.ts",
+      "sha256": "cecff47a87231196e2aee45950e11367880c766cf418a493321de4dccf7e753d",
+      "bytes": 27481
+    },
+    {
+      "path": "apps/api/test/import-worker-reuse.test.ts",
+      "sha256": "2423aad13006828e61d3154813b8adbc88d3fb841e0d51dfc447182a61de7caa",
+      "bytes": 64130
+    },
+    {
+      "path": "apps/api/test/phase3-analysis-publication.test.ts",
+      "sha256": "28d2becc7e5f878166ed701914745067be29dd9d92c0b44bd9986e2d8ff993df",
+      "bytes": 7343
+    },
+    {
+      "path": "apps/api/test/phase3-evidence-scripts.test.ts",
+      "sha256": "4bb89ee2ba778e7a997375e86a6c497f3e2dee9a907fa4620421c44568bc9bc9",
+      "bytes": 2040
+    },
+    {
+      "path": "apps/api/test/phase3-import-matrix.test.ts",
+      "sha256": "746f682e9945c8acb8c94dba3e772a3d65146cba2838e81ec60f04902544815e",
+      "bytes": 41271
+    },
+    {
+      "path": "apps/api/test/phase3-t12-real-lane.test.ts",
+      "sha256": "22bc34247d12f2fd9905150e062d761beb9a20af6fe53c7920710b6a0f0d4ded",
+      "bytes": 36783
+    },
+    {
+      "path": "apps/api/test/restore-evidence.test.ts",
+      "sha256": "f8f8593f7b4ed0ef53d3e5a838406bdacb1acd35867191345177e6c59cd33227",
+      "bytes": 3506
+    },
+    {
+      "path": "apps/api/test/restore-journal.test.ts",
+      "sha256": "7e98a4d3784bc02e8740f7d08f138dffa4f4b37c7b813c3f9ef6b64a5b605cd3",
+      "bytes": 13474
+    },
+    {
+      "path": "apps/api/test/server-runtime.test.ts",
+      "sha256": "ad53fbbed237ba78a94f962f7109e1cb973c38edeb6d60032fdf94067e9e6b95",
+      "bytes": 134574
+    },
+    {
+      "path": "apps/api/test/task-admission.test.ts",
+      "sha256": "bbea06cfadd00bec97a648468214bc8564d249aea8394f8f4af7323ea389db2d",
+      "bytes": 4316
+    },
+    {
+      "path": "apps/ios/RAI/HealthSyncCancellation.swift",
+      "sha256": "854aa3e7471ec5480dbeca8226d44f88d76f82167baf2497dc17be4ac3409c06",
+      "bytes": 9911
+    },
+    {
+      "path": "apps/ios/tests/check-direct-sync-contract-parity.py",
+      "sha256": "0e3ee07e611f6690949f4d106d9e97ac76da86015491a7f53865d6df5cf8a43b",
+      "bytes": 13905
+    },
+    {
+      "path": "deliverables/IMPORT_RECOVERY_REVIEW_FIX_2026-10-23.md",
+      "sha256": "6b26640dcdf073e2d5a3a1d6445c903bf4adf9ef66210e3475121889f483efcd",
+      "bytes": 7224
+    },
+    {
+      "path": "deliverables/IMPORT_RECOVERY_REVIEW_FIX_2_2026-10-23.md",
+      "sha256": "5adb644256ef2c14a62376ec62a6155e46a38dbd82a58e148ce76780154e4777",
+      "bytes": 5590
+    },
+    {
+      "path": "deliverables/IMPORT_RECOVERY_REVIEW_FIX_3_2026-10-23.md",
+      "sha256": "36306a180dbea6d3fc48b760a4f9834a578ffbc132240941c413af1cc7a61cd2",
+      "bytes": 4516
+    },
+    {
+      "path": "deliverables/README.md",
+      "sha256": "8da76f956092140f8926bbc2193f6d1c8fd2e64d25e68aaa79e743c82e20f382",
+      "bytes": 12252
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/DEPENDENCY_MATRIX.md",
+      "sha256": "466e59ef0de76c6162d397a093798d5551d5669677b474283faa01f076549d7c",
+      "bytes": 36039
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/PHASE3_REPORT.md",
+      "sha256": "8b48f560dfac5bf821b6af426260f8e6816fcb1890c4db84f724aaed6f3df77e",
+      "bytes": 48771
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/PHASE3_REVIEW_ISSUES_IMPLEMENTATION_PLAN_2026-10-23.md",
+      "sha256": "26eb8da524f359c3d7f3bf41335e7aa0c3aeb4c01b727387107a725477fd2c43",
+      "bytes": 23405
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/PHASE3_REVIEW_THREE_ISSUES_FIX_PLAN_2026-10-22.md",
+      "sha256": "ef1a47d05a113389a224ebf7a1fd9037ef1378c4d027070d2d549069ba55350f",
+      "bytes": 15844
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/PHASE3_REVIEW_TWO_REMAINING_ISSUES_FIX_PLAN_2026-10-22.md",
+      "sha256": "7f9ded568583b95aefdc3cd9717d4c48b5582b448c6d07d0f284581e3035b351",
+      "bytes": 17146
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/STATE_CONTRACT.md",
+      "sha256": "4b42326d555a03681c20cd5c3bfbe9f440a951f7d8733637220896e6a16ca62f",
+      "bytes": 26468
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/TEST_MATRIX.md",
+      "sha256": "f6db64df909fb94be19e000127b5488b2ea444099ecd256f75ce89e0879fd83a",
+      "bytes": 46573
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/acceptance-final-2026-10-23.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "bytes": 335
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/acceptance-g12.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "bytes": 335
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/baseline-2026-10-22.json",
+      "sha256": "9fb0c93a0bf8b8a40d39c1c33042a3914a4303e3fdf5d2949d4587260c3c3a84",
+      "bytes": 2176
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/direct-sync-f01-lock-fixed-g12.log",
+      "sha256": "a7fa1eb7fe6fe4aa47eb7971f8635013767e853ec44b260512843d097c8e49f7",
+      "bytes": 611
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/doc-refs-final-2026-10-23.log",
+      "sha256": "1b7a08ca8f414fbffff9cfd419d906fb8dec9d8dee2d7d00a10b14336bece7b0",
+      "bytes": 32230
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/doc-refs-g12.log",
+      "sha256": "e450833ca6a5d0b09768fe3ca6ed6579f558316c11ceb07731c1b6808a87d58b",
+      "bytes": 32063
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/docs-final-2026-10-23.log",
+      "sha256": "959d7108328c53ea81a7116cff570e64cf40e008db4521e50a732688a6f6e6ad",
+      "bytes": 145
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/docs-g12.log",
+      "sha256": "b7255d97a2895b8346175aa469405247918e99751319b7864e36d015a3ac4de5",
+      "bytes": 145
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/env-failures-remediation.log",
+      "sha256": "96ef2ec53f2e9b6705f6c46f7a26fa122c399e89569241ca0fb636ec19cdb690",
+      "bytes": 3537
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/equivalence-remediation.log",
+      "sha256": "fc069e389ccfcd0f729237ffcc2059c4ba1d86d6e672fdc41802bc93e472923e",
+      "bytes": 31435
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/equivalence-run.log",
+      "sha256": "252d51676347dca7eb1b927f78f499c72adaf14f0c4fc249b3ca7f9e03605e0b",
+      "bytes": 27261
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/equivalence-summary.json",
+      "sha256": "4e567a9059ee256870489e2125a39cc01ec163bfd52d155670e7e27fbb87adc4",
+      "bytes": 87245
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/fault-and-boundary-summary.json",
+      "sha256": "0876d9cf5e31aae7cb2cca741098fde642b58a45cd91b1c54c8a4708c70d326e",
+      "bytes": 5289
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-excluding-env-failures.log",
+      "sha256": "ea57a24a9b0d9c646020ffec3017058e4127c08391f881b0d252d1ba8a6b24ea",
+      "bytes": 276487
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-excluding-env-files.txt",
+      "sha256": "602d019c1d18feb7f4bd4c7527cc3defcdee327dc3efb6d06e4fb0418c68e078",
+      "bytes": 14497
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-2-2026-10-23.log",
+      "sha256": "9494f56d843302e81ad50d86129eb4e960867a5fc162b3a261d72e9dfc66022c",
+      "bytes": 100943
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-2.log",
+      "sha256": "bb60bf5bfaab1f3636ca9c727978bd0fa8c7f4e3cc97dfdaaedc6e6f033711c5",
+      "bytes": 651654
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-2026-10-23.log",
+      "sha256": "aed11d96cd33ae6d46cb2e88892532d91d1cda81670e47d50ff46aa1bdc0272a",
+      "bytes": 666567
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-3.log",
+      "sha256": "368e9e4ed7c3851ded9ba0af415bc4db55f9d247b76982f937a548b5b12a16cb",
+      "bytes": 651667
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-4.log",
+      "sha256": "3f87b0d3702256fb6acccd56887c7d2e3f46e849ab47d02ed39f45c650dad010",
+      "bytes": 651806
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-5.log",
+      "sha256": "3c1964d0e85a72e52fe1849ac0ad15d745fc9044427cdc41342e9a9fa389bb34",
+      "bytes": 653941
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-6.log",
+      "sha256": "28b077c529d51db6b2e7ac97b502327e4a432a28ccce7a015c8561721fedca8b",
+      "bytes": 655844
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-7.log",
+      "sha256": "93be600270cab23d2ef61d6581ce12864fd1ba5b882d9cc175533297d0129ff2",
+      "bytes": 654326
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-8.log",
+      "sha256": "102525a27aa7966fd57c5d9368ecda3320700efe96cc807edece28ac048cb5ba",
+      "bytes": 654470
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final.log",
+      "sha256": "9e92231131c30790f7e126b024937965f24fe23f4272a07f49e6710869649787",
+      "bytes": 647080
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-g12-final.log",
+      "sha256": "3883d465b256565263b44b46c0e75c752dae28e1cf4ddd839294c28c6f5a248b",
+      "bytes": 197611
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-g12-verified.log",
+      "sha256": "2c557ed20cdee443d35ba70b9ad68b90b0b42419c6ff589002ff9b0cba2b4ac7",
+      "bytes": 655617
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-g12.log",
+      "sha256": "191bcd324b4c0fd642114b0ba24ce4de891767a37c78c3f41b15ecb18439dd13",
+      "bytes": 655889
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-remediation-2.log",
+      "sha256": "72851865cd56b7d6acf875ef0c7cedd7eed70f2e99ebe4f6f738e0fb34f134f0",
+      "bytes": 646743
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-remediation-excluding-env.log",
+      "sha256": "9a0877fc45156b342dc014bab60f009176a3587c8f9a1124a578e144d8284677",
+      "bytes": 281368
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-with-env-failures.log",
+      "sha256": "1945611e576f084134a386beb26de8f8c5c7005ce90d383c7544f97a77b40d64",
+      "bytes": 279827
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g1-g6-target-final-2.log",
+      "sha256": "f0a85a36b1c8581f6c1e1dca00e81404dd40f448e6b2a93595449f6ce6f90e42",
+      "bytes": 29379
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g1-g6-target-final-2026-10-23.log",
+      "sha256": "be913b61ba3a98a781c95c4c4cf32f3bcfa6349eaec19e1c10e08d65cf427e73",
+      "bytes": 29408
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g1-ingest-core-2.log",
+      "sha256": "b065389fa71e9422e20dca2da4f3b7aba520054944080a6c8c83898cdaae8087",
+      "bytes": 26834
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g10-t12-real-lane-final-2.log",
+      "sha256": "e1620963a5e7240b4aa23e04bef4ca0d24564a33c98c7a941a5d5696d14b57f7",
+      "bytes": 1646
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g10-t12-real-lane-final.log",
+      "sha256": "ae380a345d69d4978efb0d71559482c76932c0e8edbd45b76c60b5d3d93a0f90",
+      "bytes": 1647
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g10-t12-real-lane.log",
+      "sha256": "10404e2e921173b217e757a1729f3852959387a3f0ed8db41e825d9e42231f85",
+      "bytes": 1610
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g11-dataset-deletion-recovery-final.log",
+      "sha256": "808f0b0fbf31b7fe743bf7e6684157377c5b44a8c7c1d9569959ae8fb1ab35af",
+      "bytes": 5403
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g11-dataset-deletion-recovery-superseded.log",
+      "sha256": "96937e17871c4571bc14fcdd543aac71eea855038d5e4c5e22d1e14593fbfbcc",
+      "bytes": 4642
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g11-dataset-deletion-recovery.log",
+      "sha256": "73ed2c4994244cdf437b85c1ec6cca6941f515f78d1b40989cae68256b257a12",
+      "bytes": 2916
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g12-recovery-review-fixes.log",
+      "sha256": "261c69a07c109279151359278a4062ccc68c6156bf2be94850b0fada7d8e5b88",
+      "bytes": 26998
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g3-server-worker-final-2026-10-23.log",
+      "sha256": "32cc5f8a1c64df3e9154c675adde4181c7cfbbb766805b3ea30fdf626606efdf",
+      "bytes": 12477
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g3-server-worker-final.log",
+      "sha256": "6f5f2f454a4117495622ab66630c1d664c3e7a14e28911c3b1642585740cbfda",
+      "bytes": 16417
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g4-t12-projection-final-2.log",
+      "sha256": "1cad9e35d6100ed157b984e85f2cab7f53e378b7f6bae04f731f2fbec0aec3a7",
+      "bytes": 41352
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g4-t12-projection-final-3.log",
+      "sha256": "672b4c2a5c2ee0c7a54a07b119af9e164a7a297e7ed07997c791b37ee5729b67",
+      "bytes": 42864
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g4-t12-projection-final.log",
+      "sha256": "4afb9cbc90e6b4f072fdccd37c4eea3693dfe97ec7fb0bc3bf0859539998ffa9",
+      "bytes": 41353
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g4-t12-projection-remediation.log",
+      "sha256": "6d73a03a6b882642dde3d525b3f7b12562b17823df6e7d14b9affd2238dab0ff",
+      "bytes": 36421
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g5-f01-delete-gpx-http-worker.log",
+      "sha256": "7810e95ac4a49734a001c9ca0e14f310cec41179ecdb23c02582366d523dd96a",
+      "bytes": 20914
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g5-f01-gpx-http-worker.log",
+      "sha256": "d64b754a65c146566be7bfdcf9c1d80c31918d39e67f7473da3ee123999959f7",
+      "bytes": 10887
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g6-import-matrix-publication-final.log",
+      "sha256": "150fe2d446c6daec9d33036c95532a7c817eb9ec93b7d06f75f121fdec2be886",
+      "bytes": 4648
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g7-scope-first-empty-final.log",
+      "sha256": "8b7d4f8baca911493d244bd0d5d7ea438b439900144c1e8219b00b687301d63b",
+      "bytes": 8044
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/g7-scope-first-empty.log",
+      "sha256": "2cbc0014c3256efa607385e368bfea450c197b378b201c9901a0b4b7e0c58319",
+      "bytes": 2076
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-acceptance-matrix-final-2.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "bytes": 335
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-acceptance-matrix-final.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "bytes": 335
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-doc-refs-final.log",
+      "sha256": "bca940ac8caf4da67a5fe1b8365e44ed1d7ef2aaa178f71eabc4ebceb6b36660",
+      "bytes": 32305
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-docs-final-2.log",
+      "sha256": "b7255d97a2895b8346175aa469405247918e99751319b7864e36d015a3ac4de5",
+      "bytes": 145
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-docs-final.log",
+      "sha256": "b7255d97a2895b8346175aa469405247918e99751319b7864e36d015a3ac4de5",
+      "bytes": 145
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-final-2.log",
+      "sha256": "3f14fd50bb4aec908afaf26a02a021f6a3044f6a46b64342977f834ecd8e5e4f",
+      "bytes": 36848
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-final-3.log",
+      "sha256": "3f14fd50bb4aec908afaf26a02a021f6a3044f6a46b64342977f834ecd8e5e4f",
+      "bytes": 36848
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-final-4.log",
+      "sha256": "3f14fd50bb4aec908afaf26a02a021f6a3044f6a46b64342977f834ecd8e5e4f",
+      "bytes": 36848
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-final.log",
+      "sha256": "3433455d41ba6c2833a784e51558d6b202e46cae3f0287c40f4f337b5b28d847",
+      "bytes": 37235
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-ios-final.log",
+      "sha256": "7bee99ccca67a618282506c09c0ab06fe2429371de8d82d861d9d90380439402",
+      "bytes": 3336
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-package-boundaries-final.log",
+      "sha256": "63100df27ea9e8da3c934fefe66da3a92bf9a560493502ac87d39c76e1b44869",
+      "bytes": 183
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-remediation-2.log",
+      "sha256": "2209b25639f1d6899edc40dcf5371f645c665f3db38523cd5cb4e166a2913ffa",
+      "bytes": 36936
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-remediation.log",
+      "sha256": "8af7aab3a8507aea29c6b3de4f3b3b93ce007a135d9de20ff11cfc8e1f3d0288",
+      "bytes": 3085
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-scripts-final.log",
+      "sha256": "fd5f2abc18d8238470399ae5658aac2d3bd59cbef2a22dbcdb05e9b29e858c24",
+      "bytes": 180
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/gates-single-writer-final.log",
+      "sha256": "d8e3a9805fbee5d2c090f323ae0fe04dc88972c640498658ff757e63c1270822",
+      "bytes": 267
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/import-matrix-remediation.log",
+      "sha256": "5fc085313cd9b87ad500b496c45fd82d2e94515d7234bc80eeb1ab5cab30b553",
+      "bytes": 1947
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/ios-gates-final-2026-10-23.log",
+      "sha256": "f791470ac79d289c9c818e2cf467e55c903b2be200ac3b7ecae3b2b66a45c3fe",
+      "bytes": 3336
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/ios-gates-remediation.log",
+      "sha256": "5324b88a27930cd0f371a4c817ba692574768a3241f808d5498daf25e0648faa",
+      "bytes": 3252
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/ios-tests-final-2026-10-23.log",
+      "sha256": "dc4b611b9709097a576230e1179a8bc8571534695f5c46c38e2aa53392660d8f",
+      "bytes": 131147
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g1-ingest-core.log",
+      "sha256": "52c65edf7a01fb0641233d47ae4e2e0e2407f33f30ebc1ce3f374d12559f66f0",
+      "bytes": 11413
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g2-parser-application-storage.log",
+      "sha256": "9781fcb2660c09a7acf2bf3a68770ddd48fefb5962569454f61644abe133ee69",
+      "bytes": 9972
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g3-analysis-recovery.log",
+      "sha256": "65ddfb8bee815790f02197c4b543f509b58fe8c79185210b8c39e7dfff614a35",
+      "bytes": 4284
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g4-training-metric.log",
+      "sha256": "627a73c0244f907c101ae42382d77f039237cdb07a9fb76757dd2304c333068c",
+      "bytes": 143063
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g4b-training-metric-rerun.log",
+      "sha256": "3d559dcaf9e16ae086c53896ed910f85cc4b3c362cbbad575a04415e0e5df545",
+      "bytes": 21816
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g5-http-and-worker.log",
+      "sha256": "049012d725a5b27e5bc5c1db03a3ebad3570258c83594e7b6927ce636a356bc0",
+      "bytes": 10760
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g6-phase3-new.log",
+      "sha256": "73a9ed0097d13537cea4a66c8d4ec8a9e032e6b342af86375ee0c3057cdadf40",
+      "bytes": 1729
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g7-restart-recovery.log",
+      "sha256": "090890f231c26fd51e06644028636dc867d31c24ff4e2f4e47c64690dac7acb7",
+      "bytes": 1249
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g8-receipt-fields.log",
+      "sha256": "d89e6e3f50a709a5d9ed3ee54ae0c5e924d6341c86cbb576df67d57745d86a2c",
+      "bytes": 846
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/matrix-logs/g9-nights-window.log",
+      "sha256": "68c91ea438c7b61d628288ce2d4a0115518715500ba3083436bfa95201cb308e",
+      "bytes": 2184
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/recompute-wake-fixed-g12.log",
+      "sha256": "c90d870215c30825afe07b90623e16159dd34f87c302ab10612a0c698c3f4041",
+      "bytes": 694
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/recompute-wake-isolated-g12.log",
+      "sha256": "c5eb14d0a08f7c11dbdbb0fb4548e5a6fe78400c8fc68f53848a21a0fd36ce87",
+      "bytes": 975
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/restart-recovery-remediation.log",
+      "sha256": "a279f18e7bcd1c6916cdbc311e4f23f7d103d7c00d24009d31e0bd2307b0e7a0",
+      "bytes": 1583
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/scripts-final-2026-10-23.log",
+      "sha256": "fd5f2abc18d8238470399ae5658aac2d3bd59cbef2a22dbcdb05e9b29e858c24",
+      "bytes": 180
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/smoke-api-final-2.log",
+      "sha256": "e6deb0fb4b855a1ceca9e2b4fe427163215f2a71db2e72b09771fa248797ad5b",
+      "bytes": 222
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/smoke-api-final-2026-10-23.log",
+      "sha256": "e6deb0fb4b855a1ceca9e2b4fe427163215f2a71db2e72b09771fa248797ad5b",
+      "bytes": 222
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/smoke-api-final.log",
+      "sha256": "e6deb0fb4b855a1ceca9e2b4fe427163215f2a71db2e72b09771fa248797ad5b",
+      "bytes": 222
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/smoke-api-g12.log",
+      "sha256": "e6deb0fb4b855a1ceca9e2b4fe427163215f2a71db2e72b09771fa248797ad5b",
+      "bytes": 222
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/snapshot-digest-equal-size-g12.log",
+      "sha256": "734de06c14b58733958662c3393a040ff4969a272bf3db851276215730d5d4b8",
+      "bytes": 522
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/typecheck-final-2.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "bytes": 201
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/typecheck-final-2026-10-23.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "bytes": 201
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/typecheck-final.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "bytes": 201
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/typecheck-g12.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "bytes": 201
+    },
+    {
+      "path": "deliverables/phase3-import-analysis-2026-10-22/evidence/typecheck-remediation.log",
+      "sha256": "194ff5bca66278888f0f00be5c7ca523d15098ece958b14952533811089f6106",
+      "bytes": 7
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "1bfba09fe01d6dacf865705872605c1f448f2da5a954b3c99351309e741e7c6f",
+      "bytes": 13912
+    },
+    {
+      "path": "docs/DATA_PIPELINE.md",
+      "sha256": "561945d5b139f226c7df857310c681192566dff21df6f6dd17a26a364e022efd",
+      "bytes": 12451
+    },
+    {
+      "path": "docs/IMPORT_RECOVERY_REVIEW_FIX_PLAN_2026-10-23.md",
+      "sha256": "e1a443a5c95a84d482c436cbf4a495b5bcd144a51512fe4f7bb211b25cd2ef23",
+      "bytes": 14329
+    },
+    {
+      "path": "docs/IOS_NATIVE_API_CONTRACT.md",
+      "sha256": "f39f5408c9e7900a23dc32ddd50077284f16d84f5656a6a2ae6354a4a2ab48ba",
+      "bytes": 26016
+    },
+    {
+      "path": "docs/OPERATIONS.md",
+      "sha256": "4050dcb261a81eaec99c5a64effc7373e84740cf15d6e78b4018e7be2084c7b0",
+      "bytes": 34024
+    },
+    {
+      "path": "package.json",
+      "sha256": "46fc53790b9b5aaa3f43a7e3684ec1bc1de283227c22d834a766ce27bda884b8",
+      "bytes": 6874
+    },
+    {
+      "path": "packages/api-contracts/src/index.ts",
+      "sha256": "121e27f479b85ee4d5a22fcb74e77e64ee40e732b5d06f90589cd65c820e868c",
+      "bytes": 88723
+    },
+    {
+      "path": "packages/application/src/services/recompute-pipeline.ts",
+      "sha256": "0eb8814ae33e26599184430525c64bee0b2504a4b5a87f1346a8852f13b1270d",
+      "bytes": 244667
+    },
+    {
+      "path": "packages/application/test/business-artifact-projection.ts",
+      "sha256": "0653f7e26064363f5ee6a43fbfba86e219a0ad00dafb0e02e02755994ea3e345",
+      "bytes": 56338
+    },
+    {
+      "path": "packages/application/test/import-idempotency-and-checkpoint.test.ts",
+      "sha256": "44b61185c27d9894ce147c62ced5a131836415e6c206d71997a858a240b64dcb",
+      "bytes": 26312
+    },
+    {
+      "path": "packages/application/test/phase3-business-artifact-differential.test.ts",
+      "sha256": "aa5a650cc03c9b25b73ca66e418fc9aa1c15e8a8ae93ca7a3a28edd6e8b8caf0",
+      "bytes": 12976
+    },
+    {
+      "path": "packages/application/test/training-metric-domain-reuse.test.ts",
+      "sha256": "faff4d686c503c568ad0553694420a35a17707600fff5bacc81bb5f8776840d5",
+      "bytes": 93169
+    },
+    {
+      "path": "packages/health-export-parser/src/apple-health-parser.ts",
+      "sha256": "dc063586aed5d69072a7ae46e7996fcccafbee19daf6cbab1dd348ec84571604",
+      "bytes": 50065
+    },
+    {
+      "path": "packages/health-export-parser/src/canonicalize-nights.ts",
+      "sha256": "3b3069a6b53eaccaed5538073bb7070850cd6b4fb24e79d069342c88bb20bb2d",
+      "bytes": 41410
+    },
+    {
+      "path": "packages/health-export-parser/src/dirty-range.ts",
+      "sha256": "627f25d4d20f43d6c6f8402d8f7145e2b26ec9bc88e22474f06088614a56cab5",
+      "bytes": 15851
+    },
+    {
+      "path": "packages/health-export-parser/src/gpx-parser.ts",
+      "sha256": "aba9b77bd3ac7af9822a5783e903b8468d4377b0dc2bf332f4f527e628f4ea08",
+      "bytes": 30234
+    },
+    {
+      "path": "packages/health-export-parser/src/index.ts",
+      "sha256": "216a6c72c98d4afc526a6cc0c8e3d791cb967cc283fb507a635dd9213e5add07",
+      "bytes": 3112
+    },
+    {
+      "path": "packages/health-export-parser/test/dirty-range.test.ts",
+      "sha256": "947ed53716f70a13d610261d3b297c183942e6d694aa79c5446f1c3f6b5a78a2",
+      "bytes": 13435
+    },
+    {
+      "path": "packages/health-export-parser/test/gpx-bundle-reuse.test.ts",
+      "sha256": "291ebd910baf2f4a9a96bab709471107c7f01d93bd12a8655bf4ba78e3d86306",
+      "bytes": 4841
+    },
+    {
+      "path": "packages/storage-sqlite/src/database.ts",
+      "sha256": "417b4dbaf42d9034a31511e32856dfc9bcc47e1261b8ef2f9b0dbe0bcc477a07",
+      "bytes": 203224
+    },
+    {
+      "path": "packages/storage-sqlite/src/index.ts",
+      "sha256": "9e604f969988b4ad2fe5ed64748c62fe1abaf35303d8e82d1e28dd07f4023e18",
+      "bytes": 6433
+    },
+    {
+      "path": "packages/storage-sqlite/test/database-import.test.ts",
+      "sha256": "75dfb7d19ea93d6210550b4118790d662c87516dafcc232a27e0f28c5db43f2e",
+      "bytes": 8947
+    },
+    {
+      "path": "packages/storage-sqlite/test/import-removal-ledger.test.ts",
+      "sha256": "d8620dd0e202bca30937cf18ef3eb8faa84d36997ad31f0beb6c8e0f3e681fad",
+      "bytes": 13658
+    },
+    {
+      "path": "scripts/phase3-equivalence-summary.mts",
+      "sha256": "88c0a8dbd878f11e2806132404eecc89c0b16af078b7476ab979e58ea53fed20",
+      "bytes": 11693
+    },
+    {
+      "path": "scripts/phase3-evidence-manifest.mts",
+      "sha256": "60315862ef004242117236a18c5f0c1cbf693886996985d775fd19dfaad0b682",
+      "bytes": 4182
+    }
+  ],
+  "changedFileCount": 172
+}

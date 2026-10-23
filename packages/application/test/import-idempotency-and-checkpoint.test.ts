@@ -372,3 +372,57 @@ test("O04: rewinding the dirty boundary to the overlapping workout start recompu
     assert.equal(counts.loads, days.length);
   });
 });
+
+// F10 复审（2026-10-23）：真实任务完成 + 生产发布路径的故障注入。
+// 旧 F10 只手工 seed run/bundle 后调用 activateSucceeded，证明的是存储事务；
+// 这里跑 `service.runNextJob()` 的真实全量重算，并在发布指针写入处注入失败。
+test("F10 production path: a failed activation leaves job failed and no visible release; retry publishes exactly once", async () => {
+  await withFixture(async (store, xmlPath) => {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: 1 });
+    canonicalizeRunningWorkouts(store.database);
+    const service = new RaiApplicationService(store);
+    const enqueue = () => service.enqueueFullRecompute({
+      evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai"
+    });
+    enqueue();
+    store.database.exec(`
+      CREATE TRIGGER f10_fail_active_run_insert BEFORE INSERT ON active_model_run
+        BEGIN SELECT RAISE(ABORT, 'fixture activation failure'); END;
+      CREATE TRIGGER f10_fail_active_run_update BEFORE UPDATE ON active_model_run
+        BEGIN SELECT RAISE(ABORT, 'fixture activation failure'); END;
+      CREATE TRIGGER f10_fail_active_release_insert BEFORE INSERT ON active_model_release
+        BEGIN SELECT RAISE(ABORT, 'fixture activation failure'); END;
+      CREATE TRIGGER f10_fail_active_release_update BEFORE UPDATE ON active_model_release
+        BEGIN SELECT RAISE(ABORT, 'fixture activation failure'); END;
+    `);
+    const failed = service.runNextJob();
+    assert.equal(failed?.status, "failed", "发布失败必须把任务结算为 failed");
+    const count = (sql: string): number =>
+      Number((store.database.prepare(sql).get() as { n: number }).n);
+    assert.equal(count("SELECT COUNT(*) AS n FROM active_model_run"), 0, "失败发布不得留下 active run 指针");
+    assert.equal(count("SELECT COUNT(*) AS n FROM active_model_release"), 0, "失败发布不得留下 active release 指针");
+    assert.equal(count("SELECT COUNT(*) AS n FROM model_release_bundles WHERE activated_at IS NOT NULL"), 0,
+      "候选 bundle 不得被登记为已激活");
+
+    store.database.exec(`
+      DROP TRIGGER f10_fail_active_run_insert;
+      DROP TRIGGER f10_fail_active_run_update;
+      DROP TRIGGER f10_fail_active_release_insert;
+      DROP TRIGGER f10_fail_active_release_update;
+    `);
+    enqueue();
+    const succeeded = service.runNextJob();
+    assert.equal(succeeded?.status, "succeeded", JSON.stringify(succeeded));
+    const activeRun = store.database.prepare(
+      "SELECT model_run_id AS id FROM active_model_run WHERE singleton = 1").get() as { id: string } | undefined;
+    const activeRelease = store.database.prepare(
+      "SELECT model_run_id AS id FROM active_model_release WHERE singleton = 1").get() as { id: string } | undefined;
+    assert.ok(activeRun && activeRelease);
+    assert.equal(activeRelease.id, activeRun.id, "两个 active 指针必须指向同一个已发布 run");
+    assert.equal(count("SELECT COUNT(*) AS n FROM model_release_bundles WHERE activated_at IS NOT NULL"), 1,
+      "重试只能产生一个可见发布");
+    const readable = store.database.prepare(
+      "SELECT status FROM model_release_bundles WHERE model_run_id = ?").get(activeRun.id) as { status: string };
+    assert.equal(readable.status, "passed", "公开可读状态必须与激活指针同源");
+  });
+});

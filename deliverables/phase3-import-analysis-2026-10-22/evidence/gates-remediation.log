@@ -1,0 +1,32 @@
+包边界：16 个包 / 31 条 src 边；禁线 4 条
+包边界检查通过。
+single-writer 结构门禁：R1–R5 / 生产源文件 491 / 测试文件 133（R1/R2/R4 豁免）/ 违规 0
+single-writer 结构门禁通过。
+✅ npm script 跨平台语法检查通过：18 个 package.json / 106 条 script。
+§16.1 矩阵：80 条；cited 80；declared-gap 0；missing 0
+  注：cited 仅表示测试**标题**引用了该 ID，不代表断言存在；覆盖强度请看测试内容，不要只看这个数字。
+
+验收矩阵检查通过。
+Documentation: 63 files, 565 local links, 2 anchors, 0 problems
+docs/ARCHITECTURE.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+docs/ALGORITHM.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+docs/DATA_PIPELINE.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+docs/OPERATIONS.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+🟠 锚在空行       database.ts:493                              -> packages/storage-sqlite/src/database.ts
+docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md: 40 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），1 处锚在空行（告警）（--problems-only）
+🟠 锚在空行       packages/storage-sqlite/src/database.ts:493  -> packages/storage-sqlite/src/database.ts
+docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md: 31 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），1 处锚在空行（告警）（--problems-only）
+🟠 锚在空行       docs/SQLITE_DIRECT_SYNC_DESIGN.md:305-306    -> docs/SQLITE_DIRECT_SYNC_DESIGN.md
+🟠 锚在空行       read/workout-read-repository.ts:246-285      -> packages/storage-sqlite/src/read/workout-read-repository.ts
+🟠 锚在空行       data.ts:255-262                              -> apps/api/src/data.ts
+🟠 锚在空行       server.ts:1552-1557                          -> apps/api/src/server.ts
+🟠 锚在空行       data.ts:255-274                              -> apps/api/src/data.ts
+docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md: 82 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），5 处锚在空行（告警）（--problems-only）
+docs/IOS_SYNC_PERFORMANCE_REVIEW.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+deploy/README-UBUNTU.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+docs/DECISIONS.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+docs/HEALTHKIT_RECORD_SYNC_V2.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+
+合计 153 处（去重后）；越界/无法解析 0 处；内容漂移 未核对（无基线；11 份文档均无 .linerefs.json）；锚在空行 7 处（告警）
+Production API runtime smoke test passed
+EXIT:0

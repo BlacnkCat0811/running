@@ -58,7 +58,7 @@ CLI 仍保留完整链路：SQLite 在线 backup 生成私有候选库 → TS/Ru
 | 主库 `var/rai.sqlite` | 健康事实、训练、覆盖修订、不可变派生 run、已发布指针；迁移注册表是 schema 版本唯一来源 | API 请求/worker（同一时刻一个写者）；CLI 离线迁移 |
 | 控制库 `var/rai-control.sqlite` | 计划状态与历史、发布结果、排期回执；schema 表 `mobile_control_schema` 当前为 **v2**：`mobile_training_state` / `_history` / `_migration_audit`，另有 legacy `mobile_goals`/`_history`、`mobile_plan_pushes`、`mobile_plan_operations`、`mobile_coach_loop_receipts` | 只有 API 主线程（同步写，无自己的跨进程发布锁） |
 | 运行时 `var/runtime.sqlite` | 来源/任务状态、导入回执索引与发布 journal | API 主线程/worker |
-| epoch 侧车 `var/rai.sqlite.dataset-epoch.sqlite` | dataset epoch 单行持久化；独立于可删除的事实库与运行时库的损坏恢复 | 恢复/替换数据集时写入；缺失时失败开放回落到 configured epoch |
+| epoch 侧车 `var/rai.sqlite.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 阶段日志；独立于可删除的事实库与运行时库的损坏恢复 | 恢复/替换/删库时写入；删库阶段含 `deletionId`、保护快照与 runtime 账本实例；缺失/损坏时失败关闭 |
 
 四者都可能含敏感信息，属于同一维护/备份边界；迁移与恢复按 [运维](OPERATIONS.md) 协调，不能只复制一个活跃 `.sqlite` 文件。
 

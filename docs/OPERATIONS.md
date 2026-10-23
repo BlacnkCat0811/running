@@ -79,6 +79,14 @@ npm run smoke:api
 - **模型边界对抗探针**（`npm run review:model-boundaries`，R1–R3）只读、用合成库并在 finally 清理；`violationCount > 0` 时 exit 1，不得用“这次没改”跳过它。
 - **deploy/ 模板变更**：仓库里改完不等于线上生效。服务器上 `nginx -t` 通过后 `systemctl reload nginx`；unit 复制后用 `systemctl daemon-reload` → `restart` → 核对 `Type`/`NRestarts`/`WatchdogUSec`（见下节「线上可观测性与 hang 守护」）。
 - **控制库/主库**：主库迁移走 `data:migrate`；控制库 schema 由 API 自动追加，控制库**数据**迁移走 `scripts/migrate-training-planner.mts`（见「控制库训练计划迁移」）。两者都必须在维护窗口内、先做一致性备份。
+- **全新数据集首次导入**：主库不存在时，API 不再根据“文件缺失”自动签发首次空库许可。部署/初始化新数据集前，先运行 `npm run data:init-scope` **只读检查**（输出配置 epoch、持久 epoch、scope、许可来源与删库阶段），确认无误后再运行 `npm run data:init-scope -- --apply --fresh-install`；主库已存在、存在删库记录，或发现任何历史证据（侧车、`runtime.sqlite.corrupt-*`、旧任务/来源 JSON）时都会拒绝。它在受控锁下重新检查“真正全新”，并且拒绝把“损坏账本刚被隔离重建”当成首次安装。随后首个导入消费一次 `pristine` 许可并永久失效。
+- **删库中断恢复**：`DELETE /v1/database` 在删除前为保护快照记录文件大小与 SHA-256，并写入 `dataset_deletion`（`prepared → main_removed → permit_issued → writer_entered`）。启动时若主库可读但没有显式 `rai.dataset-epoch` 行（升级前的存量库），API 会把当前生效 epoch 回填进主库；回填失败则保持写入阻断。重启时 `prepared + 主库仍在且显式 epoch 匹配` 自动回滚；`main_removed`/`permit_issued` 只有可读主库的显式 epoch 等于删除记录的 `previousEpoch`、且保护快照字节身份仍匹配时才回滚。`writer_entered` 后的首包会在建库后、写入事实前把新 epoch 持久写入主库；若重启时主库虽可读却没有显式 epoch，仍保持 `recovery_required`，不能从侧车推断其身份。主库 epoch 不匹配、无显式 epoch 或 `prepared + 主库缺失` 均保持 `recovery_required`，不撤销许可、不关闭删除日志，业务读写及后台任务全部阻断，只开放诊断与显式备份恢复入口。显式备份恢复在替换主库前持久记录绑定删除操作、备份字节与预定新 epoch 的恢复意图，主库提交后才进入 `committed`；sidecar、scope 与发布意图全部收口后才清除，重启只凭该意图和主库校验结果重放。主库缺失时，先恢复保护快照，或核对快照后运行 `npm run data:init-scope -- --apply --deletion-id <id> --confirm-main-removed`；快照字节变化必须先由运维恢复，不能补发许可。`main_removed` 可幂等补发同一 `nextEpoch` 许可；`permit_issued` 只接受账本中已有且未消费的许可，缺失时 API 和 CLI 都拒绝重签。首次写者已进入后如显式恢复旧备份，日志以 `superseded` 收口，侧车改为恢复后的新 epoch，scope 登记为 `established`。恢复阻断期间，已排队但没有实际写库的导入与命令不会阻止显式备份恢复；恢复仍等待正在执行的写入结束。显式恢复成功后，同一进程会重新裁决旧 scope 的导入作业、命令与发布意图：导入作业持久标为 `superseded`，排队命令以 `dataset_scope_changed` 终结，旧运行中命令的提交结果标为未核实，旧发布意图持久记为“由本次恢复取代”，然后才解除本次导入恢复 token；若仍有无法核实的回执/意图或另一个永久阻断，响应带 `restartRequired: true`，任务准入保持关闭。一般删库仍受待执行工作阻止。恢复在触及主库前失败（备份不存在、候选校验失败）会释放临时冻结；只有结构化证据（替换门已释放、恢复日志已收口、原库身份/必要表/epoch/侧车一致）证明原库完整回滚时才恢复调度，否则保持阻断并保留恢复入口。
+
+  - **保护快照轮换**：`permit_issued` 阶段只校验未消费的原许可，保护快照可以轮换到异地；`prepared`/`main_removed` 仍要求快照字节与日志绑定一致。启动时因快照暂时缺失而阻断，不会撤销同一 `deletionId` 的许可。
+  - **不可读主库**：`npm run data:init-scope -- --list-quarantine` 只读列举隔离快照与哈希；确认保护字节后运行 `--apply --quarantine-unreadable-main --deletion-id <id> --confirm-quarantine`，把不可读主库/WAL/SHM 移入 `var/quarantine` 并写 manifest，才推进 `main_removed`。
+  - **建库前崩溃（P1-5）**：写者已进入但主库从未建立时，不会自动建库。核对原库及 WAL/SHM 不存在后运行 `npm run data:init-scope -- --apply --abandon-and-create-new-epoch --confirm-abandon <生效epoch> --reason "<操作者说明>"`；旧 scope 记为 `abandoned`，新 epoch 获得一次性许可，旧任务标为 `superseded`（结果未核实）。`--confirm-abandon` 是操作身份：账本提交后或侧车写入后中断时，用**同一条命令**重试只会补齐剩余一步或报告“已完成”，不会生成第二个 epoch 或第二张 `pristine` 许可；换一个确认 epoch、换操作者说明或侧车已指向第三个 epoch 时一律拒绝并要求人工核对。所有 `--apply` 分支共用 `var/import-scope-init.lock`；持锁进程被强杀后，锁内记录的同机 PID 已不存在时下次运行可安全接管。
+  - **部署身份（P2-7）**：删除日志 v3 绑定 `serverId + athleteId`；改变 `RAI_SERVER_ID`/`RAI_ATHLETE_ID` 后旧日志不会被当成新命名空间的删除记录，需人工迁移或恢复。
+  - **故障注入**：`fault-injection.ts` 的 `sigkill`/`throw` 只在同时设置 `RAI_FAULT_INJECTION=1` 与测试环境标记时启用；部署模板不设置这两个变量。
 
 ## 部署 profile：云端（现行）与 n100（固定的备选）
 
@@ -161,7 +169,7 @@ sudo journalctl -u rai-api --since '-20 min' -o cat | jq -R 'fromjson? | select(
 | `<runtime>/var/rai.sqlite` | 主健康库（事实、路线、Fitness、模型发布） | `data:migrate` 显式 `--apply`；API 发现待迁移会退出 78 |
 | `<runtime>/var/rai-control.sqlite` | 控制库（目标、计划/历史、回执、操作幂等） | schema 由 API 启动时自动追加（当前 v2）；**数据**迁移走 `migrate-training-planner.mts` |
 | `<runtime>/var/runtime.sqlite` | 导入来源/任务/运行时状态 | 无独立迁移 CLI；随 API 启动维护 |
-| `<rai.sqlite>.dataset-epoch.sqlite` | 删库后的 dataset epoch 侧车 | 恢复/删库路径自动维护；备份时不得漏 |
+| `<rai.sqlite>.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 删库操作日志 | 恢复/删库路径自动维护；阶段记录含 `deletionId`/快照名/runtime 实例标识；备份时不得漏 |
 
 ```bash
 npm run data:migrate -- --database /absolute/path/rai.sqlite

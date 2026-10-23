@@ -312,6 +312,15 @@ records）存在即 200；只有事实不存在（或已软删）才 404。每�
 直连回执 `summary.directSync.records`：`{ parsed, inserted, unchanged }`，`unchanged = parsed - inserted`
 （显式删除不在 `parsed` 内）。老服务端省略该键 ⇒ 按「未提供」处理，不得当成 0。
 
+回执 `summary.routesUpdated`（P2-8，2026-10-23 明确）：**本批内容或归属发生变化的唯一路线数**，
+按 route id 去重。内容变化计 1；内容字节未变但父训练归属变化也计 1，包括原本无父训练的孤儿路线被 XML 训练认领且本批没有重传 GPX 文件；同一路线重复只计 1。
+它不是「路线文件数」或「路线点数」，也不能据此推断分析重算范围（见 `recomputeReasons`）。
+iOS 展示文案必须用「更新路线」而不是「路线文件」，避免用户把归属变化读成新增文件。
+
+导入任务的稳定失败码 `failureCode`（`GET /v1/jobs/:id` 与单次查询同源）：`direct_sync_route_ownership_conflict`
+表示同一批把一条路线声明或改归到多个训练（按完整 `WorkoutRoute` 声明集判定，与 XML 顺序无关；载荷自相矛盾，整批回滚）；客户端必须清任务并重新生成同步批次
+（与 `direct_sync_input_not_allowed` 同档，**不可重试**），不得保留同一 `sourceId` 反复重传。
+
 ## 8. 写接口（存活）
 
 - **反馈**：`POST /v1/commands`，`kind: "workout_override"`，payload 为完整训练覆盖字段 + `trainingSessionId`；

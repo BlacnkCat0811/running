@@ -22,7 +22,8 @@
 
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -79,6 +80,45 @@ function recordOnlyLargeFixtureXml(): string {
 /** 同尺寸、但**带一个 Workout**：用于"丢回复"用例 —— 它要顺带证明恢复也没有重复登记分析任务。 */
 function analysisLargeFixtureXml(): string {
   const workout = workoutExportXml().replace(/^<HealthData[^>]*>|<\/HealthData>\s*$/g, "");
+  return recordOnlyLargeFixtureXml().replace("</HealthData>", `${workout}</HealthData>`);
+}
+
+/** A05 GPX 变体：同一个大载荷 + 一个**显式**引用 GPX 的 Workout；ZIP 里必须带上这份 GPX。 */
+const KILL_GPX_ROUTE_RELATIVE_PATH = "workout-routes/route-kill.gpx";
+const KILL_GPX_ROUTE_POINTS = 3;
+
+/**
+ * 3 个 trkpt 的最小合法 GPX（形状同 `phase3-import-matrix.test.ts` 的 T11 夹具）。
+ *
+ * 🔴 点数不是装饰：重启后的判据要同时钉住 `route_version_points` 与
+ * `readable_route_points` 视图 = 3 —— 只写 0 点会让"版本已发布"与"点可读"
+ * 这两件事分不开（视图本身还要求 `point_count > 0`）。
+ */
+const killRouteGpx = (): string =>
+  `<gpx><trk><trkseg>${Array.from({ length: KILL_GPX_ROUTE_POINTS }, (_, index) =>
+    `<trkpt lat="23.1${index}" lon="113.3${index}"><ele>12.5</ele>` +
+    `<time>2026-01-02T08:00:0${index}Z</time></trkpt>`
+  ).join("")}</trkseg></trk></gpx>`;
+
+/**
+ * 真机形态的 Workout + `<WorkoutRoute><FileReference .../></WorkoutRoute>`。
+ *
+ * 显式引用是这条用例的关键：只有 XML 点名了这条路线，GPX 文件才会被挂到这次
+ * 训练上并走"版本发布"路径；只把 GPX 塞进 ZIP 而不引用，路线不会被读侧看见。
+ */
+const workoutWithRouteExportXml = (): string => `<HealthData locale="en_US">
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Watch"
+    duration="30" durationUnit="min"
+    startDate="2026-01-02 08:00:00 +0000" endDate="2026-01-02 08:30:00 +0000">
+    <MetadataEntry key="RAIHealthKitWorkoutUUID" value="${WORKOUT_UUID}"/>
+    <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" unit="km" sum="5"/>
+    <WorkoutRoute><FileReference path="/${KILL_GPX_ROUTE_RELATIVE_PATH}"/></WorkoutRoute>
+  </Workout>
+</HealthData>`;
+
+/** 4500 条记录 + 一个带显式 GPX 引用的 Workout：留在直连上界内，但写事务足够长。 */
+function gpxLargeFixtureXml(): string {
+  const workout = workoutWithRouteExportXml().replace(/^<HealthData[^>]*>|<\/HealthData>\s*$/g, "");
   return recordOnlyLargeFixtureXml().replace("</HealthData>", `${workout}</HealthData>`);
 }
 
@@ -184,10 +224,15 @@ function storedZip(entries: Array<{ name: string; data: Buffer }>): Buffer {
  * 而它决定"成功导入后保留上传件还是清掉"（`finalizeImportSource`）。名字变了，清理路径就变了，
  * 于是测试会在**别的地方**（重放时找不到来源）以看不懂的方式变红。
  */
-function healthKitZip(xml: string, manifest: string): Buffer {
+function healthKitZip(
+  xml: string,
+  manifest: string,
+  entries: ReadonlyArray<{ name: string; data: Buffer }> = []
+): Buffer {
   return storedZip([
     { name: "export.xml", data: Buffer.from(xml, "utf8") },
-    { name: "sync-manifest.json", data: Buffer.from(manifest, "utf8") }
+    { name: "sync-manifest.json", data: Buffer.from(manifest, "utf8") },
+    ...entries
   ]);
 }
 
@@ -200,7 +245,7 @@ interface Harness {
   databasePath: string;
   runtimeStatePath: string;
   /** 启动一个真 API 子进程并等它就绪。返回的 handle 用于 kill / 再次启动。 */
-  start(): Promise<ServerHandle>;
+  start(options?: { preCommitBarrierMarker?: string }): Promise<ServerHandle>;
   /** 为了强杀之后的断言，夹具要能**不经过 HTTP** 读主库。 */
   readMain<T>(run: (db: DatabaseSync) => T): T;
   dispose(): void;
@@ -222,10 +267,15 @@ function createHarness(prefix: string): Harness {
     root,
     databasePath,
     runtimeStatePath,
-    start: () => startServer(root, databasePath),
+    start: (options) => startServer(root, databasePath, options),
     readMain: (run) => {
       const db = new DatabaseSync(databasePath, { readOnly: true });
-      try { return run(db); } finally { db.close(); }
+      try {
+        // 收尾体检与仍在运行的服务端可能同时持有 WAL 连接；给只读探测一个
+        // 有界等待，避免把"恰好撞上 checkpoint/清理写锁"误报成用例失败。
+        db.exec("PRAGMA busy_timeout=5000");
+        return run(db);
+      } finally { db.close(); }
     },
     dispose: () => { removeTree(root); }
   };
@@ -261,8 +311,15 @@ async function prepareDatabase(harness: Harness): Promise<void> {
 // 真子进程
 // ---------------------------------------------------------------------------
 
-async function startServer(root: string, databasePath: string): Promise<ServerHandle> {
-  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+async function startServer(
+  root: string, databasePath: string, options: { preCommitBarrierMarker?: string } = {}
+): Promise<ServerHandle> {
+  const args = ["--import", "tsx"];
+  if (options.preCommitBarrierMarker !== undefined) {
+    args.push("--import", join(projectRoot, "apps/api/test/fixtures/pre-commit-barrier.mjs"));
+  }
+  args.push("apps/api/src/server.ts");
+  const child = spawn(process.execPath, args, {
     cwd: projectRoot,
     env: {
       ...process.env,
@@ -273,7 +330,10 @@ async function startServer(root: string, databasePath: string): Promise<ServerHa
       RAI_API_TOKEN: "",
       RAI_SERVER_ID: "local",
       RAI_ATHLETE_ID: "athlete_1",
-      RAI_DATASET_EPOCH: "default"
+      RAI_DATASET_EPOCH: "default",
+      ...(options.preCommitBarrierMarker === undefined ? {} : {
+        RAI_PRECOMMIT_BARRIER_MARKER: options.preCommitBarrierMarker
+      })
     },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe", "ipc"]
@@ -496,6 +556,7 @@ const count = (db: DatabaseSync, sql: string): number => Number((db.prepare(sql)
 function readMainFacts(databasePath: string): MainFacts {
   const db = new DatabaseSync(databasePath, { readOnly: true });
   try {
+    db.exec("PRAGMA busy_timeout = 5000");
     const receiptRow = db.prepare("SELECT value FROM import_manifest WHERE key='direct_sync_payload_class'").get() as
       { value?: string } | undefined;
     return {
@@ -519,6 +580,82 @@ function readMainFacts(databasePath: string): MainFacts {
 }
 
 const receiptKey = (jobId: string): string => `rai.applied-import.${jobId}`;
+
+/**
+ * GPX 相关表的**全部**行数（含已删除事实、未发布版本、旧表）。
+ *
+ * 强杀之后只能这样读：HTTP 已经不可用，而"有没有半批"必须逐表回答。刻意不按
+ * `deleted_at IS NULL` 过滤 —— 半批的指控是"事务里留下了行"，哪怕这些行本来会被软删，
+ * 也已经是 COMMIT 之前不该存在的东西。`readable_route_points` 是读侧唯一的路线点入口，
+ * **不**断言 `route_points` 表（新代码把点写进 `route_versions`，旧表只在指针为 NULL 时才有行）。
+ */
+interface GpxTableFacts {
+  healthRecords: number;
+  workouts: number;
+  trainingSessions: number;
+  workoutRoutes: number;
+  routeVersions: number;
+  routeVersionPoints: number;
+  routeFileFingerprints: number;
+  importBatches: number;
+  readableRoutePoints: number;
+}
+
+function readGpxTableFacts(databasePath: string): GpxTableFacts {
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    return {
+      healthRecords: count(db, "SELECT COUNT(*) AS n FROM health_records"),
+      workouts: count(db, "SELECT COUNT(*) AS n FROM workouts"),
+      trainingSessions: count(db, "SELECT COUNT(*) AS n FROM training_sessions"),
+      workoutRoutes: count(db, "SELECT COUNT(*) AS n FROM workout_routes"),
+      routeVersions: count(db, "SELECT COUNT(*) AS n FROM route_versions"),
+      routeVersionPoints: count(db, "SELECT COUNT(*) AS n FROM route_version_points"),
+      routeFileFingerprints: count(db, "SELECT COUNT(*) AS n FROM route_file_fingerprints"),
+      importBatches: count(db, "SELECT COUNT(*) AS n FROM import_batches"),
+      readableRoutePoints: count(db, "SELECT COUNT(*) AS n FROM readable_route_points")
+    };
+  } finally { db.close(); }
+}
+
+/**
+ * P2：批次前/杀后/重试后的**逐表精确快照**。
+ *
+ * 只挑与“删除 + GPX + 批次/回执/代次”有因果关系的表；每张表按 rowid 全列投影，
+ * 因此任何半批行（含软删标记、版本点、墓碑、变更账本、任务）都会逐字段暴露。
+ * 不按 `deleted_at IS NULL` 过滤：半批本身就是“事务里曾经有行”的指控。
+ */
+const P2_SNAPSHOT_TABLES = [
+  "health_records",
+  "healthkit_record_sources",
+  "healthkit_record_facts",
+  "import_entity_changes",
+  "import_source_tombstones",
+  "workouts",
+  "training_sessions",
+  "workout_routes",
+  "route_versions",
+  "route_version_points",
+  "route_file_fingerprints",
+  "import_batches",
+  "recompute_jobs",
+  "import_generations",
+  "import_manifest"
+] as const;
+
+function readP2Snapshot(databasePath: string): Record<string, string> {
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    db.exec("PRAGMA busy_timeout=5000");
+    const snapshot: Record<string, string> = {};
+    for (const table of P2_SNAPSHOT_TABLES) {
+      const rows = db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<Record<string, unknown>>;
+      snapshot[table] = JSON.stringify(rows.map((row) => ({ ...row })));
+    }
+    return snapshot;
+  } finally { db.close(); }
+}
 
 /**
  * 字段名集合。
@@ -912,6 +1049,297 @@ test("A05：COMMIT 前强杀真子进程 ⇒ 没有半批，重启后任务重�
     assert.equal(after.recomputeJobs.length, 0);
     // （旧注记曾写"本车道不推进 import_generations"——那是 R6 现象①被当成设计的年代；
     //   修复后同文件 record-only 用例与这里共同钉住"成功恰好 +1"。）
+  } finally {
+    await server.stop();
+    harness.dispose();
+  }
+});
+
+test("A05：COMMIT 前强杀含 GPX 的批次 ⇒ 路线点/删除/回执均无半批，重启后恰好提交一次", { timeout: 120_000 }, async () => {
+  const harness = createHarness("rai-direct-sync-http-kill-before-commit-gpx-");
+  await prepareDatabase(harness);
+  let server = await harness.start();
+  const api = session(server.baseUrl);
+  try {
+    // 载荷 = 与 A05 同尺的 4500 条记录 + 一个显式引用 GPX 的 Workout。
+    // 上界自检不能省：越界会走拒收/候选链路，那时"强杀写事务"就没被证明了。
+    const xml = gpxLargeFixtureXml();
+    assertWithinDirectSyncBounds(xml);
+    assert.equal(xml.split("<Record ").length - 1, KILL_FIXTURE_RECORDS,
+      "GPX 变体必须复用 A05 的记录条数（恰好一次断言的基准）");
+    const zip = healthKitZip(xml, syncManifest(), [
+      { name: KILL_GPX_ROUTE_RELATIVE_PATH, data: Buffer.from(killRouteGpx(), "utf8") }
+    ]);
+    const upload = await api.upload(zip, "kill-before-commit-gpx-0001", "apple-health-healthkit-kill-gpx.zip");
+    const created = await api.createJob(upload.sourceId);
+    assert.equal(created.status, 202, JSON.stringify(created.job));
+    const jobId = created.job.id;
+
+    const walPath = `${harness.databasePath}-wal`;
+    const baseline = readGpxTableFacts(harness.databasePath);
+    assert.equal(baseline.healthRecords, 0);
+    assert.equal(baseline.importBatches, 0);
+
+    // 与 A05 相同的窗口判据：任务已 running、WAL ≥ 256 KiB、回执尚未落库。
+    // 必须持有一个常开的读者连接：最后一个连接关闭时会 checkpoint(-wal → 主库) 并截断 WAL，
+    // 那样这里的字节数就永远等不到阈值。探测回执也走同一个句柄。
+    const reader = new DatabaseSync(harness.databasePath, { readOnly: true });
+    const receiptWith = (db: DatabaseSync): string | null =>
+      (db.prepare("SELECT value FROM import_manifest WHERE key=?").get(receiptKey(jobId)) as { value?: string } | undefined)
+        ?.value ?? null;
+    try {
+      assert.equal(receiptWith(reader), null);
+      const observed = await waitForCondition(() => {
+        if (receiptWith(reader) !== null) {
+          throw new Error("批次在强杀之前就提交完了 —— 这次拿到的是 COMMIT 之后的样本，不是 COMMIT 之前的");
+        }
+        const job = runtimeJob(harness.runtimeStatePath, jobId);
+        if (job === null || job.status !== "running") return null;
+        const walBytes = existsSync(walPath) ? statSync(walPath).size : 0;
+        return walBytes >= 256 * 1024 ? { job, walBytes } : null;
+      }, {
+        what: "含 GPX 的任务进入写事务（WAL ≥ 256 KiB 且任务为 running）",
+        budgetMs: POLL_BUDGET_MS,
+        describe: () => JSON.stringify({
+          job: runtimeJob(harness.runtimeStatePath, jobId),
+          walBytes: existsSync(walPath) ? statSync(walPath).size : 0,
+          walExists: existsSync(walPath),
+          varEntries: readdirSync(join(harness.root, "var"))
+        })
+      });
+      assert.equal(receiptWith(reader), null,
+        "强杀之前不得已经有持久回执 —— 有就说明这次取到的是 COMMIT 后的样本");
+      assert.equal(observed.job.status, "running");
+    } finally { reader.close(); }
+
+    hardKill(server);
+    await delay(200); // 只等 OS 回收进程句柄，等的不是业务状态。
+
+    // ⓐ COMMIT 前强杀：GPX 相关七张表 + 批次账本 + 回执必须一起是"没发生"。
+    //    这是 F01 的缺失变体：只断言 health_records 的话，路线版本/点/指纹的半批不可见。
+    const killed = readGpxTableFacts(harness.databasePath);
+    const killedMain = readMainFacts(harness.databasePath);
+    assert.equal(readReceiptJson(harness.databasePath, jobId), null, "COMMIT 前被强杀不得留下回执");
+    assert.deepEqual(killedMain.batches, [], "COMMIT 前被强杀不得留下批次账本行");
+    assert.equal(killedMain.receiptKeys.length, 0);
+    assert.equal(killed.healthRecords, 0, "health_records 不得留下半批");
+    assert.equal(killed.workouts, 0, "workouts 不得留下半批");
+    assert.equal(killed.trainingSessions, 0, "training_sessions 不得留下半批");
+    assert.equal(killed.workoutRoutes, 0, "workout_routes 不得留下半批");
+    assert.equal(killed.routeVersions, 0, "route_versions 不得留下半批");
+    assert.equal(killed.routeVersionPoints, 0, "route_version_points 不得留下半批");
+    assert.equal(killed.routeFileFingerprints, 0, "route_file_fingerprints 不得留下半批");
+    assert.equal(killed.importBatches, 0, "import_batches 不得留下半批");
+    assert.equal(killed.readableRoutePoints, 0, "读侧视图不得看到任何半批路线点");
+
+    // ⓑ 重启同一个 var/：同一个任务 id 自己续上，并**恰好**提交一次（记录 + 路线都要）。
+    server = await harness.start();
+    const restarted = session(server.baseUrl);
+    const recovered = await waitForTerminal(restarted, jobId, { what: "重启后恢复的含 GPX 批次终态" });
+    assert.equal(recovered.status, "succeeded", JSON.stringify({
+      error: recovered.error, message: recovered.message, summary: recovered.summary
+    }));
+    assert.equal(recovered.id, jobId, "恢复必须落在**同一个**任务 id 上（批次身份不能换）");
+    assert.equal(recovered.summary?.directSync?.ingestStatus, "committed");
+    assert.equal(recovered.summary?.directSync?.receiptId, jobId);
+
+    const receipt = readReceiptJson(harness.databasePath, jobId);
+    assert.ok(receipt, "成功批次必须有持久回执");
+    assert.deepEqual(JSON.parse(receipt), recovered.summary, "终态摘要与持久回执必须是同一份结论");
+
+    const after = readGpxTableFacts(harness.databasePath);
+    assert.equal(after.healthRecords, KILL_FIXTURE_RECORDS, "记录必须**恰好**落库一次");
+    assert.equal(after.workouts, 1, "Workout 必须**恰好**落库一次");
+    assert.equal(after.trainingSessions, 1, "训练会话必须**恰好**一条");
+    assert.equal(after.workoutRoutes, 1, "路线必须**恰好**一条");
+    assert.equal(after.routeVersions, 1, "路线版本必须**恰好**一个");
+    assert.equal(after.routeVersionPoints, 3, "轨迹点必须**恰好**落库一次");
+    assert.equal(after.importBatches, 1, "整条故事线只许留下一个批次账本行");
+    // 🔴 只读 `readable_route_points` 视图，不断言 `route_points` 表：新代码把点写进
+    //    `route_versions`，旧表只在 `published_route_version_id IS NULL` 时才有行。
+    assert.equal(after.readableRoutePoints, 3, "读侧必须通过 readable_route_points 看到恰好 3 个点");
+    assert.equal(after.routeFileFingerprints, 1, "GPX 指纹必须**恰好**一条");
+
+    const afterMain = readMainFacts(harness.databasePath);
+    assert.deepEqual(afterMain.batches, [jobId], "只许留下一个批次账本行");
+    assert.deepEqual(plainRows(afterMain.batchStatuses), [{ id: jobId, status: "succeeded" }]);
+    assert.equal(afterMain.receiptKeys.length, 1, "只许留下一个持久回执");
+
+    // ⓒ 与既有直连用例同口径的收尾体检：外键全绿、var/ 里没有整库副本/候选目录。
+    const foreignKeyViolations = harness.readMain((db) => db.prepare("PRAGMA foreign_key_check").all());
+    assert.deepEqual(plainRows(foreignKeyViolations as object[]), [], "提交后的库不得有外键违规");
+    assert.deepEqual(
+      readdirSync(join(harness.root, "var")).filter((name) => /^(backups|rai\.importing)/.test(name)), [],
+      "隔离 var/ 里不得出现项目备份或整库候选"
+    );
+  } finally {
+    await server.stop();
+    harness.dispose();
+  }
+});
+
+test("A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次", { timeout: 180_000 }, async () => {
+  const harness = createHarness("rai-direct-sync-http-p2-delete-gpx-");
+  await prepareDatabase(harness);
+  const markerPath = join(harness.root, "precommit-marker.json");
+  const deletedUuid = sampleUuid(900);
+  const controlUuid = sampleUuid(901);
+  let server = await harness.start({ preCommitBarrierMarker: markerPath });
+  const api = session(server.baseUrl);
+  try {
+    // ── 基线：先通过真实 HTTP/worker 提交两条有稳定 UUID 的事实（一条待删、一条保护对照）。
+    const baselineXml = `<HealthData locale="en_US">${stepRecordXml(900)}${stepRecordXml(901)}</HealthData>`;
+    const baselineUpload = await api.upload(
+      healthKitZip(baselineXml, syncManifest()), "p2-delete-gpx-baseline-0001",
+      "apple-health-healthkit-p2-baseline.zip");
+    const baselineCreated = await api.createJob(baselineUpload.sourceId);
+    assert.equal(baselineCreated.status, 202, JSON.stringify(baselineCreated.job));
+    const baselineDone = await waitForTerminal(api, baselineCreated.job.id, { what: "P2 基线批次终态" });
+    assert.equal(baselineDone.status, "succeeded", describeJob(baselineDone, server.output));
+    const baseline = readP2Snapshot(harness.databasePath);
+    const baselineMain = readMainFacts(harness.databasePath);
+    assert.equal(baselineMain.healthRecords, 2);
+    assert.equal(baselineMain.workouts, 0);
+
+    // ── 确定性屏障：触发器挂在**回执 INSERT** 上。回执写入位于删除、GPX 路线版本/点、
+    //    批次终态、任务登记之后，COMMIT 之前。触发器先在同一事务连接里逐条 RAISE
+    //    证明“待删 UUID 已不可见 / 对照仍在 / Workout/路线版本/3 点已存在”，
+    //    再把同连接读到的计数交给测试函数落盘并暂停真实子进程。
+    const trigger = `CREATE TRIGGER rai_p2_precommit_barrier BEFORE INSERT ON import_manifest
+      WHEN NEW.key LIKE 'rai.applied-import.%'
+      BEGIN
+        SELECT RAISE(ABORT, 'P2 barrier: deleted UUID still present')
+          WHERE EXISTS (SELECT 1 FROM healthkit_record_sources s
+            JOIN health_records r ON r.id = s.record_id
+            WHERE s.sample_uuid = '${deletedUuid}');
+        SELECT RAISE(ABORT, 'P2 barrier: control UUID missing')
+          WHERE NOT EXISTS (SELECT 1 FROM healthkit_record_sources s
+            JOIN health_records r ON r.id = s.record_id
+            WHERE s.sample_uuid = '${controlUuid}');
+        SELECT RAISE(ABORT, 'P2 barrier: workout missing')
+          WHERE NOT EXISTS (SELECT 1 FROM workouts);
+        SELECT RAISE(ABORT, 'P2 barrier: route version/3 points missing')
+          WHERE NOT EXISTS (SELECT 1 FROM workout_routes route
+            JOIN route_versions version ON version.id = route.published_route_version_id
+            WHERE version.point_count = 3
+              AND (SELECT COUNT(*) FROM route_version_points point
+                WHERE point.route_version_id = version.id) = 3);
+        SELECT rai_hold_before_commit(
+          NEW.key,
+          (SELECT COUNT(*) FROM healthkit_record_sources s
+            JOIN health_records r ON r.id = s.record_id WHERE s.sample_uuid = '${controlUuid}'),
+          (SELECT COUNT(*) FROM workouts),
+          (SELECT COUNT(*) FROM route_versions),
+          (SELECT COUNT(*) FROM route_version_points),
+          (SELECT COUNT(*) FROM import_source_tombstones
+            WHERE source_identifier LIKE '%${deletedUuid}%')
+        );
+      END`;
+    const triggerDb = new DatabaseSync(harness.databasePath);
+    triggerDb.exec(trigger);
+    triggerDb.close();
+
+    // ── 待强杀批次：12 条新记录 + 显式删除基线 UUID + 一个显式引用 3 点 GPX 的 Workout。
+    const revisionRecords = Array.from({ length: 12 }, (_, index) => stepRecordXml(1000 + index)).join("");
+    const revisionWorkout = workoutWithRouteExportXml()
+      .replace(/^<HealthData[^>]*>/, "").replace(/<\/HealthData>\s*$/, "");
+    const revisionXml = `<HealthData locale="en_US">${revisionRecords}${revisionWorkout}</HealthData>`;
+    assertWithinDirectSyncBounds(revisionXml);
+    const revisionZip = healthKitZip(
+      revisionXml,
+      syncManifest({ deletedRecords: [{ type: "HKQuantityTypeIdentifierStepCount", uuid: deletedUuid }] }),
+      [{ name: KILL_GPX_ROUTE_RELATIVE_PATH, data: Buffer.from(killRouteGpx(), "utf8") }]
+    );
+    const upload = await api.upload(
+      revisionZip, "p2-delete-gpx-kill-0001", "apple-health-healthkit-p2-kill.zip");
+    const created = await api.createJob(upload.sourceId);
+    assert.equal(created.status, 202, JSON.stringify(created.job));
+    const jobId = created.job.id;
+
+    const marker = await waitForCondition(() => {
+      if (!existsSync(markerPath)) return null;
+      try { return JSON.parse(readFileSync(markerPath, "utf8")) as { values: string[] }; }
+      catch { return null; }
+    }, {
+      what: "删除与 GPX 已写入、COMMIT 未发生的确定性屏障",
+      budgetMs: POLL_BUDGET_MS,
+      describe: () => JSON.stringify({ job: runtimeJob(harness.runtimeStatePath, jobId), markerExists: existsSync(markerPath), serverOutput: server.output() })
+    });
+    assert.equal(marker.values[0], receiptKey(jobId), "屏障必须由实际导入事务的回执写入触发，并携带本 job id");
+    assert.equal(marker.values[1], "1", "同一事务连接上保护对照必须仍可见");
+    assert.equal(marker.values[2], "1", "同一事务连接上 Workout 必须已写入");
+    assert.equal(marker.values[3], "1", "同一事务连接上路线版本必须已写入");
+    assert.equal(marker.values[4], "3", "同一事务连接上路线点必须恰好 3 个");
+    assert.equal(marker.values[5], "1", "同一事务连接上删除墓碑必须已写入");
+    assert.equal(readReceiptJson(harness.databasePath, jobId), null,
+      "屏障点必须在 COMMIT 之前：外部连接不得看到回执");
+    assert.deepEqual(readP2Snapshot(harness.databasePath), baseline,
+      "外部只读连接必须仍看到批次前快照（删除、GPX、批次、任务、回执都不可见）");
+
+    // ── 真实 SIGKILL；等 OS 确认退出后直接开库逐表比较。
+    const exited = once(server.child, "exit");
+    hardKill(server);
+    await exited;
+
+    const clean = new DatabaseSync(harness.databasePath);
+    clean.exec("DROP TRIGGER rai_p2_precommit_barrier");
+    clean.close();
+    assert.deepEqual(readP2Snapshot(harness.databasePath), baseline,
+      "SIGKILL 后数据库必须逐表等于批次前快照（包括原删除目标仍在）");
+    assert.equal(readReceiptJson(harness.databasePath, jobId), null);
+    const foreignKeys = harness.readMain((db) => db.prepare("PRAGMA foreign_key_check").all());
+    assert.deepEqual(plainRows(foreignKeys as object[]), []);
+
+    // ── 同一 runtime 重启，同一 job id 恰好重试一次。
+    server = await harness.start();
+    const restarted = session(server.baseUrl);
+    const recovered = await waitForTerminal(restarted, jobId, { what: "重启后删除+GPX 批次终态" });
+    assert.equal(recovered.status, "succeeded", JSON.stringify({
+      error: recovered.error, message: recovered.message, summary: recovered.summary
+    }));
+    assert.equal(recovered.id, jobId);
+    assert.ok(recovered.summary?.directSync);
+    assert.deepEqual(JSON.parse(readReceiptJson(harness.databasePath, jobId)!), recovered.summary,
+      "终态摘要必须等于持久回执");
+
+    const after = readGpxTableFacts(harness.databasePath);
+    assert.equal(after.healthRecords, 13, "2 条基线 - 1 条显式删除 + 12 条新记录");
+    assert.equal(after.workouts, 1);
+    assert.equal(after.trainingSessions, 1);
+    assert.equal(after.workoutRoutes, 1);
+    assert.equal(after.routeVersions, 1);
+    assert.equal(after.routeVersionPoints, 3);
+    assert.equal(after.routeFileFingerprints, 1);
+    assert.equal(after.importBatches, 2, "基线与本批各一行");
+    assert.equal(after.readableRoutePoints, 3);
+    const deletedVisible = harness.readMain((db) => Number((db.prepare(`
+      SELECT COUNT(*) AS n FROM healthkit_record_sources s JOIN health_records r ON r.id=s.record_id
+      WHERE s.sample_uuid = ?`).get(deletedUuid) as { n: number }).n));
+    assert.equal(deletedVisible, 0, "待删 UUID 必须被正确删除");
+    const controlVisible = harness.readMain((db) => Number((db.prepare(`
+      SELECT COUNT(*) AS n FROM healthkit_record_sources s JOIN health_records r ON r.id=s.record_id
+      WHERE s.sample_uuid = ?`).get(controlUuid) as { n: number }).n));
+    assert.equal(controlVisible, 1, "未删的保护对照必须保留");
+    assert.equal(harness.readMain((db) => Number((db.prepare(
+      "SELECT COUNT(*) AS n FROM import_source_tombstones WHERE source_identifier LIKE ?"
+    ).get(`%${deletedUuid}%`) as { n: number }).n)), 1);
+
+    const afterMain = readMainFacts(harness.databasePath);
+    assert.equal(afterMain.rawGeneration, baselineMain.rawGeneration + 1, "成功批次 raw 只推进一次");
+    assert.equal(afterMain.dependencyGeneration, baselineMain.dependencyGeneration + 1,
+      "本批影响分析，dependency 只推进一次");
+    assert.equal(afterMain.batches.length, 2);
+    assert.equal(afterMain.receiptKeys.length, 2);
+    assert.equal(afterMain.recomputeJobs.length, baselineMain.recomputeJobs.length + 1);
+
+    // ── 同批同内容重放不改变任何事实/代次/回执。
+    const beforeReplay = readP2Snapshot(harness.databasePath);
+    const reupload = await restarted.upload(
+      revisionZip, "p2-delete-gpx-kill-0001", "apple-health-healthkit-p2-kill.zip");
+    const replay = await restarted.createJob(reupload.sourceId);
+    assert.equal(replay.job.id, jobId, "重放必须命中同一任务");
+    assert.deepEqual(replay.job.summary, recovered.summary, "重放必须返回原回执");
+    assert.deepEqual(readP2Snapshot(harness.databasePath), beforeReplay, "重放不得改变任何表");
   } finally {
     await server.stop();
     harness.dispose();

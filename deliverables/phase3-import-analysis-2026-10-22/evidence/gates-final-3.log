@@ -1,0 +1,534 @@
+
+> rai-running-intelligence@0.1.0 pretypecheck
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json
+
+
+> rai-running-intelligence@0.1.0 check:package-boundaries
+> node scripts/check-package-boundaries.mjs
+
+包边界：16 个包 / 31 条 src 边；禁线 4 条
+包边界检查通过。
+
+> rai-running-intelligence@0.1.0 check:training-plan-single-writer
+> node scripts/check-training-plan-single-writer.mjs
+
+single-writer 结构门禁：R1–R5 / 生产源文件 492 / 测试文件 136（R1/R2/R4 豁免）/ 违规 0
+single-writer 结构门禁通过。
+
+> rai-running-intelligence@0.1.0 check:scripts
+> node scripts/check-npm-scripts-portable.mjs
+
+✅ npm script 跨平台语法检查通过：18 个 package.json / 108 条 script。
+
+> rai-running-intelligence@0.1.0 check:acceptance-matrix
+> tsx scripts/check-acceptance-matrix.mts
+
+§16.1 矩阵：80 条；cited 80；declared-gap 0；missing 0
+  注：cited 仅表示测试**标题**引用了该 ID，不代表断言存在；覆盖强度请看测试内容，不要只看这个数字。
+
+验收矩阵检查通过。
+
+> rai-running-intelligence@0.1.0 check:docs
+> node scripts/check-doc-links.mjs
+
+Documentation: 64 files, 566 local links, 2 anchors, 0 problems
+
+> rai-running-intelligence@0.1.0 check:doc-refs
+> node scripts/check-doc-line-refs.mjs
+
+docs/ARCHITECTURE.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+docs/ALGORITHM.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+docs/DATA_PIPELINE.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+docs/OPERATIONS.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+packages/storage-sqlite/src/database.ts:2198-2202 -> packages/storage-sqlite/src/database.ts
+    2198: "DELETE FROM workout_routes WHERE lower(relative_path) = lower(?) AND id <> ?"
+    2202: route_id, sequence, timestamp, latitude, longitude, elevation_meters,
+database.ts:2224-2234                        -> packages/storage-sqlite/src/database.ts
+    2224: private begin(): void {
+    2234: if (this.transactionOwner === "store" && !this.atomicImport && this.objectsSinceCommit >= 5_000) thi
+database.ts:2204-2216                        -> packages/storage-sqlite/src/database.ts
+    2204: vertical_accuracy_meters
+    2216: throw new Error(
+packages/health-export-parser/src/apple-health-parser.ts:336-345 -> packages/health-export-parser/src/apple-health-parser.ts
+    336: }
+    345: if (!activityType || !startAt || !endAt) return null;
+database.ts:3473-3487                        -> packages/storage-sqlite/src/database.ts
+    3473: ...(batchId === undefined ? {} : { batchId }), sourceIdentifier: source
+    3487: 
+database.ts:1045-1046                        -> packages/storage-sqlite/src/database.ts
+    1045: database.exec("ALTER TABLE feature_runs ADD COLUMN reused_feature_count INTEGER NOT NULL DEFAULT 0 C
+    1046: }
+packages/storage-sqlite/src/v31-migration.ts:39-48 -> packages/storage-sqlite/src/v31-migration.ts
+    39: CREATE TABLE healthkit_record_facts (
+    48: );
+database.ts:218-231                          -> packages/storage-sqlite/src/database.ts
+    218: average_value REAL,
+    231: event_at TEXT,
+database.ts:491-506                          -> packages/storage-sqlite/src/database.ts
+    491: CREATE INDEX IF NOT EXISTS idx_daily_snapshots_model_date
+    506: 
+packages/health-export-parser/src/canonicalize-nights.ts:521 -> packages/health-export-parser/src/canonicalize-nights.ts
+    521: database.exec("DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;");
+canonicalize-nights.ts:10                    -> packages/health-export-parser/src/canonicalize-nights.ts
+    10: *
+canonicalize-nights.ts:447-449               -> packages/health-export-parser/src/canonicalize-nights.ts
+    447: const windowStart = Date.parse(localDateTimeAt(`${addLocalDays(date, -1)}T18:00:00`, timezoneIdentif
+    449: const candidates = all.filter((s) => s.end > windowStart && s.start < windowEnd).map((s) => ({ ...s,
+database.ts:132                              -> packages/storage-sqlite/src/database.ts
+    132: /** Jobs kept for audit but detached from the run they produced. */
+database.ts:1682                             -> packages/storage-sqlite/src/database.ts
+    1682: WHERE entity_kind = 'record' AND entity_id IN (SELECT staged FROM realign_record_ids);
+database.ts:1736                             -> packages/storage-sqlite/src/database.ts
+    1736: *
+apps/api/src/import-worker.ts:948-966        -> apps/api/src/import-worker.ts
+    948: console.error(`Import job ${job.id} has an unconfirmed commit: ingest worker did not terminate`);
+    966: job.summary = committed; job.completedAt = new Date().toISOString();
+apps/api/src/import-database-tasks.ts:7-12   -> apps/api/src/import-database-tasks.ts
+    7: import type { DirectSyncImportResult, DirectSyncRejection } from "./direct-sync-ingest.js";
+    12: * 运行期的顺序判据在 `import-worker.ts` 的 `IMPORT_LANE_ATTEMPTS`（主线程按它下发、
+v31-migration.ts:39-48                       -> packages/storage-sqlite/src/v31-migration.ts
+    39: CREATE TABLE healthkit_record_facts (
+    48: );
+database.ts:132-1682                         -> packages/storage-sqlite/src/database.ts
+    132: /** Jobs kept for audit but detached from the run they produced. */
+    1682: WHERE entity_kind = 'record' AND entity_id IN (SELECT staged FROM realign_record_ids);
+database.ts:1683-1684                        -> packages/storage-sqlite/src/database.ts
+    1683: UPDATE import_entity_tombstones
+    1684: SET entity_id = (SELECT final FROM realign_record_ids WHERE staged = entity_id)
+canonicalize-nights.ts:521                   -> packages/health-export-parser/src/canonicalize-nights.ts
+    521: database.exec("DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;");
+packages/health-export-parser/src/canonicalize-nights.ts:8-16 -> packages/health-export-parser/src/canonicalize-nights.ts
+    8: /**
+    16: export const CANONICAL_NIGHT_ALGORITHM_VERSION = "canonical-night-v2" as const;
+packages/health-export-parser/src/cli.ts:321 -> packages/health-export-parser/src/cli.ts
+    321: let store: RaiDatabase;
+server.ts:568                                -> apps/api/src/server.ts
+    568: const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(i
+packages/storage-sqlite/src/recompute-job-repository.ts:303-306 -> packages/storage-sqlite/src/recompute-job-repository.ts
+    303: SELECT id, job_type AS jobType, request_json AS requestJson,
+    306: FROM recompute_jobs WHERE status = 'running' ORDER BY created_at
+application/src/service.ts:283               -> packages/application/src/service.ts
+    283: this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RE
+database.ts:493                              -> packages/storage-sqlite/src/database.ts
+    493: 
+packages/health-export-parser/src/cli.ts:421-432 -> packages/health-export-parser/src/cli.ts
+    421: // 本批删除/取代过的记录时刻也必须压低分析下界：只取训练时刻会让"值更正"
+    432: JSON.stringify({ changes, xml: xmlResult, gpx: gpxResult, canonicalization: canonicalResult }),
+packages/storage-sqlite/src/recompute-job-repository.ts:115 -> packages/storage-sqlite/src/recompute-job-repository.ts
+    115: enqueue(
+apps/api/src/recompute-worker.ts:75          -> apps/api/src/recompute-worker.ts
+    75: constructor(
+packages/application/src/service.ts:283      -> packages/application/src/service.ts
+    283: this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RE
+service.ts:288-294                           -> packages/application/src/service.ts
+    288: requestJobCancellation(jobId: string): JobCancellationResult {
+    294: if (!job) return null;
+service.ts:296                               -> packages/application/src/service.ts
+    296: try {
+packages/health-export-parser/src/cli.ts:334-340 -> packages/health-export-parser/src/cli.ts
+    334: try {
+    340: (SELECT value FROM import_manifest WHERE key = 'dataset_version'), '{}')
+packages/health-export-parser/src/cli.ts:505-512 -> packages/health-export-parser/src/cli.ts
+    505: modelCohorts: stagedAudit?.audit.readiness ?? null,
+    512: ,datasetVersion: datasetVersionRow?.value ?? null
+packages/health-export-parser/src/cli.ts:340 -> packages/health-export-parser/src/cli.ts
+    340: (SELECT value FROM import_manifest WHERE key = 'dataset_version'), '{}')
+packages/contracts/src/index.ts:564-579      -> packages/contracts/src/index.ts
+    564: /** Why the number reads the way it does. The UI renders these instead of inventing wording. */
+    579: export type PerformanceProtocol = (typeof performanceProtocols)[number];
+service.ts:304                               -> packages/application/src/service.ts
+    304: throw new Error(
+packages/health-export-parser/src/cli.ts:343 -> packages/health-export-parser/src/cli.ts
+    343: .prepare(`
+service.ts:293-296                           -> packages/application/src/service.ts
+    293: const job = this.jobs.claimNext();
+    296: try {
+🟠 锚在空行       database.ts:493                              -> packages/storage-sqlite/src/database.ts
+docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md: 40 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），1 处锚在空行（告警）
+apps/api/src/import-worker.ts:696-710        -> apps/api/src/import-worker.ts
+    696: try {
+    710: try {
+packages/application/src/service.ts:288-312  -> packages/application/src/service.ts
+    288: requestJobCancellation(jobId: string): JobCancellationResult {
+    312: this.pipeline.runSnapshotRefresh(job);
+apps/api/src/recompute-thread.ts:12-14       -> apps/api/src/recompute-thread.ts
+    12: import { createWriteLeaseClient, withWriteGate, type WriteLeaseStats } from "./write-lease.js";
+    14: /**
+apps/api/src/recompute-worker.ts:64          -> apps/api/src/recompute-worker.ts
+    64: private timer: NodeJS.Timeout | null = null;
+apps/api/src/mutation-coordinator.ts:11-25   -> apps/api/src/mutation-coordinator.ts
+    11: export class MutationCoordinator {
+    25: }
+apps/api/src/server.ts:475                   -> apps/api/src/server.ts
+    475: const requestStarts = new WeakMap<object, number>();
+packages/storage-sqlite/src/database.ts:493  -> packages/storage-sqlite/src/database.ts
+    493: 
+packages/storage-sqlite/src/v35-migration.ts:61-64 -> packages/storage-sqlite/src/v35-migration.ts
+    61: ALTER TABLE recompute_jobs ADD COLUMN target_raw_generation INTEGER;
+    64: ALTER TABLE recompute_jobs ADD COLUMN dirty_json TEXT;
+packages/storage-sqlite/src/v34-migration.ts:42-49 -> packages/storage-sqlite/src/v34-migration.ts
+    42: CREATE TABLE import_generations (
+    49: VALUES (1, 0, 0);
+packages/contracts/src/direct-sync.ts:60-67  -> packages/contracts/src/direct-sync.ts
+    60: * `facts` —— 后者会把非评分批次的合法差额读成"分析落后"，制造假 stale）。
+    67: */
+packages/storage-sqlite/src/v34-migration.ts:27-40 -> packages/storage-sqlite/src/v34-migration.ts
+    27: CREATE TABLE import_fact_history (
+    40: ON import_fact_history(entity_kind, entity_id, valid_to_generation);
+packages/storage-sqlite/src/read/facts-reader.ts:97-137 -> packages/storage-sqlite/src/read/facts-reader.ts
+    97: toAt?: string;
+    137: *
+packages/health-export-parser/src/canonicalize-nights.ts:435-441 -> packages/health-export-parser/src/canonicalize-nights.ts
+    435: /**
+    441: */
+packages/health-export-parser/src/canonicalize-nights.ts:515-521 -> packages/health-export-parser/src/canonicalize-nights.ts
+    515: export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: string = DATABASE_TIM
+    521: database.exec("DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;");
+packages/storage-sqlite/src/database.ts:2723 -> packages/storage-sqlite/src/database.ts
+    2723: `SELECT id FROM workout_routes WHERE lower(relative_path) = lower(?) LIMIT 1`
+apps/api/src/data-only-import.ts:102         -> apps/api/src/data-only-import.ts
+    102: if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")
+packages/health-export-parser/src/apple-health-parser.ts:309-312 -> packages/health-export-parser/src/apple-health-parser.ts
+    309: device: attributes.device ?? null,
+    312: textValue: numericValue === null ? (attributes.value ?? null) : null,
+apps/api/src/data-only-import.ts:54-79       -> apps/api/src/data-only-import.ts
+    54: const condition = name !== "health_records" ? "" : `WHEN ${
+    79: 
+packages/storage-sqlite/src/recompute-job-repository.ts:109-159 -> packages/storage-sqlite/src/recompute-job-repository.ts
+    109: * 四个 v35 绑定列保持 NULL。传了才会把对应列追加到 `INSERT` 里（只追加给定的列，
+    159: get(id: string): RecomputeJob | null {
+mutation-coordinator.ts:3-8                  -> apps/api/src/mutation-coordinator.ts  ⚠️ 同名 4 个，取第一个
+    3: // 缺 code 会退化成通用 "request_error"，客户端无法与其它 409 区分。
+    8: }
+model-release-repository.ts:89-91            -> packages/storage-sqlite/src/model-release-repository.ts
+    89: if (semanticHash(this.snapshots(runId)) !== bundle.snapshot_hash) throw new Error("V2 release snapsh
+    91: if (bundle.dataset_version !== currentDataset) {
+packages/storage-sqlite/src/database.ts:926-932 -> packages/storage-sqlite/src/database.ts
+    926: history_days INTEGER NOT NULL DEFAULT 0 CHECK (history_days >= 0),
+    932: confidence REAL CHECK (confidence BETWEEN 0 AND 1),
+packages/application/test/service.test.ts:484 -> packages/application/test/service.test.ts
+    484: test("rolls back active activation when job completion cannot be persisted", async () => {
+recompute-pipeline.ts:4173                   -> packages/application/src/services/recompute-pipeline.ts
+    4173: ...buildDurabilitySnapshot({distance:distance as "five_k"|"ten_k"|"half_marathon",preparation,durabi
+apps/api/src/recompute-worker.ts:75          -> apps/api/src/recompute-worker.ts
+    75: constructor(
+canonicalize-nights.ts:447-449               -> packages/health-export-parser/src/canonicalize-nights.ts
+    447: const windowStart = Date.parse(localDateTimeAt(`${addLocalDays(date, -1)}T18:00:00`, timezoneIdentif
+    449: const candidates = all.filter((s) => s.end > windowStart && s.start < windowEnd).map((s) => ({ ...s,
+packages/storage-sqlite/src/database.ts:220  -> packages/storage-sqlite/src/database.ts
+    220: maximum_value REAL,
+packages/storage-sqlite/src/v35-migration.ts:24 -> packages/storage-sqlite/src/v35-migration.ts
+    24: route_id TEXT NOT NULL REFERENCES workout_routes(id) ON DELETE CASCADE,
+packages/application/src/service.ts:293-306  -> packages/application/src/service.ts
+    293: const job = this.jobs.claimNext();
+    306: `job_type=${job.jobType}, request.mode=${recomputeRequestMode(job.request) ?? "absent"}`
+packages/health-export-parser/src/cli.ts:321-343 -> packages/health-export-parser/src/cli.ts
+    321: let store: RaiDatabase;
+    343: .prepare(`
+api-contracts/src/index.ts:1255-1268         -> packages/api-contracts/src/index.ts
+    1255: blocks: MobileIntervalBlock[];
+    1268: 
+🟠 锚在空行       packages/storage-sqlite/src/database.ts:493  -> packages/storage-sqlite/src/database.ts
+docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md: 31 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），1 处锚在空行（告警）
+docs/SQLITE_DIRECT_SYNC_DESIGN.md:305-306    -> docs/SQLITE_DIRECT_SYNC_DESIGN.md
+    305: 
+    306: ### 8.1 基于变更账目，不比较两个整库
+packages/storage-sqlite/src/database.ts:220  -> packages/storage-sqlite/src/database.ts
+    220: maximum_value REAL,
+v35-migration.ts:35                          -> packages/storage-sqlite/src/v35-migration.ts
+    35: route_version_id TEXT NOT NULL REFERENCES route_versions(id) ON DELETE CASCADE,
+v35-migration.ts:34                          -> packages/storage-sqlite/src/v35-migration.ts
+    34: CREATE TABLE route_version_points (
+v35-migration.ts:48                          -> packages/storage-sqlite/src/v35-migration.ts
+    48: ALTER TABLE workout_routes ADD COLUMN published_route_version_id TEXT REFERENCES route_versions(id);
+database.ts:2852-2856                        -> packages/storage-sqlite/src/database.ts
+    2852: * 开这个路线的**未发布**暂存版本（docs §2.4 / §5.3）。
+    2856: * 正在展示的轨迹与它的版本记录在发布前都不受任何影响，中途失败也不会被改写。
+database.ts:2798-2800                        -> packages/storage-sqlite/src/database.ts
+    2798: * `status !== 'imported'` 时清掉 `route_points` 里属于这条路线的那份**旧副本**，
+    2800: * （视图的判据就是 `file_status = 'imported' AND point_count > 0`）。
+database.ts:3512                             -> packages/storage-sqlite/src/database.ts
+    3512: * - 只看本批账本里 **`inserted`/`updated`** 的新行（`removed`/`unchanged` 不算写入）；
+database.ts:525-529                          -> packages/storage-sqlite/src/database.ts
+    525: completed_at TEXT
+    529: ON recompute_jobs(status, created_at);
+v2-migration.ts:33-35                        -> packages/storage-sqlite/src/v2-migration.ts
+    33: CREATE TABLE IF NOT EXISTS active_model_release (
+    35: model_run_id TEXT NOT NULL REFERENCES model_release_bundles(model_run_id) ON DELETE RESTRICT
+model-release-repository.ts:89-91            -> packages/storage-sqlite/src/model-release-repository.ts
+    89: if (semanticHash(this.snapshots(runId)) !== bundle.snapshot_hash) throw new Error("V2 release snapsh
+    91: if (bundle.dataset_version !== currentDataset) {
+read/workout-read-repository.ts:182-195      -> packages/storage-sqlite/src/read/workout-read-repository.ts
+    182: /** 触发本训练分析的 recompute job id；无关联任务时为 `null`。 */
+    195: type: string;
+sql/fragments.ts:36-38                       -> packages/storage-sqlite/src/sql/fragments.ts
+    36: export function usableRouteConditionSql(alias?: string): string {
+    38: return `${prefix}file_status = 'imported' AND ${prefix}point_count > 0`;
+read/workout-read-repository.ts:246-285      -> packages/storage-sqlite/src/read/workout-read-repository.ts
+    246: 
+    285: *   不可少报成 published（那正是 A6 的缺陷）。
+read/series-read-repository.ts:85-97         -> packages/storage-sqlite/src/read/series-read-repository.ts
+    85: averagePaceSecondsPerKm: number | null;
+    97: export interface StoredSeriesSession {
+apps/api/src/data.ts:570-596                 -> apps/api/src/data.ts
+    570: assemble: (base: T, view: FactReadView) => T,
+    596: this.database.exec("COMMIT");
+data.ts:604                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    604: trainingPlanState(store: MobileGoalsStore, identity: () => { serverId: string; athleteId: string; da
+data.ts:665-672                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    665: const windowEnd = shiftMobileDate(windowStart, effective.windowDays - 1);
+    672: const historyDigest = digest(history);
+data.ts:454-496                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    454: if (row.data_version !== this.cacheVersion) {
+    496: : null,
+data.ts:255-262                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    255: 
+    262: interface TrainingPlanStateBuilt {
+data.ts:1661-1667                            -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    1661: includeRoute: boolean
+    1667: // 🔴 2026-10-18（P0-1）：这里此前是 `getDetailRow(row.sessionId) !== null` ——
+sql/fragments.ts:6-15                        -> packages/storage-sqlite/src/sql/fragments.ts
+    6: /** Prefer canonical workout active duration; fall back to wall-clock session span. */
+    15: )`;
+read/trends-read-repository.ts:80-91         -> packages/storage-sqlite/src/read/trends-read-repository.ts
+    80: .all(start, start) as Record<string, unknown>[];
+    91: WHERE (? IS NULL OR load.local_date >= ?) AND ${sessionFactPresentConditionSql("session")}
+read/training-statistics-read-repository.ts:66-75 -> packages/storage-sqlite/src/read/training-statistics-read-repository.ts
+    66: sessionType: SessionType;
+    75: WHERE session.anchor_end_at IS NOT NULL AND ${sessionFactPresentConditionSql("session")}
+apps/api/src/mobile-read.ts:362-364          -> apps/api/src/mobile-read.ts
+    362: JOIN model_runs m ON m.id=a.model_run_id JOIN feature_runs f ON f.id=m.feature_run_id`).get()?.schem
+    364: const dated = v4 ? loadDatedReadiness(database, now, DATABASE_TIMEZONE) : null;
+packages/application/src/model-v2-snapshots.ts:38-52 -> packages/application/src/model-v2-snapshots.ts
+    38: interface RecoveryFactRows {
+    52: interface RecoveryHrvRow { date: string; observedAt: string | null; availableAt: string | null; valu
+mobile-read.ts:567                           -> apps/api/src/mobile-read.ts  ⚠️ 同名 4 个，取第一个
+    567: executable: numbers.structure != null && planned.kind !== "rest"
+data.ts:774-779                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    774: goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" |
+    779: (base, view) => ({ ...base, currentFacts: view.facts, publishedAnalysis: view.analysis })
+api-contracts/src/index.ts:1272-1285         -> packages/api-contracts/src/index.ts
+    1272: reason: string;
+    1285: lastNightSleepMinutes: number | null;
+mobile-sync.ts:99-104                        -> apps/api/src/mobile-sync.ts  ⚠️ 同名 4 个，取第一个
+    99: if (input.syncStatus === "failed") {
+    104: }
+server.ts:1552-1557                          -> apps/api/src/server.ts
+    1552: return { overrideId, jobId };
+    1557: );
+coach-loop-routes.ts:56                      -> apps/api/src/coach-loop-routes.ts  ⚠️ 同名 4 个，取第一个
+    56: });
+data.ts:208-209                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    208: const shiftMobileDate = (date: string, days: number): string => {
+    209: const value = new Date(`${date}T00:00:00Z`);
+server.ts:926-927                            -> apps/api/src/server.ts
+    926: if (queued && !closing) recomputeWorker.schedule();
+    927: } finally {
+data.ts:785-797                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    785: *
+    797: private mobileTodayWithExecutablePlan(
+packages/storage-sqlite/src/recompute-job-repository.ts:121-135 -> packages/storage-sqlite/src/recompute-job-repository.ts
+    121: const id = opaqueId("recompute_job");
+    135: }
+contracts/src/index.ts:934-941               -> packages/contracts/src/index.ts
+    934: revision: number;
+    941: note: string | null;
+data.ts:1922-1945                            -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    1922: private buildWorkoutSeries(id: string, candidates: PlanCandidateDay[]): WorkoutSeriesResponse | null
+    1945: endedAt,
+contracts/src/direct-sync.ts:24-52           -> packages/contracts/src/direct-sync.ts
+    24: /**
+    52: /** `active_model_run.model_run_id`；`null` = 还没有任何已发布分析。 */
+data-only-import.ts:184-195                  -> apps/api/src/data-only-import.ts  ⚠️ 同名 4 个，取第一个
+    184: // 上面的 `DATA_ONLY_RECORD_TYPES ∩ scoringHealthTypes = ∅` 判定（见函数开头）
+    195: // 这条车道**明确不登记**分析任务（`analysisStatus: "not_required"` 是结构性结论，
+server.ts:906-916                            -> apps/api/src/server.ts
+    906: activeAlgorithmVersion: counts.active_algorithm_version,
+    916: } else if (counts.latest_profile_date === null || counts.latest_profile_date < localToday()) {
+apps/ios/RAI/NativeAppModel.swift:414        -> apps/ios/RAI/NativeAppModel.swift
+    414: // 叠一轮 coach-loop/四连读。窗口期间又来的调用照旧走
+apps/ios/RAI/APIModels.swift:1185-1198       -> apps/ios/RAI/APIModels.swift
+    1185: /// the observable counts behind it. Optional so a payload cached before this field existed
+    1198: let components: Components?
+contracts/src/direct-sync.ts:60-67           -> packages/contracts/src/direct-sync.ts
+    60: * `facts` —— 后者会把非评分批次的合法差额读成"分析落后"，制造假 stale）。
+    67: */
+v34-migration.ts:42-48                       -> packages/storage-sqlite/src/v34-migration.ts
+    42: CREATE TABLE import_generations (
+    48: INSERT INTO import_generations (singleton, raw_generation, dependency_generation)
+read-store-manager.ts:52-64                  -> apps/api/src/read-store-manager.ts  ⚠️ 同名 4 个，取第一个
+    52: */
+    64: *
+read/facts-reader.ts:58-60                   -> packages/storage-sqlite/src/read/facts-reader.ts
+    58: *   {@link CHUNK_SIZE} 行，逐页产出，从不把整表读进内存。keyset 直接走主键索引，总量 O(n)。
+    60: *   路线版本（v35 `route_versions`）改由读侧消费是 PR5/PR6 的事。所以 `routeFor()` 读的是
+read/facts-reader.ts:29-48                   -> packages/storage-sqlite/src/read/facts-reader.ts
+    29: *
+    48: * 一条当前行墓碑"，同样要先定契约。）所以这里不猜：保持单一窗口谓词，把缺口写在明处，
+test/facts-reader.test.ts:187-200            -> packages/storage-sqlite/test/facts-reader.test.ts
+    187: test("边界（刻意限定）：被删除的实体在任何代次下都不可见", async () => {
+    200: store.database.prepare("DELETE FROM health_records WHERE id = 'gone'").run();
+database.ts:1382-1390                        -> packages/storage-sqlite/src/database.ts
+    1382: base_model_run_id TEXT REFERENCES model_runs(id) ON DELETE SET NULL,
+    1390: );
+contracts/src/direct-sync.ts:24-31           -> packages/contracts/src/direct-sync.ts
+    24: /**
+    31: export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
+data.ts:858-868                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    858: SELECT
+    868: FROM active_workout_training_loads load
+apps/api/src/run-coach.ts:77-82              -> apps/api/src/run-coach.ts
+    77: /**
+    82: * that happens to land on it, which makes the assertions brittle in a way that hides
+data.ts:459                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    459: const value = load();
+data.ts:462                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    462: }
+data.ts:354-364                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    354: WHERE s.status='active' AND ${workoutPresentConditionSql("w")}
+    364: const inputs = this.mobileWeeklyPlanInputs(goals, history);
+SQLITE_DIRECT_SYNC_PR4_DESIGN.md:107-109     -> docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md
+    107: ⚠️ 与 PR2/PR3 同一处已知边界：过渡期发布时**真双写** `route_points`（F1/NEW-2 的处置），
+    109: 否则"版本表"会变成第二份真相。
+database.ts:2681                             -> packages/storage-sqlite/src/database.ts
+    2681: */
+facts-reader.ts:167-185                      -> packages/storage-sqlite/src/read/facts-reader.ts
+    167: workouts(filter: FactsWorkoutFilter): Iterable<CanonicalWorkout> {
+    185: 
+data.ts:598-613                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    598: } catch (error) {
+    613: // straight into the generic 500 handler. Treat it as "the snapshot may have
+data.ts:255-274                              -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    255: 
+    274: private readonly dashboardRepository: SqliteDashboardReadRepository;
+apps/api/src/coach-loop-routes.ts:56         -> apps/api/src/coach-loop-routes.ts
+    56: });
+mobile-read.ts:362-364                       -> apps/api/src/mobile-read.ts  ⚠️ 同名 4 个，取第一个
+    362: JOIN model_runs m ON m.id=a.model_run_id JOIN feature_runs f ON f.id=m.feature_run_id`).get()?.schem
+    364: const dated = v4 ? loadDatedReadiness(database, now, DATABASE_TIMEZONE) : null;
+apps/api/src/coach-prediction-companion.ts:15-31 -> apps/api/src/coach-prediction-companion.ts
+    15: const facts = db.prepare("SELECT key,value FROM import_manifest ORDER BY key").all();
+    31: dataThroughAt: cutoff.at, entries: report.snapshot.races.map(entry => ({
+read/facts-reader.ts:167-185                 -> packages/storage-sqlite/src/read/facts-reader.ts
+    167: workouts(filter: FactsWorkoutFilter): Iterable<CanonicalWorkout> {
+    185: 
+packages/storage-sqlite/src/recompute-job-repository.ts:1296-1340 -> packages/storage-sqlite/src/recompute-job-repository.ts
+    1296: }
+    1340: `Covering analysis task did not publish (${reason}); this task stays queued for re-planning`,
+data.ts:696                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    696: // `coherenceToken` 会与今天不同 ⇒ 所有已保存的 `coherenceToken` 立刻失效（C9）。
+data.ts:2450-2454                            -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    2450: return this.modelRunsRepository.activeSummary();
+    2454: id: string;
+server.ts:1056                               -> apps/api/src/server.ts
+    1056: });
+data.ts:542                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    542: * 🔴 为什么要包一层而不是把两块塞进 `workouts()`：两块必须在**一个读事务**里取齐
+data.ts:693                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    693: // 🔴 `versions`/`freshness` **必须**在这儿补，不能写进上面那个 `metadata` 字面量：
+data.ts:771                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    771: * 而那正是 C1 要挡的跨快照混合。旧字段的取值一个字都不动，只是多两个键。
+mobile-read.ts:614                           -> apps/api/src/mobile-read.ts  ⚠️ 同名 4 个，取第一个
+    614: executable: executable && numbers.structure != null && session.kind !== "rest"
+coach-prediction-companion.ts:19             -> apps/api/src/coach-prediction-companion.ts  ⚠️ 同名 4 个，取第一个
+    19: return { ...scope, bundleId: active.id, bundleHash: active.hash, factsHash: digest(facts),
+data.ts:330                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    330: * SQLite 跨连接变更计数器（`PRAGMA data_version`，2026-10-18 事故复盘 P1）。
+data.ts:445                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    445: }
+data.ts:625                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    625: this.cache.clear();
+data.ts:741                                  -> apps/api/src/data.ts  ⚠️ 同名 4 个，取第一个
+    741: // Second (and last) control read pair per attempt. Re-measuring with the
+database.ts:2874-2901                        -> packages/storage-sqlite/src/database.ts
+    2874: completed_at = NULL
+    2901: this.markObject();
+packages/api-contracts/src/index.ts:461-462  -> packages/api-contracts/src/index.ts
+    461: baselineStartAt: string | null;
+    462: baselineEndAt: string | null;
+packages/api-contracts/src/index.ts:1430-1431 -> packages/api-contracts/src/index.ts
+    1430: localDate: string;
+    1431: windowStart: string;
+packages/api-contracts/src/index.ts:1743-1744 -> packages/api-contracts/src/index.ts
+    1743: race: MobileRaceCard;
+    1744: injuryFlags: MobileInjuryFlag[];
+🟠 锚在空行       docs/SQLITE_DIRECT_SYNC_DESIGN.md:305-306    -> docs/SQLITE_DIRECT_SYNC_DESIGN.md
+🟠 锚在空行       read/workout-read-repository.ts:246-285      -> packages/storage-sqlite/src/read/workout-read-repository.ts
+🟠 锚在空行       data.ts:255-262                              -> apps/api/src/data.ts
+🟠 锚在空行       data.ts:255-274                              -> apps/api/src/data.ts
+docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md: 82 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），4 处锚在空行（告警）
+docs/IOS_SYNC_PERFORMANCE_REVIEW.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+deploy/README-UBUNTU.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+docs/DECISIONS.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+docs/HEALTHKIT_RECORD_SYNC_V2.md: 0 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）
+
+合计 153 处（去重后）；越界/无法解析 0 处；内容漂移 未核对（无基线；11 份文档均无 .linerefs.json）；锚在空行 6 处（告警）
+
+> rai-running-intelligence@0.1.0 presmoke:api
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 smoke:api
+> node apps/api/test/production-runtime-smoke.mjs
+
+Production API runtime smoke test passed
+
+> rai-running-intelligence@0.1.0 check:ios-gates
+> node scripts/run-ios-python-gates.mjs
+
+iOS 结构门禁解释器：python3 3.9.6（要求 ≥ 3.9）
+
+=== apps/ios/tests/check-background-capabilities.py ===
+Background capability checks: 342 checks, 0 failed
+
+=== apps/ios/tests/check-direct-sync-analysis-reconcile.py ===
+OK: analysis terminal-state reconciliation gate (52 checks).
+    note: this is a source-level gate. It does NOT execute the Swift reconcile path;
+    the behavioural assertions run on macOS via apps/ios/tests/DirectSyncReceiptRegression.swift (H).
+
+=== apps/ios/tests/check-direct-sync-contract-parity.py ===
+server contract: packages/contracts/src/direct-sync.ts
+  DirectSyncIngestStatus == INGEST_STATUSES: ['receiving', 'validating', 'applying', 'committed', 'rejected']
+  DirectSyncAnalysisStatus == ANALYSIS_STATUSES: ['not_required', 'queued', 'running', 'published', 'failed']
+  factsAnalysisContractVersion: server ['1'], iOS ['1']
+Direct-sync contract parity checks passed (21 checks: status enums verbatim and in order, factsAnalysisContractVersion identical, lane refusal codes pinned, gate is mounted)
+
+=== apps/ios/tests/check-direct-sync-status-copy.py ===
+Direct-sync status copy checks passed (55 checks: §10.3 copy verbatim from one entry, legacy copy absent, §10.2 gate order and intent acknowledgement, gate is mounted)
+
+=== apps/ios/tests/check-export-determinism.py ===
+Export determinism checks: 14 checks, 0 failed
+
+=== apps/ios/tests/check-fresh-skin.py ===
+Athletic skin: dark surfaces/night maps, scaled type roles, native symbols, original layout and progress semantics passed
+
+=== apps/ios/tests/check-health-sync-archive.py ===
+Health sync archive execution-boundary checks: 19 checks, 0 failed
+
+=== apps/ios/tests/check-healthkit-record-sync.py ===
+HealthKit record sync wiring: 126 checks, 0 failed
+
+=== apps/ios/tests/check-pr5-facts-analysis.py ===
+contracts: packages/api-contracts/src/index.ts
+  C9 baseline: apps/ios/tests/fixtures/pr5-c9-baseline-keys.json @ 67028e1322ba38e62dc1d0c854d4b632a0338e06（3 个 interface，含**可选性**）
+  C2 rows: facts=['FactsView'] analysis=['AnalysisView']
+  capability: factsAnalysisContractVersion literal sites=[('apps/api/src/server.ts', 1099)]；view capability=factsAnalysisViewContractVersion
+PR5 facts/analysis checks passed (24 checks: C9 key set **and optionality**, C2 block disjointness, capability naming)
+
+=== apps/ios/tests/check-retired-plan-outbound.py ===
+retired-plan outbound gate passed (623 checks)
+
+=== apps/ios/tests/check-today-layout.py ===
+Today layout checks passed (order, paired summaries, sync visibility, recovery icons)
+Compact card heights, minute chart coordinates, structured steps, map consent and map gesture lock checks passed
+Workout detail layout checks passed (expandable weather summary, no duplicate panels, tap charts, kilometer markers)
+
+⏭️  跳过 apps/ios/tests/check-background-mutations.py：逐条改坏 Swift 源码再跑 bash + Xcode 门禁（需要 macOS 工具链；`test:ios:mutation` 是它的入口）
+
+⏭️  跳过 apps/ios/tests/check-export-determinism-live.py：要把探针装进已启动的 iOS 模拟器并跨进程比对导出字节（只在 macOS + Simulator 上可跑）
+
+iOS 结构门禁通过（11 支跨平台判据；跳过 2 支需外部条件的）。

@@ -7,15 +7,16 @@ import {
   CONTRACT_VERSION, DATABASE_TIMEZONE, DIRECT_SYNC_ANALYSIS_REQUEST_MODE, localCalendarFormatter
 } from "@rai/contracts";
 import type { ImportJobResponse } from "@rai/api-contracts";
-import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
+import { RaiDatabase, RecomputeJobRepository, type RouteOwnershipChange } from "@rai/storage-sqlite";
 import {
   DATA_ONLY_MAX_RECORDS, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
   RecordDeltaNotEligibleError, canonicalizeNightsForWindow, canonicalizeRunningWorkouts,
-  classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes, listGpxRelativePaths,
-  loadDirtyRangeInput, normalizeRelativePath,
-  encodeBatchAnalysisDirtyEvidence,
+  classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
+  loadDirtyRangeInput,
+  encodeBatchAnalysisDirtyEvidence, isCanonicalInstant,
   parseAppleHealthXml, parseHealthSyncManifest, planIncrementalAnalysisDirtyRange,
-  type BatchAnalysisDirtyEvidence, type DirectSyncPayloadFacts, type HealthSyncManifest
+  type BatchAnalysisDirtyEvidence, type DirectSyncPayloadFacts, type ExplicitRouteDeclaration,
+  type HealthSyncManifest
 } from "@rai/health-export-parser";
 
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
@@ -99,7 +100,8 @@ export type DirectSyncRejectionReason =
   | "identity_not_eligible"
   | "baseline_rebuild_required"
   | "batch_without_receipt"
-  | "write_guard_triggered";
+  | "write_guard_triggered"
+  | "route_ownership_conflict";
 
 /** 拒收发生在哪一步（排查用；与 reason 正交）。 */
 export type DirectSyncRejectionStage = "read" | "prepare" | "identity" | "transaction";
@@ -323,6 +325,14 @@ export interface DirectSyncImportInput {
   jobId: string;
   payloadSha256: string;
   startedAtMs: number;
+  /**
+   * 可审计的内部时钟注入点（仅验收夹具使用；生产省略 = 真实时钟）。
+   *
+   * 一次导入的以下事实必须来自同一个时刻：canonical 行到达时间
+   * (`computed_at`)、`import_completed_at`、批次完成时刻和分析任务登记的
+   * `evaluatedAt`。把它们拆成多个 `new Date()` 会让“当时是否已知”不可复现。
+   */
+  now?: string;
 }
 
 /**
@@ -526,6 +536,41 @@ const shiftLocalDate = (localDate: string, days: number): string => {
 };
 
 /**
+ * The full local-date span that can still contain a night after a legacy
+ * deletion with no previous interval. The deleted fact is no longer in
+ * `health_records`; surviving facts alone cannot bound its old canonical row.
+ * Include existing canonical dates and every available deleted-row instant.
+ */
+export function fullNightRebuildPeriod(
+  db: DatabaseSync, legacyDeletionInstants: readonly string[] = []
+): { from: string; to: string } {
+  const row = db.prepare(`SELECT MIN(start_at) AS minStart,
+    MAX(COALESCE(end_at, start_at)) AS maxEnd FROM health_records`).get() as
+    { minStart: string | null; maxEnd: string | null };
+  const nights = db.prepare(`SELECT MIN(wake_date) AS firstDate, MAX(wake_date) AS lastDate
+    FROM canonical_nights`).get() as { firstDate: string | null; lastDate: string | null };
+  const hrv = db.prepare(`SELECT MIN(local_date) AS firstDate, MAX(local_date) AS lastDate
+    FROM canonical_hrv_days`).get() as { firstDate: string | null; lastDate: string | null };
+  const dates: string[] = [];
+  for (const instant of [row.minStart, row.maxEnd, ...legacyDeletionInstants]) {
+    if (instant === null) continue;
+    const parsed = Date.parse(instant);
+    if (Number.isFinite(parsed)) dates.push(localDateOf(parsed));
+  }
+  for (const date of [nights.firstDate, nights.lastDate, hrv.firstDate, hrv.lastDate]) {
+    if (date !== null) dates.push(date);
+  }
+  // With no remaining facts or derived rows there is nothing to clear. Keep a
+  // valid, bounded no-op window for the receipt and canonicalizer.
+  if (dates.length === 0) dates.push(localDateOf(Date.now()));
+  dates.sort();
+  return {
+    from: shiftLocalDate(dates[0]!, -1),
+    to: shiftLocalDate(dates.at(-1)!, 1)
+  };
+}
+
+/**
  * 本批触及的**夜**窗口（本地日期闭区间）。`null` = 本批一条喂夜的记录都没碰。
  *
  * 有界性的来源：窗口只由**本批账目**里的时间戳算出（不是全表扫描），并向外各放宽一天
@@ -535,6 +580,7 @@ const shiftLocalDate = (localDate: string, days: number): string => {
  * （`import_entity_changes.effective_at` = 删除前那条记录的起点），而"删的是不是喂夜类型"
  * 只能取自 manifest 的**类型化删除**（v2 才有类型）。只要本批有喂夜类型的删除，就把本批
  * **全部** record 删除的时刻并进窗口 —— 宁可窗口宽一点（仍然有界），也不要漏掉一个夜。
+ * 历史删除缺少旧侧时，改用现存事实、canonical 日期与删除时刻组成全量窗口。
  *
  * O10（WP-31）步骤 4 —— **不相邻的时期不再被一个全局 min/max 跨度连起来**：
  * 一批同时更正 1 月初与 12 月末两条睡眠段时，旧实现返回一个覆盖全年的 `[1/1-1d, 12/31+1d]`，
@@ -558,6 +604,11 @@ function nightWindow(
   /** 真正要重建的时期：本地日期闭区间、各自 ±1 天 padding、**互不重叠也不相接**。 */
   periods: Array<{ from: string; to: string }>;
   earliestInstant: string;
+  /**
+   * 历史账本的删除行没有 `previous_*`：类型与旧区间都不可证明，无法把它限定到
+   * 某几个本地日期。调用方必须退回全量夜重建（方向永远是"宁可多算"）。
+   */
+  unbounded: boolean;
 } | null {
   const types = NIGHT_FEEDING_TYPE_VALUES as readonly string[];
   const placeholders = types.map(() => "?").join(",");
@@ -574,13 +625,42 @@ function nightWindow(
   }>;
   const deletesNightType = manifest.deletedRecords.some((row) => types.includes(row.type));
   const removed = deletesNightType ? db.prepare(`
-    SELECT effective_at AS effectiveAt FROM import_entity_changes
-    WHERE batch_id = ? AND entity_kind = 'record' AND change_type = 'removed'
-  `).all(batchId) as Array<{ effectiveAt: string | null }> : [];
+    SELECT change.effective_at AS effectiveAt,
+           change.previous_effective_at AS previousAt, change.previous_end_at AS previousEndAt,
+           change.previous_type AS previousType, record.type AS currentType
+    FROM import_entity_changes change
+    LEFT JOIN health_records record ON record.id = change.entity_id
+    WHERE change.batch_id = ? AND change.entity_kind = 'record' AND change.change_type = 'removed'
+  `).all(batchId) as Array<{
+    effectiveAt: string | null; previousAt: string | null; previousEndAt: string | null;
+    previousType: string | null; currentType: string | null;
+  }> : [];
+  let unbounded = false;
+  const unboundedInstants: string[] = [];
+  const removedSides: Array<{
+    startAt: string | null; endAt: string | null; previousAt: string | null; previousEndAt: string | null;
+  }> = [];
+  for (const row of removed) {
+    const affectsNight = types.includes(row.currentType ?? "")
+      || types.includes(row.previousType ?? "")
+      || (row.currentType === null && row.previousType === null);
+    if (!affectsNight) continue;
+    // P1-3：删除只有旧侧可用。`effective_at` 是兼容用的单点时刻；跨夜睡眠/HRV
+    // 的旧起点必须来自 `previous_effective_at`，否则整夜会被漏掉。
+    if (row.previousAt === null) {
+      unbounded = true;
+      for (const instant of [row.effectiveAt, row.previousEndAt]) {
+        if (instant !== null) unboundedInstants.push(instant);
+      }
+      continue;
+    }
+    removedSides.push({
+      startAt: row.effectiveAt, endAt: row.effectiveAt,
+      previousAt: row.previousAt, previousEndAt: row.previousEndAt
+    });
+  }
   const instants: number[] = [];
-  for (const row of [...written, ...removed.map((row) => ({
-    startAt: row.effectiveAt, endAt: row.effectiveAt, previousAt: null, previousEndAt: null
-  }))]) {
+  for (const row of [...written, ...removedSides]) {
     // R7（2026-10-15）：更新前的旧范围（previous_*）一并进窗口——记录从 A 日移到 B 日时，
     // A 日的旧夜必须被重建/清掉（否则残留，R7 的实证）。current 与 previous 取**并集**，
     // 宽出来的部分由 ±1 天 padding 与"窗口外逐字节不变"的金丝雀兜住。
@@ -589,6 +669,16 @@ function nightWindow(
       const parsed = Date.parse(value);
       if (Number.isFinite(parsed)) instants.push(parsed);
     }
+  }
+  if (unbounded) {
+    const period = fullNightRebuildPeriod(db, unboundedInstants);
+    const knownInstants = [...instants, ...unboundedInstants.map(Date.parse).filter(Number.isFinite)];
+    return {
+      ...period, periods: [period],
+      earliestInstant: knownInstants.length > 0
+        ? new Date(Math.min(...knownInstants)).toISOString() : new Date(0).toISOString(),
+      unbounded: true
+    };
   }
   if (instants.length === 0) return null;
   const dates = instants.map(localDateOf).sort();
@@ -615,7 +705,8 @@ function nightWindow(
     from: periods[0]!.from,
     to: periods.at(-1)!.to,
     periods,
-    earliestInstant: new Date(Math.min(...instants)).toISOString()
+    earliestInstant: new Date(Math.min(...instants)).toISOString(),
+    unbounded
   };
 }
 
@@ -788,64 +879,115 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       (id,xml_sha256,status,import_mode,previous_dataset_version,summary_json)
       VALUES (?,'pending','running','incremental',?,'{}')`).run(input.jobId, previousVersion);
 
-    // 🔴 B05（2026-10-17）：路线**归属变化 / 删除**的旧范围必须在解析**之前**快照。
+    // 🔴 B05 / T11(c)：路线归属变化的脏证据必须来自**实际发生的 UPDATE**，不能来自
+    // “本批带没带 GPX 文件”。XML 的显式 `WorkoutRoute` 引用可以在增量包省略未变化
+    // GPX 时把已有路线从 A 改挂到 B；此时旧归属 A 不在本批 GPX 清单里，靠文件枚举
+    // 会漏掉 A 的脏时刻，导致旧训练的轨迹特征/时间线不重算。
     //
-    // `routeDirtyTimes` 原来只查"变更后"的归属训练。路线从 A 移到 B 时（XML 的
-    // `WorkoutRoute` 换了父训练，`ON CONFLICT(id) DO UPDATE workout_id`），A 的时刻
-    // 当场丢失 —— 那条训练的轨迹特征与时间线不会被重算。删除同理：行没了就什么都查不到。
-    //
-    // 快照只用于本批的 dirty 证据，不落盘、不回填。
-    //
-    // 🔴 2026-10-17（第三轮）：只查**本批**携带的 GPX 路径。导入器只遍历这一份清单
-    // （`importGpxRoutes` 的 `allPaths`），别的路径的归属不会因本批改变 —— 旧实现每批
-    // 扫一遍 `workout_routes` 全表，让"小批同步"的成本随历史路线数增长。
-    // 落库值由 `normalizeRouteRelativePath`（database.ts:129）统一小写 + 正斜杠，
-    // 与这里的 `normalizeRelativePath` 同形，所以按 `relative_path` 的 UNIQUE 索引点查是精确的。
-    const routeOwnerBefore = new Map<string, string>();
-    const routeOwnerLookup = db.prepare(`
-      SELECT route.id AS id, workout.start_at AS startAt
-      FROM workout_routes route
-      JOIN workouts workout ON workout.id = route.workout_id
-      WHERE route.relative_path = ?
-    `);
-    const batchRoutePaths = [...new Set(
-      listGpxRelativePaths(input.inputPath).map((path) => normalizeRelativePath(path))
-    )];
-    for (const relativePath of batchRoutePaths) {
-      const row = routeOwnerLookup.get(relativePath) as
-        { id: string; startAt: string | null } | undefined;
-      if (row !== undefined && row.startAt !== null) routeOwnerBefore.set(row.id, row.startAt);
+    // One arrival instant for raw records, canonical rows, the batch receipt
+    // and its analysis job. Resolve it before XML parsing, which writes
+    // health_records.available_at; historical acceptance clocks must not leave
+    // those rows at the host's real wall-clock time.
+    const now = input.now ?? new Date().toISOString();
+    if (!isCanonicalInstant(now) || new Date(now).toISOString() !== now) {
+      throw new Error("Direct sync import clock must be a canonical UTC-millisecond ISO instant");
     }
+    // 观察器安装在 insertWorkout 内、事务提交之前；只收集内存事件，不写库。
+    const routeOwnershipChanges: RouteOwnershipChange[] = [];
+    store.observeRouteOwnershipChanges((change) => { routeOwnershipChanges.push(change); });
+    // P2: a route path declared under two different parent workouts is
+    // self-contradictory regardless of XML order. The write-time observer only
+    // sees actual UPDATEs, so an unchanged declaration (A then B where the
+    // stored owner is already A) can otherwise hide the conflict. Collect every
+    // explicit declaration and adjudicate the complete set after parsing.
+    const routeDeclarations: ExplicitRouteDeclaration[] = [];
     // ── 解析段（P2-3）：事务开启/批次行/路线归属快照 + XML/GPX 解析 +
     // 训练会话与恢复事实的局部 canonical。
     // 这一段与"逐条身份解析"（parser 内部）不可再拆：拆它需要改 parser 的写路径，
     // 而本工作包不改 parser（另一 lane 的所有权）。四段账本回答的是接收器层面
     // "5–8 s 花在哪"，不是单条记录层面的剖析；"接收准备"并入解析段，
     // 保证 identity 之后到 commit 之前的每一毫秒都落在某个键上（否则四段之和对不上车道耗时）。
-    const parsed = await parseAppleHealthXml(payload.xmlPath, store, {
-      fileSize: payload.xmlFileBytes,
-      healthKitRecordIdentity: true,
-      deletedRecords: payload.manifest.deletedRecords,
-      deletedWorkoutIds: payload.manifest.deletedWorkoutIds,
-      callerOwnedTransaction: true,
-      incremental: { generation: entityGeneration, batchId: input.jobId, preserveAbsent: true }
+    // P3: the observer is cleared in `finally`, so a parser throw cannot leave a
+    // callback attached to a store that may be reused by the next task.
+    const parsed = await (async () => {
+      try {
+        return await parseAppleHealthXml(payload.xmlPath, store, {
+          fileSize: payload.xmlFileBytes,
+          healthKitRecordIdentity: true,
+          deletedRecords: payload.manifest.deletedRecords,
+          deletedWorkoutIds: payload.manifest.deletedWorkoutIds,
+          callerOwnedTransaction: true,
+          availableAt: now,
+          onRouteDeclaration: (declaration) => { routeDeclarations.push(declaration); },
+          incremental: { generation: entityGeneration, batchId: input.jobId, preserveAbsent: true }
+        });
+      } finally {
+        // 观察器只在 XML 解析段需要；后续 GPX 导入不再产生归属变更。
+        store.observeRouteOwnershipChanges(undefined);
+      }
+    })();
+    // A path may be repeated only under the same parent. Compare the complete
+    // declaration set (normalized path → parent workout), not the sequence of
+    // actual ownership UPDATEs: A→B and B→A must both be rejected, while the
+    // same declaration repeated under one workout remains valid.
+    const declaredParentByRoute = new Map<string, string>();
+    for (const declaration of routeDeclarations) {
+      if (declaration.tombstoned) continue;
+      const previousParent = declaredParentByRoute.get(declaration.relativePath);
+      if (previousParent !== undefined && previousParent !== declaration.workoutId) {
+        const actualChanges = routeOwnershipChanges.filter(
+          (change) => change.relativePath === declaration.relativePath).length;
+        throw new DirectSyncIngestRejected(rejectDirect("route_ownership_conflict", "transaction", {
+          detail: actualChanges > 1
+            ? `Route ${declaration.relativePath} changed ownership more than once in one batch`
+            : `Route ${declaration.relativePath} is declared under multiple workouts in one batch`
+        }));
+      }
+      declaredParentByRoute.set(declaration.relativePath, declaration.workoutId);
+    }
+    // 同一路线在同批内被改归多次 = 载荷自相矛盾。结果若依赖 XML 顺序，脏证据与
+    // 最终归属会不可解释；这里确定性拒收（任意第二次归属变更），整批回滚。
+    const ownershipChangeByRoute = new Map<string, RouteOwnershipChange>();
+    for (const change of routeOwnershipChanges) {
+      if (ownershipChangeByRoute.has(change.routeId)) {
+        // P2-6: a batch that moves one route to two different workouts is
+        // self-contradictory. Reject it deterministically with a stable code so
+        // the client abandons the batch instead of retrying forever; the
+        // surrounding transaction rolls back every partial ownership write.
+        throw new DirectSyncIngestRejected(rejectDirect("route_ownership_conflict", "transaction", {
+          detail: `Route ${change.relativePath} changed ownership more than once in one batch`
+        }));
+      }
+      ownershipChangeByRoute.set(change.routeId, change);
+    }
+    const ownershipChangedRouteIds = [...ownershipChangeByRoute.keys()];
+    // 即使 GPX 字节没变（指纹缓存命中），也要把这组 route id 强制交给导入器，
+    // 让 `changedRouteIds` / `routesUpdated` 与脏证据口径一致。
+    const routes = await importGpxRoutes(input.inputPath, store, {
+      preserveAbsent: true,
+      forceChangedRouteIds: ownershipChangedRouteIds
     });
-    const routes = await importGpxRoutes(input.inputPath, store, { preserveAbsent: true });
-    // 训练会话的**局部**规范化：只处理本批弄脏的训练时刻（解析器给的 dirtyWorkoutTimes
-    // + 本批改过的路线所属训练）。不做全量重建（§8.2）。
-    //
-    // 每条被改的路线取「**旧归属** ∪ 新归属」：归属移动时两个训练都被改写；删除时只有旧侧
-    // 存在。去重交给证据的 `routeDirtyTimes`（构造时 `Set` + 排序）。
-    const routeDirtyTimes = (routes.changedRouteIds ?? []).flatMap((routeId) => {
-      const row = db.prepare(`SELECT workout.start_at AS startAt FROM workout_routes route
-        JOIN workouts workout ON workout.id = route.workout_id WHERE route.id = ?`)
-        .get(routeId) as { startAt: string } | undefined;
-      const before = routeOwnerBefore.get(routeId);
-      const after = row?.startAt;
-      return [before, after].filter((value): value is string => typeof value === "string");
+    // 训练会话的**局部**规范化：只处理解析器给出的 dirtyWorkoutTimes。
+    // ⚠️ 不把 routeDirtyTimes 传进来：路线内容/归属变化不会改变训练分组或
+    // training_session 身份；把它传进来只会让 canonicalize 对未变训练做
+    // reset→update 的净零写，而接收事务的写守卫会把这些写当成"未记账事实"拒掉
+    // （T11 纯 GPX 内容变化被整批拒绝的根因）。routeDirtyTimes 仍然只用于分析脏范围。
+    const changedRouteIds = [...new Set([...(routes.changedRouteIds ?? []), ...ownershipChangedRouteIds])];
+    // 每条被改的路线取「**旧归属** ∪ 新归属」：归属移动时两个训练都被改写；
+    // 纯内容变化取当前归属。删除时只有旧侧存在。
+    const routeStartAtLookup = db.prepare(`SELECT workout.start_at AS startAt FROM workout_routes route
+      JOIN workouts workout ON workout.id = route.workout_id WHERE route.id = ?`);
+    const routeDirtyTimes = changedRouteIds.flatMap((routeId) => {
+      const change = ownershipChangeByRoute.get(routeId);
+      if (change !== undefined) {
+        return [change.before?.startAt, change.after.startAt]
+          .filter((value): value is string => typeof value === "string");
+      }
+      const row = routeStartAtLookup.get(routeId) as { startAt: string } | undefined;
+      return row === undefined ? [] : [row.startAt];
     });
     canonicalizeRunningWorkouts(db, {
-      dirtyWorkoutTimes: [...(parsed.dirtyWorkoutTimes ?? []), ...routeDirtyTimes]
+      dirtyWorkoutTimes: [...(parsed.dirtyWorkoutTimes ?? [])]
     }, { callerOwnedTransaction: true });
 
     // 恢复事实的**局部**重建（PR4 步骤 4）：只重建本批真正碰到的**夜**。
@@ -860,7 +1002,7 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     const canonicalNights = nightRange === null ? null : nightRange.periods.reduce(
       (totals, period) => {
         const counts = canonicalizeNightsForWindow(db, DATABASE_TIMEZONE, period.from, period.to,
-          { callerOwnedTransaction: true });
+          { callerOwnedTransaction: true, computedAt: now });
         return {
           mainCount: totals.mainCount + counts.mainCount,
           napCount: totals.napCount + counts.napCount,
@@ -873,7 +1015,7 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     finishStage("directSync.parse");
 
     // ── 账本段（P2-3）：账本装配 → 分类 → 代次推进 → 分析任务登记 + 脏证据落库。
-    const facts = ledgerFacts(db, input.jobId, payload.manifest, routes.changedRouteIds?.length ?? routes.importedRouteCount);
+    const facts = ledgerFacts(db, input.jobId, payload.manifest, changedRouteIds.length);
     const classification = classifyDirectSyncPayload(facts);
     const analysisRequired = classification.payloadClass === "analysis-required";
 
@@ -885,7 +1027,6 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       "SELECT raw_generation AS raw, dependency_generation AS dependency FROM import_generations WHERE singleton = 1"
     ).get() as { raw: number; dependency: number };
 
-    const now = new Date().toISOString();
     const datasetVersion = `dataset_delta_${hashOf(previousVersion, input.payloadSha256)}`;
     let analysisJobId: string | null = null;
     if (analysisRequired) {
@@ -963,7 +1104,7 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       // （`import-worker.ts` 的 PayloadPreflight 注释），不是本字段的定义。表为百行级，
       // 此 COUNT 不进热路径（10-15 库量快照：workouts 287）。
       unchangedWorkouts: Number(db.prepare("SELECT COUNT(*) AS n FROM training_sessions").get()!.n),
-      routesUpdated: routes.importedRouteCount,
+      routesUpdated: changedRouteIds.length,
       featuresReused: 0, featuresRecomputed: 0, modelReplayFrom: null,
       durationMs: Date.now() - input.startedAtMs, backupName: null,
       // 🔴 canonical 的**模式必须落进持久化产物**（§14.1 的"还要记录 SQL、任务阶段和文件操作"）。
@@ -981,7 +1122,10 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         // 写 `published` 会是假话（分析还没跑），写 `not_required` 更是（§9.1）。
         analysisStatus: analysisRequired ? "queued" : "not_required",
         receiptId: input.jobId,
-        dependencyGeneration: String(generations.dependency),
+        // 合同（`packages/contracts/src/direct-sync.ts`）：本批不影响分析时为 null。
+        // 本批真实的代次仍照常持久化在 `import_generations` / `import_batches`；
+        // 这里只描述**本批的依赖**，不把全局计数器当成每一批的贡献。
+        dependencyGeneration: analysisRequired ? String(generations.dependency) : null,
         publishedReleaseId: null,
         parentBatchId: null,
         // 2026-10-18（P0-3，同步诊断 §2.5 / P2-3）：回执只承诺到批次，而客户端把
@@ -1091,8 +1235,9 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     if (error instanceof RecordDeltaNotEligibleError) {
       return rejectDirect("identity_not_eligible", "transaction", { detail: error.message });
     }
-    // 写守卫触发 = **编程错误**（接收事务里出现了不该出现的表）。观测版仍按既有语义回退候选，
-    // 但把 detail 带出来；收口版（阶段 3）会把这条改成 500 内部完整性错误、不再回退。
+    // 写守卫触发 = **编程错误**（接收事务里出现了不该出现的表）。这里作为稳定拒收码
+    // 原样上抛；父调用方（import-worker）把它转成终态 refusal，不存在候选库回退。
+    // detail 保留用于诊断，但绝不代表还有一条更宽的写入车道可以接手。
     if (error instanceof Error && error.message.includes(DIRECT_SYNC_WRITE_GUARD)) {
       return rejectDirect("write_guard_triggered", "transaction", { detail: error.message.slice(0, 300) });
     }

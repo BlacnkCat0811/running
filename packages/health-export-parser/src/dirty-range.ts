@@ -1,4 +1,5 @@
 import { healthTypes, scoringHealthTypes } from "@rai/contracts";
+import { DATA_ONLY_RECORD_TYPES } from "./record-delta-policy.js";
 
 /**
  * O04（WP-20）：分析的**脏范围**与**影响域边界**纯函数。
@@ -31,7 +32,8 @@ import { healthTypes, scoringHealthTypes } from "@rai/contracts";
  * 所以"把边界给 features"的代价只是重算边界之后那一段（通常 1 场训练），
  * 方向仍是保守（多算一段，不错复用）。
  *
- * 只有区间不可解析/无边界时才是 `full`（`invalid_health_interval` / `health_boundary_unknown`）。
+ * 只有区间不可解析／无边界／出现未知记录类型时才是 `full`
+ * （`invalid_health_interval` / `health_boundary_unknown` / `unknown_record_type`）。
  */
 
 /** 一条待分析变更（账本行 + 当前行 JOIN 后的合并视图）。 */
@@ -158,6 +160,23 @@ export function mergeDirtyPlans(
   return { dirtyFromAt, domains };
 }
 
+const SCORING_RECORD_TYPES = new Set<string>(scoringHealthTypes);
+const NON_SCORING_RECORD_TYPES = new Set<string>(DATA_ONLY_RECORD_TYPES);
+
+/**
+ * 记录类型能否被**局部脏边界**解释。
+ *
+ * 只有两类可以：评分类型（进特征/能力/负荷）与非评分白名单（结构上不碰分析）。
+ * 其余一律视为未知：它既可能影响任何域，也可能只影响未建模的证据；在没有域依赖
+ * 证明之前，唯一安全结论是 **full**。不能因为同一批里还有一条有界已知变更，就把
+ * 未知记录的时间影响“借”给那一条边界 —— 那正是 T05 的漏算形态。
+ */
+function hasUnknownRecordType(change: DirtyRangeChange): boolean {
+  if (change.entityKind !== "record") return false;
+  return [change.newType, change.previousType].some((type) =>
+    type !== null && !SCORING_RECORD_TYPES.has(type) && !NON_SCORING_RECORD_TYPES.has(type));
+}
+
 export function planIncrementalAnalysisDirtyRange(input: {
   changes: readonly DirtyRangeChange[];
   workouts: readonly DirtyRangeWorkout[];
@@ -180,6 +199,31 @@ export function planIncrementalAnalysisDirtyRange(input: {
   };
 
   for (const change of input.changes) {
+    // 未知记录类型没有域依赖证明：即使同批还有一条有界已知变更，也不能把未知
+    // 记录的影响交给那条边界。这是第二层 fail-closed（第一层是登记分析任务）。
+    if (hasUnknownRecordType(change)) {
+      full = true;
+      reasons.add("unknown_record_type");
+      continue;
+    }
+    // P1-3：历史账本（v37 之前）的 `removed` 行没有 `previous_*`。删除没有新侧，
+    // 旧侧也缺失时，这条变更的**类型与区间都不可证明** —— 不能因为它“没有边界”
+    // 就被同一批里另一条有界变更吞掉。唯一安全结论是全量。
+    if (change.changeType === "removed"
+        && change.previousStart === null
+        && (change.entityKind === "record" || change.entityKind === "workout"
+          || change.entityKind === "activity_summary")) {
+      full = true;
+      reasons.add("legacy_removal_without_previous_range");
+      reasons.add("health_boundary_unknown");
+      continue;
+    }
+    if (change.entityKind === "record" && change.changeType === "removed" && change.previousType === null) {
+      full = true;
+      reasons.add("legacy_removal_without_previous_range");
+      reasons.add("health_boundary_unknown");
+      continue;
+    }
     if (change.entityKind === "record" || change.entityKind === "workout") {
       const sides = [
         { type: change.newType, start: change.newStart, end: change.newEnd },

@@ -74,10 +74,29 @@ function countRows(store: RaiDatabase, table: string): number {
 
 function changeRow(
   store: RaiDatabase, batchId: string, kind: Kind, id: string
-): { changeType: string; effectiveAt: string | null } | undefined {
-  return store.database.prepare(`SELECT change_type AS changeType, effective_at AS effectiveAt
+): {
+  changeType: string; effectiveAt: string | null;
+  previousStart: string | null; previousEnd: string | null; previousType: string | null;
+} | undefined {
+  return store.database.prepare(`SELECT change_type AS changeType, effective_at AS effectiveAt,
+    previous_effective_at AS previousStart, previous_end_at AS previousEnd,
+    previous_type AS previousType
     FROM import_entity_changes WHERE batch_id = ? AND entity_kind = ? AND entity_id = ?`)
-    .get(batchId, kind, id) as { changeType: string; effectiveAt: string | null } | undefined;
+    .get(batchId, kind, id) as {
+      changeType: string; effectiveAt: string | null;
+      previousStart: string | null; previousEnd: string | null; previousType: string | null;
+    } | undefined;
+}
+
+function insertRecordRange(store: RaiDatabase, id: string, startAt: string, endAt: string, type = HEART_RATE): void {
+  store.database.prepare(`INSERT INTO health_records
+    (id, type, source_name, source_category, start_at, end_at, metadata_json, raw_attributes_json)
+    VALUES (?, ?, 'watch', 'active', ?, ?, '{}', '{}')`).run(id, type, startAt, endAt);
+}
+
+function insertAlias(store: RaiDatabase, aliasId: string, type: string, uuid: string): void {
+  store.database.prepare("INSERT INTO healthkit_record_aliases VALUES (?, ?, ?)")
+    .run(aliasId, type, uuid.toLowerCase());
 }
 
 function tombstoneBatchId(store: RaiDatabase, kind: Kind, id: string): string | null | undefined {
@@ -152,6 +171,9 @@ test("removeHealthKitRecords attributes an explicit deletion to the importing ba
     assert.ok(change, "an explicit record deletion must leave a per-batch ledger row");
     assert.equal(change.changeType, "removed");
     assert.equal(change.effectiveAt, "2026-02-01T00:00:00.000Z", "the removal keeps the deleted fact's time");
+    assert.equal(change.previousStart, "2026-02-01T00:00:00.000Z", "P1-3: the old side must be persisted");
+    assert.equal(change.previousEnd, "2026-02-01T00:00:00.000Z");
+    assert.equal(change.previousType, HEART_RATE);
     assert.equal(tombstoneBatchId(store, "record", "rec_del"), "batch_rec_delete");
     assert.equal(countRows(store, "health_records"), 0);
   } finally {
@@ -203,6 +225,55 @@ test("a preserve-absent generation writes no removals and deletes nothing", asyn
       "preserve-absent must write no ledger rows — otherwise the zero-deletion witness would be broken"
     );
     assert.equal(countRows(store, "import_entity_tombstones"), 0, "preserve-absent must leave no tombstone");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// P1-3（2026-10-23 复审）：删除前保存完整旧区间/类型
+// ---------------------------------------------------------------------------
+
+test("P1-3：删除跨夜记录时账本保存旧起止时间与类型，而不只是一个时刻", async () => {
+  const { store, root } = await openStore();
+  try {
+    insertBatch(store, "batch_cross_midnight");
+    insertRecordRange(store, "rec_sleep", "2026-02-01T22:00:00.000Z", "2026-02-02T06:00:00.000Z",
+      "HKCategoryTypeIdentifierSleepAnalysis");
+    mapSource(store, "HKCategoryTypeIdentifierSleepAnalysis", "uuid-sleep", "rec_sleep");
+    store.removeHealthKitRecords(
+      [{ type: "HKCategoryTypeIdentifierSleepAnalysis", uuid: "uuid-sleep" }], "batch_cross_midnight");
+    store.flush();
+    const change = changeRow(store, "batch_cross_midnight", "record", "rec_sleep");
+    assert.equal(change?.changeType, "removed");
+    assert.equal(change?.previousStart, "2026-02-01T22:00:00.000Z");
+    assert.equal(change?.previousEnd, "2026-02-02T06:00:00.000Z",
+      "只保存 effective_at 无法重建跨夜区间");
+    assert.equal(change?.previousType, "HKCategoryTypeIdentifierSleepAnalysis");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("P1-3：删除旧别名副本时使用副本自身的区间与类型", async () => {
+  const { store, root } = await openStore();
+  try {
+    insertBatch(store, "batch_alias_delete");
+    insertRecord(store, "rec_canon", "2026-02-10T10:00:00.000Z");
+    mapSource(store, HEART_RATE, "uuid-canon", "rec_canon");
+    insertRecordRange(store, "rec_alias", "2026-02-09T23:00:00.000Z", "2026-02-10T05:00:00.000Z");
+    insertAlias(store, "rec_alias", HEART_RATE, "uuid-canon");
+    store.removeHealthKitRecords([{ type: HEART_RATE, uuid: "uuid-canon" }], "batch_alias_delete");
+    store.flush();
+    const aliasChange = changeRow(store, "batch_alias_delete", "record", "rec_alias");
+    assert.equal(aliasChange?.changeType, "removed");
+    assert.equal(aliasChange?.previousStart, "2026-02-09T23:00:00.000Z");
+    assert.equal(aliasChange?.previousEnd, "2026-02-10T05:00:00.000Z");
+    assert.equal(aliasChange?.previousType, HEART_RATE);
+    assert.equal(countRows(store, "health_records"), 0);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 
 export interface TaskAdmission {
@@ -20,11 +22,44 @@ export interface TaskAdmission {
   blocker?(): string;
 }
 
+/**
+ * Why a scheduler stopped issuing permits.
+ *
+ * Two classes are deliberately distinct:
+ *   - `permanent`: only a restart (or another explicit process-level decision)
+ *     may clear it — e.g. `restore_recovery_required` after an unprovable
+ *     rollback.
+ *   - `recovery`: an explicit, verified recovery (a committed backup restore)
+ *     may clear exactly this block — but only with the token that created it.
+ *
+ * `id` is the block identity (not the reason): an import receipt block and a
+ * restore block may use different reasons while never overwriting each other.
+ */
+export type TaskAdmissionBlockKind = "permanent" | "recovery";
+
+export interface TaskAdmissionBlock {
+  readonly id: string;
+  readonly reason: string;
+  readonly kind: TaskAdmissionBlockKind;
+}
+
+/** Capability to release exactly one recovery block; never a permanent one. */
+export interface RecoveryBlockToken {
+  readonly id: string;
+  readonly reason: string;
+  readonly token: string;
+}
+
+interface StoredTaskAdmissionBlock extends TaskAdmissionBlock {
+  readonly token: string | null;
+}
+
 /** One CPU-heavy writer across all executors. Pending owners keep FIFO priority. */
 export class TaskAdmissionScheduler {
   private readonly waiting = new Set<string>();
   private active: string | null = null;
-  private blocked: string | null = null;
+  /** Active blocks keyed by identity. Empty ⇔ permits may be issued. */
+  private readonly blocks = new Map<string, StoredTaskAdmissionBlock>();
   private controls = 0;
   /** 状态变化监听器（O08）。空集合时 `notifyChanged()` 是纯粹的几次判断，无副作用。 */
   private readonly listeners = new Set<() => void>();
@@ -32,7 +67,7 @@ export class TaskAdmissionScheduler {
 
   owner(name: string): TaskAdmission {
     const blocker = (): string => {
-      if (this.blocked) return "restart";
+      if (this.blocks.size > 0) return "restart";
       if (this.active) return this.active;
       if (this.controls > 0) return "control";
       const head = this.waiting.values().next().value;
@@ -44,7 +79,7 @@ export class TaskAdmissionScheduler {
         // 🔴 这里**刻意不通知**：进队列 / 拿不到许可都不是"别人更可能拿到许可"的变化。
         // 通知必须只发给"可得性上升"的迁移，否则一个 blocked 的等待方每次重试都会唤醒另一个
         // blocked 的等待方，两者互相叫醒去失败一次 —— 那正是 O08 要消灭的空转轮询。
-        if (this.blocked || this.active || this.controls > 0 || this.waiting.values().next().value !== name) {
+        if (this.blocks.size > 0 || this.active || this.controls > 0 || this.waiting.values().next().value !== name) {
           return null;
         }
         let release: () => void;
@@ -92,17 +127,82 @@ export class TaskAdmissionScheduler {
     }
   }
 
+  /**
+   * Permanent block: only a restart (or an equivalent external decision) clears
+   * it. Multiple reasons accumulate instead of overwriting each other — a
+   * restore failure must never make an import-recovery block disappear.
+   */
   blockUntilRestart(reason: string): void {
-    if (this.blocked === reason) return;
-    this.blocked = reason;
+    for (const block of this.blocks.values()) {
+      if (block.kind === "permanent" && block.reason === reason) return;
+    }
+    // The identity *is* the reason for permanent blocks; a recovery block may
+    // already own that identity, so use a distinct one instead of overwriting it.
+    const id = this.blocks.has(reason) ? `permanent:${reason}` : reason;
+    this.blocks.set(id, { id, reason, kind: "permanent", token: null });
     this.notifyChanged();
   }
-  get isBlocked(): boolean { return this.blocked !== null; }
+
+  /**
+   * Register a block that a verified explicit recovery may clear.
+   *
+   * Idempotent per identity: repeated discoveries of the same unresolved
+   * condition return the original token, so there is exactly one block to
+   * resolve and a stale caller cannot mint a second one.
+   */
+  beginRecoveryBlock(reason: string, identity: string = reason): RecoveryBlockToken {
+    const existing = this.blocks.get(identity);
+    if (existing !== undefined) {
+      if (existing.kind !== "recovery" || existing.token === null) {
+        throw new Error(`Task admission block ${identity} is permanent and cannot become recoverable`);
+      }
+      return { id: existing.id, reason: existing.reason, token: existing.token };
+    }
+    const token = randomUUID();
+    this.blocks.set(identity, { id: identity, reason, kind: "recovery", token });
+    this.notifyChanged();
+    return { id: identity, reason, token };
+  }
+
+  /**
+   * Clear exactly the recovery block that `token` created.
+   *
+   * Returns false (and changes nothing) when the token is stale, belongs to a
+   * different block, or the block is permanent. Other blocks are never touched:
+   * the caller must re-check {@link isBlocked} before claiming the process
+   * recovered.
+   */
+  resolveRecoveryBlock(token: RecoveryBlockToken): boolean {
+    const existing = this.blocks.get(token.id);
+    if (existing === undefined || existing.kind !== "recovery"
+        || existing.token === null || existing.token !== token.token) {
+      return false;
+    }
+    this.blocks.delete(token.id);
+    // Availability rose: every waiting owner must re-evaluate immediately.
+    this.notifyChanged();
+    return true;
+  }
+
+  get isBlocked(): boolean { return this.blocks.size > 0; }
   get hasActiveControls(): boolean { return this.controls > 0; }
+  /** Owner currently holding the single writer permit (`null` when idle). */
+  get activeOwner(): string | null { return this.active; }
+
+  /** Snapshot of every active block (stable order = insertion order). */
+  activeBlocks(): TaskAdmissionBlock[] {
+    return [...this.blocks.values()].map(({ id, reason, kind }) => ({ id, reason, kind }));
+  }
+
+  /** True when any active block is not part of `except`. */
+  hasBlocksOtherThan(except: readonly RecoveryBlockToken[]): boolean {
+    const ids = new Set(except.map((token) => token.id));
+    return [...this.blocks.keys()].some((id) => !ids.has(id));
+  }
 
   /** Allow cancellation of the current compute job, but pin out a following import. */
   acquireControl(owner: string): (() => void) | null {
-    if (this.blocked || this.active !== owner) return null;
+    if (this.blocks.size > 0 || this.active !== owner) return null;
     // `controls++` 是**收紧**可得性（把它钉住），没有等待方需要因此醒来 —— 与 `acquire()`
     // 拿不到许可同理，这里不通知。
     this.controls++;
@@ -116,7 +216,11 @@ export class TaskAdmissionScheduler {
     };
   }
 
-  snapshot(): { active: string | null; waiting: string[]; blocked?: string } {
-    return { active: this.active, waiting: [...this.waiting], ...(this.blocked ? { blocked: this.blocked } : {}) };
+  snapshot(): { active: string | null; waiting: string[]; blocked?: string; blocks?: TaskAdmissionBlock[] } {
+    const blocks = this.activeBlocks();
+    return {
+      active: this.active, waiting: [...this.waiting],
+      ...(blocks.length === 0 ? {} : { blocked: blocks[0]!.reason, blocks })
+    };
   }
 }

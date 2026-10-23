@@ -153,7 +153,7 @@ test("preserve-absent insertWorkout upserts present routes without deleting omit
   }
 });
 
-test("preserve-absent insertWorkout skips relative_path collisions instead of deleting the owner", async () => {
+test("preserve-absent insertWorkout re-points an explicitly referenced path without deleting its points", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-storage-route-collision-"));
   const store = await RaiDatabase.open(join(root, "rai.sqlite"), { createMigrationBackup: false });
   try {
@@ -179,15 +179,18 @@ test("preserve-absent insertWorkout skips relative_path collisions instead of de
       { preserveAbsent: true }
     );
 
+    // T11（阶段 3）：路径在载荷里**显式出现**时，归属是权威的；preserve-absent 只保护
+    // “批次没带 = 不删除”。旧实现跳过整条路线，导致路线永远留在 A、B 的分析把旧归属漏掉。
+    // 修正后复用旧路线行 id（点、指纹、已发布版本都保留），只把 owner 改到 B。
     const routes = store.database.prepare(`
       SELECT id, workout_id AS workoutId, point_count AS pointCount
       FROM workout_routes ORDER BY id
     `).all() as Array<{ id: string; workoutId: string; pointCount: number }>;
     const points = store.database.prepare("SELECT COUNT(*) AS count FROM route_points").get() as { count: number };
     assert.deepEqual(routes.map((row) => ({ ...row })), [
-      { id: "route-a", workoutId: "workout-a", pointCount: 1 }
-    ]);
-    assert.equal(points.count, 1);
+      { id: "route-a", workoutId: "workout-b", pointCount: 1 }
+    ], "explicit path moves ownership but keeps the existing route row and points");
+    assert.equal(points.count, 1, "moving ownership must not delete route points");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

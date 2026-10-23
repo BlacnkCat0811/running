@@ -72,11 +72,19 @@ nonisolated enum HealthSyncResumePolicy {
     /// 进来、撞同一个 400（与 2026-09-22 的 404 死锁同构）。
     static let inputNotAllowedCode = "direct_sync_input_not_allowed"
 
+    /// P2-6（2026-10-23）：同一路线在一批里被改归多个训练 —— 载荷自相矛盾。
+    ///
+    /// 重发同一份字节只会得到同一个拒收，因此必须 `.abandonTask`（清任务后重新生成
+    /// 同步批次），不能落 `.keepTask` 形成每个同步周期重撞同一失败的活锁。
+    static let routeOwnershipConflictCode = "direct_sync_route_ownership_conflict"
+
     static func disposition(statusCode: Int?, errorCode: String?) -> Disposition {
         // 🔴 先判 code、后判状态码：它是 400 而不是 404，落到下面只会得到 `.keepTask`。
         if errorCode == batchExceedsBoundsCode { return .convergeBudget }
         // P2-7（2026-10-15）：确定性输入拒绝 ⇒ 清任务重导（自愈），不能落 `.keepTask` 活锁。
         if errorCode == inputNotAllowedCode { return .abandonTask }
+        // P2-6：确定性的路线归属冲突同样不可重试。
+        if errorCode == routeOwnershipConflictCode { return .abandonTask }
         if statusCode == sourceGoneStatusCode { return .abandonTask }
         if errorCode == terminalJobCode { return .abandonTask }
         return .keepTask

@@ -31,13 +31,16 @@ import {
   type NoopReceiptOutcome
 } from "./import-database-tasks.js";
 import { type DirectSyncRejection } from "./direct-sync-ingest.js";
+import type { ImportPublicationRecoveryBlock } from "./import-publication.js";
 import { planDirectSyncLane } from "./direct-sync-plan.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
-import { RuntimeStateStore } from "./runtime-state.js";
+import { RuntimeStateStore, type ImportScopeEvidenceRow } from "./runtime-state.js";
+import { advanceDeletionOperation, backfillDatasetEpochToMain } from "./dataset-epoch.js";
+import { faultPoint } from "./fault-injection.js";
 
 import {
-  ImportPublicationJournal, readImportReceipt, readImportReceiptStrict
+  ImportPublicationJournal, readImportReceipt, readImportReceiptForRecovery, readImportReceiptStrict
 } from "./import-publication.js";
 import type { TaskAdmission } from "./task-admission.js";
 import { waitForShutdown } from "./worker-process.js";
@@ -112,6 +115,17 @@ class ImportLaneRefusal extends Error {
  * 为什么集中一张表：这些码是 iOS 处置分支（拆批 / 退避 / 报维护）的输入契约，
  * 散在调用点会让"某个码改了而客户端分支没跟"变成静默错误。
  */
+/** `[serverId, athleteId, epoch]` → deployment identity (P2-7). */
+function scopeIdentityOf(scope: string): { serverId: string; athleteId: string } | undefined {
+  try {
+    const parsed = JSON.parse(scope) as unknown;
+    if (Array.isArray(parsed) && typeof parsed[0] === "string" && typeof parsed[1] === "string") {
+      return { serverId: parsed[0], athleteId: parsed[1] };
+    }
+  } catch { /* not a structured scope: leave identity unset for legacy fixtures */ }
+  return undefined;
+}
+
 export function laneRefusalFailure(reason: string): { code: string; message: string } {
   switch (reason) {
     case "fast_path_disabled":
@@ -145,6 +159,12 @@ export function laneRefusalFailure(reason: string): { code: string; message: str
     case "batch_without_receipt":
     case "write_guard_triggered":
       return { code: "direct_sync_internal_integrity", message: "导入失败，请查看服务日志" };
+    case "route_ownership_conflict":
+      // Deterministic payload contradiction: never auto-retry the same bytes.
+      return {
+        code: "direct_sync_route_ownership_conflict",
+        message: "本批把同一路线改归到多个训练，服务端已拒绝；请重新生成同步批次"
+      };
     default:
       // `engine_<name>` 等前缀式否决与未知码：统一归"不可用"（退避重试是安全方向）。
       return { code: "direct_sync_unavailable", message: "直连通道当前不可用，请稍后重试" };
@@ -159,7 +179,21 @@ interface MutableImportJob extends ImportJobResponse {
   preserveAbsent?: boolean;
   removalGuard?: RemovalGuardPayload;
   onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>;
-  queue?: { scope: string; attempts: number; finalized: boolean; cancelRequested?: boolean; engine?: ImportExecutionEngine };
+  queue?: {
+    scope: string;
+    attempts: number;
+    finalized: boolean;
+    cancelRequested?: boolean;
+    engine?: ImportExecutionEngine;
+    /**
+     * 入队时主库文件是否确实不存在。**单独不足以放行**：必须同时持有
+     * `firstEmptyEpoch`，且作用域账本仍证明没有写者进入/数据集建立。
+     * 旧作业没有这个字段 ⇒ 缺失一律按无法核实处理。
+     */
+    databaseAbsentAtEnqueue?: boolean;
+    /** 入队时作用域账本的首空空库代次；作用域一旦有写者进入即作废。 */
+    firstEmptyEpoch?: number;
+  };
 }
 
 /**
@@ -177,15 +211,56 @@ interface PayloadPreflight {
   unchangedWorkouts: number;
 }
 
+/**
+ * Stable identity of the import recovery block. The scheduler keys blocks by
+ * identity, so a worker that discovers the same unresolved condition again
+ * (startup, a failed publish, a restore reload) resolves to **one** token
+ * instead of stacking blocks or overwriting another reason.
+ */
+export const IMPORT_RECOVERY_BLOCK_ID = "import_publication_recovery_required";
+
+export interface ImportRecoveryNotice {
+  identity: string;
+  reason: string;
+}
+
+/**
+ * Handle returned by {@link ImportWorker.prepareForRestore}. It identifies the
+ * *temporary* freeze; releasing it can never clear a genuine recovery block.
+ */
+export interface ImportRestoreFreezeHandle {
+  readonly id: string;
+  readonly databasePath: string;
+}
+
+/** Outcome of re-adjudicating import state against a restored database. */
+export interface ImportRestoreReloadResult {
+  /** No receipt/publication recovery block remains. */
+  reconciled: boolean;
+  /** Publication intents durably marked as superseded by this restore. */
+  supersededIntents: number;
+  /** Remaining journal intents that still block (should be zero after a clean restore). */
+  blockedIntents: number;
+  /** Jobs parked at `recovery_required` that still belong to the restored scope. */
+  blockedJobs: number;
+}
+
 export interface ImportQueueOptions {
   engine?: ImportExecutionEngine;
+  /** Current configured dataset epoch; required to persist deletion journal stages. */
+  datasetEpoch?: string;
   /** Roll back to the candidate-publication path without changing sync identity. */
   dataOnlyFastPath?: boolean;
   scope: string;
   admission: TaskAdmission;
   maxPending?: number;
   assertAccepting?: () => void;
-  onRecoveryRequired?: () => void;
+  /**
+   * The worker found a condition that only an explicit recovery can clear.
+   * Callers register a token-bound scheduler block; the worker never clears a
+   * scheduler block itself.
+   */
+  onRecoveryRequired?: (notice: ImportRecoveryNotice) => void;
   onTerminal?: (job: ImportJobResponse, succeeded: boolean, durable: boolean) => void | Promise<void>;
 }
 
@@ -293,8 +368,27 @@ export class ImportWorker {
   private activeJob: MutableImportJob | null = null;
   private cancelRequested = false;
   private readonly publicationJournal: ImportPublicationJournal | undefined;
+  /** P1-6: journal intents that could not be adjudicated without the main DB. */
+  private publicationRecoveryBlocks: readonly ImportPublicationRecoveryBlock[] = [];
   private computeStagesMs: Record<string, number> = {};
+  /** Genuine recovery block (unverifiable receipt / unresolved publication). */
   private recoveryBlocked = false;
+  /**
+   * Temporary freeze held by an in-flight backup restore.
+   *
+   * Deliberately separate from `recoveryBlocked`: a failed restore attempt (for
+   * example an unknown backup name) must not leave a permanent worker block
+   * behind. Only the matching handle can clear it.
+   */
+  private restoreFreeze: ImportRestoreFreezeHandle | null = null;
+  /** True only after a freeze's thread-stopping proof succeeded. */
+  private restoreFreezeReady = false;
+  /**
+   * `loadJobs()` 的恢复通知必须晚于构造器完成，因此先记“待通知”，只由
+   * `resume()` 显式兑现。server.ts 的 `databaseRecoveryRequired` 在
+   * `new ImportWorker(...)` 之后、且隔着 await 才声明；构造器内不调用回调。
+   */
+  private recoveryNotificationPending = false;
   /** 常驻 ingest Worker（WP-41 第二阶段）：懒创建、跨批复用、崩溃或任务抛错后替换。 */
   private ingest: ResidentIngestWorker | null = null;
   /**
@@ -334,8 +428,20 @@ export class ImportWorker {
     this.jobStatePath = resolve(runtimeRoot, "var/import-jobs.json");
     this.state = new RuntimeStateStore(runtimeRoot);
     this.publicationJournal = queueOptions ? new ImportPublicationJournal(databasePath, runtimeRoot) : undefined;
-    const repaired = this.publicationJournal?.recover();
-    if (repaired && existsSync(databasePath) && databaseReadable(databasePath)) {
+    const publicationRecovery = this.publicationJournal?.recover();
+    if (publicationRecovery !== undefined && publicationRecovery.blocked.length > 0) {
+      // P1-6: do not let a temporarily unreadable/missing main database kill the
+      // API. Keep every intent, block writes and let the recovery routes serve.
+      this.publicationRecoveryBlocks = publicationRecovery.blocked;
+      this.recoveryBlocked = true;
+      this.scheduleRecoveryNotification();
+      for (const block of publicationRecovery.blocked) {
+        process.stderr.write(
+          `Import publication intent ${block.id} (${block.phase}) needs recovery: ${block.detail}\n`);
+      }
+    }
+    if (publicationRecovery?.repaired === true
+        && existsSync(databasePath) && databaseReadable(databasePath)) {
       const audit = this.stageAuditReports(databasePath, resolve(runtimeRoot, "docs/DATA_AUDIT.md"), resolve(runtimeRoot, "var/reports/data-audit.json"));
       audit.commit();
       audit.finalize();
@@ -348,11 +454,144 @@ export class ImportWorker {
     return this.running;
   }
 
+  /**
+   * P1-7: a real writer (or an unfinished terminal acknowledgement) — these
+   * must keep the main database un-replaceable.
+   *
+   * A job parked at `recovery_required` is deliberately **not** a writer: its
+   * database is already unusable and the only way out may be an explicit
+   * restore. Treating it as busy made the recovery route permanently 409.
+   */
+  get hasPendingWrites(): boolean {
+    return this.running || [...this.jobs.values()].some((job) => {
+      if (job.queue && !job.queue.finalized && job.phase !== "recovery_required") return true;
+      return ["queued", "running"].includes(job.status) && job.phase !== "recovery_required";
+    });
+  }
+
+  /** P1-6: publication intents kept because the main database could not be read. */
+  get publicationRecoveryBlocked(): readonly ImportPublicationRecoveryBlock[] {
+    return this.publicationRecoveryBlocks;
+  }
+
+  /** Jobs stopped on an explicit recovery decision, waiting for an operator. */
+  get hasRecoveryBlockedJobs(): boolean {
+    return [...this.jobs.values()].some((job) =>
+      job.phase === "recovery_required" && Boolean(job.queue && !job.queue.finalized));
+  }
+
+  /** Kept for callers that need "any reason left to hold the receipt DB". */
   get hasPending(): boolean {
-    // Terminal status is visible before source cleanup and the publication
-    // acknowledgement finish. Maintenance must not replace their receipt DB.
-    return this.running || [...this.jobs.values()].some((job) =>
-      ["queued", "running"].includes(job.status) || Boolean(job.queue && !job.queue.finalized));
+    return this.hasPendingWrites || this.hasRecoveryBlockedJobs;
+  }
+
+  /** True when a genuine (not temporary-freeze) recovery block is active. */
+  get hasRecoveryBlock(): boolean { return this.recoveryBlocked; }
+
+  /** True while a backup restore holds the temporary freeze. */
+  get isRestoreFrozen(): boolean { return this.restoreFreeze !== null; }
+
+  /**
+   * P1-7: an explicit restore may replace the main database once every worker
+   * thread is provably gone and no new task can start. A park at
+   * `recovery_required` does not veto the restore (it is the reason for it).
+   *
+   * The freeze is a **separate** state from `recoveryBlocked`: a restore that
+   * fails before its first side effect must be able to release it, and a retry
+   * must receive the same handle rather than stacking freezes.
+   */
+  async prepareForRestore(): Promise<ImportRestoreFreezeHandle> {
+    const existing = this.restoreFreeze;
+    // Idempotent only for a *successful* freeze. A previous attempt that could
+    // not prove thread termination must re-run the proof, never hand back a
+    // handle that pretends the database is replaceable.
+    if (existing !== null && this.restoreFreezeReady) return existing;
+    const handle: ImportRestoreFreezeHandle =
+      existing ?? { id: randomUUID(), databasePath: this.databasePath };
+    this.restoreFreeze = handle;
+    this.restoreFreezeReady = false;
+    // Stop accepting new tasks now; an in-flight ingest thread is retired below.
+    this.queueOptions?.admission.withdraw();
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    const resident = this.ingest;
+    if (resident !== null) {
+      await this.retireIngestWorker(resident, new Error("Database restore is replacing the main database"));
+    }
+    if (!(await this.waitForIngestTermination())) {
+      // Keep the freeze: without proof that no writer exists, no new task may run.
+      throw new Error("Import worker threads could not be stopped; refusing to replace the main database");
+    }
+    this.restoreFreezeReady = true;
+    return handle;
+  }
+
+  /**
+   * Release a temporary restore freeze by identity.
+   *
+   * Never touches `recoveryBlocked`: if a genuine block appeared while the
+   * restore was running, it survives this release. Returns false for a stale or
+   * foreign handle so the caller's `finally` cannot clear a newer attempt.
+   */
+  releaseRestoreFreeze(handle: ImportRestoreFreezeHandle): boolean {
+    const current = this.restoreFreeze;
+    if (current === null || current.id !== handle.id || current.databasePath !== handle.databasePath) return false;
+    this.restoreFreeze = null;
+    this.restoreFreezeReady = false;
+    // The queue may have a runnable current-scope job waiting for the freeze.
+    this.scheduleNext();
+    return true;
+  }
+
+  /**
+   * P1-7: re-adjudicate persistent state against the restored database/scope.
+   *
+   * Two independent sources must agree, otherwise this is not a recovery:
+   *   1. import jobs — old-scope jobs are marked `superseded` (their original
+   *      transaction may have committed; we never claim it did not), and
+   *      current-scope jobs are re-read through the four-state receipt path;
+   *   2. publication intents — intents left over from before the restore are
+   *      durably recorded as superseded by this explicit restore and only then
+   *      removed. A restart must see that record instead of re-blocking.
+   *
+   * `reconciled` is true only when both sources are clean afterwards.
+   */
+  reloadAfterRestore(restoredEpoch: string): ImportRestoreReloadResult {
+    if (this.restoreFreeze === null) throw new Error("reloadAfterRestore requires an active restore freeze");
+    this.jobs.clear();
+    this.recoveryBlocked = false;
+    this.recoveryNotificationPending = false;
+    this.publicationRecoveryBlocks = [];
+
+    const journal = this.publicationJournal;
+    let supersededIntents = 0;
+    let blockedIntents = 0;
+    if (journal !== undefined) {
+      // The database replacement is committed and the final epoch is durable by
+      // the time this runs. Only then may pre-restore intents become inert.
+      supersededIntents = journal.supersedeWithRestore(restoredEpoch);
+      const recovery = journal.recover();
+      this.publicationRecoveryBlocks = recovery.blocked;
+      blockedIntents = recovery.blocked.length;
+      if (blockedIntents > 0) {
+        this.recoveryBlocked = true;
+        for (const block of recovery.blocked) {
+          process.stderr.write(
+            `Import publication intent ${block.id} (${block.phase}) still needs recovery after restore: ${block.detail}\n`);
+        }
+      }
+    }
+
+    this.loadJobs({ supersededByRestore: true });
+    // Constructor-only notification is not replayed here: the scheduler block
+    // that existed before the restore is resolved by the caller with its token.
+    this.recoveryNotificationPending = false;
+    const blockedJobs = [...this.jobs.values()].filter((job) => job.phase === "recovery_required").length;
+    return {
+      reconciled: !this.recoveryBlocked && blockedIntents === 0 && blockedJobs === 0,
+      supersededIntents,
+      blockedIntents,
+      blockedJobs
+    };
   }
 
   active(): ImportJobResponse | null {
@@ -361,8 +600,29 @@ export class ImportWorker {
     return job ? this.publicJob(job) : null;
   }
 
-  /** Explicit startup after database readiness and request dependencies exist. */
-  resume(): void { this.scheduleNext(); }
+  /**
+   * Explicit startup after database readiness and request dependencies exist.
+   *
+   * 恢复阻断的全局通知**只**在这里兑现。构造器只记录 pending，不同步/异步调用
+   * 回调，因此不需要靠捕获 ReferenceError 去猜 `databaseRecoveryRequired` 是否
+   * 已经声明。server.ts 在声明完成之后调用 resume()，时序是显式的。
+   */
+  resume(): void {
+    this.flushRecoveryNotification();
+    this.scheduleNext();
+  }
+
+  /** 构造期发现无法核实的回执：只登记待通知，由 resume() 显式兑现一次。 */
+  private scheduleRecoveryNotification(): void {
+    this.recoveryNotificationPending = true;
+  }
+
+  private flushRecoveryNotification(): void {
+    if (!this.recoveryNotificationPending) return;
+    // 先清 pending 再回调：回调即使失败也不能在后续 resume() 中重复触发。
+    this.recoveryNotificationPending = false;
+    this.queueOptions?.onRecoveryRequired?.({ identity: IMPORT_RECOVERY_BLOCK_ID, reason: IMPORT_RECOVERY_BLOCK_ID });
+  }
 
   /** Called under the exclusive restore lease, after all imports are finalized. */
   setScope(scope: string): void { if (this.queueOptions) this.queueOptions.scope = scope; }
@@ -397,7 +657,8 @@ export class ImportWorker {
   }
 
   private scheduleNext(delay = 20): void {
-    if (!this.queueOptions || this.closing || this.recoveryBlocked || this.timer || this.runPromise) return;
+    if (!this.queueOptions || this.closing || this.recoveryBlocked
+        || this.restoreFreeze !== null || this.timer || this.runPromise) return;
     const job = [...this.jobs.values()].find((item) => item.queue && !item.queue.finalized &&
       item.queue.scope === this.queueOptions!.scope &&
       (item.status === "queued" || ["succeeded", "failed", "cancelled"].includes(item.status)));
@@ -439,6 +700,7 @@ export class ImportWorker {
     source?: ImportWorkerSource
   ): ImportJobResponse {
     if (this.closing) throw new Error("导入服务正在关闭");
+    if (this.restoreFreeze !== null) throw new Error("数据库恢复进行中，暂不能接受导入任务");
     this.queueOptions?.assertAccepting?.();
     if (sourceId) {
       const existing = this.findBySourceId(sourceId);
@@ -461,6 +723,19 @@ export class ImportWorker {
     // filename is only consulted when no manifest is present.
     const snapshot = resolvePreserveAbsent(inputPath, source ?? {});
     const preserveAbsent = snapshot.preserveAbsent;
+    // 首次空库的持久证据分两层：
+    //   1. 入队那一刻主库确实不存在（任务自己的观察）；
+    //   2. 作用域账本仍证明“此前没有写者进入或数据集建立”（跨任务、持久化）。
+    // 第 2 层是必需的：A、B 连续入队后 A 已成功、B 尚未运行，随后主库被移走时，
+    // B 自己的入队标记仍然为真 —— 只有作用域账本（A 开始执行前写入的
+    // writerEnteredAt）能阻止 B 在恢复时创建新空库。
+    const databaseAbsentAtEnqueue = !existsSync(this.databasePath);
+    // 首次空库许可只读自作用域账本：没有受控初始化写入的 pristine 行时，
+    // 即使入队这一刻文件不在，也不会自动创建许可。任务仍会被受理并持久化，
+    // 但执行/恢复时进入 recovery_required，等待恢复原库或显式初始化。
+    const scopePermit = this.queueOptions !== undefined && databaseAbsentAtEnqueue
+      ? this.state.firstEmptyPermit(this.queueOptions.scope)
+      : null;
     const job: MutableImportJob = {
       id,
       status: "queued",
@@ -470,7 +745,14 @@ export class ImportWorker {
       completedAt: null,
       error: null,
       inputPath,
-      ...(this.queueOptions ? { queue: { scope: this.queueOptions.scope, attempts: 0, finalized: false, engine: this.queueOptions.engine ?? this.executionEngine } } : {}),
+      ...(this.queueOptions ? { queue: {
+        scope: this.queueOptions.scope,
+        attempts: 0,
+        finalized: false,
+        engine: this.queueOptions.engine ?? this.executionEngine,
+        ...(databaseAbsentAtEnqueue ? { databaseAbsentAtEnqueue: true } : {}),
+        ...(scopePermit?.firstEmptyEpoch == null ? {} : { firstEmptyEpoch: scopePermit.firstEmptyEpoch })
+      } } : {}),
       ...(sourceId === undefined ? {} : { sourceId }),
       ...(preserveAbsent ? { preserveAbsent: true } : {})
     };
@@ -623,7 +905,7 @@ export class ImportWorker {
       this.recoveryBlocked = true;
       job.phase = "recovery_required";
       job.message = message;
-      this.queueOptions?.onRecoveryRequired?.();
+      this.queueOptions?.onRecoveryRequired?.({ identity: IMPORT_RECOVERY_BLOCK_ID, reason: IMPORT_RECOVERY_BLOCK_ID });
       try { this.persistJobs(); } catch { /* 内存中的恢复阻断仍然生效 */ }
     };
     // 观测（阶段 1，实施方案 §5.2 S1.3）：车道决策与拒因。
@@ -636,6 +918,64 @@ export class ImportWorker {
       job.status = "running";
       this.persistJobs();
       await mkdir(nativeSpoolRoot, { recursive: true });
+      // 🔴 首次空库许可必须同时有**作用域级**持久证据：任务自己的
+      // `databaseAbsentAtEnqueue` 只能证明“入队那一刻文件不在”，不能证明
+      // “此前没有写者进入/数据集建立”。A、B 连续入队、A 已成功后主库被移走，
+      // B 仍带着入队标记 —— 这里必须靠作用域账本把 B 拦在创建新库之前。
+      const missingAtStart = !existsSync(this.databasePath);
+      if (this.queueOptions && job.queue) {
+        const permit = missingAtStart ? this.firstEmptyPermitEvidence(job) : null;
+        if (missingAtStart && permit === null) {
+          withholdTerminalDecision("导入主库暂时缺失，且无法证明这是尚未写入的首次空库；恢复已阻断，等待原库恢复");
+          return;
+        }
+        // P2-1: an already-established scope only needs a diagnostic write; a
+        // failure there must not turn a no-op/data-only batch into
+        // recovery_required. A scope without that evidence still fails closed.
+        const priorEvidence = this.state.scopeEvidence(job.queue.scope);
+        const barrierRequired = priorEvidence === null || priorEvidence.state !== "established";
+        try {
+          // 写者进入先于任何可能写主库的动作持久化；失败则拒绝执行。
+          this.state.markScopeWriterEntered(job.queue.scope, new Date().toISOString());
+          faultPoint("deletion:writer-runtime-entered");
+          // 若这张 pristine 许可来自一次持久删库操作，侧车也必须先记录
+          // `writer_entered`，然后才允许创建主库。顺序与 review §1.2 一致：
+          // runtime 账本 → 侧车 → 主库。任一步失败都保守阻断。
+          const deletionId = permit?.permitSource?.startsWith("explicit_database_delete:")
+            ? permit.permitSource.slice("explicit_database_delete:".length)
+            : null;
+          if (deletionId !== null) {
+            const configuredEpoch = this.queueOptions.datasetEpoch;
+            if (!configuredEpoch) {
+              throw new Error("无法持久化删库写者进入：导入 worker 未配置 datasetEpoch");
+            }
+            advanceDeletionOperation(
+              this.databasePath, configuredEpoch, deletionId, "writer_entered", undefined,
+              scopeIdentityOf(job.queue.scope));
+            faultPoint("deletion:writer-sidecar-entered");
+          }
+          if (!missingAtStart) {
+            // P2-1: "the file exists" is not evidence of a dataset. A zero-byte
+            // or corrupt file must stay unknown until its structure is readable;
+            // otherwise a later failure would leave the ledger claiming a
+            // healthy established dataset that never existed.
+            if (databaseReadable(this.databasePath)) {
+              this.state.markScopeDatasetEstablished(job.queue.scope, new Date().toISOString());
+            } else {
+              process.stderr.write(
+                `Main database exists but is not readable; not registering scope ${job.queue.scope} as established.\n`);
+            }
+          }
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          if (barrierRequired) {
+            withholdTerminalDecision(`无法持久化导入作用域证据，恢复已阻断：${detail}`);
+            return;
+          }
+          process.stderr.write(
+            `Import scope ${job.queue.scope} is already established; diagnostic writer-entry write failed: ${detail}\n`);
+        }
+      }
       // 2026-10-14（S3.2/S3.3 补全）：**导入入口负责创建/修复存储** —— 这是既有的、被测试钉住的
       // 契约：`metadataOnlyMutationRoutes` 的注册注释写明 importing / restore / delete 三类路由
       // 不得被 existsSync 门挡住（否则恢复路径被锁死），deploy/README-UBUNTU.md 的显式迁移契约
@@ -645,9 +985,31 @@ export class ImportWorker {
       //   · 只处理"文件不存在"——创建一份全新迁移库（等价于运维的 `data:migrate`）；
       //   · 已存在但待迁移/损坏的库**绝不**在这里动（那是运维的显式流程：启动退出 78 / 隔离）。
       // 首包随后走 S3.2 的三态：四项身份全缺 ⇒ 就地初始化。
-      if (!existsSync(this.databasePath)) {
+      if (missingAtStart) {
         process.stderr.write(`Main database missing; creating a fresh database before import ${job.id}.\n`);
-        (await RaiDatabase.open(this.databasePath)).close();
+        try {
+          (await RaiDatabase.open(this.databasePath)).close();
+          // A deletion at writer_entered must never adopt a merely readable,
+          // epoch-less file on restart. Persist and verify the effective epoch
+          // before any import can write facts or a receipt. The gap between
+          // database creation and this write is fail-closed at startup.
+          if (this.queueOptions?.datasetEpoch !== undefined && job.queue !== undefined) {
+            const parsedScope = JSON.parse(job.queue.scope) as unknown;
+            if (!Array.isArray(parsedScope) || parsedScope.length !== 3
+                || typeof parsedScope[2] !== "string" || parsedScope[2].length === 0) {
+              throw new Error("Cannot persist the new database epoch: import scope is invalid");
+            }
+            backfillDatasetEpochToMain(this.databasePath, this.queueOptions.datasetEpoch, parsedScope[2]);
+          }
+        } catch (error) {
+          withholdTerminalDecision(
+            `无法建立带持久 epoch 的首次主库，恢复已阻断：${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
+        if (this.queueOptions && job.queue) {
+          try { this.state.markScopeDatasetEstablished(job.queue.scope, new Date().toISOString()); }
+          catch { /* writerEnteredAt 已经阻断后续首次空库许可；此处只是补全“数据集建立”证据 */ }
+        }
       }
       const receipt = this.queueOptions ? readImportReceipt(this.databasePath, job.id) : null;
       if (receipt) {
@@ -1018,7 +1380,7 @@ export class ImportWorker {
       // Rollback did not finish. Keep both the journal and the uploaded input;
       // running another writer here could destroy the only recovery point.
       this.recoveryBlocked = true;
-      this.queueOptions?.onRecoveryRequired?.();
+      this.queueOptions?.onRecoveryRequired?.({ identity: IMPORT_RECOVERY_BLOCK_ID, reason: IMPORT_RECOVERY_BLOCK_ID });
       throw new Error("Import publication needs recovery; writers paused until service restart");
     }
     if (!job.onTerminal && !this.queueOptions && !job.queue) return;
@@ -2322,6 +2684,30 @@ export class ImportWorker {
     };
   }
 
+  /**
+   * P3: `job.message` is internal diagnostics and may quote SQLite errors,
+   * absolute paths or a table name. The public layer keeps a stable, actionable
+   * sentence and the machine-readable `failureCode`; the full text stays in the
+   * server log / persisted job row.
+   */
+  private publicMessage(job: MutableImportJob): string {
+    if (job.phase === "recovery_required") {
+      // Keep the actionable distinction (missing database vs unreadable
+      // receipt) without leaking the SQLite/path detail that follows the colon.
+      if (job.message.includes("主库暂时缺失")) {
+        return "导入主库暂时缺失，无法核实回执，恢复已阻断；请恢复原库后重启服务";
+      }
+      if (job.message.includes("回执无法读取") || job.message.includes("无法读取持久回执")) {
+        return "导入回执无法读取，恢复已阻断；请检查数据库权限或完整性后重启服务";
+      }
+      return "导入恢复被阻断：无法核实主库回执，请按运维指引恢复后重启服务";
+    }
+    if (/sqlite|SQLITE|\.sqlite|no such table|disk image|database is locked|EACCES|\/[A-Za-z0-9._-]+\//.test(job.message)) {
+      return "导入暂时无法完成，请稍后重试或联系维护人员";
+    }
+    return job.message;
+  }
+
   private publicJob(job: MutableImportJob): ImportJobResponse {
     const removalGuard = job.status === "failed"
       ? ImportRemovalGuardError.fromPayload(job.removalGuard) : null;
@@ -2334,7 +2720,7 @@ export class ImportWorker {
       ...(job.sourceId === undefined ? {} : { sourceId: job.sourceId }),
       status: job.status,
       phase: job.phase,
-      message: job.message,
+      message: this.publicMessage(job),
       createdAt: job.createdAt,
       completedAt: job.completedAt,
       error: publicError
@@ -2351,7 +2737,70 @@ export class ImportWorker {
     };
   }
 
-  private loadJobs(): void {
+  /**
+   * 首次空库许可的**唯一**判据：任务记录的作用域代次仍等于账本代次，且账本
+   * 仍没有任何写者进入/数据集建立的证据。缺少任务代次、账本不存在或读不出来
+   * 一律为 false（无法证明 ⇒ 阻断）。
+   */
+  private firstEmptyPermitEvidence(value: MutableImportJob): ImportScopeEvidenceRow | null {
+    const queue = value.queue;
+    if (!queue || queue.firstEmptyEpoch === undefined) return null;
+    const evidence = this.state.scopeEvidence(queue.scope);
+    return evidence !== null
+      && evidence.state === "pristine"
+      && evidence.firstEmptyEpoch === queue.firstEmptyEpoch
+      && evidence.writerEnteredAt === null
+      && evidence.datasetEstablishedAt === null
+      && evidence.permitRevokedAt === null
+      ? evidence : null;
+  }
+
+  private firstEmptyPermitIsValid(value: MutableImportJob): boolean {
+    return this.firstEmptyPermitEvidence(value) !== null;
+  }
+
+  /**
+   * 重启恢复的既有政策：只有回执**确认不存在**时，才允许按 cancelRequested /
+   * attempts 裁决。外 scope 的旧任务不读回执，同样走这里以保留原终态与 scope 收口。
+   */
+  private applyUncommittedRestartPolicy(
+    value: MutableImportJob, options: { supersededByRestore?: boolean } = {}
+  ): void {
+    if (options.supersededByRestore === true && value.queue !== undefined
+        && value.queue.scope !== this.queueOptions?.scope) {
+      // P1-7: the dataset was replaced by an explicit restore. We cannot read
+      // the old receipt (the bytes are gone), so the only honest terminal state
+      // is "superseded by an operator action", not "failed/interrupted".
+      value.status = "failed";
+      value.phase = "superseded";
+      value.error = null;
+      value.message = "数据集已由显式备份恢复替代；该任务的原提交结果未核实";
+      value.completedAt = new Date().toISOString();
+      value.queue.finalized = true;
+      return;
+    }
+    if (value.queue?.cancelRequested) {
+      value.status = "cancelled"; value.phase = "cancelled"; value.error = null;
+      value.message = "导入已取消"; value.completedAt = new Date().toISOString();
+    } else if (this.queueOptions && value.queue && value.queue.scope === this.queueOptions.scope &&
+        value.queue.attempts < 3) {
+      value.status = "queued";
+      value.phase = "queued";
+      value.error = null;
+      value.message = "正在恢复已接受的导入任务";
+    } else {
+      value.status = "failed";
+      value.phase = "interrupted";
+      value.message = "上次导入因本地服务重启而中断，可重新提交导入";
+      value.error = PUBLIC_IMPORT_FAILURE_ERROR;
+      value.completedAt = new Date().toISOString();
+      if (value.queue && value.queue.scope !== this.queueOptions?.scope) value.queue.finalized = true;
+    }
+  }
+
+  private loadJobs(options: { supersededByRestore?: boolean } = {}): void {
+    let receiptRecoveryBlocked = false;
+    let recoveryRequiredNotified = false;
     try {
       const parsed = this.state.jobs(20) as MutableImportJob[];
       for (const value of parsed) {
@@ -2359,35 +2808,96 @@ export class ImportWorker {
         if (this.publicationJournal?.rolledBackIds.has(value.id) && value.queue?.scope === this.queueOptions?.scope) {
           value.status = "queued";
         }
-        const receipt = this.queueOptions && value.queue?.scope === this.queueOptions.scope
-          ? readImportReceipt(this.databasePath, value.id) : null;
-        if (receipt && ["queued", "running"].includes(value.status)) {
-          value.status = "succeeded"; value.phase = "completed"; value.error = null;
-          value.summary = receipt; value.completedAt = new Date().toISOString();
-          value.message = "已恢复完成的导入";
-        } else if (value.queue?.cancelRequested && ["queued", "running"].includes(value.status)) {
-          value.status = "cancelled"; value.phase = "cancelled"; value.error = null;
-          value.message = "导入已取消"; value.completedAt = new Date().toISOString();
-        } else if (this.queueOptions && value.queue && ["queued", "running"].includes(value.status) &&
-            value.queue.scope === this.queueOptions.scope && value.queue.attempts < 3) {
-          value.status = "queued";
-          value.phase = "queued";
+        const pending = ["queued", "running"].includes(value.status);
+        const inCurrentScope = Boolean(this.queueOptions && value.queue &&
+          value.queue.scope === this.queueOptions.scope);
+        if (pending && inCurrentScope) {
+          // 🔴 四态：found / confirmed_absent / missing / unreadable。
+          // 只有 confirmed_absent 才能按原政策取消、重试或判失败；
+          // missing 只有在“入队时主库不存在 + 尚未执行的首包”这条持久证据下
+          // 才能等同于首次空库；其余 missing/unreadable 一律阻断恢复。
+          const outcome = readImportReceiptForRecovery(this.databasePath, value.id);
+          if (outcome.state === "found") {
+            value.status = "succeeded"; value.phase = "completed"; value.error = null;
+            value.summary = outcome.receipt; value.completedAt = new Date().toISOString();
+            value.message = "已恢复完成的导入";
+          } else if (outcome.state === "confirmed_absent") {
+            this.applyUncommittedRestartPolicy(value);
+          } else {
+            // 任务自己的入队标记只说明“那一刻文件不在”。还必须由**作用域账本**
+            // 证明此后没有任何写者进入/数据集建立 —— 否则 A 已成功、B 尚未运行的
+            // 场景会在主库暂时缺失时被误放行，随后执行路径创建新空库。
+            const provenFirstEmpty = outcome.state === "missing"
+              && value.status === "queued"
+              && value.queue?.attempts === 0
+              && value.queue?.databaseAbsentAtEnqueue === true
+              && this.firstEmptyPermitIsValid(value);
+            if (provenFirstEmpty) {
+              this.applyUncommittedRestartPolicy(value);
+            } else {
+              // 事实和回执可能已经同事务提交。读不到就不发布终态、不 finalize queue、
+              // 不清理来源；保持 queued/running，让全局调度器继续被挡住。
+              value.phase = "recovery_required";
+              value.message = outcome.state === "missing"
+                ? `导入主库暂时缺失，无法核实回执，恢复已阻断：${outcome.error.message}`
+                : `导入回执无法读取，恢复已阻断：${outcome.error.message}`;
+              this.recoveryBlocked = true;
+              receiptRecoveryBlocked = true;
+              this.jobs.set(value.id, value);
+              if (!recoveryRequiredNotified) {
+                recoveryRequiredNotified = true;
+                // 只登记 pending；全局通知由启动依赖声明完成后的 resume() 显式兑现。
+                this.scheduleRecoveryNotification();
+              }
+              try { this.persistJobs(); } catch { /* 落盘失败不得撤销内存中的恢复阻断 */ }
+              continue;
+            }
+          }
+        } else if (pending) {
+          // P1-5: a scope explicitly abandoned by an operator is not "failed":
+          // the original transaction may have committed and its bytes are gone.
+          if (value.queue !== undefined && this.state.isScopeAbandoned(value.queue.scope)) {
+            value.status = "failed";
+            value.phase = "superseded";
+            value.error = null;
+            value.message = "旧数据集已被运维显式放弃并建立新 epoch；该任务结果未核实";
+            value.completedAt = new Date().toISOString();
+            value.queue.finalized = true;
+          } else {
+            // 外 scope 旧任务保持既有行为：不读回执，按旧终态路径并收口它自己的 scope。
+            this.applyUncommittedRestartPolicy(value, options);
+          }
+        } else if (value.queue !== undefined && !value.queue.finalized && !inCurrentScope) {
+          // A terminal job from a replaced scope can never be retried by this
+          // scheduler. Persisting it as unfinalized made hasPendingWrites()
+          // permanently true, so every later deletion/restore kept returning
+          // 409 even though the job itself was already terminal. Finalize it
+          // through the same acknowledgement path so the publication intent is
+          // removed atomically with the queue flag.
+          // Preserve the terminal status: a `succeeded` job really did
+          // succeed; only its old-scope acknowledgement can never resume.
+          value.phase = "superseded";
           value.error = null;
-          value.message = "正在恢复已接受的导入任务";
-        } else if (["queued", "running"].includes(value.status)) {
-          value.status = "failed";
-          value.phase = "interrupted";
-          value.message = "上次导入因本地服务重启而中断，可重新提交导入";
-          value.error = PUBLIC_IMPORT_FAILURE_ERROR;
-          value.completedAt = new Date().toISOString();
-          if (value.queue && value.queue.scope !== this.queueOptions?.scope) value.queue.finalized = true;
+          value.message = "该导入属于已被替代的数据集 scope；已停止等待旧 scope 的终态确认";
+          value.completedAt ??= new Date().toISOString();
+          value.queue.finalized = true;
+          this.jobs.set(value.id, value);
+          try {
+            this.state.finalizeImportJob(value);
+          } catch (error) {
+            // Never leave an in-memory finalized job when its durable
+            // acknowledgement failed: the restart would inherit the same bug.
+            this.jobs.delete(value.id);
+            throw error;
+          }
+          continue;
         }
         this.jobs.set(value.id, value);
       }
       this.persistJobs();
     } catch (error) {
-      if (this.queueOptions) throw error;
-      // Corrupt task metadata must not block the local API or the health database.
+      // 恢复阻断是内存中的安全状态；持久化失败可以报告，但不能把它撤掉。
+      if (this.queueOptions && !receiptRecoveryBlocked) throw error;
     }
   }
 

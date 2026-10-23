@@ -72,14 +72,7 @@ export class CommandQueue {
       sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL,
       scope TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL
     ); CREATE INDEX IF NOT EXISTS idx_mutation_commands_pending ON mutation_commands(status, sequence)`));
-    for (const command of this.pending()) {
-      if (command.scope !== scope) {
-        command.status = "failed";
-        command.error = { code: "dataset_scope_changed", message: "数据集已更换，旧操作未执行" };
-        command.completedAt = new Date().toISOString();
-        this.save(command);
-      }
-    }
+    this.supersedeOtherScopes();
   }
   private use<T>(operation: (db: DatabaseSync) => T): T {
     const db = new DatabaseSync(this.path);
@@ -102,8 +95,34 @@ export class CommandQueue {
       .all() as { payload: string }[]).map((row) => JSON.parse(row.payload) as DurableCommand));
   }
   get hasPending(): boolean { return this.pending().length > 0 || this.executing !== null; }
-  /** Called under the exclusive restore lease, with no pending commands. */
+  /** Only an executing command can still be writing the main database. */
+  get isExecuting(): boolean { return this.executing !== null; }
+  /** Called under the exclusive restore lease; old queued commands are settled after commit. */
   setScope(scope: string): void { this.scope = scope; }
+  /**
+   * A committed restore replaces the old scope's facts and receipts. Parked
+   * commands from that scope must become terminal before admission reopens;
+   * a `running` row may have committed before a crash, so its message must not
+   * claim that the old command was never applied.
+   */
+  supersedeOtherScopes(): number {
+    let settled = 0;
+    for (const command of this.pending()) {
+      if (command.scope === this.scope) continue;
+      const wasRunning = command.status === "running";
+      command.status = "failed";
+      command.error = {
+        code: "dataset_scope_changed",
+        message: wasRunning
+          ? "数据集已更换，旧操作的原提交结果未核实"
+          : "数据集已更换，旧操作未执行"
+      };
+      command.completedAt = new Date().toISOString();
+      this.save(command);
+      settled += 1;
+    }
+    return settled;
+  }
   enqueue(request: CommandRequest): DurableCommand {
     const id = `command_${createHash("sha256").update(JSON.stringify([this.scope, request.idempotencyKey])).digest("hex")}`;
     const fingerprint = createHash("sha256").update(canonical({ kind: request.kind, payload: request.payload })).digest("hex");

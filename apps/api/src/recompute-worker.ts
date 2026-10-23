@@ -142,8 +142,14 @@ export class RecomputeWorker {
     // 别的路径会回收它。`closing` 已在上面置位 ⇒ 退出处理器把未决轮次按"这一轮没跑"结算
     // （关闭不是任务的失败面），同时 dispose 租约。
     const resident = this.resident;
-    if (resident) await resident.thread.terminate();
-    else await this.activeWorker?.terminate();
+    // An idle resident is deliberately unref'd. terminate() returns a Promise
+    // but that Promise does not keep Node alive, so close() must hold the thread
+    // reference until its exit has actually been observed.
+    const thread = resident?.thread ?? this.activeWorker;
+    if (thread) {
+      thread.ref();
+      await thread.terminate();
+    }
     await this.drainPromise;
   }
 

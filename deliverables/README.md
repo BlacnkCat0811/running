@@ -4,11 +4,37 @@
 现行说明统一从 [项目 README](../README.md) 进入；现行状态、未决问题与已收尾批次指针只维护
 [项目审查](../docs/PROJECT_REVIEW.md)。
 
-## 1. 当前证据（2026-10-22）
+## 1. 当前证据（2026-10-23）
 
 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
 [项目审查](../docs/PROJECT_REVIEW.md) 后删除。
 
+- [IMPORT_RECOVERY_REVIEW_FIX_2026-10-23.md](IMPORT_RECOVERY_REVIEW_FIX_2026-10-23.md)：
+  导入恢复审查三项问题修复的验收记录——恢复后任务准入 token、恢复失败的结构化证据与临时冻结、
+  放弃旧 scope 的唯一 epoch 重放；含故障注入点与逐条验收映射。
+- [IMPORT_RECOVERY_REVIEW_FIX_2_2026-10-23.md](IMPORT_RECOVERY_REVIEW_FIX_2_2026-10-23.md)：
+  第二轮只读复审两个问题（可读外来主库误判为删库回滚成功、路线归属冲突依赖 XML 顺序）的
+  修复与回归记录；含显式恢复意图的崩溃重放、保护快照身份校验与 A→B/B→A 顺序测试。
+- [IMPORT_RECOVERY_REVIEW_FIX_3_2026-10-23.md](IMPORT_RECOVERY_REVIEW_FIX_3_2026-10-23.md)：
+  第三轮只读复审五项问题（旧 scope 终态作业永久 pending、prepared 删除窗口阻断自动回滚、
+  放弃重试跳过许可校验、失败测试日志生成通过摘要、证据清单漏掉未跟踪文件）的修复与
+  定向回归记录。
+- [IMPORT_RECOVERY_REVIEW_FIX_4_2026-10-23.md](IMPORT_RECOVERY_REVIEW_FIX_4_2026-10-23.md)：
+  第四轮只读复审七项问题（initial rollback 误安装、完成放弃的幂等重试、permit_issued
+  快照轮换、存量主库 epoch 回填、RestoreJournal fail-open、abandoned 终态、证据清单
+  跨平台路径）的修复与回归记录。
+- [阶段 3 复审问题逐项修复实施方案](phase3-import-analysis-2026-10-22/PHASE3_REVIEW_ISSUES_IMPLEMENTATION_PLAN_2026-10-23.md)：
+  2026-10-23 当轮复核；列出 P1/P2/P3、验收证据问题的修改位置、实施步骤与完成判据，尚未实施。
+- [PHASE3_REPORT.md](phase3-import-analysis-2026-10-22/PHASE3_REPORT.md)：
+  阶段 3 实施与复审修复——回执合同 R1/R2、重启恢复四态与作用域首空状态机（P1/R3）、
+  T05 未知记录全量兜底、T11 纯 GPX/路线归属/仅 XML 改归属修复、D1 原始 epoch 校准集合
+  重映射、T12 真实到达 + 原任务消费的 readiness/Fitness A/B、F01 删除+GPX 同事务确定性屏障、删库任意中断恢复协议、逐域完整业务产物与发布投影差分；配套
+  [三项问题修复方案](phase3-import-analysis-2026-10-22/PHASE3_REVIEW_THREE_ISSUES_FIX_PLAN_2026-10-22.md)、
+  [剩余两项问题修复方案](phase3-import-analysis-2026-10-22/PHASE3_REVIEW_TWO_REMAINING_ISSUES_FIX_PLAN_2026-10-22.md)、
+  [状态合同](phase3-import-analysis-2026-10-22/STATE_CONTRACT.md)、
+  [依赖矩阵](phase3-import-analysis-2026-10-22/DEPENDENCY_MATRIX.md)、
+  [T/F 测试矩阵](phase3-import-analysis-2026-10-22/TEST_MATRIX.md) 与 `evidence/`；
+  **研发验收记录；目标 macOS 主机上总体验收通过（完整 `npm test` exit 0），未部署生产、未进入阶段 4**。
 - [PHASE2_SQLITE_RELEASE_2026-10-22.md](PHASE2_SQLITE_RELEASE_2026-10-22.md)：
   阶段 2 发布记录（`9364270`，2026-10-22 部署生产，主健康库 v46 → v47）——发布前冷备、迁移计数、
   部署后健康检查/只读冒烟与代码/数据回滚边界；**按用户要求未运行测试套件**。

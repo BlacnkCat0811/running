@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-10-22T04:47:30Z",
+  "phase": "P3-01",
+  "head": "16a12296d62a77b45be9a96a38d90163ce2f5b13",
+  "branch": "main",
+  "worktree": "clean",
+  "environment": {
+    "node": "v24.21.0",
+    "platform": "darwin",
+    "arch": "x64",
+    "os": "macOS 26.6.2 (25G83)",
+    "npm": "not installed in harness; equivalent node invocations used (plan §9.2)",
+    "timezone": "Asia/Shanghai"
+  },
+  "commands": [
+    {
+      "id": "G1",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/data-only-import.test.ts apps/api/test/direct-sync-ingest.test.ts apps/api/test/direct-sync-analysis-reconcile.test.ts apps/api/test/import-payload-preflight.test.ts",
+      "exitCode": 0,
+      "tests": 64,
+      "pass": 64,
+      "fail": 0,
+      "durationMs": 57116,
+      "log": "/tmp/rai-p3-g1.log"
+    },
+    {
+      "id": "G2",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/direct-sync-http-acceptance.test.ts apps/api/test/import-worker-reuse.test.ts apps/api/test/import-publication.test.ts",
+      "exitCode": 0,
+      "tests": 44,
+      "pass": 44,
+      "fail": 0,
+      "durationMs": 91950,
+      "log": "/tmp/rai-p3-g2.log"
+    },
+    {
+      "id": "G3",
+      "command": "node --import tsx --test --test-concurrency=2 packages/application/test/training-metric-domain-reuse.test.ts packages/application/test/vo2-fitness-domain-convergence.test.ts packages/application/test/analysis-input-pruning.test.ts",
+      "exitCode": 0,
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "durationMs": 75117,
+      "log": "/tmp/rai-p3-g3.log"
+    },
+    {
+      "id": "PUB",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/import-publication.test.ts",
+      "exitCode": 0,
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "durationMs": 1761,
+      "log": "inline"
+    }
+  ],
+  "notes": [
+    "Baseline tests were run before any Phase 3 production edit.",
+    "Test existence is not treated as proof; every mapped row must be executed again after changes (see TEST_MATRIX.md).",
+    "No production database, server, migration, VACUUM or deployment was touched."
+  ]
+}

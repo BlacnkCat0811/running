@@ -164,7 +164,10 @@ export function writeNoopReceiptTask(input: NoopReceiptInput): NoopReceiptOutcom
         dependencyGeneration: null,
         publishedReleaseId: null,
         parentBatchId: null
-      }
+      },
+      // 与 data-only 车道一致：显式 `null` = "问过了，本批不登记分析任务"；
+      // 缺键只表示旧服务端从未提供这个字段。no-op 不推进任何代次，也不登记任务。
+      analysisJobId: null
     };
     writeImportReceiptInDatabase(database, input.jobId, summary);
     database.exec("COMMIT");

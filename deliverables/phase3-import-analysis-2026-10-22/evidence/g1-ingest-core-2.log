@@ -1,0 +1,553 @@
+TAP version 13
+# (node:52178) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads
+ok 1 - bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads
+  ---
+  duration_ms: 7.260383
+  type: 'test'
+  ...
+# Subtest: raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement
+ok 2 - raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement
+  ---
+  duration_ms: 322.052463
+  type: 'test'
+  ...
+# Subtest: a durable same-batch replay performs no writes and refuses a changed payload identity
+ok 3 - a durable same-batch replay performs no writes and refuses a changed payload identity
+  ---
+  duration_ms: 364.721496
+  type: 'test'
+  ...
+# Subtest: SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state
+ok 4 - SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state
+  ---
+  duration_ms: 1594.522054
+  type: 'test'
+  ...
+# Subtest: deletion before arrival cannot resurrect a carried or later UUID
+ok 5 - deletion before arrival cannot resurrect a carried or later UUID
+  ---
+  duration_ms: 331.192659
+  type: 'test'
+  ...
+# Subtest: a deletion-only delta restores a surviving shared UUID and records the correction
+ok 6 - a deletion-only delta restores a surviving shared UUID and records the correction
+  ---
+  duration_ms: 243.042475
+  type: 'test'
+  ...
+# Subtest: UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 7 - UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 239.440567
+  type: 'test'
+  ...
+# Subtest: change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 8 - change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 225.820998
+  type: 'test'
+  ...
+# Subtest: silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 9 - silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 253.471161
+  type: 'test'
+  ...
+# Subtest: silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 10 - silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 257.942745
+  type: 'test'
+  ...
+# Subtest: silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 11 - silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 273.894536
+  type: 'test'
+  ...
+# Subtest: silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 12 - silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 267.799389
+  type: 'test'
+  ...
+# Subtest: silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 13 - silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 267.322756
+  type: 'test'
+  ...
+# Subtest: silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 14 - silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 250.547662
+  type: 'test'
+  ...
+# Subtest: silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 15 - silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 250.183353
+  type: 'test'
+  ...
+# Subtest: receipt write failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 16 - receipt write failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 240.437789
+  type: 'test'
+  ...
+# Subtest: silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 17 - silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 250.153853
+  type: 'test'
+  ...
+# Subtest: silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 18 - silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 237.313296
+  type: 'test'
+  ...
+# Subtest: late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 19 - late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 240.791623
+  type: 'test'
+  ...
+# Subtest: late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 20 - late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 231.954801
+  type: 'test'
+  ...
+# Subtest: late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 21 - late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 341.073513
+  type: 'test'
+  ...
+# Subtest: ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 22 - ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 258.509966
+  type: 'test'
+  ...
+# Subtest: late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+ok 23 - late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker
+  ---
+  duration_ms: 234.817165
+  type: 'test'
+  ...
+# Subtest: a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated
+ok 24 - a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated
+  ---
+  duration_ms: 233.020271
+  type: 'test'
+  ...
+# Subtest: profile drift rolls back earlier records and returns a no-write fallback
+ok 25 - profile drift rolls back earlier records and returns a no-write fallback
+  ---
+  duration_ms: 251.457648
+  type: 'test'
+  ...
+# Subtest: an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards
+ok 26 - an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards
+  ---
+  duration_ms: 230.693285
+  type: 'test'
+  ...
+# Subtest: missing/old parser attestation and uninitialized legacy hashes use the normal path without writes
+ok 27 - missing/old parser attestation and uninitialized legacy hashes use the normal path without writes
+  ---
+  duration_ms: 265.597262
+  type: 'test'
+  ...
+# Subtest: a missing UUID lookup index cannot qualify for data-only
+ok 28 - a missing UUID lookup index cannot qualify for data-only
+  ---
+  duration_ms: 201.912396
+  type: 'test'
+  ...
+# Subtest: workout deletions, routes and unknown record types cannot take the fast path
+ok 29 - workout deletions, routes and unknown record types cannot take the fast path
+  ---
+  duration_ms: 178.775901
+  type: 'test'
+  ...
+# (node:52179) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 需要分析的批次：回执的 analysisJobId 等于 recompute_jobs 那一行，且与批次账本同源
+ok 30 - 需要分析的批次：回执的 analysisJobId 等于 recompute_jobs 那一行，且与批次账本同源
+  ---
+  duration_ms: 296.792247
+  type: 'test'
+  ...
+# Subtest: record-only 批次：analysisJobId 是 null（不是缺键）
+ok 31 - record-only 批次：analysisJobId 是 null（不是缺键）
+  ---
+  duration_ms: 263.745898
+  type: 'test'
+  ...
+# Subtest: 🔴 回执不因分析推进而变：跑完分析后重读，analysisStatus 仍是 queued、id 仍是同一个
+ok 32 - 🔴 回执不因分析推进而变：跑完分析后重读，analysisStatus 仍是 queued、id 仍是同一个
+  ---
+  duration_ms: 10964.09461
+  type: 'test'
+  ...
+# (node:52232) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 步骤 1：消费者认识 `import`，直连分析载荷会被**真正执行**（不再是 Unsupported）
+ok 33 - 步骤 1：消费者认识 `import`，直连分析载荷会被**真正执行**（不再是 Unsupported）
+  ---
+  duration_ms: 237.858313
+  type: 'test'
+  ...
+# Subtest: 步骤 1 的边界：CLI 载荷被消费者**拒绝**，且不会跑分析（原因说清，不是 Unsupported）
+ok 34 - 步骤 1 的边界：CLI 载荷被消费者**拒绝**，且不会跑分析（原因说清，不是 Unsupported）
+  ---
+  duration_ms: 156.190535
+  type: 'test'
+  ...
+# Subtest: 直连车道的事实范围是 full，且 worker **真的**有调用方（放开判据 ≠ 接上车道）
+ok 35 - 直连车道的事实范围是 full，且 worker **真的**有调用方（放开判据 ≠ 接上车道）
+  ---
+  duration_ms: 9.492995
+  type: 'test'
+  ...
+# Subtest: 两条车道的回执各守各的：record-only 恒 not_required；统一接收器按分类取 queued/not_required
+ok 36 - 两条车道的回执各守各的：record-only 恒 not_required；统一接收器按分类取 queued/not_required
+  ---
+  duration_ms: 2.199132
+  type: 'test'
+  ...
+# Subtest: 统一接收器：回执的 analysisStatus 与登记**在同一个事务里互相印证**（半落地即红）
+ok 37 - 统一接收器：回执的 analysisStatus 与登记**在同一个事务里互相印证**（半落地即红）
+  ---
+  duration_ms: 3.584526
+  type: 'test'
+  ...
+# Subtest: `directSync` 直连回执今天只有三个产出方（新增第四个即红）
+ok 38 - `directSync` 直连回执今天只有三个产出方（新增第四个即红）
+  ---
+  duration_ms: 124.81631
+  type: 'test'
+  ...
+# Subtest: 直连车道登记的分析任务必须被唤醒：import 终态回调要有 schedule()，且有兜底巡检
+ok 39 - 直连车道登记的分析任务必须被唤醒：import 终态回调要有 schedule()，且有兜底巡检
+  ---
+  duration_ms: 4.878692
+  type: 'test'
+  ...
+# (node:52233) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务
+ok 40 - record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务
+  ---
+  duration_ms: 268.368501
+  type: 'test'
+  ...
+# Subtest: P0-3/P2-3：回执带 records 计数（parsed/inserted/unchanged），提交成功的批次带四段阶段账本
+ok 41 - P0-3/P2-3：回执带 records 计数（parsed/inserted/unchanged），提交成功的批次带四段阶段账本
+  ---
+  duration_ms: 301.734578
+  type: 'test'
+  ...
+# Subtest: Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）
+ok 42 - Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）
+  ---
+  duration_ms: 10694.939863
+  type: 'test'
+  ...
+# Subtest: O04：训练内的记录变更把脏下界回退到相交训练起点（不再是变更时刻）
+ok 43 - O04：训练内的记录变更把脏下界回退到相交训练起点（不再是变更时刻）
+  ---
+  duration_ms: 553.083813
+  type: 'test'
+  ...
+# Subtest: 删除-only 载荷：显式删除先于到达也要求分析，且不误删同来源其它事实
+ok 44 - 删除-only 载荷：显式删除先于到达也要求分析，且不误删同来源其它事实
+  ---
+  duration_ms: 366.445
+  type: 'test'
+  ...
+# Subtest: GPX 路线：路线变更同样要求分析，且路线版本对读侧可见（末批发布）
+ok 45 - GPX 路线：路线变更同样要求分析，且路线版本对读侧可见（末批发布）
+  ---
+  duration_ms: 235.266943
+  type: 'test'
+  ...
+# Subtest: manifest_exceeds_bounds 的 bounds 键必须与 actual 同指一个量（P3a）
+ok 46 - manifest_exceeds_bounds 的 bounds 键必须与 actual 同指一个量（P3a）
+  ---
+  duration_ms: 1.249965
+  type: 'test'
+  ...
+# Subtest: 超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）
+ok 47 - 超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）
+  ---
+  duration_ms: 277.802046
+  type: 'test'
+  ...
+# Subtest: 收口窗口 (2, 8] MiB：data-only 拒、统一接收器接受（P2-4）
+ok 48 - 收口窗口 (2, 8] MiB：data-only 拒、统一接收器接受（P2-4）
+  ---
+  duration_ms: 8468.029243
+  type: 'test'
+  ...
+# Subtest: 边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4）
+ok 49 - 边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4）
+  ---
+  duration_ms: 346.11026
+  type: 'test'
+  ...
+# Subtest: 拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason
+ok 50 - 拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason
+  ---
+  duration_ms: 226.316726
+  type: 'test'
+  ...
+# Subtest: 空库首包（四项身份全缺）+ v2 载荷 ⇒ 就地初始化：四要素齐备、第二包照常（S3.2/D3）
+ok 51 - 空库首包（四项身份全缺）+ v2 载荷 ⇒ 就地初始化：四要素齐备、第二包照常（S3.2/D3）
+  ---
+  duration_ms: 374.28112
+  type: 'test'
+  ...
+# Subtest: 写守卫：接收事务写派生分析/发布表 ⇒ 立刻被拒；写事实表允许（阳性对照）
+ok 52 - 写守卫：接收事务写派生分析/发布表 ⇒ 立刻被拒；写事实表允许（阳性对照）
+  ---
+  duration_ms: 155.879216
+  type: 'test'
+  ...
+# Subtest: fail-closed：出现未表态的表时，守卫拒绝安装（而不是默认放行）
+ok 53 - fail-closed：出现未表态的表时，守卫拒绝安装（而不是默认放行）
+  ---
+  duration_ms: 147.341476
+  type: 'test'
+  ...
+# Subtest: PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变
+ok 54 - PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变
+  ---
+  duration_ms: 312.109451
+  type: 'test'
+  ...
+# Subtest: O10（WP-31）：一批里两个**不相邻**时期 ⇒ 逐时期重建，中间那段（间隙）逐字节不变
+ok 55 - O10（WP-31）：一批里两个**不相邻**时期 ⇒ 逐时期重建，中间那段（间隙）逐字节不变
+  ---
+  duration_ms: 336.891979
+  type: 'test'
+  ...
+# Subtest: R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口）
+ok 56 - R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口）
+  ---
+  duration_ms: 310.199497
+  type: 'test'
+  ...
+# Subtest: PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）
+ok 57 - PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）
+  ---
+  duration_ms: 270.534653
+  type: 'test'
+  ...
+# Subtest: A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执整批回滚
+ok 58 - A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执整批回滚
+  ---
+  duration_ms: 245.819924
+  type: 'test'
+  ...
+# Subtest: §4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接路径的门槛）
+ok 59 - §4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接路径的门槛）
+  ---
+  duration_ms: 174.189908
+  type: 'test'
+  ...
+# Subtest: P1-1：source_xml_bytes 报磁盘字节数，不是解码后重编码的长度
+ok 60 - P1-1：source_xml_bytes 报磁盘字节数，不是解码后重编码的长度
+  ---
+  duration_ms: 194.452648
+  type: 'test'
+  ...
+# Subtest: P1-1：prepare 阶段不得再整读 XML（AST 级，行为判据看不见这一条）
+ok 61 - P1-1：prepare 阶段不得再整读 XML（AST 级，行为判据看不见这一条）
+  ---
+  duration_ms: 76.345644
+  type: 'test'
+  ...
+# (node:52234) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A01/§14.1 清单本身自洽：每条都声明了可观测通道，且通道名在真实实现上存在
+ok 62 - A01/§14.1 清单本身自洽：每条都声明了可观测通道，且通道名在真实实现上存在
+  ---
+  duration_ms: 2.310591
+  type: 'test'
+  ...
+# (node:52234) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A01/§14.1 逐项：真实排队的 v2 增量不触发任何禁止操作，且主库文件身份不变
+ok 63 - A01/§14.1 逐项：真实排队的 v2 增量不触发任何禁止操作，且主库文件身份不变
+  ---
+  duration_ms: 1067.417437
+  type: 'test'
+  ...
+# (node:52234) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjd7z0e_7e83d08d-8c36-4cd8-9251-7ff742d95f61: continuing to the direct-sync receiver
+# Subtest: A01/§14.1 全类型：含 Workout 的增量走统一接收器，同样一条禁止操作都不踩
+ok 64 - A01/§14.1 全类型：含 Workout 的增量走统一接收器，同样一条禁止操作都不踩
+  ---
+  duration_ms: 1008.391815
+  type: 'test'
+  ...
+# (node:52234) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A01/§14.1 阳性对照（S3.3 改写）：直接调用保留方法，守卫必须转红 —— 「全 0」不是假绿
+ok 65 - A01/§14.1 阳性对照（S3.3 改写）：直接调用保留方法，守卫必须转红 —— 「全 0」不是假绿
+  ---
+  duration_ms: 936.585294
+  type: 'test'
+  ...
+# (node:52234) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A17/§10.1 直连回执把「原始已保存」与「分析已更新」分成两个字段，且与持久回执一致
+ok 66 - A17/§10.1 直连回执把「原始已保存」与「分析已更新」分成两个字段，且与持久回执一致
+  ---
+  duration_ms: 1013.488551
+  type: 'test'
+  ...
+# (node:52234) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A05/§14.1 重启后的已 committed 任务从持久回执恢复，且不投递任何数据库任务
+ok 67 - A05/§14.1 重启后的已 committed 任务从持久回执恢复，且不投递任何数据库任务
+  ---
+  duration_ms: 996.768618
+  type: 'test'
+  ...
+# Subtest: §14.1 进程内通道有牙：直接调用被禁的 store 方法会被守卫判红
+ok 68 - §14.1 进程内通道有牙：直接调用被禁的 store 方法会被守卫判红
+  ---
+  duration_ms: 179.679768
+  type: 'test'
+  ...
+# (node:52235) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 迁移产物与 INGEST_TABLE_DISPOSITIONS 双向一致（漏表态 = 整条同步车道被拒）
+ok 69 - 迁移产物与 INGEST_TABLE_DISPOSITIONS 双向一致（漏表态 = 整条同步车道被拒）
+  ---
+  duration_ms: 166.905426
+  type: 'test'
+  ...
+# (node:52236) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: payload identity moves with every input that changes what an import writes
+ok 70 - payload identity moves with every input that changes what an import writes
+  ---
+  duration_ms: 7.919946
+  type: 'test'
+  ...
+# Subtest: payload content digest ignores the exporter wall clock but notices real data
+ok 71 - payload content digest ignores the exporter wall clock but notices real data
+  ---
+  duration_ms: 15.385748
+  type: 'test'
+  ...
+# Subtest: payload anchors round-trip, and an unusable anchor reads as absent
+ok 72 - payload anchors round-trip, and an unusable anchor reads as absent
+  ---
+  duration_ms: 229.417545
+  type: 'test'
+  ...
+# (node:52236) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_preflight_v8it6x71sw: continuing to the direct-sync receiver
+# Subtest: an import records the payload anchor and the next identical sync skips the whole pipeline
+ok 73 - an import records the payload anchor and the next identical sync skips the whole pipeline
+  ---
+  duration_ms: 1116.697336
+  type: 'test'
+  ...
+# Subtest: a payload that declares absence-as-deletion never short-circuits
+ok 74 - a payload that declares absence-as-deletion never short-circuits
+  ---
+  duration_ms: 224.241794
+  type: 'test'
+  ...
+# Subtest: a database that moved since the anchor was recorded disables the short-circuit
+ok 75 - a database that moved since the anchor was recorded disables the short-circuit
+  ---
+  duration_ms: 223.974975
+  type: 'test'
+  ...
+# (node:52236) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_preflight_2903t89tjkk: continuing to the direct-sync receiver
+# Subtest: a payload whose identity differs still runs the full pipeline
+ok 76 - a payload whose identity differs still runs the full pipeline
+  ---
+  duration_ms: 1074.359582
+  type: 'test'
+  ...
+# Payload identity unavailable for web_import_preflight_ds6jvveikot: ENOENT: no such file or directory, open '/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-payload-preflight-unreadable-klM2Pd/export/导出.xml'
+# Payload identity unavailable for web_import_preflight_30lm83w0vfv: ENOENT: no such file or directory, open '/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-payload-preflight-unreadable-klM2Pd/export/导出.xml'
+# Payload identity unavailable for web_import_preflight_30lm83w0vfv: ENOENT: no such file or directory, open '/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-payload-preflight-unreadable-klM2Pd/export/导出.xml'
+# Import job web_import_preflight_30lm83w0vfv refused by the direct-sync lane: payload_identity_unavailable
+# Subtest: an unreadable payload disables the short-circuit and is refused explicitly (not a crash)
+ok 77 - an unreadable payload disables the short-circuit and is refused explicitly (not a crash)
+  ---
+  duration_ms: 226.317226
+  type: 'test'
+  ...
+# (node:52236) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_preflight_owkmp8x07q: continuing to the direct-sync receiver
+# Subtest: the recorded anchor survives a real direct import into the live database
+ok 78 - the recorded anchor survives a real direct import into the live database
+  ---
+  duration_ms: 1366.763894
+  type: 'test'
+  ...
+# Subtest: worker no-op 回执任务：重验通过才提交，anchor 失效返回 not_verified 且不写回执
+ok 79 - worker no-op 回执任务：重验通过才提交，anchor 失效返回 not_verified 且不写回执
+  ---
+  duration_ms: 183.863542
+  type: 'test'
+  ...
+# (node:52239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:52239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjd87x1_d328b638-fa56-485a-a48d-9191ae45bd15: continuing to the direct-sync receiver
+# Subtest: 2e：含 Workout 的增量在 worker 里走统一接收器——登记分析任务、回执 queued、零禁止操作
+ok 80 - 2e：含 Workout 的增量在 worker 里走统一接收器——登记分析任务、回执 queued、零禁止操作
+  ---
+  duration_ms: 1072.163193
+  type: 'test'
+  ...
+# (node:52239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjd88py_d38a9c7c-0ed5-4fad-86f4-8cdf7d11554b: continuing to the direct-sync receiver
+# Subtest: 2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与接收复核摘要必须同源）
+ok 81 - 2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与接收复核摘要必须同源）
+  ---
+  duration_ms: 1038.09096
+  type: 'test'
+  ...
+# (node:52239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjd89ko_f066510f-b61d-4c2a-b25e-5ba10d0b4368: continuing to the direct-sync receiver
+# Direct sync rejected for web_import_mvjd89ko_f066510f-b61d-4c2a-b25e-5ba10d0b4368: xml_exceeds_bounds (stage=prepare) actual={"xmlBytes":10044434} bounds={"maxXmlBytes":8388608}
+# Import job web_import_mvjd89ko_f066510f-b61d-4c2a-b25e-5ba10d0b4368 refused by the direct-sync lane: xml_exceeds_bounds detail={"directSyncRejected":true,"reason":"xml_exceeds_bounds","stage":"prepare","actual":{"xmlBytes":10044434},"bounds":{"maxXmlBytes":8388608}}
+# Subtest: 回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前）
+ok 82 - 回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前）
+  ---
+  duration_ms: 1116.977374
+  type: 'test'
+  ...
+1..82
+# tests 82
+# suites 0
+# pass 82
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 36875.484306

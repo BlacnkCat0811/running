@@ -72,6 +72,7 @@ npm run check:package-boundaries
 | 算法职责、不变量与 §16.1 验收合同矩阵（80 条，以 `npm run check:acceptance-matrix` 输出为准） | [算法](docs/ALGORITHM.md) |
 | 导入、身份、时间语义、恢复事实、存储与发布合同 | [数据管线](docs/DATA_PIPELINE.md) |
 | 开发、迁移、四库备份/恢复、发布与排障 | [运维](docs/OPERATIONS.md) |
+| 导入恢复审查问题的待实施修复方法与验收条件 | [导入恢复修复方案](docs/IMPORT_RECOVERY_REVIEW_FIX_PLAN_2026-10-23.md) |
 | 长期约束与不能随意“优化”的决策（D1–D19） | [决策](docs/DECISIONS.md) |
 | 当前状态、验证基线、未决问题与已收尾批次索引 | [项目审查](docs/PROJECT_REVIEW.md) |
 | 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |

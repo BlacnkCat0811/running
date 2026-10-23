@@ -1,0 +1,648 @@
+TAP version 13
+# (node:78976) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P2-1 首次安装：显式初始化写当前生效 scope 的唯一许可；首包一次；第二次初始化拒绝
+ok 1 - P2-1 首次安装：显式初始化写当前生效 scope 的唯一许可；首包一次；第二次初始化拒绝
+  ---
+  duration_ms: 6762.679652
+  type: 'test'
+  ...
+# Subtest: P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch
+ok 2 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch
+  ---
+  duration_ms: 10252.802232
+  type: 'test'
+  ...
+# Subtest: P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 scope 恢复 established，删库意图收口
+ok 3 - P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 scope 恢复 established，删库意图收口
+  ---
+  duration_ms: 5528.27422
+  type: 'test'
+  ...
+# Subtest: P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包
+ok 4 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包
+  ---
+  duration_ms: 11439.842989
+  type: 'test'
+  ...
+# Subtest: P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次
+ok 5 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次
+  ---
+  duration_ms: 10773.142835
+  type: 'test'
+  ...
+# Subtest: P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活
+ok 6 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活
+  ---
+  duration_ms: 13997.966592
+  type: 'test'
+  ...
+# Subtest: P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pristine、不建新空库
+ok 7 - P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pristine、不建新空库
+  ---
+  duration_ms: 8724.038264
+  type: 'test'
+  ...
+# Subtest: P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库
+ok 8 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库
+  ---
+  duration_ms: 11879.326328
+  type: 'test'
+  ...
+# Subtest: P2-8 恢复旧备份：删库意图收口，恢复后的 scope 为 established，旧 nextEpoch 不再是当前 scope
+ok 9 - P2-8 恢复旧备份：删库意图收口，恢复后的 scope 为 established，旧 nextEpoch 不再是当前 scope
+  ---
+  duration_ms: 3244.522055
+  type: 'test'
+  ...
+# Subtest: P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用
+ok 10 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用
+  ---
+  duration_ms: 6406.129666
+  type: 'test'
+  ...
+# Subtest: P2-10 permit_issued 丢失 scope 行但账本实例不变：CLI 不得重签许可
+ok 11 - P2-10 permit_issued 丢失 scope 行但账本实例不变：CLI 不得重签许可
+  ---
+  duration_ms: 7502.039238
+  type: 'test'
+  ...
+# Subtest: P2-11 首包消费后恢复备份：旧删库日志 superseded，主库再缺失不回到旧 nextEpoch
+ok 12 - P2-11 首包消费后恢复备份：旧删库日志 superseded，主库再缺失不回到旧 nextEpoch
+  ---
+  duration_ms: 8202.871875
+  type: 'test'
+  ...
+# Subtest: P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可
+ok 13 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可
+  ---
+  duration_ms: 6396.257256
+  type: 'test'
+  ...
+# (node:78977) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B02: persisted epochs survive reopening while an explicit namespace change takes precedence
+ok 14 - B02: persisted epochs survive reopening while an explicit namespace change takes precedence
+  ---
+  duration_ms: 183.215815
+  type: 'test'
+  ...
+# Subtest: restore epoch commits with the replacement and rolls back with a rejected restore
+ok 15 - restore epoch commits with the replacement and rolls back with a rejected restore
+  ---
+  duration_ms: 977.997047
+  type: 'test'
+  ...
+# Subtest: malformed epoch metadata cannot silently select stale receipts
+ok 16 - malformed epoch metadata cannot silently select stale receipts
+  ---
+  duration_ms: 225.0422
+  type: 'test'
+  ...
+# Subtest: deletion epochs survive an absent or rebuilt facts database without overriding a committed restore
+ok 17 - deletion epochs survive an absent or rebuilt facts database without overriding a committed restore
+  ---
+  duration_ms: 490.757552
+  type: 'test'
+  ...
+# Subtest: a failed durable epoch preparation never unlinks the facts database
+ok 18 - a failed durable epoch preparation never unlinks the facts database
+  ---
+  duration_ms: 281.572842
+  type: 'test'
+  ...
+# Subtest: damaged deletion metadata fails closed instead of reusing the default scope
+ok 19 - damaged deletion metadata fails closed instead of reusing the default scope
+  ---
+  duration_ms: 16.788319
+  type: 'test'
+  ...
+# (node:78999) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1-1 旧库升级：启动登记 established；旧账本空行迁移为 unknown 而不是 pristine
+ok 20 - P1-1 旧库升级：启动登记 established；旧账本空行迁移为 unknown 而不是 pristine
+  ---
+  duration_ms: 296.823226
+  type: 'test'
+  ...
+# (node:78999) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1-2 旧库在首次登记前暂时缺失：unknown 阻断，恢复原库后按真实状态收敛且只提交一次
+ok 21 - P1-2 旧库在首次登记前暂时缺失：unknown 阻断，恢复原库后按真实状态收敛且只提交一次
+  ---
+  duration_ms: 1843.724077
+  type: 'test'
+  ...
+# Subtest: P1-3 启动后旧库消失：已登记 established，新作业 attempts=0 也不得被当成首次空库
+ok 22 - P1-3 启动后旧库消失：已登记 established，新作业 attempts=0 也不得被当成首次空库
+  ---
+  duration_ms: 307.140948
+  type: 'test'
+  ...
+# (node:78999) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1-4 账本损坏/隔离重建：新账本 unknown，不因“无行”重建空库；恢复后收敛
+ok 23 - P1-4 账本损坏/隔离重建：新账本 unknown，不因“无行”重建空库；恢复后收敛
+  ---
+  duration_ms: 1309.265306
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import web_import_mvjkrf7g_95b6bc27-9d07-4987-9c3e-3d26eebb388a.
+# (node:78999) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjkrf7g_95b6bc27-9d07-4987-9c3e-3d26eebb388a: continuing to the direct-sync receiver
+# Subtest: P1-6 真正首次安装：受控 pristine 许可放行首批 v47 建库，许可在写者进入后永久失效
+ok 24 - P1-6 真正首次安装：受控 pristine 许可放行首批 v47 建库，许可在写者进入后永久失效
+  ---
+  duration_ms: 1460.728538
+  type: 'test'
+  ...
+# Subtest: P1-7 进入 writer_entered 前账本写失败：不写主库、不发布终态、来源保留
+ok 25 - P1-7 进入 writer_entered 前账本写失败：不写主库、不发布终态、来源保留
+  ---
+  duration_ms: 283.821144
+  type: 'test'
+  ...
+# Subtest: P1-8 显式删除/恢复：旧 scope 许可不复活，新 scope 只按显式初始化放行
+ok 26 - P1-8 显式删除/恢复：旧 scope 许可不复活，新 scope 只按显式初始化放行
+  ---
+  duration_ms: 75.034468
+  type: 'test'
+  ...
+# (node:79030) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: creates an online backup containing committed WAL data and lists it
+ok 27 - creates an online backup containing committed WAL data and lists it
+  ---
+  duration_ms: 85.398285
+  type: 'test'
+  ...
+# Subtest: enforces backup retention while preserving the newest snapshot
+ok 28 - enforces backup retention while preserving the newest snapshot
+  ---
+  duration_ms: 126.909953
+  type: 'test'
+  ...
+# Subtest: read-only backup listing and streaming never create, rotate or clean up files
+ok 29 - read-only backup listing and streaming never create, rotate or clean up files
+  ---
+  duration_ms: 101.605245
+  type: 'test'
+  ...
+# Subtest: preserves corrupt database bytes before deleting an unrecoverable database
+ok 30 - preserves corrupt database bytes before deleting an unrecoverable database
+  ---
+  duration_ms: 42.361004
+  type: 'test'
+  ...
+# Subtest: restores a corrupt database group when deletion fails after removing its sidecars
+ok 31 - restores a corrupt database group when deletion fails after removing its sidecars
+  ---
+  duration_ms: 229.595244
+  type: 'test'
+  ...
+# Subtest: publishes corrupt main, WAL, and SHM files as one quarantine group
+ok 32 - publishes corrupt main, WAL, and SHM files as one quarantine group
+  ---
+  duration_ms: 61.547743
+  type: 'test'
+  ...
+# Subtest: corrupt quarantine snapshots never evict the last valid backup
+ok 33 - corrupt quarantine snapshots never evict the last valid backup
+  ---
+  duration_ms: 73.054141
+  type: 'test'
+  ...
+# Subtest: rejecting an invalid restore does not evict a valid backup
+ok 34 - rejecting an invalid restore does not evict a valid backup
+  ---
+  duration_ms: 267.806214
+  type: 'test'
+  ...
+# Backup retention cleanup failed after backup was published: Error: retention target is locked
+#     at DatabaseMaintenance.DatabaseMaintenance.maxCount (/Users/ta/running/apps/api/test/maintenance.test.ts:278:41)
+#     at DatabaseMaintenance.removeFileWithRetry (/Users/ta/running/apps/api/src/maintenance.ts:818:20)
+#     at async DatabaseMaintenance.enforceBackupPolicy (/Users/ta/running/apps/api/src/maintenance.ts:722:7)
+#     at async DatabaseMaintenance.createBackup (/Users/ta/running/apps/api/src/maintenance.ts:216:7)
+#     at async TestContext.<anonymous> (/Users/ta/running/apps/api/test/maintenance.test.ts:283:23)
+#     at async Test.run (node:internal/test_runner/test:1054:7)
+#     at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+# Subtest: returns a published backup when retention cleanup fails
+ok 35 - returns a published backup when retention cleanup fails
+  ---
+  duration_ms: 273.102674
+  type: 'test'
+  ...
+# Pre-backup retention cleanup failed; checking capacity without pruning: Error: locked
+#     at DatabaseMaintenance.DatabaseMaintenance.maxCount (/Users/ta/running/apps/api/test/maintenance.test.ts:308:60)
+#     at DatabaseMaintenance.removeFileWithRetry (/Users/ta/running/apps/api/src/maintenance.ts:818:20)
+#     at async DatabaseMaintenance.enforceBackupPolicy (/Users/ta/running/apps/api/src/maintenance.ts:722:7)
+#     at async DatabaseMaintenance.ensureBackupCapacity (/Users/ta/running/apps/api/src/maintenance.ts:677:7)
+#     at async waitForActual (node:assert:644:5)
+#     at async Function.rejects (node:assert:767:25)
+#     at async TestContext.<anonymous> (/Users/ta/running/apps/api/test/maintenance.test.ts:314:5)
+#     at async Test.run (node:internal/test_runner/test:1054:7)
+#     at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+# Subtest: capacity cleanup skips locked backups and removes other eligible candidates
+ok 36 - capacity cleanup skips locked backups and removes other eligible candidates
+  ---
+  duration_ms: 321.775404
+  type: 'test'
+  ...
+# Subtest: does not prune a backup selected as a restore source
+ok 37 - does not prune a backup selected as a restore source
+  ---
+  duration_ms: 69.420895
+  type: 'test'
+  ...
+# Subtest: deletes an explicitly selected backup and rejects insufficient disk capacity
+ok 38 - deletes an explicitly selected backup and rejects insufficient disk capacity
+  ---
+  duration_ms: 46.677387
+  type: 'test'
+  ...
+# Subtest: does not expose a partial backup when SQLite backup fails
+ok 39 - does not expose a partial backup when SQLite backup fails
+  ---
+  duration_ms: 12.484754
+  type: 'test'
+  ...
+# Subtest: retries transient cleanup failures without replacing the backup error
+ok 40 - retries transient cleanup failures without replacing the backup error
+  ---
+  duration_ms: 226.050047
+  type: 'test'
+  ...
+# Subtest: preserves the backup error when partial cleanup remains locked
+ok 41 - preserves the backup error when partial cleanup remains locked
+  ---
+  duration_ms: 180.253335
+  type: 'test'
+  ...
+# Subtest: rejects backup path traversal
+ok 42 - rejects backup path traversal
+  ---
+  duration_ms: 1.740694
+  type: 'test'
+  ...
+# Subtest: ignores a backup deleted between directory enumeration and metadata lookup
+ok 43 - ignores a backup deleted between directory enumeration and metadata lookup
+  ---
+  duration_ms: 73.33249
+  type: 'test'
+  ...
+# Subtest: backs up the current database before deleting SQLite files
+ok 44 - backs up the current database before deleting SQLite files
+  ---
+  duration_ms: 91.756822
+  type: 'test'
+  ...
+# Subtest: does not release a delete gate that beforeReplace failed to acquire
+ok 45 - does not release a delete gate that beforeReplace failed to acquire
+  ---
+  duration_ms: 51.308741
+  type: 'test'
+  ...
+# Subtest: restores the safety backup when delete removes the main file and then fails
+ok 46 - restores the safety backup when delete removes the main file and then fails
+  ---
+  duration_ms: 206.004671
+  type: 'test'
+  ...
+# Subtest: restores the database before reporting a persistent delete gate-release failure
+ok 47 - restores the database before reporting a persistent delete gate-release failure
+  ---
+  duration_ms: 252.024312
+  type: 'test'
+  ...
+# Subtest: validates and atomically restores a RAI backup while preserving the replaced database
+ok 48 - validates and atomically restores a RAI backup while preserving the replaced database
+  ---
+  duration_ms: 493.661081
+  type: 'test'
+  ...
+# Subtest: retries transient Windows file locks while publishing a restore
+ok 49 - retries transient Windows file locks while publishing a restore
+  ---
+  duration_ms: 651.687269
+  type: 'test'
+  ...
+# Restore safety backup failed; the replacement gate will preserve corrupt bytes in quarantine: Error: file is not a database
+# Subtest: restores over a corrupt database and quarantines the original bytes when safety backup fails
+ok 50 - restores over a corrupt database and quarantines the original bytes when safety backup fails
+  ---
+  duration_ms: 411.314414
+  type: 'test'
+  ...
+# Restore safety backup failed; the replacement gate will preserve corrupt bytes in quarantine: Error: file is not a database
+# Subtest: restores a quarantined corrupt group when restore fails before commit
+ok 51 - restores a quarantined corrupt group when restore fails before commit
+  ---
+  duration_ms: 406.436493
+  type: 'test'
+  ...
+# Subtest: retries transient Windows locks while removing restored candidate sidecars
+ok 52 - retries transient Windows locks while removing restored candidate sidecars
+  ---
+  duration_ms: 472.968337
+  type: 'test'
+  ...
+# Subtest: rejects a superficially plausible four-table database before replacement
+ok 53 - rejects a superficially plausible four-table database before replacement
+  ---
+  duration_ms: 206.652368
+  type: 'test'
+  ...
+# Subtest: rejects an empty migration ledger without replacing the current database
+ok 54 - rejects an empty migration ledger without replacing the current database
+  ---
+  duration_ms: 280.135118
+  type: 'test'
+  ...
+# Subtest: keeps reads gated until the original database is restored after an install failure
+ok 55 - keeps reads gated until the original database is restored after an install failure
+  ---
+  duration_ms: 477.41699
+  type: 'test'
+  ...
+# Subtest: rolls back the installed database before reopening reads when pre-commit recovery fails
+ok 56 - rolls back the installed database before reopening reads when pre-commit recovery fails
+  ---
+  duration_ms: 421.909986
+  type: 'test'
+  ...
+# Subtest: removes an unreadable replacement before restoring the original database on Windows
+ok 57 - removes an unreadable replacement before restoring the original database on Windows
+  ---
+  duration_ms: 385.595049
+  type: 'test'
+  ...
+# Subtest: keeps the only readable candidate active but removes its sidecars when an empty-destination restore fails
+ok 58 - keeps the only readable candidate active but removes its sidecars when an empty-destination restore fails
+  ---
+  duration_ms: 358.085276
+  type: 'test'
+  ...
+# Subtest: commits and retains a visible backup when the rollback file cannot be removed
+ok 59 - commits and retains a visible backup when the rollback file cannot be removed
+  ---
+  duration_ms: 579.898388
+  type: 'test'
+  ...
+# Subtest: does not release a replacement gate that beforeReplace failed to acquire
+ok 60 - does not release a replacement gate that beforeReplace failed to acquire
+  ---
+  duration_ms: 418.05847
+  type: 'test'
+  ...
+# Subtest: preserves a persistent beforeReplace failure without releasing another owner
+ok 61 - preserves a persistent beforeReplace failure without releasing another owner
+  ---
+  duration_ms: 323.032439
+  type: 'test'
+  ...
+# Subtest: retries afterReplace without turning a committed restore into a failed response
+ok 62 - retries afterReplace without turning a committed restore into a failed response
+  ---
+  duration_ms: 432.976175
+  type: 'test'
+  ...
+# Subtest: restores the original database before reporting a persistent afterReplace failure
+ok 63 - restores the original database before reporting a persistent afterReplace failure
+  ---
+  duration_ms: 671.494045
+  type: 'test'
+  ...
+# Subtest: keeps the candidate active when moving the original rollback back fails
+ok 64 - keeps the candidate active when moving the original rollback back fails
+  ---
+  duration_ms: 468.808027
+  type: 'test'
+  ...
+# Subtest: keeps a genuinely locked rollback as a visible backup after commit
+ok 65 - keeps a genuinely locked rollback as a visible backup after commit # SKIP Windows-only: POSIX can rename an open database, so the locked-rollback path cannot be reproduced here
+  ---
+  duration_ms: 0.274229
+  type: 'test'
+  ...
+# Subtest: reclaims leftover database copies past the window while keeping in-flight ones
+ok 66 - reclaims leftover database copies past the window while keeping in-flight ones
+  ---
+  duration_ms: 19.476973
+  type: 'test'
+  ...
+# Subtest: reclaims displaced rollback points during backup capacity preparation
+ok 67 - reclaims displaced rollback points during backup capacity preparation
+  ---
+  duration_ms: 10.212102
+  type: 'test'
+  ...
+# Subtest: leaves unrelated files, directories and malformed names alone when reclaiming
+ok 68 - leaves unrelated files, directories and malformed names alone when reclaiming
+  ---
+  duration_ms: 13.52413
+  type: 'test'
+  ...
+# Subtest: deleteDatabase refuses to delete when a reader pins the WAL snapshot
+ok 69 - deleteDatabase refuses to delete when a reader pins the WAL snapshot
+  ---
+  duration_ms: 5136.838082
+  type: 'test'
+  ...
+# (node:79101) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked
+ok 70 - coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked
+  ---
+  duration_ms: 3633.379922
+  type: 'test'
+  ...
+# Subtest: retired legacy plan routes answer 410 with replacements and never publish
+ok 71 - retired legacy plan routes answer 410 with replacements and never publish
+  ---
+  duration_ms: 3226.706515
+  type: 'test'
+  ...
+# Subtest: restore and deletion reject a committed import whose acknowledgement is still pending
+ok 72 - restore and deletion reject a committed import whose acknowledgement is still pending
+  ---
+  duration_ms: 3625.174768
+  type: 'test'
+  ...
+# Subtest: prediction training reports a missing active ability baseline as a conflict
+ok 73 - prediction training reports a missing active ability baseline as a conflict
+  ---
+  duration_ms: 3950.602593
+  type: 'test'
+  ...
+# Subtest: runtime status includes persisted prediction work and restore recovers recompute jobs
+ok 74 - runtime status includes persisted prediction work and restore recovers recompute jobs
+  ---
+  duration_ms: 5092.024518
+  type: 'test'
+  ...
+# Subtest: HTTP restore remains available when the active database is corrupt at startup
+ok 75 - HTTP restore remains available when the active database is corrupt at startup
+  ---
+  duration_ms: 3383.076705
+  type: 'test'
+  ...
+# Subtest: API quarantines a corrupt runtime state database and still starts
+ok 76 - API quarantines a corrupt runtime state database and still starts
+  ---
+  duration_ms: 3217.754334
+  type: 'test'
+  ...
+# Subtest: restore request fails and keeps the current database when job recovery fails
+ok 77 - restore request fails and keeps the current database when job recovery fails
+  ---
+  duration_ms: 4060.462238
+  type: 'test'
+  ...
+# Subtest: database-backed writes cannot recreate a deleted database
+ok 78 - database-backed writes cannot recreate a deleted database
+  ---
+  duration_ms: 4095.242361
+  type: 'test'
+  ...
+# Subtest: startup foreign-key failure cannot be bypassed by the request hot-open policy
+ok 79 - startup foreign-key failure cannot be bypassed by the request hot-open policy
+  ---
+  duration_ms: 3157.861704
+  type: 'test'
+  ...
+# Subtest: retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream
+ok 80 - retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream
+  ---
+  duration_ms: 3085.004983
+  type: 'test'
+  ...
+# Subtest: startup retires legacy future plans and only preview confirmation enables them again
+ok 81 - startup retires legacy future plans and only preview confirmation enables them again
+  ---
+  duration_ms: 3159.828387
+  type: 'test'
+  ...
+# Subtest: dynamic-port startup reports readiness and workout overrides preserve service result
+ok 82 - dynamic-port startup reports readiness and workout overrides preserve service result
+  ---
+  duration_ms: 13007.644392
+  type: 'test'
+  ...
+# Subtest: upload HTTP errors distinguish limits, invalid archives, and internal I/O failures
+ok 83 - upload HTTP errors distinguish limits, invalid archives, and internal I/O failures
+  ---
+  duration_ms: 4466.673902
+  type: 'test'
+  ...
+# Subtest: scopes sync batch idempotency by dataset epoch
+ok 84 - scopes sync batch idempotency by dataset epoch
+  ---
+  duration_ms: 6867.433507
+  type: 'test'
+  ...
+# Subtest: deletion isolates receipts and rebuilds the same source without restart
+ok 85 - deletion isolates receipts and rebuilds the same source without restart
+  ---
+  duration_ms: 13470.787885
+  type: 'test'
+  ...
+# Subtest: deletion isolates receipts and rebuilds the same source after restart
+ok 86 - deletion isolates receipts and rebuilds the same source after restart
+  ---
+  duration_ms: 16119.093806
+  type: 'test'
+  ...
+# Subtest: restore advances durable dataset scope and reapplies commands instead of replaying stale success
+ok 87 - restore advances durable dataset scope and reapplies commands instead of replaying stale success
+  ---
+  duration_ms: 7226.989202
+  type: 'test'
+  ...
+# Subtest: training-zone HTTP errors expose only typed client failures
+ok 88 - training-zone HTTP errors expose only typed client failures
+  ---
+  duration_ms: 2741.238099
+  type: 'test'
+  ...
+# Subtest: mobile lock confirms a session when today has no recovery record
+ok 89 - mobile lock confirms a session when today has no recovery record
+  ---
+  duration_ms: 2645.266893
+  type: 'test'
+  ...
+# Subtest: every mounted write route is classified, whatever the source looks like
+ok 90 - every mounted write route is classified, whatever the source looks like
+  ---
+  duration_ms: 2499.711174
+  type: 'test'
+  ...
+# Subtest: snapshot capabilities and receipt lifecycle work through the production router
+ok 91 - snapshot capabilities and receipt lifecycle work through the production router
+  ---
+  duration_ms: 2876.663565
+  type: 'test'
+  ...
+# Subtest: P3-01: plan reads fail closed on an in-flight control publication and keep their shape
+ok 92 - P3-01: plan reads fail closed on an in-flight control publication and keep their shape
+  ---
+  duration_ms: 2426.547109
+  type: 'test'
+  ...
+# Subtest: summary export requires token even on a public host and validates its range before reading
+ok 93 - summary export requires token even on a public host and validates its range before reading
+  ---
+  duration_ms: 2431.70913
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=true, anonymousRoutes=unset
+ok 94 - workout route privacy: token=true, anonymousRoutes=unset
+  ---
+  duration_ms: 3751.865775
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=true, anonymousRoutes=1
+ok 95 - workout route privacy: token=true, anonymousRoutes=1
+  ---
+  duration_ms: 12405.40887
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=unset
+ok 96 - workout route privacy: token=false, anonymousRoutes=unset
+  ---
+  duration_ms: 12471.226588
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=0
+ok 97 - workout route privacy: token=false, anonymousRoutes=0
+  ---
+  duration_ms: 12449.12976
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=1
+ok 98 - workout route privacy: token=false, anonymousRoutes=1
+  ---
+  duration_ms: 12618.541766
+  type: 'test'
+  ...
+# Subtest: retired backup endpoints create and delete nothing while the recovery path stays usable
+ok 99 - retired backup endpoints create and delete nothing while the recovery path stays usable
+  ---
+  duration_ms: 2376.740923
+  type: 'test'
+  ...
+# Subtest: retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe
+ok 100 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe
+  ---
+  duration_ms: 2132.840531
+  type: 'test'
+  ...
+1..100
+# tests 100
+# suites 0
+# pass 99
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 205637.996016

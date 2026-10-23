@@ -42,6 +42,22 @@ export interface RouteImportTarget {
   relativePath: string;
 }
 
+/**
+ * 一条路线在**本事务内**发生的父训练归属变化。
+ *
+ * 直连接收器必须在 XML 解析完成后把旧、新归属都写进分析脏范围；只靠“本批
+ * 携带了哪些 GPX 文件”枚举会在“XML 显式改归属、但增量包省略未变化 GPX”时
+ * 漏掉旧归属。观察点放在实际执行 UPDATE 的 insertWorkout 内，脏证据来自
+ * **实际发生的变更**，不依赖文件是否重传。
+ */
+export interface RouteOwnershipChange {
+  routeId: string;
+  relativePath: string;
+  /** 更新前的父训练；路线原本是孤儿或没有可解析训练时为 null。 */
+  before: { workoutId: string; startAt: string } | null;
+  after: { workoutId: string; startAt: string };
+}
+
 interface Migration {
   version: number;
   name: string;
@@ -1838,6 +1854,8 @@ export class RaiDatabase {
   private atomicImport = false;
   /** 活跃 SAVEPOINT 的 LIFO 栈；仅在 `transactionOwner="caller"` 下使用。 */
   private readonly savepoints: string[] = [];
+  /** 事务内路线归属变化的观察器；直连接收器用它收集脏证据。 */
+  private routeOwnershipObserver: ((change: RouteOwnershipChange) => void) | undefined;
 
   /**
    * 确保库处于 WAL 模式。**不是**一条 `PRAGMA journal_mode = WAL` 就完事，理由都是实测的：
@@ -2515,6 +2533,54 @@ export class RaiDatabase {
     }
     for (const route of incomingRoutes) {
       if (route.relativePath) {
+        // T11：partial archive（preserveAbsent）里**显式出现**的路线路径是权威归属，
+        // 不是“本批没带 = 删除”。路线 id 由 (workout id, path) 派生，父训练变化时
+        // 新 id 会与旧行同路径冲突；旧代码在这里直接跳过，导致归属永远留在 A、
+        // 旧归属的脏时刻也丢失。这里改为复用旧行 id、只把归属与来源字段更新到本训练，
+        // 从而保留已导入的点、指纹与路线版本。
+        const conflictingOwner = options?.preserveAbsent
+          ? this.database.prepare(
+              `SELECT route.id AS id, route.workout_id AS workoutId, workout.start_at AS startAt
+               FROM workout_routes route
+               LEFT JOIN workouts workout ON workout.id = route.workout_id
+               WHERE lower(route.relative_path) = lower(?) AND route.id <> ? LIMIT 1`
+            ).get(route.relativePath, route.id) as unknown as
+              { id: string; workoutId: string | null; startAt: string | null } | undefined
+          : undefined;
+        if (conflictingOwner) {
+          this.insertRouteStatement.run(
+            conflictingOwner.id,
+            workout.id,
+            route.sourceName,
+            sourceCategory,
+            route.sourceVersion,
+            route.startAt,
+            route.endAt,
+            route.createdAt,
+            route.relativePath,
+            JSON.stringify(route.metadata)
+          );
+          // T11(c)：这是**实际发生的归属变更**。即使本批没有 GPX 文件，也必须
+          // 让接收器知道旧父训练（A）与新父训练（B）都可脏。
+          if (conflictingOwner.workoutId !== workout.id) {
+            this.routeOwnershipObserver?.({
+              routeId: conflictingOwner.id,
+              relativePath: route.relativePath,
+              before: conflictingOwner.workoutId !== null && conflictingOwner.startAt !== null
+                ? { workoutId: conflictingOwner.workoutId, startAt: conflictingOwner.startAt } : null,
+              after: { workoutId: workout.id, startAt: workout.startAt }
+            });
+          }
+          continue;
+        }
+        // Same route id can still change owner (legacy/imported route ids are not
+        // guaranteed to embed the workout id). Capture before/after for the observer.
+        const sameIdOwner = this.database.prepare(
+          `SELECT route.workout_id AS workoutId, workout.start_at AS startAt
+           FROM workout_routes route
+           LEFT JOIN workouts workout ON workout.id = route.workout_id
+           WHERE route.id = ?`
+        ).get(route.id) as unknown as { workoutId: string | null; startAt: string | null } | undefined;
         // Drop stale route rows that share a relative_path but a different id so
         // UNIQUE(relative_path) does not fail when route identity drifts.
         const replaced = this.deleteRoutesByPathExcept(
@@ -2523,6 +2589,28 @@ export class RaiDatabase {
           options
         );
         if (!replaced) continue;
+        this.insertRouteStatement.run(
+          route.id,
+          workout.id,
+          route.sourceName,
+          sourceCategory,
+          route.sourceVersion,
+          route.startAt,
+          route.endAt,
+          route.createdAt,
+          route.relativePath,
+          JSON.stringify(route.metadata)
+        );
+        if (sameIdOwner !== undefined && sameIdOwner.workoutId !== workout.id) {
+          this.routeOwnershipObserver?.({
+            routeId: route.id,
+            relativePath: route.relativePath,
+            before: sameIdOwner.workoutId !== null && sameIdOwner.startAt !== null
+              ? { workoutId: sameIdOwner.workoutId, startAt: sameIdOwner.startAt } : null,
+            after: { workoutId: workout.id, startAt: workout.startAt }
+          });
+        }
+        continue;
       }
       this.insertRouteStatement.run(
         route.id,
@@ -2578,6 +2666,14 @@ export class RaiDatabase {
       issue.objectId,
       issue.message
     );
+  }
+
+  /**
+   * 安装/清除路线归属变化观察器。仅用于同一连接、同一事务内的接收器；
+   * 回调必须只做内存收集（不得在这个同步路径里再开事务或写库）。
+   */
+  observeRouteOwnershipChanges(observer?: (change: RouteOwnershipChange) => void): void {
+    this.routeOwnershipObserver = observer;
   }
 
   /**
@@ -3260,12 +3356,56 @@ export class RaiDatabase {
     };
   }
 
+  /**
+   * Write one ledger row while keeping the **earliest** old side observed in
+   * this batch.
+   *
+   * The same canonical row can be mentioned more than once in one batch (two
+   * deleted source UUIDs that resolve to the same row, a delete plus a
+   * surviving-owner rewrite). A plain `INSERT OR REPLACE` lets the second
+   * mention erase the first one's `previous_*` interval — the dirty-range
+   * reader would then see "no old side" and silently under-scope the batch.
+   */
+  private recordImportEntityChange(
+    batchId: string, kind: "record" | "workout" | "activity_summary", id: string,
+    changeType: "inserted" | "updated" | "removed", effectiveAt: string | null, contentHash: string,
+    previous: { start: string | null; end: string | null; type: string | null }
+  ): void {
+    this.database.prepare(`
+      INSERT INTO import_entity_changes (
+        batch_id, entity_kind, entity_id, change_type, effective_at, content_hash,
+        previous_effective_at, previous_end_at, previous_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(batch_id, entity_kind, entity_id) DO UPDATE SET
+        change_type = excluded.change_type,
+        effective_at = excluded.effective_at,
+        content_hash = excluded.content_hash,
+        previous_effective_at = CASE
+          WHEN import_entity_changes.previous_effective_at IS NULL THEN excluded.previous_effective_at
+          WHEN excluded.previous_effective_at IS NULL THEN import_entity_changes.previous_effective_at
+          WHEN excluded.previous_effective_at < import_entity_changes.previous_effective_at THEN excluded.previous_effective_at
+          ELSE import_entity_changes.previous_effective_at END,
+        previous_end_at = CASE
+          WHEN import_entity_changes.previous_effective_at IS NULL THEN excluded.previous_end_at
+          WHEN excluded.previous_effective_at IS NULL THEN import_entity_changes.previous_end_at
+          WHEN excluded.previous_effective_at < import_entity_changes.previous_effective_at THEN excluded.previous_end_at
+          ELSE import_entity_changes.previous_end_at END,
+        previous_type = CASE
+          WHEN import_entity_changes.previous_effective_at IS NULL THEN excluded.previous_type
+          WHEN excluded.previous_effective_at IS NULL THEN import_entity_changes.previous_type
+          WHEN excluded.previous_effective_at < import_entity_changes.previous_effective_at THEN excluded.previous_type
+          ELSE import_entity_changes.previous_type END
+    `).run(batchId, kind, id, changeType, effectiveAt, contentHash,
+      previous.start, previous.end, previous.type);
+  }
+
   /** Older v30 imports may already have forked a known XML alias into an
    * unmapped row. An explicit deletion must remove that copy too, but never
    * another canonical UUID mapping or an alias with any still-live owner. */
   private removeDeletedHealthKitAliasCopies(recordId: string, source: string, batchId?: string): number {
     const copies = this.database.prepare(`
-      SELECT DISTINCT r.id, r.start_at AS startAt FROM healthkit_record_aliases a
+      SELECT DISTINCT r.id, r.start_at AS startAt, r.end_at AS endAt, r.type
+      FROM healthkit_record_aliases a
       JOIN healthkit_record_sources s USING (sample_type, sample_uuid)
       JOIN health_records r ON r.id = a.alias_id
       WHERE s.record_id = ? AND r.id <> s.record_id
@@ -3278,16 +3418,19 @@ export class RaiDatabase {
               'healthkit-record:v2:' || live.sample_type || ':' || live.sample_uuid
           )
         )
-    `).all(recordId) as { id: string; startAt: string }[];
+    `).all(recordId) as { id: string; startAt: string | null; endAt: string | null; type: string }[];
     for (const copy of copies) {
       this.recordEntityTombstones("record", [copy.id], {
         ...(batchId === undefined ? {} : { batchId }), sourceIdentifier: source
       });
-      if (batchId) this.database.prepare(`
-        INSERT OR REPLACE INTO import_entity_changes
-          (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
-        VALUES (?, 'record', ?, 'removed', ?, ?)
-      `).run(batchId, copy.id, copy.startAt, copy.id);
+      if (batchId) {
+        // P1-3: an alias copy has its **own** interval/type. Using the canonical
+        // row's would leave the copy's real nights/segments out of the dirty
+        // range.
+        this.recordImportEntityChange(batchId, "record", copy.id, "removed", copy.startAt, copy.id, {
+          start: copy.startAt, end: copy.endAt, type: copy.type
+        });
+      }
       this.database.prepare("DELETE FROM import_entity_generations WHERE entity_kind = 'record' AND entity_id = ?").run(copy.id);
       this.database.prepare("DELETE FROM health_records WHERE id = ?").run(copy.id);
     }
@@ -3316,12 +3459,14 @@ export class RaiDatabase {
     for (const deletion of [...deletions, ...resolved]) {
       const source = this.healthKitRecordSourceIdentifier(deletion.type, deletion.uuid);
       const row = this.database.prepare(`
-        SELECT s.record_id AS id, r.start_at AS startAt, r.type, r.metadata_json AS metadataJson
+        SELECT s.record_id AS id, r.start_at AS startAt, r.end_at AS endAt, r.type,
+          r.metadata_json AS metadataJson
         FROM healthkit_record_sources s
         LEFT JOIN health_records r ON r.id = s.record_id
         WHERE s.sample_type = ? AND s.sample_uuid = ?
       `).get(deletion.type, deletion.uuid.toLowerCase()) as {
-        id: string; startAt: string | null; type: string | null; metadataJson: string | null;
+        id: string; startAt: string | null; endAt: string | null;
+        type: string | null; metadataJson: string | null;
       } | undefined;
       if (!row || handled.has(row.id)) continue;
       handled.add(row.id);
@@ -3362,26 +3507,34 @@ export class RaiDatabase {
         const record = JSON.parse(surviving.recordJson) as CanonicalHealthRecord;
         record.id = row.id;
         record.metadata.RAIHealthKitSampleUUID = [surviving.uuid];
+        const priorHash = (this.database.prepare(`SELECT content_hash AS contentHash
+          FROM import_entity_generations WHERE entity_kind='record' AND entity_id = ?`).get(row.id) as
+          { contentHash: string } | undefined)?.contentHash;
         this.observeImportEntity("record", row.id, generation, record.startAt, batchId, surviving.contentHash);
         this.insertRecord(record, surviving.category, JSON.parse(surviving.attributesJson));
         // Cold-start seed hashes do not count as updates in observeImportEntity,
-        // but replacing a deleted fact must always activate recomputation.
-        if (batchId) this.database.prepare(`
-          INSERT OR REPLACE INTO import_entity_changes
-            (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
-          VALUES (?, 'record', ?, 'updated', ?, ?)
-        `).run(batchId, row.id, record.startAt, surviving.contentHash);
+        // but replacing a deleted fact must always activate recomputation. If the
+        // surviving fact is byte-identical, do not manufacture a misleading
+        // "updated" boundary for a deletion that changed nothing observable.
+        if (batchId && priorHash !== surviving.contentHash) {
+          this.recordImportEntityChange(batchId, "record", row.id, "updated", record.startAt, surviving.contentHash, {
+            start: row.startAt, end: row.endAt, type: row.type
+          });
+        }
         continue;
       }
       this.recordEntityTombstones("record", [row.id], {
         ...(batchId === undefined ? {} : { batchId }), sourceIdentifier: source
       });
       if (row.startAt === null) continue;
-      if (batchId) this.database.prepare(`
-        INSERT OR REPLACE INTO import_entity_changes
-          (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
-        VALUES (?, 'record', ?, 'removed', ?, ?)
-      `).run(batchId, row.id, row.startAt, row.id);
+      if (batchId) {
+        // P1-3: capture the deleted row's **own** type and full interval before
+        // the DELETE. `effective_at` stays as the compatibility value, but it is
+        // one instant and cannot reconstruct a night that crosses midnight.
+        this.recordImportEntityChange(batchId, "record", row.id, "removed", row.startAt, row.id, {
+          start: row.startAt, end: row.endAt, type: row.type
+        });
+      }
       this.database.prepare("DELETE FROM import_entity_generations WHERE entity_kind = 'record' AND entity_id = ?").run(row.id);
       this.database.prepare("DELETE FROM health_records WHERE id = ?").run(row.id);
       removed += 1;

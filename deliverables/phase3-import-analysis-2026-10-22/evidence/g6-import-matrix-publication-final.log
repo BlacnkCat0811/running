@@ -1,0 +1,110 @@
+TAP version 13
+# (node:52512) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: F10 候选已生成但发布前中断：旧发布稳定、候选不可见；补发同一发布幂等且无重复 release
+ok 1 - F10 候选已生成但发布前中断：旧发布稳定、候选不可见；补发同一发布幂等且无重复 release
+  ---
+  duration_ms: 317.895748
+  type: 'test'
+  ...
+# (node:52513) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: T05 未知 record 类型（单独 / 与有界已知变更混合）都必须登记分析且不产出有界增量计划
+ok 2 - T05 未知 record 类型（单独 / 与有界已知变更混合）都必须登记分析且不产出有界增量计划
+  ---
+  duration_ms: 714.262709
+  type: 'test'
+  ...
+# Subtest: T06 同 job 同内容重放（worker 层）：返回原回执，事实/任务/代次不重复
+ok 3 - T06 同 job 同内容重放（worker 层）：返回原回执，事实/任务/代次不重复
+  ---
+  duration_ms: 692.008749
+  type: 'test'
+  ...
+# Subtest: T07 同 job id 不同内容：显式身份冲突拒绝，原成功批次与回执不变
+ok 4 - T07 同 job id 不同内容：显式身份冲突拒绝，原成功批次与回执不变
+  ---
+  duration_ms: 297.672153
+  type: 'test'
+  ...
+# Subtest: T10 直连删除先于到达：墓碑阻止复活；删除-only 必须要求分析
+ok 5 - T10 直连删除先于到达：墓碑阻止复活；删除-only 必须要求分析
+  ---
+  duration_ms: 277.846746
+  type: 'test'
+  ...
+# Subtest: T10 直连共享 UUID 来源：删除一个来源不误删另一来源
+ok 6 - T10 直连共享 UUID 来源：删除一个来源不误删另一来源
+  ---
+  duration_ms: 261.113003
+  type: 'test'
+  ...
+# Subtest: T10 data-only 白名单删除：not_required、无本批任务、raw+1 且 dependency 不变
+ok 7 - T10 data-only 白名单删除：not_required、无本批任务、raw+1 且 dependency 不变
+  ---
+  duration_ms: 200.306256
+  type: 'test'
+  ...
+# Subtest: T11 同大小 GPX 内容替换：发布新路线版本，并按路线归属把分析标脏
+ok 8 - T11 同大小 GPX 内容替换：发布新路线版本，并按路线归属把分析标脏
+  ---
+  duration_ms: 303.461102
+  type: 'test'
+  ...
+# Subtest: T11 路线归属 A→B（同内容）：旧、新归属都必须进入脏证据
+ok 9 - T11 路线归属 A→B（同内容）：旧、新归属都必须进入脏证据
+  ---
+  duration_ms: 295.958625
+  type: 'test'
+  ...
+# Subtest: T11 仅 XML 改归属、未附 GPX：旧 A/新 B 都脏，路线点与已发布版本保留
+ok 10 - T11 仅 XML 改归属、未附 GPX：旧 A/新 B 都脏，路线点与已发布版本保留
+  ---
+  duration_ms: 321.618276
+  type: 'test'
+  ...
+# Subtest: T11 同批同一路径出现两次归属变更：确定性拒收，整批回滚
+ok 11 - T11 同批同一路径出现两次归属变更：确定性拒收，整批回滚
+  ---
+  duration_ms: 359.474315
+  type: 'test'
+  ...
+# Subtest: T14 上限常量未被放宽：直连 8 MiB / 删除配额 5000 / 200 / 64 MiB，data-only 2 MiB / 5000
+ok 12 - T14 上限常量未被放宽：直连 8 MiB / 删除配额 5000 / 200 / 64 MiB，data-only 2 MiB / 5000
+  ---
+  duration_ms: 0.459259
+  type: 'test'
+  ...
+# Subtest: T14 data-only 纯判据：2 MiB 恰好接收、+1 字节拒绝；5000 条接收、5001 条拒绝
+ok 13 - T14 data-only 纯判据：2 MiB 恰好接收、+1 字节拒绝；5000 条接收、5001 条拒绝
+  ---
+  duration_ms: 347.48424
+  type: 'test'
+  ...
+# Subtest: T14 直连 XML record 数不设上限（maxRecords 只限删除配额）：5001 条在 8 MiB 内必须接收
+ok 14 - T14 直连 XML record 数不设上限（maxRecords 只限删除配额）：5001 条在 8 MiB 内必须接收
+  ---
+  duration_ms: 5875.750011
+  type: 'test'
+  ...
+# Subtest: T14 GPX 边界：200 文件恰好接收、201 拒绝；64 MiB 恰好接收、+1 字节拒绝
+ok 15 - T14 GPX 边界：200 文件恰好接收、201 拒绝；64 MiB 恰好接收、+1 字节拒绝
+  ---
+  duration_ms: 462.236006
+  type: 'test'
+  ...
+# Subtest: F04 分析脏证据写入被静默忽略（回读不一致）⇒ 事实/批次/任务/回执整批回滚
+ok 16 - F04 分析脏证据写入被静默忽略（回读不一致）⇒ 事实/批次/任务/回执整批回滚
+  ---
+  duration_ms: 239.838006
+  type: 'test'
+  ...
+1..16
+# tests 16
+# suites 0
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11792.45081

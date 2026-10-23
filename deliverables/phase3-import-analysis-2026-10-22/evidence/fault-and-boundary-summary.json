@@ -1,0 +1,96 @@
+{
+  "generatedAt": "2026-10-22T20:10:00+08:00",
+  "head": "16a12296d62a77b45be9a96a38d90163ce2f5b13",
+  "concurrency": 2,
+  "runs": [
+    {
+      "id": "restart-recovery",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/import-restart-receipt-recovery.test.ts",
+      "exitCode": 0,
+      "tests": 9,
+      "pass": 9,
+      "fail": 0,
+      "coverage": [
+        "helper found / confirmed_absent / unreadable",
+        "corrupt DB + cancelRequested => recovery_required, not cancelled",
+        "corrupt DB + attempts=3 => recovery_required, not failed",
+        "readable DB without receipt + cancelRequested => cancelled (policy unchanged)",
+        "readable DB without receipt + attempts=3 => failed/interrupted (policy unchanged)",
+        "missing DB first import => confirmed_absent, first record-only import succeeds",
+        "out-of-scope old job => old terminal path, no current-scope block",
+        "onRecoveryRequired deferred to avoid server.ts let TDZ, delivered once"
+      ]
+    },
+    {
+      "id": "receipt-fields",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/import-receipt-fields.test.ts",
+      "exitCode": 0,
+      "tests": 4,
+      "pass": 4,
+      "fail": 0,
+      "coverage": [
+        "no-op persisted receipt has own analysisJobId=null",
+        "direct-sync record-only receipt dependencyGeneration=null / analysisJobId=null",
+        "direct-sync queued receipt analysisJobId == task.id == batch summary id; dependencyGeneration == generation",
+        "historical receipt without analysisJobId and with dependencyGeneration='7' read/replayed unchanged"
+      ]
+    },
+    {
+      "id": "import-matrix-and-f10",
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/phase3-import-matrix.test.ts apps/api/test/phase3-analysis-publication.test.ts",
+      "exitCode": 0,
+      "tests": 14,
+      "pass": 14,
+      "fail": 0,
+      "coverage": [
+        "T05 unknown alone/mixed => analysis required, no incrementalPlan, dirty evidence full",
+        "T06 same job same content replay => original receipt, no duplicate facts/jobs/generations",
+        "T07 same job id different content => explicit identity conflict, original batch intact",
+        "T10 delete-before-arrival / shared UUID / data-only deletion policy",
+        "T11 same-size GPX replacement and route reassignment A->B with old+new dirty times",
+        "T14 exact bounds: 8 MiB/5000 deletions/200 files/64 MiB, data-only 2 MiB/5000; direct-sync XML record count is not 5000-bounded per current contract",
+        "F04 dirty evidence read-back mismatch => whole batch rollback",
+        "F10 candidate generated but publication interrupted => old release stable, replay idempotent"
+      ]
+    },
+    {
+      "id": "route-regression",
+      "command": "node --import tsx --test --test-concurrency=2 packages/storage-sqlite/test/database-import.test.ts packages/storage-sqlite/test/route-version.test.ts packages/health-export-parser/test/parser.test.ts packages/health-export-parser/test/incremental.test.ts packages/health-export-parser/test/gpx-bundle-reuse.test.ts",
+      "exitCode": 0,
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "coverage": [
+        "preserveAbsent explicit route path re-points ownership and keeps points",
+        "route version publication / staging slot / rejection invariants",
+        "parser and incremental route behavior",
+        "GPX bundle hash reuse"
+      ]
+    },
+    {
+      "id": "deletion-recovery",
+      "command": "RAI_TEST_CONCURRENCY=1 node --import tsx --test --test-concurrency=1 apps/api/test/dataset-deletion-recovery.test.ts",
+      "exitCode": 0,
+      "tests": 9,
+      "pass": 9,
+      "fail": 0,
+      "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/g11-dataset-deletion-recovery.log",
+      "coverage": [
+        "fresh install: one explicit permit, first packet creates DB once, second init refused",
+        "prepared before/after with main present: main bytes unchanged, no permit, startup rolls back old epoch",
+        "prepared + main missing: startup blocks, no DB created; CLI requires --confirm-main-removed and issues one nextEpoch permit",
+        "main_removed + permit unwritten: startup idempotently issues the same nextEpoch permit; first packet once",
+        "permit_issued before response: replay produces no second permit/epoch; old scope stays established",
+        "writer_entered + main lost + runtime ledger corrupt: no pristine, no new empty DB",
+        "corrupt sidecar/config mismatch/missing snapshot/ledger instance mismatch/write failure: CLI non-zero and no main DB write",
+        "restore old backup: deletion intent closed, restored scope established, deleted nextEpoch is no longer current",
+        "ordinary exception after unlink: maintenance restores the protection snapshot, old epoch/scope established, deletion intent rolled_back"
+      ]
+    }
+  ],
+  "notCovered": [
+    "GPX-specific SIGKILL variant (F01 partial): same outer transaction/rollback path, not separately fixture-injected",
+    "readiness end-to-end A/B + Fitness isolation (T12 partial): canonical nights proven; readiness remains whole-domain full",
+    "production performance/RSS/P95: not measured"
+  ]
+}

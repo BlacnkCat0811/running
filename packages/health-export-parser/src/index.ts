@@ -1,7 +1,7 @@
 export {
   parseAppleHealthXml, CALLER_OWNED_PARSE_SAVEPOINT,
   isUnchangedRecordForIncrementalImport,
-  type UnchangedRecordFastPathInput
+  type UnchangedRecordFastPathInput, type ExplicitRouteDeclaration
 } from "./apple-health-parser.js";
 export {
   DATA_ONLY_RECORD_TYPES, DATA_ONLY_MAX_XML_BYTES, DATA_ONLY_MAX_RECORDS,

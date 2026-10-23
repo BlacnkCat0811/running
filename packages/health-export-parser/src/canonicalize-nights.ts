@@ -430,6 +430,11 @@ interface RebuildInput {
   firstDate: string;
   /** inclusive 本地日期上界 */
   lastDate: string;
+  /**
+   * 本次重建的**到达时刻**（`canonical_*.computed_at`）。省略时保留历史行为
+   * （SQLite `now`）；显式注入只用于可审计的验收时钟，生产默认不传。
+   */
+  computedAt?: string;
 }
 
 /**
@@ -440,9 +445,9 @@ interface RebuildInput {
  * 相交的段"，所以只要调用方给的 `segments` 覆盖到这些段，逐日结果就与全量逐字等价。
  */
 function rebuildCanonicalNights(input: RebuildInput): RebuildCounts {
-  const { database, timezoneIdentifier, segments: all, hrv, firstDate, lastDate } = input;
+  const { database, timezoneIdentifier, segments: all, hrv, firstDate, lastDate, computedAt } = input;
   let date = firstDate; let mainCount = 0; let napCount = 0; let hrvCount = 0; let rejected = 0;
-  const insertNight = database.prepare(`INSERT INTO canonical_nights (id,wake_date,timezone_identifier,kind,source_name,source_category,source_rank,has_stages,sleep_onset_at,wake_at,asleep_union_minutes,in_bed_union_minutes,awake_minutes,stage_minutes_json,segment_count,provenance_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insertNight = database.prepare(`INSERT INTO canonical_nights (id,wake_date,timezone_identifier,kind,source_name,source_category,source_rank,has_stages,sleep_onset_at,wake_at,asleep_union_minutes,in_bed_union_minutes,awake_minutes,stage_minutes_json,segment_count,provenance_json,computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ','now')))`);
   while (date <= lastDate) {
     const windowStart = Date.parse(localDateTimeAt(`${addLocalDays(date, -1)}T18:00:00`, timezoneIdentifier));
     const windowEnd = Date.parse(localDateTimeAt(`${date}T14:00:00`, timezoneIdentifier));
@@ -468,15 +473,15 @@ function rebuildCanonicalNights(input: RebuildInput): RebuildCounts {
       night.kind = index === 0 ? "main" : "nap";
       insertNight.run(
         night.id, night.wakeDate, night.timezoneIdentifier, night.kind, night.sourceName, night.sourceCategory, night.sourceRank, night.hasStages ? 1 : 0,
-        night.sleepOnsetAt, night.wakeAt, night.asleepUnionMinutes, night.inBedUnionMinutes, night.awakeMinutes, JSON.stringify(night.stageMinutes), night.segmentCount, JSON.stringify(night.provenance));
+        night.sleepOnsetAt, night.wakeAt, night.asleepUnionMinutes, night.inBedUnionMinutes, night.awakeMinutes, JSON.stringify(night.stageMinutes), night.segmentCount, JSON.stringify(night.provenance), computedAt ?? null);
       if (night.kind === "main") {
         mainCount += 1;
         const samples = hrv.filter((sample) => night.sleepOnsetAt && night.wakeAt && sample.start >= Date.parse(night.sleepOnsetAt) && sample.start <= Date.parse(night.wakeAt));
         const confidence: HrvDayConfidence = samples.length >= 2 ? "confident" : samples.length === 1 ? "sparse" : "missing";
         const hrvId = stableId("canonical_hrv_day", [date, timezoneIdentifier, night.id]);
-        database.prepare(`INSERT INTO canonical_hrv_days (id,local_date,timezone_identifier,night_id,hrv_sdnn_ms,sample_count,confidence,window_start_at,window_end_at,source_name,provenance_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
+        database.prepare(`INSERT INTO canonical_hrv_days (id,local_date,timezone_identifier,night_id,hrv_sdnn_ms,sample_count,confidence,window_start_at,window_end_at,source_name,provenance_json,computed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ','now')))`).run(
           hrvId, date, timezoneIdentifier, night.id, median(samples.map((s) => s.value)), samples.length, confidence, night.sleepOnsetAt, night.wakeAt,
-          samples[0]?.sourceName ?? null, JSON.stringify({ algorithmVersion: CANONICAL_NIGHT_ALGORITHM_VERSION, fallbackWatch: false }));
+          samples[0]?.sourceName ?? null, JSON.stringify({ algorithmVersion: CANONICAL_NIGHT_ALGORITHM_VERSION, fallbackWatch: false }), computedAt ?? null);
         hrvCount += 1;
       } else napCount += 1;
     }
@@ -503,7 +508,7 @@ function rebuildCanonicalNights(input: RebuildInput): RebuildCounts {
       for (const session of sessions) {
         const night = buildNight(date, timezoneIdentifier, "nap", { sourceName: sourceName ?? "", sourceCategory: sourceCategory ?? "other", rank }, session, 0);
         if (!night.asleepUnionMinutes) continue;
-        insertNight.run(night.id, night.wakeDate, night.timezoneIdentifier, night.kind, night.sourceName, night.sourceCategory, night.sourceRank, night.hasStages ? 1 : 0, night.sleepOnsetAt, night.wakeAt, night.asleepUnionMinutes, night.inBedUnionMinutes, night.awakeMinutes, JSON.stringify(night.stageMinutes), night.segmentCount, JSON.stringify(night.provenance));
+        insertNight.run(night.id, night.wakeDate, night.timezoneIdentifier, night.kind, night.sourceName, night.sourceCategory, night.sourceRank, night.hasStages ? 1 : 0, night.sleepOnsetAt, night.wakeAt, night.asleepUnionMinutes, night.inBedUnionMinutes, night.awakeMinutes, JSON.stringify(night.stageMinutes), night.segmentCount, JSON.stringify(night.provenance), computedAt ?? null);
         napCount += 1;
       }
     }
@@ -512,7 +517,26 @@ function rebuildCanonicalNights(input: RebuildInput): RebuildCounts {
   return { mainCount, napCount, hrvCount, rejectedInBedOnly: rejected };
 }
 
-export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: string = DATABASE_TIMEZONE): CanonicalizationNightsResult {
+/**
+ * P3: the external `computedAt` is a persisted arrival timestamp. Accept only a
+ * canonical UTC-millisecond ISO string (what `new Date().toISOString()` emits);
+ * otherwise a caller's local-offset or second-precision value would be stored
+ * verbatim and later compared against canonical rows.
+ */
+function assertComputedAt(value: string | undefined): void {
+  if (value === undefined) return;
+  const canonical = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+    && Number.isFinite(Date.parse(value))
+    && new Date(value).toISOString() === value;
+  if (!canonical) {
+    throw new Error("computedAt must be a canonical UTC-millisecond ISO instant");
+  }
+}
+
+export function canonicalizeNights(
+  database: DatabaseSync, timezoneIdentifier: string = DATABASE_TIMEZONE, computedAt?: string
+): CanonicalizationNightsResult {
+  assertComputedAt(computedAt);
   const all = loadSegments(database);
   database.exec("BEGIN IMMEDIATE");
   try {
@@ -541,7 +565,10 @@ export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: s
     ]);
     const minDate = dates.sort()[0]!; const maxDate = dates.sort().at(-1)!;
     const hrv = loadHrv(database);
-    const counts = rebuildCanonicalNights({ database, timezoneIdentifier, segments: all, hrv, firstDate: minDate, lastDate: maxDate });
+    const counts = rebuildCanonicalNights({
+      database, timezoneIdentifier, segments: all, hrv, firstDate: minDate, lastDate: maxDate,
+      ...(computedAt === undefined ? {} : { computedAt })
+    });
     // 全部行插入完之后再还原到达时间：事实未变的行拿回原值，新增/改动的行保持 now。
     preserveArrivalTime(database, "canonical_nights", "restore");
     preserveArrivalTime(database, "canonical_hrv_days", "restore");
@@ -583,8 +610,9 @@ export function canonicalizeNightsForWindow(
   timezoneIdentifier: string,
   fromLocalDate: string,
   toLocalDate: string,
-  transaction: { callerOwnedTransaction?: boolean } = {}
+  transaction: { callerOwnedTransaction?: boolean; computedAt?: string } = {}
 ): CanonicalizationNightsResult {
+  assertComputedAt(transaction.computedAt);
   // caller 模式下提交权归调用方：本段边界是 SAVEPOINT，不是新事务（见 owned-transaction.ts）。
   const callerOwned = transaction.callerOwnedTransaction === true;
   assertLocalDate(fromLocalDate, "fromLocalDate");
@@ -643,7 +671,11 @@ export function canonicalizeNightsForWindow(
       commitOwnedTransaction(database, CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT, callerOwned);
       return { mainCount: 0, napCount: 0, hrvCount: 0, rejectedInBedOnly: 0, timezoneIdentifier };
     }
-    const counts = rebuildCanonicalNights({ database, timezoneIdentifier, segments: all, hrv, firstDate: fromLocalDate, lastDate: toLocalDate });
+    const counts = rebuildCanonicalNights({
+      database, timezoneIdentifier, segments: all, hrv,
+      firstDate: fromLocalDate, lastDate: toLocalDate,
+      ...(transaction.computedAt === undefined ? {} : { computedAt: transaction.computedAt })
+    });
     preserveArrivalTime(database, "canonical_nights", "restore");
     preserveArrivalTime(database, "canonical_hrv_days", "restore");
     commitOwnedTransaction(database, CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT, callerOwned);

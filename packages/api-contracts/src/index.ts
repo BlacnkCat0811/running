@@ -901,7 +901,9 @@ export interface ImportJobResponse {
    * 稳定机器码的失败原因（收口阶段 3 起；成功/老持久化作业没有该键）。
    *
    * 客户端（iOS）据此分支处置：`direct_sync_payload_exceeds_bounds` ⇒ 收敛拆批预算后重传；
-   * `direct_sync_unavailable` ⇒ 退避重试；`direct_sync_baseline_rebuild_required` ⇒ 报维护。
+   * `direct_sync_unavailable` ⇒ 退避重试；`direct_sync_baseline_rebuild_required` ⇒ 报维护；
+   * `direct_sync_route_ownership_conflict` ⇒ 载荷自相矛盾（同一路线在本批改归多个训练），
+   * 整批已回滚，客户端必须清任务并重新生成同步批次，**不可重试**。
    * 与 `error` 的分工：`error` 是给人看的（公开层恒为通用文案），本字段是给程序看的
    * （枚举见 `apps/api/src/import-worker.ts` 的 `laneRefusalFailure`）。
    */
@@ -919,6 +921,18 @@ export interface ImportJobResponse {
     updatedWorkouts: number;
     removedWorkouts: number;
     unchangedWorkouts: number;
+    /**
+     * P2-8: **本批内容或归属发生变化的唯一路线数**（按 route id 去重）。
+     *
+     * 口径（合同，不是实现细节）：
+     *   - 路线文件内容变化计入 1；
+     *   - 内容字节未变、但父训练归属（`workout_id`）变化的路线也计入 1；
+     *   - 同一路线在一批里重复出现只计 1；
+     *   - 本批未触及的路线不计。
+     *
+     * 它**不是**“路线文件数”，也不是“路线点数”。消费方不得用它推断分析是否重算，
+     * 那只由 `recomputeReasons` / `directSync.analysisStatus` 表达。
+     */
     routesUpdated: number;
     featuresReused: number;
     featuresRecomputed: number;

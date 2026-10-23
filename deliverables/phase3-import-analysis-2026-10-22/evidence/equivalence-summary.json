@@ -1,0 +1,3084 @@
+{
+  "generatedAt": "2026-10-22T21:20:08.030Z",
+  "head": "16a12296d62a77b45be9a96a38d90163ce2f5b13",
+  "workingTree": "dirty: 2026-10-23 review implementation; status+diff sha256=33dd3343070deb29e09b4c9a47ef644ad7dac1d147c366d118c011ee16f81b1f",
+  "fixture": {
+    "description": "Synthetic Apple Health XML: one 30-minute running workout per natural day starting 2026-01-01 (BASE_DAYS=40), 15 heart-rate records per workout; deterministic values, no RNG. Two independent SQLite databases A/B receive identical facts and identical parent releases (two full baselines at EVAL_1).",
+    "seed": "deterministic: day index only (no random seed)",
+    "timezone": "Asia/Shanghai",
+    "evaluatedAt": {
+      "baseline": "2026-02-10T04:00:00.000Z",
+      "candidate": "2026-02-12T04:00:00.000Z"
+    },
+    "baseDays": 40,
+    "newWorkoutDay": 42,
+    "vo2Sample": {
+      "value": 56,
+      "unit": "mL/min*kg",
+      "observedAt": "2026-02-09T00:10:00.000Z"
+    },
+    "parentRelease": "second full recompute on each database (so evidence chains read a real published run)"
+  },
+  "projection": {
+    "tables": [
+      "workout_features",
+      "workout_training_loads",
+      "workout_zone_summaries",
+      "daily_zone_profiles",
+      "daily_training_metrics",
+      "training_sessions",
+      "ability_assessments",
+      "daily_ability_snapshots",
+      "model_runs",
+      "model_v2_runs",
+      "model_domain_snapshots",
+      "model_release_bundles",
+      "release_readable_state",
+      "analysis_run_input_bindings",
+      "analysis_job_coverage"
+    ],
+    "rules": "stable business keys; integers/enums/bools/null/explanation codes exact; floats abs(a-b)<=1e-9*max(1,|a|,|b|) after finite check; JSON compared recursively; extra/missing rows and dangling references fail; only run/row ids and pure execution timestamps are removed from sealed snapshot payloads.",
+    "semanticMappings": [
+      "ability_assessments.feature_id -> featureTrainingSessionId (asserts same session)",
+      "daily_ability_snapshots.last_assessment_id -> assessment training_session_id+sequence_number (dangling fails)",
+      "model_runs.summary_json.baseline.calibrationFeatureIds -> training_session_id (parent-run ids resolve globally)",
+      "load_vector.highIntensityZoneSystem / zone_coherence.zoneProfileId -> daily_zone_profiles.local_date",
+      "baselineEpochId / calibrationCohortHash -> compared as raw persisted values (D1 fixed; no semantic replacement)"
+    ],
+    "releaseProjection": {
+      "model_release_bundles": "runOrdinal/baseRunOrdinal/datasetVersion/status/evaluation(normalized run ids)/snapshotDomains/snapshotProjectionHash/createdAt/activated",
+      "release_readable_state": "activeRunOrdinal/activeReleaseOrdinal/activePublished/bundleStatus/readableDomains/analysisStatus/freshness",
+      "excludedExecutionIdentity": "raw snapshot_hash and activated_at wall clock are execution identity, not cross-database business values"
+    },
+    "note": "The 15-table projection is validated by assertCompleteBusinessProjection(); a scenario missing one of these tables fails this generator."
+  },
+  "scenarios": [
+    {
+      "scenario": "new_workout",
+      "testName": "O09: a newly imported workout keeps the prefix and equals an offline from-scratch run",
+      "change": "Base 40 days + new workout day 42 (2026-02-11)",
+      "expectReuse": true,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "verified",
+        "rejectionReason": null,
+        "loads": {
+          "reused": 40,
+          "recomputed": 1
+        },
+        "zoneProfiles": {
+          "reused": 41,
+          "recomputed": 2
+        },
+        "dailyMetrics": {
+          "reused": 41,
+          "recomputed": 2
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": "2026-01-01",
+        "reuseThroughLocalDate": "2026-02-10"
+      },
+      "featureCounters": {
+        "reused": 40,
+        "recomputed": 1
+      },
+      "reusedAssessmentCount": 40,
+      "comparedRows": {
+        "workout_features": 41,
+        "workout_training_loads": 41,
+        "workout_zone_summaries": 41,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 41,
+        "ability_assessments": 41,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 87,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "rows": 41,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "rows": 41,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "rows": 41,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 87,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "scenario": "route_move_xml_only",
+      "testName": "P3-06 T11: an XML-only route move dirties the old owner and equals offline-full",
+      "change": "Base 40 days; route on day 40 (A) moved to new workout day 42 (B) by XML only, no GPX file in the delta",
+      "expectReuse": true,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "verified",
+        "rejectionReason": null,
+        "loads": {
+          "reused": 39,
+          "recomputed": 2
+        },
+        "zoneProfiles": {
+          "reused": 39,
+          "recomputed": 4
+        },
+        "dailyMetrics": {
+          "reused": 39,
+          "recomputed": 4
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": "2026-01-01",
+        "reuseThroughLocalDate": "2026-02-08"
+      },
+      "featureCounters": {
+        "reused": 39,
+        "recomputed": 2
+      },
+      "reusedAssessmentCount": 32,
+      "comparedRows": {
+        "workout_features": 41,
+        "workout_training_loads": 41,
+        "workout_zone_summaries": 41,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 41,
+        "ability_assessments": 41,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 87,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 2008
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3444
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11618
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 2008
+        },
+        "workout_training_loads": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "rows": 41,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "rows": 41,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "rows": 41,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3444
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 87,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11618
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "routeAssertions": {
+        "oldOwnerRoutePointCount": 0,
+        "newOwnerRoutePointCount": 3,
+        "routeRowPreserved": true,
+        "publishedRouteVersionPreserved": true
+      },
+      "pass": true
+    },
+    {
+      "scenario": "in_training_correction",
+      "testName": "O09: an in-training heart-rate correction rewinds the boundary and equals an offline run",
+      "change": "15 HR records on 2026-01-13 shifted +9 bpm",
+      "expectReuse": true,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "verified",
+        "rejectionReason": null,
+        "loads": {
+          "reused": 12,
+          "recomputed": 28
+        },
+        "zoneProfiles": {
+          "reused": 12,
+          "recomputed": 31
+        },
+        "dailyMetrics": {
+          "reused": 12,
+          "recomputed": 31
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": "2026-01-01",
+        "reuseThroughLocalDate": "2026-01-12"
+      },
+      "featureCounters": {
+        "reused": 12,
+        "recomputed": 28
+      },
+      "reusedAssessmentCount": 0,
+      "comparedRows": {
+        "workout_features": 40,
+        "workout_training_loads": 40,
+        "workout_zone_summaries": 40,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 40,
+        "ability_assessments": 40,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 85,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 1960
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1435
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3155
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1073
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 280
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3323
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11390
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 379
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 96
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 40,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 1960
+        },
+        "workout_training_loads": {
+          "rows": 40,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1435
+        },
+        "workout_zone_summaries": {
+          "rows": 40,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3155
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1073
+        },
+        "training_sessions": {
+          "rows": 40,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 280
+        },
+        "ability_assessments": {
+          "rows": 40,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3323
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 85,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11390
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 379
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 96
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "scenario": "deletion",
+      "testName": "O09: a deletion refuses the prefix (missing rows) and still equals an offline run",
+      "change": "Latest training session deactivated (explicit inactive + canonical pointer cleared)",
+      "expectReuse": false,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "rejected",
+        "rejectionReason": "distance_queue_provenance",
+        "loads": {
+          "reused": 0,
+          "recomputed": 39
+        },
+        "zoneProfiles": {
+          "reused": 0,
+          "recomputed": 43
+        },
+        "dailyMetrics": {
+          "reused": 0,
+          "recomputed": 43
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": null,
+        "reuseThroughLocalDate": null
+      },
+      "featureCounters": {
+        "reused": 39,
+        "recomputed": 0
+      },
+      "reusedAssessmentCount": 32,
+      "comparedRows": {
+        "workout_features": 39,
+        "workout_training_loads": 39,
+        "workout_zone_summaries": 39,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 40,
+        "ability_assessments": 39,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 83,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 1911
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1399
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3076
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1069
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 280
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3199
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11159
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 372
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 94
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 39,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 1911
+        },
+        "workout_training_loads": {
+          "rows": 39,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1399
+        },
+        "workout_zone_summaries": {
+          "rows": 39,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3076
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1069
+        },
+        "training_sessions": {
+          "rows": 40,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 280
+        },
+        "ability_assessments": {
+          "rows": 39,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3199
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 83,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11159
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 372
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 94
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "scenario": "override",
+      "testName": "O09: an override change invalidates the override digest and equals an offline run",
+      "change": "workout_overrides row inserted for earliest session + new workout day 42",
+      "expectReuse": false,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "rejected",
+        "rejectionReason": "config_hash",
+        "loads": {
+          "reused": 0,
+          "recomputed": 41
+        },
+        "zoneProfiles": {
+          "reused": 0,
+          "recomputed": 43
+        },
+        "dailyMetrics": {
+          "reused": 0,
+          "recomputed": 43
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": null,
+        "reuseThroughLocalDate": null
+      },
+      "featureCounters": {
+        "reused": 0,
+        "recomputed": 41
+      },
+      "reusedAssessmentCount": 0,
+      "comparedRows": {
+        "workout_features": 41,
+        "workout_training_loads": 41,
+        "workout_zone_summaries": 41,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 41,
+        "ability_assessments": 41,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 87,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "rows": 41,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "rows": 41,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "rows": 41,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 87,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "scenario": "config",
+      "testName": "O09: a zone-config change invalidates the settings digest and equals an offline run",
+      "change": "training_zone_profile_settings revision 2 inserted + new workout day 42",
+      "expectReuse": false,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "rejected",
+        "rejectionReason": "zone_settings",
+        "loads": {
+          "reused": 0,
+          "recomputed": 41
+        },
+        "zoneProfiles": {
+          "reused": 0,
+          "recomputed": 43
+        },
+        "dailyMetrics": {
+          "reused": 0,
+          "recomputed": 43
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": null,
+        "reuseThroughLocalDate": null
+      },
+      "featureCounters": {
+        "reused": 40,
+        "recomputed": 1
+      },
+      "reusedAssessmentCount": 40,
+      "comparedRows": {
+        "workout_features": 41,
+        "workout_training_loads": 41,
+        "workout_zone_summaries": 41,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 41,
+        "ability_assessments": 41,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 87,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "rows": 41,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "rows": 41,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "rows": 41,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 87,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 376
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "scenario": "vo2_only",
+      "testName": "P3-06 T13: VO2Max-only bounded reuse equals offline-full on the full business projection",
+      "change": "One VO2Max record (56 mL/min*kg) at 2026-02-09T00:10Z inside day-40 workout",
+      "expectReuse": true,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "verified",
+        "rejectionReason": null,
+        "loads": {
+          "reused": 39,
+          "recomputed": 1
+        },
+        "zoneProfiles": {
+          "reused": 39,
+          "recomputed": 4
+        },
+        "dailyMetrics": {
+          "reused": 39,
+          "recomputed": 4
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": "2026-01-01",
+        "reuseThroughLocalDate": "2026-02-08"
+      },
+      "featureCounters": {
+        "reused": 39,
+        "recomputed": 1
+      },
+      "reusedAssessmentCount": 32,
+      "comparedRows": {
+        "workout_features": 40,
+        "workout_training_loads": 40,
+        "workout_zone_summaries": 40,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 40,
+        "ability_assessments": 40,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 85,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 0,
+        "analysis_job_coverage": 0
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 1960
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1435
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3155
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1073
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 280
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3323
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11390
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 374
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 96
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 0,
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 0,
+          "leafValues": 0
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 40,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 1960
+        },
+        "workout_training_loads": {
+          "rows": 40,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1435
+        },
+        "workout_zone_summaries": {
+          "rows": 40,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3155
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1073
+        },
+        "training_sessions": {
+          "rows": 40,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 280
+        },
+        "ability_assessments": {
+          "rows": 40,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3323
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 85,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11390
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 374
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 96
+        },
+        "analysis_run_input_bindings": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        },
+        "analysis_job_coverage": {
+          "rows": 0,
+          "columns": [],
+          "leafValues": 0
+        }
+      },
+      "pass": true
+    },
+    {
+      "scenario": "direct_binding",
+      "testName": "P3-06: direct-lane input binding and coverage evidence agree with offline-full",
+      "change": "Direct-sync lane: new workout day 42 + one succeeded import batch + generation bump in two independent DBs",
+      "expectReuse": true,
+      "incrementalReuse": {
+        "attempted": true,
+        "proof": "verified",
+        "rejectionReason": null,
+        "loads": {
+          "reused": 40,
+          "recomputed": 1
+        },
+        "zoneProfiles": {
+          "reused": 41,
+          "recomputed": 2
+        },
+        "dailyMetrics": {
+          "reused": 41,
+          "recomputed": 2
+        },
+        "checkpointWritten": true,
+        "reuseFromLocalDate": "2026-01-01",
+        "reuseThroughLocalDate": "2026-02-10"
+      },
+      "featureCounters": {
+        "reused": 40,
+        "recomputed": 1
+      },
+      "reusedAssessmentCount": 40,
+      "comparedRows": {
+        "workout_features": 41,
+        "workout_training_loads": 41,
+        "workout_zone_summaries": 41,
+        "daily_zone_profiles": 43,
+        "daily_training_metrics": 43,
+        "training_sessions": 41,
+        "ability_assessments": 41,
+        "daily_ability_snapshots": 43,
+        "model_runs": 1,
+        "model_v2_runs": 1,
+        "model_domain_snapshots": 87,
+        "model_release_bundles": 3,
+        "release_readable_state": 1,
+        "analysis_run_input_bindings": 1,
+        "analysis_job_coverage": 1
+      },
+      "fieldCounts": {
+        "workout_features": {
+          "fieldCount": 19,
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "fieldCount": 26,
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "fieldCount": 11,
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "fieldCount": 15,
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "fieldCount": 21,
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "fieldCount": 7,
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "fieldCount": 24,
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "fieldCount": 8,
+          "leafValues": 344
+        },
+        "model_runs": {
+          "fieldCount": 8,
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "fieldCount": 4,
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "fieldCount": 4,
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "fieldCount": 9,
+          "leafValues": 408
+        },
+        "release_readable_state": {
+          "fieldCount": 8,
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "fieldCount": 11,
+          "leafValues": 11
+        },
+        "analysis_job_coverage": {
+          "fieldCount": 3,
+          "leafValues": 3
+        }
+      },
+      "tables": {
+        "workout_features": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "averageSpeedMps",
+            "canonicalWorkoutId",
+            "distanceKm",
+            "durationSeconds",
+            "eligibilityStatus",
+            "features",
+            "heartRateCoverage",
+            "heartRateSampleCount",
+            "missingReasons",
+            "provenance",
+            "qualityScore",
+            "routePointCount",
+            "routeQuality",
+            "sessionType",
+            "sessionTypeSource",
+            "sourceConfidence",
+            "trainingSessionId",
+            "workoutStartAt"
+          ],
+          "leafValues": 2009
+        },
+        "workout_training_loads": {
+          "rows": 41,
+          "columns": [
+            "averageHeartRateBpm",
+            "confidence",
+            "distanceExposureRatio",
+            "distanceFactor",
+            "distanceKm",
+            "distanceReferenceMeters",
+            "durationSeconds",
+            "elevationGainMeters",
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateLoadConfidence",
+            "intensity",
+            "internalLoad",
+            "loadSource",
+            "localDate",
+            "paceLoad",
+            "paceLoadConfidence",
+            "provenance",
+            "rawHrrTrimp",
+            "rpe",
+            "sessionType",
+            "stimulusType",
+            "timezoneIdentifier",
+            "trainingLoad",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 1471
+        },
+        "workout_zone_summaries": {
+          "rows": 41,
+          "columns": [
+            "explanationCodes",
+            "heartRateCoverage",
+            "heartRateExposure",
+            "paceCoverage",
+            "paceExposure",
+            "secondaryStimulusTypes",
+            "stimulusConfidence",
+            "stimulusScores",
+            "stimulusType",
+            "trainingSessionId",
+            "zoneProfileDate"
+          ],
+          "leafValues": 3234
+        },
+        "daily_zone_profiles": {
+          "rows": 43,
+          "columns": [
+            "dataThroughAt",
+            "effectiveAt",
+            "evidence",
+            "heartRateBands",
+            "heartRateConfidence",
+            "heartRateSource",
+            "localDate",
+            "maximumHeartRateBpm",
+            "paceBands",
+            "paceConfidence",
+            "paceSource",
+            "profileStatus",
+            "restingHeartRateBpm",
+            "thresholdPaceSecondsPerKm",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 2537
+        },
+        "daily_training_metrics": {
+          "rows": 43,
+          "columns": [
+            "acuteEwma",
+            "chronicEwma",
+            "confidence",
+            "current7dLoad",
+            "dailyLoad",
+            "distanceKm",
+            "durationSeconds",
+            "explanation",
+            "explanationCodes",
+            "historyDays",
+            "loadRatio",
+            "loadWorkoutCount",
+            "localDate",
+            "monotony",
+            "previous7dLoad",
+            "rampRate",
+            "recoveryEvidence",
+            "strain",
+            "timezoneIdentifier",
+            "trainingStatus",
+            "workoutCount"
+          ],
+          "leafValues": 1077
+        },
+        "training_sessions": {
+          "rows": 41,
+          "columns": [
+            "activityType",
+            "anchorDistanceKm",
+            "anchorEndAt",
+            "anchorStartAt",
+            "canonicalWorkoutId",
+            "status",
+            "trainingSessionId"
+          ],
+          "leafValues": 287
+        },
+        "ability_assessments": {
+          "rows": 41,
+          "columns": [
+            "assessedAt",
+            "assessmentStatus",
+            "cardioScore",
+            "confidence",
+            "confidenceFactors",
+            "currentAbility",
+            "directionFactor",
+            "effectiveWeights",
+            "efficiencyScore",
+            "evidenceStrength",
+            "explanation",
+            "explanationCodes",
+            "featureTrainingSessionId",
+            "growthResistance",
+            "paceScore",
+            "recoveryScore",
+            "sequenceNumber",
+            "stabilityScore",
+            "trainingSessionId",
+            "trueAbilityAfter",
+            "trueAbilityBefore",
+            "trueAbilityDelta",
+            "updatedTrueAbility",
+            "workoutContribution"
+          ],
+          "leafValues": 3445
+        },
+        "daily_ability_snapshots": {
+          "rows": 43,
+          "columns": [
+            "baselineEpochId",
+            "decayPoints",
+            "growthVelocityPerWeek",
+            "lastAssessmentRef",
+            "localDate",
+            "snapshotStatus",
+            "timezoneIdentifier",
+            "trueAbility"
+          ],
+          "leafValues": 344
+        },
+        "model_runs": {
+          "rows": 1,
+          "columns": [
+            "datasetVersion",
+            "evaluatedAt",
+            "featureRun",
+            "modelConfig",
+            "modelConfigHash",
+            "modelVersion",
+            "singleton",
+            "summary"
+          ],
+          "leafValues": 74
+        },
+        "model_v2_runs": {
+          "rows": 1,
+          "columns": [
+            "configVersion",
+            "engineVersion",
+            "lineage",
+            "singleton"
+          ],
+          "leafValues": 17
+        },
+        "model_domain_snapshots": {
+          "rows": 87,
+          "columns": [
+            "asOf",
+            "domain",
+            "payload",
+            "snapshotKey"
+          ],
+          "leafValues": 11619
+        },
+        "model_release_bundles": {
+          "rows": 3,
+          "columns": [
+            "activated",
+            "baseRunOrdinal",
+            "createdAt",
+            "datasetVersion",
+            "evaluation",
+            "runOrdinal",
+            "snapshotDomains",
+            "snapshotProjectionHash",
+            "status"
+          ],
+          "leafValues": 408
+        },
+        "release_readable_state": {
+          "rows": 1,
+          "columns": [
+            "activePublished",
+            "activeReleaseOrdinal",
+            "activeRunOrdinal",
+            "analysisStatus",
+            "bundleStatus",
+            "freshness",
+            "readableDomains",
+            "singleton"
+          ],
+          "leafValues": 98
+        },
+        "analysis_run_input_bindings": {
+          "rows": 1,
+          "columns": [
+            "capturedDependencyGeneration",
+            "capturedRawGeneration",
+            "configDigest",
+            "cutoffAt",
+            "datasetVersion",
+            "overrideDigest",
+            "scope",
+            "singleton",
+            "targetDependencyGeneration",
+            "targetRawGeneration",
+            "timezoneIdentifier"
+          ],
+          "leafValues": 11
+        },
+        "analysis_job_coverage": {
+          "rows": 1,
+          "columns": [
+            "dependencyGenerationFrom",
+            "dependencyGenerationTo",
+            "importBatchId"
+          ],
+          "leafValues": 3
+        }
+      },
+      "pass": true
+    }
+  ],
+  "verification": {
+    "commands": [
+      {
+        "command": "(parsed from log) node --import tsx --test --test-concurrency=2 packages/application/test/training-metric-domain-reuse.test.ts",
+        "log": "deliverables/phase3-import-analysis-2026-10-22/evidence/full-suite-final-2026-10-23.log",
+        "nodeVersion": "v22.23.2",
+        "concurrency": 2,
+        "exitCode": 0,
+        "tests": 2419,
+        "pass": 2406,
+        "fail": 0,
+        "skipped": 13,
+        "durationMs": 626362
+      }
+    ],
+    "negativeControls": {
+      "testFile": "packages/application/test/phase3-business-artifact-differential.test.ts",
+      "note": "See the dedicated run log for exact counts; the comparator now includes missing-table/missing-column/value controls for training_sessions, model_release_bundles and release_readable_state."
+    }
+  },
+  "resolvedDiscrepancy": {
+    "id": "P3-06-D1",
+    "status": "fixed",
+    "fields": [
+      "daily_ability_snapshots.baseline_epoch_id",
+      "ability_assessments.explanation_json.baselineEpochId",
+      "model_v2_runs.lineage_json.baselineEpochId",
+      "model_v2_runs.lineage_json.calibrationCohortHash"
+    ],
+    "originalObservation": {
+      "incrementalBaselineEpochId": "e6dd3a65057fbfdf24547e1131e5ab65b6ad1bef35f62c9b65fcc6935b4adbeb",
+      "offlineFullBaselineEpochId": "63be9bf666731937e3de16539b26fcf146dbaa2c4beadf4e0f00554ef70e375c",
+      "incrementalCalibrationCohortHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945 (sha256 of [])",
+      "offlineFullCalibrationCohortHash": "hash of 15 calibration sessions"
+    },
+    "rootCause": "resumeModelReplay carried the parent checkpoint's baseline.calibrationFeatureIds (run-scoped feature ids of the parent run) into the current run; current features use new ids, so fitnessEpochId/calibrationCohortHash filtered to an empty set.",
+    "fix": "remapResumedCheckpointState() maps parent calibrationFeatureIds and pendingNegativeIds through trainingSessionId to current feature ids, validates count/uniqueness/resolvability/interval/dimensions/order/throughSequence, and copies checkpoints with the remapped state_json + state_hash. Any inconsistency refuses the resume and falls back to full replay.",
+    "comparison": "business-artifact-projection.ts no longer substitutes derived hashes; raw baselineEpochId/calibrationCohortHash are compared field-by-field, with lineage_hash self-verification retained.",
+    "negativeControls": [
+      "tampered lineage baselineEpochId",
+      "tampered daily snapshot baselineEpochId",
+      "tampered assessment explanation baselineEpochId",
+      "tampered assessment explanation calibrationCohortHash"
+    ],
+    "evidence": [
+      "P3-06: consecutive incremental replay keeps the raw baseline epoch stable",
+      "P3-06: a corrupt parent calibration cohort refuses the resume, never an empty cohort",
+      "P3-06 T11: an XML-only route move dirties the old owner and equals offline-full"
+    ],
+    "backwardCompatibility": "Old pre-fix checkpoints remain readable, but a parent lineage with an empty-cohort epoch is refused by the lineage guard; the first incremental after upgrade may recompute all assessments (safe fallback)."
+  },
+  "remediation": {
+    "reviewDate": "2026-10-22",
+    "items": [
+      {
+        "id": "R1-missing-database-recovery",
+        "status": "fixed",
+        "summary": "missing DB is no longer confirmed_absent; scope-level first-empty evidence (import_scope_evidence) plus queued+attempts=0 is required; per-job databaseAbsentAtEnqueue alone blocks",
+        "evidence": "import-restart-receipt-recovery.test.ts 14/14; A/B dual-task fault test"
+      },
+      {
+        "id": "R2-xml-only-route-ownership",
+        "status": "fixed",
+        "summary": "route ownership dirty evidence captured from the actual in-transaction UPDATE; XML-only A→B without GPX dirties both owners; contradictory same-batch ownership rejected",
+        "evidence": "phase3-import-matrix.test.ts 15/15; P3-06 T11 A/B projection"
+      },
+      {
+        "id": "R3-epoch-cohort",
+        "status": "fixed",
+        "summary": "parent checkpoint calibration ids remapped by training session; raw epoch/cohort compared; tamper negative controls fail",
+        "evidence": "training-metric-domain-reuse.test.ts + phase3-business-artifact-differential.test.ts 35/35"
+      },
+      {
+        "id": "R4-acceptance-scope",
+        "status": "fixed",
+        "summary": "T12 readiness/Fitness A/B, F01 GPX SIGKILL, release bundle/evaluation/active/readable-state projection, training_sessions row comparison, and full npm test exit 0 are all evidenced",
+        "evidence": "TEST_MATRIX.md 26/26 covered; full-suite-remediation-2.log EXIT:0"
+      }
+    ],
+    "stageConclusion": "passed_on_target_macos_host_not_deployed",
+    "remainingUnproven": [
+      "Production deployment, production import/full recompute, load test, RSS/P95/capacity claims",
+      "iOS Simulator/device acceptance (no iOS changes in this phase)"
+    ]
+  }
+}

@@ -188,6 +188,60 @@ test("有变更但全被过滤（非评分类型）⇒ health_boundary_unknown f
   assert.ok(range.reasons.includes("health_boundary_unknown"));
 });
 
+test("T05：未知记录类型单独出现 ⇒ full（unknown_record_type，不猜域依赖）", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [{
+      entityKind: "record",
+      changeType: "inserted",
+      newType: "HKQuantityTypeIdentifierFutureMetric",
+      newStart: "2026-01-10T08:10:00.000Z", newEnd: "2026-01-10T08:11:00.000Z",
+      previousType: null, previousStart: null, previousEnd: null
+    }],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, true);
+  assert.equal(range.dirtyFromAt, null);
+  assert.deepEqual(range.domains, { features: null, fitness: null, readiness: null });
+  assert.ok(range.reasons.includes("unknown_record_type"));
+});
+
+test("T05：未知类型与有界已知变更混合 ⇒ 仍 full，已知边界不得掩盖未知影响", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [
+      heartRateChange("2026-01-10T08:10:00.000Z", "2026-01-10T08:11:00.000Z"),
+      {
+        entityKind: "record",
+        changeType: "inserted",
+        newType: "HKQuantityTypeIdentifierFutureMetric",
+        newStart: "2026-01-10T09:10:00.000Z", newEnd: "2026-01-10T09:11:00.000Z",
+        previousType: null, previousStart: null, previousEnd: null
+      }
+    ],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, true, "未知类型没有域依赖证明 ⇒ 不得借 HR 的边界做 partial");
+  assert.equal(range.dirtyFromAt, null);
+  assert.ok(range.reasons.includes("unknown_record_type"));
+});
+
+test("T05：已知非评分类型与有界评分变更混合 ⇒ 仍按已知边界 partial（不误伤白名单）", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [
+      heartRateChange("2026-01-10T08:10:00.000Z", "2026-01-10T08:11:00.000Z"),
+      {
+        entityKind: "record",
+        changeType: "inserted",
+        newType: "HKQuantityTypeIdentifierBodyMass",
+        newStart: "2026-01-10T06:00:00.000Z", newEnd: "2026-01-10T06:00:00.000Z",
+        previousType: null, previousStart: null, previousEnd: null
+      }
+    ],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, false);
+  assert.equal(range.dirtyFromAt, "2026-01-10T08:00:00.000Z");
+});
+
 test("回退原语的边界：区间起点等于训练终点算相交（与 SQL 的 `end_at >= ?` 同义）", () => {
   assert.equal(
     rewindToOverlappingWorkoutStart(
@@ -210,4 +264,57 @@ test("回退原语的边界：区间起点等于训练终点算相交（与 SQL 
     "2026-01-10T08:00:00.000Z",
     "大区间跨两个训练 ⇒ 取最早的训练起点"
   );
+});
+
+
+// ---------------------------------------------------------------------------
+// P1-3（2026-10-23 复审）：删除的旧侧证据
+// ---------------------------------------------------------------------------
+
+test("P1-3：历史 removed 行没有旧侧且同批另有有界变更 ⇒ 仍 full（不能被已知边界吞掉）", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [
+      heartRateChange("2026-01-10T08:10:00.000Z", "2026-01-10T08:11:00.000Z"),
+      {
+        entityKind: "record", changeType: "removed",
+        newType: null, newStart: null, newEnd: null,
+        previousType: null, previousStart: null, previousEnd: null
+      }
+    ],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, true);
+  assert.equal(range.dirtyFromAt, null);
+  assert.ok(range.reasons.includes("legacy_removal_without_previous_range"));
+});
+
+test("P1-3：删除未知类型（旧侧类型未知）⇒ unknown_record_type full", () => {
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [{
+      entityKind: "record", changeType: "removed",
+      newType: null, newStart: null, newEnd: null,
+      previousType: "HKQuantityTypeIdentifierFutureMetric",
+      previousStart: "2026-01-10T08:10:00.000Z", previousEnd: "2026-01-10T08:11:00.000Z"
+    }],
+    workouts: WORKOUTS
+  });
+  assert.equal(range.full, true);
+  assert.ok(range.reasons.includes("unknown_record_type"));
+});
+
+test("P1-3：跨夜删除用旧起点而不是 effective_at 单点回退相交训练", () => {
+  // 睡眠段 22:00–06:00；训练 21:00–22:30。只看 effective_at（06:00）不会与训练相交，
+  // 只看旧起点才会把边界回退到训练开始。
+  const range = planIncrementalAnalysisDirtyRange({
+    changes: [{
+      entityKind: "record", changeType: "removed",
+      newType: null, newStart: null, newEnd: null,
+      previousType: "HKCategoryTypeIdentifierSleepAnalysis",
+      previousStart: "2026-01-09T22:00:00.000Z", previousEnd: "2026-01-10T06:00:00.000Z"
+    }],
+    workouts: [{ startAt: "2026-01-09T21:00:00.000Z", endAt: "2026-01-09T22:30:00.000Z" }]
+  });
+  assert.equal(range.full, false);
+  assert.equal(range.dirtyFromAt, "2026-01-09T21:00:00.000Z");
+  assert.ok(range.reasons.includes("overlapping_workout_rewound"));
 });

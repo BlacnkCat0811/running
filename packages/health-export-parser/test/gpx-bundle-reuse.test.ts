@@ -65,3 +65,29 @@ test("an unchanged batch reuses the bundle hash instead of rescanning every fing
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// P3（2026-10-23）：内容缓存命中但父训练归属变化时，forceChangedRouteIds 仍必须
+// 让 changedRouteIds / ownershipChangedRouteCount 可见。该计数目前没有生产消费者，
+// 但合同/回执口径要求"归属变化"被计入，因此保留并在此钉住缓存命中分支。
+test("a cache-hit route forced by ownership change still reports the ownership count", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-gpx-force-"));
+  const store = await RaiDatabase.open(join(root, "rai.sqlite"), { createMigrationBackup: false });
+  try {
+    mkdirSync(join(root, "workout-routes"), { recursive: true });
+    writeFileSync(join(root, "workout-routes", "A.gpx"), gpx(3), "utf8");
+    await importGpxRoutes(root, store, { preserveAbsent: true });
+    const routeId = (store.database.prepare(
+      "SELECT route_id AS id FROM route_file_fingerprints WHERE relative_path = 'workout-routes/A.gpx'")
+      .get() as { id: string }).id;
+    const forced = await importGpxRoutes(root, store, {
+      preserveAbsent: true, forceChangedRouteIds: [routeId]
+    });
+    assert.equal(forced.skippedRouteCount, 1, "文件字节未变：必须走缓存解析分支");
+    assert.equal(forced.ownershipChangedRouteCount, 1,
+      "缓存命中但归属被强制标记时仍必须计数");
+    assert.deepEqual(forced.changedRouteIds, [routeId]);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

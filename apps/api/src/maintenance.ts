@@ -1,14 +1,46 @@
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import { copyFile, mkdir, open, readdir, rename, rm, stat, statfs } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 
 import { ClientRequestError } from "./api-error.js";
-import { RestoreJournal, RestoreRecoveryRequiredError, type RestoreIntent } from "./restore-journal.js";
+import { faultPoint } from "./fault-injection.js";
+import { closeDeletionOperation, readDatasetEpochState, type DatasetEpochState } from "./dataset-epoch.js";
+import { ImportPublicationJournal } from "./import-publication.js";
+import {
+  isBoundRestoreIntent, RestoreJournal, RestoreRecoveryRequiredError,
+  type BoundRestoreIntent, type RestoreIntent
+} from "./restore-journal.js";
+import { attachRestoreFailureEvidence, type RestoreFailureEvidence } from "./restore-evidence.js";
+import { RuntimeStateStore } from "./runtime-state.js";
 
 import type { BackupDto } from "@rai/api-contracts";
 import { RaiDatabase, runWalCheckpointTruncate } from "@rai/storage-sqlite";
+
+/**
+ * P1-9：删除失败后的**结构化**恢复证据。
+ *
+ * server 不得从 `existsSync()` 推断“已恢复成功”。维护层在异常路径上必须
+ * 明确回答：原库当时是否可读、快照是否恢复出了一个通过校验的库、replace
+ * gate 是否真的释放。
+ */
+export interface DatabaseDeletionFailureEvidence {
+  originalReadable: boolean;
+  originalRestored: boolean;
+  gateReleased: boolean;
+  restoredVerified: boolean;
+}
+
+export class DatabaseDeletionFailure extends AggregateError {
+  constructor(
+    message: string, errors: unknown[], readonly evidence: DatabaseDeletionFailureEvidence,
+    options?: ErrorOptions
+  ) {
+    super(errors, message, options);
+    this.name = "DatabaseDeletionFailure";
+  }
+}
 
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => {
   database.exec(`PRAGMA busy_timeout = ${milliseconds}`);
@@ -51,6 +83,20 @@ const validateRaiDatabaseIdentity = (database: DatabaseSync): void => {
     if (initialMigration?.present !== 1) throw new Error("备份不是有效的 RAI 数据库");
   }
 };
+
+/**
+ * Caller-supplied identity for a production restore. When present the journal
+ * is a {@link BoundRestoreIntent} and remains open after the main database
+ * commit until {@link DatabaseMaintenance.finalizeCommittedRestore} finishes
+ * the sidecar, scope and publication-intent settlement.
+ */
+export interface RestoreOperationContext {
+  plannedEpoch: string;
+  configuredEpoch: string;
+  serverId: string;
+  athleteId: string;
+  deletionId: string | null;
+}
 
 export interface BackupPolicyOptions {
   maxCount?: number;
@@ -115,6 +161,7 @@ export interface DisplacedDatabaseReclamation {
 
 export class DatabaseMaintenance {
   private readonly restoreJournal: RestoreJournal;
+  private readonly runtimeRoot: string;
   readonly backupDirectory: string;
   readonly quarantineDirectory: string;
 
@@ -128,6 +175,7 @@ export class DatabaseMaintenance {
     private readonly moveFile: (source: string, destination: string) => Promise<void> = rename,
     private readonly backupPolicy: BackupPolicyOptions = {}
   ) {
+    this.runtimeRoot = projectRoot;
     this.restoreJournal = new RestoreJournal(databasePath, projectRoot);
     this.backupDirectory = resolve(projectRoot, "var/backups");
     this.quarantineDirectory = resolve(projectRoot, "var/quarantine");
@@ -158,9 +206,18 @@ export class DatabaseMaintenance {
     const intent = this.restoreJournal.read();
     if (!intent) return;
     if (intent.phase === "committed") {
-      if (!this.isReadableDatabase(this.databasePath)) {
-        throw new RestoreRecoveryRequiredError("Committed restore database is unreadable");
+      if (isBoundRestoreIntent(intent)) {
+        // The durable intent, the actual main bytes and the epoch written by
+        // the committed restore must all agree before any sidecar/scope or
+        // publication state is allowed to move.
+        await this.finalizeBoundRestore(intent);
+        return;
       }
+      // A legacy committed journal has no planned epoch, deletion binding or
+      // main-byte hash. "Readable" alone cannot prove which dataset was
+      // restored, so it must never be finalized automatically.
+      throw new RestoreRecoveryRequiredError(
+        "Legacy committed restore journal cannot be verified; manual recovery required");
     } else if (intent.snapshot) {
       // Copy from an immutable snapshot. If recovery itself is killed, the same
       // intent can be replayed without consuming its only rollback point.
@@ -172,6 +229,119 @@ export class DatabaseMaintenance {
     await this.syncDirectory(dirname(this.databasePath));
     this.restoreJournal.clear();
     for (const suffix of ["-shm", "-wal", ""]) await this.removeFileWithRetry(`${intent.staging}${suffix}`);
+  }
+
+  /**
+   * Finish the durable metadata settlement of a committed bound restore.
+   *
+   * Idempotent: sidecar closure, scope registration and publication-intent
+   * supersession are replayed in full after every crash point. The journal is
+   * cleared only after all three have succeeded, so a later startup can resume
+   * from exactly the same intent.
+   */
+  async finalizeCommittedRestore(): Promise<void> {
+    const intent = this.restoreJournal.read();
+    if (intent === null) return;
+    if (intent.phase !== "committed") {
+      throw new RestoreRecoveryRequiredError("The restore journal is not at the committed phase");
+    }
+    if (!isBoundRestoreIntent(intent)) {
+      this.restoreJournal.clear();
+      await this.removeRestoreStaging(intent);
+      return;
+    }
+    await this.finalizeBoundRestore(intent);
+  }
+
+  private async finalizeBoundRestore(intent: BoundRestoreIntent): Promise<void> {
+    // Verify the main bytes and read the bound deletion in the same snapshot;
+    // never re-read a possibly different file between verification and closing.
+    const state = await this.verifyCommittedRestore(intent);
+    const at = new Date().toISOString();
+    const deletion = state.deletion;
+    if (intent.deletionId !== null && deletion === null) {
+      throw new RestoreRecoveryRequiredError(
+        `Restore intent is bound to deletion ${JSON.stringify(intent.deletionId)}, but the sidecar has no `
+        + "deletion operation; manual recovery required");
+    }
+    if (deletion !== null && deletion.deletionId !== intent.deletionId) {
+      throw new RestoreRecoveryRequiredError(
+        `Restore intent is bound to deletion ${JSON.stringify(intent.deletionId)}, but the sidecar records `
+        + `${JSON.stringify(deletion.deletionId)}; manual recovery required`);
+    }
+    const store = new RuntimeStateStore(this.runtimeRoot);
+    if (deletion !== null) {
+      // Same order as every other rollback: revoke before closing.
+      store.revokeDeletionPermit(
+        JSON.stringify([intent.serverId, intent.athleteId, deletion.nextEpoch]), deletion.deletionId, at);
+    }
+    closeDeletionOperation(this.databasePath, intent.configuredEpoch, intent.plannedEpoch, {
+      ...(deletion === null ? {} : { deletionId: deletion.deletionId }),
+      reason: "explicit backup restore committed",
+      at,
+      supersedeConsumed: true
+    });
+    store.markScopeDatasetEstablished(
+      JSON.stringify([intent.serverId, intent.athleteId, intent.plannedEpoch]), at);
+    // Publication intents that predate the replacement belong to bytes that are
+    // gone by operator decision. They become inert only after the restored
+    // main database, sidecar epoch and scope are all durable.
+    new ImportPublicationJournal(this.databasePath, this.runtimeRoot)
+      .supersedeWithRestore(intent.plannedEpoch);
+    // Acceptance-only barrier: sidecar, scope and publication intents are all
+    // settled, but the durable intent has not been cleared yet.
+    faultPoint("restore:before-journal-clear");
+    await this.removeRestoreStaging(intent);
+    this.restoreJournal.clear();
+  }
+
+  private async verifyCommittedRestore(intent: BoundRestoreIntent): Promise<DatasetEpochState> {
+    if (!existsSync(this.databasePath)) {
+      throw new RestoreRecoveryRequiredError("Committed restore database is missing");
+    }
+    try {
+      if (intent.mainSha256 !== undefined) {
+        const actual = await this.hashFile(this.databasePath);
+        if (actual.sha256 !== intent.mainSha256) {
+          throw new Error("main database bytes do not match the committed restore intent");
+        }
+      }
+      const state = readDatasetEpochState(this.databasePath, intent.configuredEpoch, {
+        strictConfigured: true, identity: { serverId: intent.serverId, athleteId: intent.athleteId }
+      });
+      if (state.mainEpochExplicit !== true || state.epoch !== intent.plannedEpoch) {
+        throw new Error(`main database reports epoch ${JSON.stringify(state.epoch)}, `
+          + `not the planned restore epoch ${JSON.stringify(intent.plannedEpoch)}`);
+      }
+      if (!this.isVerifiedRestoredDatabase(this.databasePath)) {
+        throw new Error("main database failed identity or integrity verification");
+      }
+      return state;
+    } catch (error) {
+      if (error instanceof RestoreRecoveryRequiredError) throw error;
+      throw new RestoreRecoveryRequiredError(
+        "Committed restore does not match its durable intent", { cause: error });
+    }
+  }
+
+  private async removeRestoreStaging(intent: RestoreIntent): Promise<void> {
+    for (const suffix of ["-shm", "-wal", ""]) {
+      await this.removeFileWithRetry(`${intent.staging}${suffix}`).catch(() => {});
+    }
+  }
+
+  private async hashFile(path: string): Promise<{ sha256: string; sizeBytes: number }> {
+    const before = await stat(path);
+    const hash = createHash("sha256");
+    await new Promise<void>((resolveStream, rejectStream) => {
+      const stream = createReadStream(path);
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.once("error", rejectStream);
+      stream.once("end", resolveStream);
+    });
+    const after = await stat(path);
+    if (before.size !== after.size) throw new Error(`File changed while hashing: ${path}`);
+    return { sha256: hash.digest("hex"), sizeBytes: after.size };
   }
 
   private protectedRestoreSnapshot(): string[] {
@@ -192,6 +362,10 @@ export class DatabaseMaintenance {
     try {
       await this.backupDatabase(database, staging);
       await rename(staging, destination);
+      // The deletion journal may be fsynced immediately after this returns.
+      // Make its recovery snapshot durable first, including the directory entry.
+      await this.syncFile(destination);
+      await this.syncDirectory(this.backupDirectory);
     } catch (error) {
       try {
         await this.removeFileWithRetry(staging);
@@ -259,7 +433,10 @@ export class DatabaseMaintenance {
     return backupInfo;
   }
 
-  async deleteDatabase(prepareDeletion: () => void = () => {}): Promise<BackupDto & { restorable?: boolean }> {
+  async deleteDatabase(
+    prepareDeletion: (backup: BackupDto & { restorable?: boolean }) => void = () => {},
+    afterRemoval: () => void = () => {}
+  ): Promise<BackupDto & { restorable?: boolean }> {
     const originalReadable = this.isReadableDatabase(this.databasePath);
     let backupIsQuarantine = false;
     let backupInfo: BackupDto;
@@ -280,22 +457,35 @@ export class DatabaseMaintenance {
     }
     try {
       if (this.isReadableDatabase(this.databasePath)) this.checkpointDatabase(this.databasePath);
-      prepareDeletion();
+      prepareDeletion(backupInfo);
       await this.removeFileWithRetry(`${this.databasePath}-shm`);
       await this.removeFileWithRetry(`${this.databasePath}-wal`);
       await this.removeFileWithRetry(this.databasePath);
+      // The unlink is not durable until the directory entry is flushed. Only the
+      // caller's `afterRemoval` may persist `main_removed`, so a crash before this
+      // point remains a *prepared* (ambiguous) deletion, never an assumed one.
+      await this.syncDirectory(dirname(this.databasePath));
+      faultPoint("deletion:after-main-unlinked");
+      afterRemoval();
       await this.releaseReplaceGate();
       replaceGateEntered = false;
       return backupInfo;
     } catch (error) {
       const errors: unknown[] = [error];
       let originalRestored = false;
+      let restoredVerified = false;
       if (!this.isReadableDatabase(this.databasePath)) {
         const restoreErrors = await this.restoreDeletedDatabase(backupPath, backupIsQuarantine);
         errors.push(...restoreErrors);
         originalRestored = restoreErrors.length === 0;
+        restoredVerified = originalRestored && this.isVerifiedRestoredDatabase(this.databasePath);
+      } else {
+        restoredVerified = this.isVerifiedRestoredDatabase(this.databasePath);
       }
-      if (replaceGateEntered && (this.isReadableDatabase(this.databasePath) || (!originalReadable && originalRestored))) {
+      // P1-9: the replace gate is released on **every** failure path. Leaving it
+      // entered hides the main database from maintenance for the rest of the
+      // process, which is strictly worse than surfacing "not verified".
+      if (replaceGateEntered) {
         try {
           await this.releaseReplaceGate();
           replaceGateEntered = false;
@@ -303,28 +493,114 @@ export class DatabaseMaintenance {
           errors.push(releaseError);
         }
       }
-      throw errors.length === 1
-        ? error
-        : new AggregateError(errors, "Database deletion failed and required recovery actions also failed");
+      const primary = errors[0];
+      throw new DatabaseDeletionFailure(
+        errors.length === 1
+          ? (primary instanceof Error ? primary.message : String(primary))
+          : "Database deletion failed and required recovery actions also failed",
+        errors,
+        {
+          originalReadable,
+          originalRestored,
+          gateReleased: !replaceGateEntered,
+          restoredVerified
+        },
+        { cause: errors.length === 1 ? primary : new AggregateError(errors) }
+      );
     }
   }
 
+  /**
+   * Side-effect-free checks that can run **before** the API freezes imports.
+   *
+   * The backup name and existence are cheap and prove the request cannot
+   * proceed; doing them before the freeze shrinks the frozen window to actual
+   * candidate work. `restoreBackup()` repeats them under the restore flow
+   * because the filesystem can change in between.
+   */
+  preflightRestore(name: string): { backupDirectory: string; source: string } {
+    if (name !== basename(name) || !name.endsWith(".sqlite")) {
+      throw new ClientRequestError("invalid_backup_name", "备份文件名无效", 400);
+    }
+    if (this.restoreJournal.read()) {
+      throw new RestoreRecoveryRequiredError("A previous restore needs startup recovery");
+    }
+    const source = resolve(this.backupDirectory, name);
+    if (!existsSync(source)) throw new ClientRequestError("backup_not_found", "备份文件不存在", 404);
+    // Cheap identity preflight only; full quick_check/foreign_key validation
+    // still runs on the private staging copy after the freeze.
+    const candidate = new DatabaseSync(source, { readOnly: true });
+    try {
+      validateRaiDatabaseIdentity(candidate);
+    } finally {
+      candidate.close();
+    }
+    return { backupDirectory: this.backupDirectory, source };
+  }
+
+  /**
+   * Replace the main database with a backup.
+   *
+   * Every failure carries {@link RestoreFailureEvidence}: "the request was
+   * rejected" is a claim about *side effects*, not about the error code. The
+   * API uses it (plus its own independent checks) to decide whether a temporary
+   * import freeze may be released.
+   */
   async restoreBackup(
     name: string,
     beforeCommit: () => void | Promise<void> = () => {},
-    prepareReplacement: (database: DatabaseSync) => void = () => {}
+    prepareReplacement: (database: DatabaseSync) => void = () => {},
+    operation?: RestoreOperationContext
   ): Promise<{ restored: BackupDto; safetyBackup: BackupDto | null }> {
-    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new ClientRequestError("invalid_backup_name", "备份文件名无效", 400);
-    if (this.restoreJournal.read()) throw new RestoreRecoveryRequiredError("A previous restore needs startup recovery");
-    const source = resolve(this.backupDirectory, name);
-    if (!existsSync(source)) throw new ClientRequestError("backup_not_found", "备份文件不存在", 404);
+    const evidence: RestoreFailureEvidence = {
+      version: 1,
+      mainDatabaseTouched: false,
+      originalExisted: existsSync(this.databasePath),
+      originalSnapshotDurable: false,
+      originalRestoredVerified: false,
+      recoveryErrors: 0,
+      replaceGateReleased: true,
+      restoreJournalClosed: false
+    };
+    try {
+      return await this.restoreBackupInner(name, beforeCommit, prepareReplacement, evidence, operation);
+    } catch (error) {
+      try {
+        evidence.restoreJournalClosed = this.restoreJournal.read() === null;
+      } catch {
+        // An unreadable journal is not a closed journal.
+        evidence.restoreJournalClosed = false;
+      }
+      attachRestoreFailureEvidence(error, { ...evidence });
+      throw error;
+    }
+  }
+
+  private async restoreBackupInner(
+    name: string,
+    beforeCommit: () => void | Promise<void>,
+    prepareReplacement: (database: DatabaseSync) => void,
+    evidence: RestoreFailureEvidence,
+    operation?: RestoreOperationContext
+  ): Promise<{ restored: BackupDto; safetyBackup: BackupDto | null }> {
+    // Re-check under the restore flow: the name/existence preflight ran before
+    // the import freeze, and a file can disappear while the freeze is prepared.
+    const { source } = this.preflightRestore(name);
     let safetyBackup: BackupDto | null = null;
     let intent: RestoreIntent | null = null;
     const staging = `${this.databasePath}.restoring.${randomUUID()}`;
     const rollback = resolve(this.backupDirectory, `rai.restore-rollback.${randomUUID()}.sqlite`);
     try {
       await mkdir(dirname(this.databasePath), { recursive: true });
+      // Bind the exact backup bytes the operator authorized, not merely its
+      // name: the source can be rotated/replaced while the request is frozen.
+      const authorizedBackup = await this.hashFile(source);
       await copyFile(source, staging);
+      const copiedBackup = await this.hashFile(staging);
+      if (copiedBackup.sha256 !== authorizedBackup.sha256
+          || copiedBackup.sizeBytes !== authorizedBackup.sizeBytes) {
+        throw new Error("Backup bytes changed while the restore was being prepared");
+      }
       const sourceCandidate = new DatabaseSync(staging, { readOnly: true });
       try {
         validateRaiDatabaseIdentity(sourceCandidate);
@@ -367,6 +643,7 @@ export class DatabaseMaintenance {
         throw error;
       }
       const originalExisted = existsSync(this.databasePath);
+      evidence.originalExisted = originalExisted;
       const originalReadable = originalExisted && this.isReadableDatabase(this.databasePath);
       let originalMoved = false;
       let corruptSnapshotPath: string | null = null;
@@ -377,10 +654,22 @@ export class DatabaseMaintenance {
           const snapshot = await this.preserveCorruptDatabase("before-restore-corrupt");
           corruptSnapshotPath = resolve(this.quarantineDirectory, snapshot.name);
         }
-        intent = {
+        const commonIntent = {
           target: resolve(this.databasePath), staging: resolve(staging),
           snapshot: corruptSnapshotPath ?? (safetyBackup ? resolve(this.backupDirectory, safetyBackup.name) : null),
-          snapshotIsQuarantine: corruptSnapshotPath !== null, phase: "prepared"
+          snapshotIsQuarantine: corruptSnapshotPath !== null, phase: "prepared" as const
+        };
+        intent = operation === undefined ? commonIntent : {
+          ...commonIntent,
+          version: 2 as const,
+          configuredEpoch: operation.configuredEpoch,
+          serverId: operation.serverId,
+          athleteId: operation.athleteId,
+          deletionId: operation.deletionId,
+          backupName: basename(source),
+          backupSha256: authorizedBackup.sha256,
+          backupSizeBytes: authorizedBackup.sizeBytes,
+          plannedEpoch: operation.plannedEpoch
         };
         if (originalExisted && !intent.snapshot) throw new Error("Restore requires a durable original snapshot");
         if (intent.snapshot) {
@@ -392,6 +681,9 @@ export class DatabaseMaintenance {
         await this.syncFile(staging);
         this.restoreJournal.write(intent);
         await this.syncDirectory(dirname(this.databasePath));
+        evidence.originalSnapshotDurable = !originalExisted || intent.snapshot !== null;
+        // From here on the main database bytes (or their absence) may change.
+        evidence.mainDatabaseTouched = true;
         if (originalExisted) {
           if (originalReadable) {
             const current = new DatabaseSync(this.databasePath);
@@ -418,31 +710,53 @@ export class DatabaseMaintenance {
         await this.removeFileWithRetry(`${this.databasePath}-wal`);
         await this.installReplacementWithRetry(staging, this.databasePath);
         this.restoreJournal.write({ ...intent, phase: "installed" });
+        // Acceptance-only barrier: proves the rollback-and-verify path really
+        // releases the temporary freeze on a post-gate failure.
+        faultPoint("restore:after-install");
         await beforeCommit();
         this.checkpointDatabase(this.databasePath);
         await this.syncFile(this.databasePath);
         await this.syncDirectory(dirname(this.databasePath));
         await this.releaseReplaceGate();
         replaceGateEntered = false;
-        this.restoreJournal.write({ ...intent, phase: "committed" });
+        if (isBoundRestoreIntent(intent)) {
+          const main = await this.hashFile(this.databasePath);
+          this.restoreJournal.write({ ...intent, phase: "committed", mainSha256: main.sha256 });
+        } else {
+          this.restoreJournal.write({ ...intent, phase: "committed" });
+        }
         committed = true;
       } catch (error) {
         const errors: unknown[] = [error];
+        // A failure inside the rollback itself must still fall through to the
+        // evidence/gate handling below: skipping it would leave the journal open
+        // without an explicit decision and without recorded evidence.
+        const recover = async (action: () => Promise<unknown[]>): Promise<void> => {
+          try { errors.push(...await action()); }
+          catch (recoveryError) { errors.push(recoveryError); }
+        };
         if (originalMoved) {
-          errors.push(...await this.restoreOriginalDatabase(rollback));
-        } else if (corruptSnapshotPath) {
-          errors.push(...await this.restoreDatabaseGroup(corruptSnapshotPath, false));
-        } else if (!originalExisted && existsSync(this.databasePath)) {
+          await recover(() => this.restoreOriginalDatabase(rollback));
+        } else if (corruptSnapshotPath !== null) {
+          const snapshotPath: string = corruptSnapshotPath;
+          await recover(() => this.restoreDatabaseGroup(snapshotPath, false));
+        } else if (!originalExisted) {
+          // When the original state was "no main database", a readable
+          // candidate is kept in place during failure handling (deleting the
+          // only readable database would be worse), but the journal below stays
+          // open so startup rolls the absence back from the durable intent.
           try {
             await this.removeFileWithRetry(`${this.databasePath}-shm`);
             await this.removeFileWithRetry(`${this.databasePath}-wal`);
-          } catch (sidecarError) {
-            errors.push(sidecarError);
+            await this.syncDirectory(dirname(this.databasePath));
+          } catch (removalError) {
+            errors.push(removalError);
           }
         }
         const activeReadable = this.isReadableDatabase(this.databasePath);
         if (replaceGateEntered && (
           activeReadable ||
+          (!originalExisted && !existsSync(this.databasePath)) ||
           (!originalReadable && !originalMutationStarted && existsSync(this.databasePath)) ||
           (!originalReadable && corruptSnapshotPath !== null && errors.length === 1)
         )) {
@@ -462,9 +776,28 @@ export class DatabaseMaintenance {
             errors.push(releaseError);
           }
         }
-        if (errors.length === 1 && intent) this.restoreJournal.clear();
+        // Evidence is recorded before the throw so the caller never has to
+        // infer side effects from the error class or message.
+        evidence.recoveryErrors = Math.max(0, errors.length - 1);
+        evidence.replaceGateReleased = !replaceGateEntered;
+        evidence.originalRestoredVerified = !originalExisted
+          ? !existsSync(this.databasePath) && errors.length === 1
+          : errors.length === 1 && existsSync(this.databasePath) && this.isReadableDatabase(this.databasePath);
+        const corruptGroupRestored = originalExisted && !originalReadable
+          && corruptSnapshotPath !== null && errors.length === 1;
+        if (errors.length === 1 && intent
+            && (evidence.originalRestoredVerified
+              || (operation === undefined && corruptGroupRestored))) {
+          // A legacy/low-level caller can treat an exact corrupt-group restore
+          // as closing the attempt. A bound production intent keeps its
+          // deletion/backup/epoch binding until startup verifies the restore.
+          this.restoreJournal.clear();
+        }
         if (this.restoreJournal.read()) {
-          throw new RestoreRecoveryRequiredError("Database restore needs startup recovery", { cause: new AggregateError(errors) });
+          const primaryMessage = errors[0] instanceof Error ? errors[0].message : String(errors[0]);
+          throw new RestoreRecoveryRequiredError(
+            `${primaryMessage}; database restore needs startup recovery`,
+            { cause: new AggregateError(errors) });
         }
         throw errors.length === 1 ? error : new AggregateError(errors, "Database restore failed and required recovery actions also failed");
       } finally {
@@ -473,7 +806,14 @@ export class DatabaseMaintenance {
           await this.removeFileWithRetry(rollback).catch(() => {});
         }
       }
-      this.restoreJournal.clear();
+      // Acceptance-only barrier: the main database and the durable intent are
+      // committed, but no sidecar, scope or publication state has moved yet.
+      // Keep this outside the rollback `catch`: a throw here must not pretend
+      // the already-committed restore can be rolled back in-process.
+      faultPoint("restore:after-commit");
+      // A bound production restore stays replayable until the caller confirms
+      // that the sidecar, scope and publication intents were settled.
+      if (operation === undefined) this.restoreJournal.clear();
       return { restored: await this.describe(name), safetyBackup };
     } catch (error) {
       const cleanupErrors: unknown[] = [];
@@ -495,6 +835,9 @@ export class DatabaseMaintenance {
   }
 
   private async restoreOriginalDatabase(rollback: string): Promise<unknown[]> {
+    // Acceptance-only barrier: simulates the rollback itself failing. The
+    // caller must keep the dataset blocked and the journal open.
+    faultPoint("restore:rollback-original");
     const errors: unknown[] = [];
     const activeExists = existsSync(this.databasePath);
     const activeReadable = activeExists && this.isReadableDatabase(this.databasePath);
@@ -520,6 +863,8 @@ export class DatabaseMaintenance {
     }
     try {
       await this.moveFileWithRetry(rollback, this.databasePath);
+      await this.syncFile(this.databasePath);
+      await this.syncDirectory(dirname(this.databasePath));
     } catch (error) {
       errors.push(error);
     }
@@ -541,6 +886,8 @@ export class DatabaseMaintenance {
       if (!this.isReadableDatabase(this.databasePath)) {
         throw new Error("Safety backup did not restore a readable active database");
       }
+      await this.syncFile(this.databasePath);
+      await this.syncDirectory(dirname(this.databasePath));
     } catch (error) {
       errors.push(error);
     } finally {
@@ -566,11 +913,14 @@ export class DatabaseMaintenance {
       }
       for (const suffix of available.filter((suffix) => suffix !== "")) {
         await this.moveFileWithRetry(`${stagingBase}${suffix}`, `${this.databasePath}${suffix}`);
+        await this.syncFile(`${this.databasePath}${suffix}`);
       }
       await this.moveFileWithRetry(stagingBase, this.databasePath);
       if (requireReadable && !this.isReadableDatabase(this.databasePath)) {
         throw new Error("Safety backup did not restore a readable active database");
       }
+      await this.syncFile(this.databasePath);
+      await this.syncDirectory(dirname(this.databasePath));
     } catch (error) {
       errors.push(error);
     } finally {
@@ -614,6 +964,8 @@ export class DatabaseMaintenance {
       const main = staged.find((item) => item.suffix === "");
       if (!main) throw new Error("Local RAI database does not exist");
       await rename(main.staging, main.published);
+      for (const item of staged) await this.syncFile(item.published);
+      await this.syncDirectory(this.quarantineDirectory);
     } catch (error) {
       const cleanupErrors: unknown[] = [];
       for (const item of staged) {
@@ -779,6 +1131,23 @@ export class DatabaseMaintenance {
     } finally {
       database.close();
     }
+  }
+
+  /**
+   * P1-9: `quick_check` alone is not enough to declare "the old dataset is
+   * back". The restored file must also still be a RAI database: the canonical
+   * tables and the columns the API will query on the first request.
+   */
+  private isVerifiedRestoredDatabase(path: string): boolean {
+    if (!this.isReadableDatabase(path)) return false;
+    let database: DatabaseSync | undefined;
+    try {
+      database = new DatabaseSync(path, { readOnly: true });
+      validateRaiDatabaseIdentity(database);
+      return true;
+    } catch {
+      return false;
+    } finally { database?.close(); }
   }
 
   private isReadableDatabase(path: string): boolean {

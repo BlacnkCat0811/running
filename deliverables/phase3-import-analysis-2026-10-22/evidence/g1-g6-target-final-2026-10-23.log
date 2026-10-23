@@ -1,0 +1,543 @@
+TAP version 13
+# (node:13523) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果
+ok 1 - 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果
+  ---
+  duration_ms: 2054.877938
+  type: 'test'
+  ...
+# Subtest: 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次
+ok 2 - 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次
+  ---
+  duration_ms: 1091.212869
+  type: 'test'
+  ...
+# Subtest: 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算
+ok 3 - 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算
+  ---
+  duration_ms: 1066.812729
+  type: 'test'
+  ...
+# Subtest: 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断
+ok 4 - 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断
+  ---
+  duration_ms: 151.676161
+  type: 'test'
+  ...
+# Subtest: 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度
+ok 5 - 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度
+  ---
+  duration_ms: 163.0299
+  type: 'test'
+  ...
+# (node:13524) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务
+ok 6 - record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务
+  ---
+  duration_ms: 268.624611
+  type: 'test'
+  ...
+# Subtest: P0-3/P2-3：回执带 records 计数（parsed/inserted/unchanged），提交成功的批次带四段阶段账本
+ok 7 - P0-3/P2-3：回执带 records 计数（parsed/inserted/unchanged），提交成功的批次带四段阶段账本
+  ---
+  duration_ms: 266.169904
+  type: 'test'
+  ...
+# Subtest: Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）
+ok 8 - Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）
+  ---
+  duration_ms: 9835.619554
+  type: 'test'
+  ...
+# Subtest: O04：训练内的记录变更把脏下界回退到相交训练起点（不再是变更时刻）
+ok 9 - O04：训练内的记录变更把脏下界回退到相交训练起点（不再是变更时刻）
+  ---
+  duration_ms: 231.589876
+  type: 'test'
+  ...
+# Subtest: 删除-only 载荷：显式删除先于到达也要求分析，且不误删同来源其它事实
+ok 10 - 删除-only 载荷：显式删除先于到达也要求分析，且不误删同来源其它事实
+  ---
+  duration_ms: 230.055622
+  type: 'test'
+  ...
+# Subtest: GPX 路线：路线变更同样要求分析，且路线版本对读侧可见（末批发布）
+ok 11 - GPX 路线：路线变更同样要求分析，且路线版本对读侧可见（末批发布）
+  ---
+  duration_ms: 250.904015
+  type: 'test'
+  ...
+# Subtest: manifest_exceeds_bounds 的 bounds 键必须与 actual 同指一个量（P3a）
+ok 12 - manifest_exceeds_bounds 的 bounds 键必须与 actual 同指一个量（P3a）
+  ---
+  duration_ms: 1.279335
+  type: 'test'
+  ...
+# Subtest: 超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）
+ok 13 - 超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）
+  ---
+  duration_ms: 303.937591
+  type: 'test'
+  ...
+# Subtest: 收口窗口 (2, 8] MiB：data-only 拒、统一接收器接受（P2-4）
+ok 14 - 收口窗口 (2, 8] MiB：data-only 拒、统一接收器接受（P2-4）
+  ---
+  duration_ms: 8551.022022
+  type: 'test'
+  ...
+# Subtest: 边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4）
+ok 15 - 边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4）
+  ---
+  duration_ms: 394.060317
+  type: 'test'
+  ...
+# Subtest: 拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason
+ok 16 - 拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason
+  ---
+  duration_ms: 248.678784
+  type: 'test'
+  ...
+# Subtest: 空库首包（四项身份全缺）+ v2 载荷 ⇒ 就地初始化：四要素齐备、第二包照常（S3.2/D3）
+ok 17 - 空库首包（四项身份全缺）+ v2 载荷 ⇒ 就地初始化：四要素齐备、第二包照常（S3.2/D3）
+  ---
+  duration_ms: 407.542848
+  type: 'test'
+  ...
+# Subtest: 写守卫：接收事务写派生分析/发布表 ⇒ 立刻被拒；写事实表允许（阳性对照）
+ok 18 - 写守卫：接收事务写派生分析/发布表 ⇒ 立刻被拒；写事实表允许（阳性对照）
+  ---
+  duration_ms: 188.164178
+  type: 'test'
+  ...
+# Subtest: fail-closed：出现未表态的表时，守卫拒绝安装（而不是默认放行）
+ok 19 - fail-closed：出现未表态的表时，守卫拒绝安装（而不是默认放行）
+  ---
+  duration_ms: 162.648915
+  type: 'test'
+  ...
+# Subtest: PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变
+ok 20 - PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变
+  ---
+  duration_ms: 333.295767
+  type: 'test'
+  ...
+# Subtest: O10（WP-31）：一批里两个**不相邻**时期 ⇒ 逐时期重建，中间那段（间隙）逐字节不变
+ok 21 - O10（WP-31）：一批里两个**不相邻**时期 ⇒ 逐时期重建，中间那段（间隙）逐字节不变
+  ---
+  duration_ms: 363.163672
+  type: 'test'
+  ...
+# Subtest: R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口）
+ok 22 - R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口）
+  ---
+  duration_ms: 311.707866
+  type: 'test'
+  ...
+# Subtest: PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）
+ok 23 - PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）
+  ---
+  duration_ms: 303.344617
+  type: 'test'
+  ...
+# Subtest: A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执整批回滚
+ok 24 - A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执整批回滚
+  ---
+  duration_ms: 276.84721
+  type: 'test'
+  ...
+# Subtest: §4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接路径的门槛）
+ok 25 - §4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接路径的门槛）
+  ---
+  duration_ms: 194.921562
+  type: 'test'
+  ...
+# Subtest: P1-1：source_xml_bytes 报磁盘字节数，不是解码后重编码的长度
+ok 26 - P1-1：source_xml_bytes 报磁盘字节数，不是解码后重编码的长度
+  ---
+  duration_ms: 199.217996
+  type: 'test'
+  ...
+# Subtest: P1-1：prepare 阶段不得再整读 XML（AST 级，行为判据看不见这一条）
+ok 27 - P1-1：prepare 阶段不得再整读 XML（AST 级，行为判据看不见这一条）
+  ---
+  duration_ms: 88.056455
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# [WP-41 实测] 20 小批：ingest 线程 started=1 retired=0 tasks=20；一次启动 startupMs=564.6 ms；RSS 首批=161324 KiB 末批=179780 KiB max=179780 KiB；import_lanes_transaction 首批=69.0 ms 末批=50.1 ms；dataOnlyApply 首批=61.7 ms 末批=45.6 ms
+# Subtest: 20 个连续小批：ingest 线程只起 1 条，且启动成本只付一次（实测计数与毫秒）
+ok 28 - 20 个连续小批：ingest 线程只起 1 条，且启动成本只付一次（实测计数与毫秒）
+  ---
+  duration_ms: 7969.808025
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: no-op 回执在常驻线程执行：连续 10 批复用一条线程，不落回主线程事务
+ok 29 - no-op 回执在常驻线程执行：连续 10 批复用一条线程，不落回主线程事务
+  ---
+  duration_ms: 2731.284936
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Recovered committed import web_import_mvk0nm5i_e0c5bfe0-b186-4723-b7fc-1bcb63f016c7 after its worker reply was lost.
+# Subtest: 提交后回复丢失：从持久回执恢复同一个 no-op 成功结果
+ok 30 - 提交后回复丢失：从持久回执恢复同一个 no-op 成功结果
+  ---
+  duration_ms: 1013.065313
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: no-op 提交等待期间取消返回 publishing，不终止线程，提交后仍成功
+ok 31 - no-op 提交等待期间取消返回 publishing，不终止线程，提交后仍成功
+  ---
+  duration_ms: 1043.911729
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nnri_f8389a61-d681-4a55-b70c-339c8bfcfa10 failed: Error: Import worker is shutting down before its ingest worker became ready
+#     at ImportWorker.databaseTask (/Users/ta/running/apps/api/src/import-worker.ts:1544:33)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:903:22)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:548:11)
+# Subtest: worker 冷启动期间 close：ready 与任务结算，关闭完成且不重建线程
+ok 32 - worker 冷启动期间 close：ready 与任务结算，关闭完成且不重建线程
+  ---
+  duration_ms: 1029.399317
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nokf_84fa3e8a-8d3d-46aa-9d4a-6224c800c590 failed: Error: Ingest worker thread exited with code 0
+#     at Worker.<anonymous> (/Users/ta/running/apps/api/src/import-worker.ts:1365:11)
+#     at Object.onceWrapper (node:events:634:26)
+#     at Worker.emit (node:events:531:35)
+#     at [kOnExit] (node:internal/worker:318:10)
+#     at Worker.<computed>.onexit (node:internal/worker:232:20)
+# Subtest: ready 前真实退出：启动等待被结算，任务不悬挂
+ok 33 - ready 前真实退出：启动等待被结算，任务不悬挂
+  ---
+  duration_ms: 1037.305198
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0npcv_b3f6a721-98ce-4a65-bd0c-47a6059ec805 failed: Error: Import worker is shutting down before its ingest worker became ready
+#     at ImportWorker.databaseTask (/Users/ta/running/apps/api/src/import-worker.ts:1544:33)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:903:22)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:548:11)
+# Subtest: ready 前 error 事件：启动等待同样被拒绝，close 不悬挂
+ok 34 - ready 前 error 事件：启动等待同样被拒绝，close 不悬挂
+  ---
+  duration_ms: 1032.089737
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Recovered committed import web_import_mvk0nq6n_2197e36a-e47f-448d-86eb-0a08078741d6 after its worker reply was lost.
+# Subtest: 真实 worker 提交后回复丢失：线程终止后从持久回执恢复同一成功结果
+ok 35 - 真实 worker 提交后回复丢失：线程终止后从持久回执恢复同一成功结果
+  ---
+  duration_ms: 1675.827395
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nrh8_8abb4651-310c-48d1-a9ce-794d1c3893f0 failed: Error: Ingest worker thread exited with code 1 (ingest task 1 did not complete)
+#     at ImportWorker.retireIngestWorker (/Users/ta/running/apps/api/src/import-worker.ts:1440:22)
+#     at Worker.<anonymous> (/Users/ta/running/apps/api/src/import-worker.ts:1364:19)
+#     at Object.onceWrapper (node:events:634:26)
+#     at Worker.emit (node:events:531:35)
+#     at [kOnExit] (node:internal/worker:318:10)
+#     at Worker.<computed>.onexit (node:internal/worker:232:20)
+# Subtest: 真实 worker 提交前失败：线程终止、无回执、无半提交
+ok 36 - 真实 worker 提交前失败：线程终止、无回执、无半提交
+  ---
+  duration_ms: 1673.511915
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nssy_0c13b030-8014-407a-b56b-71fa82ae1dde could not verify its committed receipt: Error: unable to open database file
+#     at readImportReceiptStrict (/Users/ta/running/apps/api/src/import-publication.ts:84:14)
+#     at ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1081:23)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:548:11)
+# Subtest: 提交结果不确定且数据库不可访问：进入恢复阻断，不发布终态也不清理来源
+ok 37 - 提交结果不确定且数据库不可访问：进入恢复阻断，不发布终态也不清理来源
+  ---
+  duration_ms: 1724.017716
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvk0nthu_7b87cf36-68d4-4171-b41e-5ab2c36d2e63: continuing to the direct-sync receiver
+# Subtest: full 载荷：两条车道在**同一个**任务里跑完（一次投递，序列仍是 data-only → direct-sync）
+ok 38 - full 载荷：两条车道在**同一个**任务里跑完（一次投递，序列仍是 data-only → direct-sync）
+  ---
+  duration_ms: 926.797486
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nu7d_f4b41c33-d9a8-4997-9455-b1675c8e837d failed: Error: Data-only payload changed after admission (ingest task 1)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1419:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1376:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 任务异常只污染那一批：线程被替换，下一批拿到新线程且回执互不串
+ok 39 - 任务异常只污染那一批：线程被替换，下一批拿到新线程且回执互不串
+  ---
+  duration_ms: 2188.221037
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 载荷身份（整棵输入树）每批只算 1 次：预检未命中的增量批不再重算第二遍
+ok 40 - 载荷身份（整棵输入树）每批只算 1 次：预检未命中的增量批不再重算第二遍
+  ---
+  duration_ms: 1145.595289
+  type: 'test'
+  ...
+# Subtest: 忘了 close 的常驻 ingest 线程不得把进程钉在事件循环里（子进程必须自己退出）
+ok 41 - 忘了 close 的常驻 ingest 线程不得把进程钉在事件循环里（子进程必须自己退出）
+  ---
+  duration_ms: 1733.985846
+  type: 'test'
+  ...
+# Subtest: 车道计划的 fail-closed 校验：颠倒或未知顺序一律拒绝执行（不做任何尝试）
+ok 42 - 车道计划的 fail-closed 校验：颠倒或未知顺序一律拒绝执行（不做任何尝试）
+  ---
+  duration_ms: 0.683987
+  type: 'test'
+  ...
+# Subtest: 每个任务的数据库调查：同路径换文件（恢复/换库）必须被看见
+ok 43 - 每个任务的数据库调查：同路径换文件（恢复/换库）必须被看见
+  ---
+  duration_ms: 276.742456
+  type: 'test'
+  ...
+# Subtest: 连续 25 轮正常退休：已结算的 termination 立即移出集合，不随历史增长
+ok 44 - 连续 25 轮正常退休：已结算的 termination 立即移出集合，不随历史增长
+  ---
+  duration_ms: 166.154397
+  type: 'test'
+  ...
+# Subtest: 两条终止操作交错完成：第一条完成不得被判为整体停止
+ok 45 - 两条终止操作交错完成：第一条完成不得被判为整体停止
+  ---
+  duration_ms: 177.811775
+  type: 'test'
+  ...
+# Subtest: 等待期间新增退休操作：新增的 termination 同样被等待
+ok 46 - 等待期间新增退休操作：新增的 termination 同样被等待
+  ---
+  duration_ms: 188.251026
+  type: 'test'
+  ...
+# Subtest: terminate 同步抛错/异步拒绝：集合清空后仍返回停止未确认，后续成功不得清除失败
+ok 47 - terminate 同步抛错/异步拒绝：集合清空后仍返回停止未确认，后续成功不得清除失败
+  ---
+  duration_ms: 173.88858
+  type: 'test'
+  ...
+# Subtest: 同一 resident 重复退休：terminate 只调用一次并返回同一个 Promise
+ok 48 - 同一 resident 重复退休：terminate 只调用一次并返回同一个 Promise
+  ---
+  duration_ms: 159.719941
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nz02_d4da125e-dcb6-435c-9283-5e8470257636 failed: Error: Data-only payload changed after admission (ingest task 1)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1419:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1376:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0nzjn_d3523d22-2b40-49e4-bb0c-53cf6c345baa failed: Error: Data-only payload changed after admission (ingest task 2)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1419:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1376:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0o040_18b2506e-e590-41f1-9451-e779f92efe39 failed: Error: Data-only payload changed after admission (ingest task 3)
+#     at ImportWorker.settleIngestReply (/Users/ta/running/apps/api/src/import-worker.ts:1419:21)
+#     at Worker.listener (/Users/ta/running/apps/api/src/import-worker.ts:1376:43)
+#     at Worker.emit (node:events:519:28)
+#     at MessagePort.<anonymous> (node:internal/worker:270:53)
+#     at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+#     at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28)
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 连续多轮任务失败并替换线程：终止账本不积累历史
+ok 49 - 连续多轮任务失败并替换线程：终止账本不积累历史
+  ---
+  duration_ms: 3019.061106
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0o1tn_961c9548-e3ed-4388-8bf0-3bb5e3600118 could not retire its ingest worker: Error: injected sync terminate failure
+#     at Worker.thread.terminate (/Users/ta/running/apps/api/test/import-worker-reuse.test.ts:1104:25)
+#     at ImportWorker.retireIngestWorker (/Users/ta/running/apps/api/src/import-worker.ts:1446:53)
+#     at ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1062:24)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:548:11)
+# Import job web_import_mvk0o1tn_961c9548-e3ed-4388-8bf0-3bb5e3600118 has an unconfirmed commit: ingest worker did not terminate
+# Subtest: 恢复分支中 terminate 同步抛错：进入恢复阻断，全局写者无法取得许可
+ok 50 - 恢复分支中 terminate 同步抛错：进入恢复阻断，全局写者无法取得许可
+  ---
+  duration_ms: 919.637351
+  type: 'test'
+  ...
+# (node:13631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Import job web_import_mvk0o2j9_1761d396-1bc4-470f-90ff-7e37c74cefc9 could not retire its ingest worker: Error: injected async terminate failure
+#     at Worker.thread.terminate (/Users/ta/running/apps/api/test/import-worker-reuse.test.ts:1105:31)
+#     at ImportWorker.retireIngestWorker (/Users/ta/running/apps/api/src/import-worker.ts:1446:53)
+#     at ImportWorker.run (/Users/ta/running/apps/api/src/import-worker.ts:1062:24)
+#     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+#     at async execute (/Users/ta/running/apps/api/src/import-worker.ts:548:11)
+# Import job web_import_mvk0o2j9_1761d396-1bc4-470f-90ff-7e37c74cefc9 has an unconfirmed commit: ingest worker did not terminate
+# Subtest: 恢复分支中 terminate 异步拒绝：进入恢复阻断，全局写者无法取得许可
+ok 51 - 恢复分支中 terminate 异步拒绝：进入恢复阻断，全局写者无法取得许可
+  ---
+  duration_ms: 930.78144
+  type: 'test'
+  ...
+# (node:13632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: F10 候选已生成但发布前中断：旧发布稳定、候选不可见；补发同一发布幂等且无重复 release
+ok 52 - F10 候选已生成但发布前中断：旧发布稳定、候选不可见；补发同一发布幂等且无重复 release
+  ---
+  duration_ms: 160.799388
+  type: 'test'
+  ...
+# (node:13633) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: T05 未知 record 类型（单独 / 与有界已知变更混合）都必须登记分析且不产出有界增量计划
+ok 53 - T05 未知 record 类型（单独 / 与有界已知变更混合）都必须登记分析且不产出有界增量计划
+  ---
+  duration_ms: 376.424824
+  type: 'test'
+  ...
+# Subtest: T06 同 job 同内容重放（worker 层）：返回原回执，事实/任务/代次不重复
+ok 54 - T06 同 job 同内容重放（worker 层）：返回原回执，事实/任务/代次不重复
+  ---
+  duration_ms: 299.984135
+  type: 'test'
+  ...
+# Subtest: T07 同 job id 不同内容：显式身份冲突拒绝，原成功批次与回执不变
+ok 55 - T07 同 job id 不同内容：显式身份冲突拒绝，原成功批次与回执不变
+  ---
+  duration_ms: 267.378214
+  type: 'test'
+  ...
+# Subtest: T10 直连删除先于到达：墓碑阻止复活；删除-only 必须要求分析
+ok 56 - T10 直连删除先于到达：墓碑阻止复活；删除-only 必须要求分析
+  ---
+  duration_ms: 284.069363
+  type: 'test'
+  ...
+# Subtest: T10 直连共享 UUID 来源：删除一个来源不误删另一来源
+ok 57 - T10 直连共享 UUID 来源：删除一个来源不误删另一来源
+  ---
+  duration_ms: 262.608773
+  type: 'test'
+  ...
+# Subtest: T10 data-only 白名单删除：not_required、无本批任务、raw+1 且 dependency 不变
+ok 58 - T10 data-only 白名单删除：not_required、无本批任务、raw+1 且 dependency 不变
+  ---
+  duration_ms: 195.842938
+  type: 'test'
+  ...
+# Subtest: T11 同大小 GPX 内容替换：发布新路线版本，并按路线归属把分析标脏
+ok 59 - T11 同大小 GPX 内容替换：发布新路线版本，并按路线归属把分析标脏
+  ---
+  duration_ms: 323.720323
+  type: 'test'
+  ...
+# Subtest: T11 路线归属 A→B（同内容）：旧、新归属都必须进入脏证据
+ok 60 - T11 路线归属 A→B（同内容）：旧、新归属都必须进入脏证据
+  ---
+  duration_ms: 315.699232
+  type: 'test'
+  ...
+# Subtest: T11 仅 XML 改归属、未附 GPX：旧 A/新 B 都脏，路线点与已发布版本保留
+ok 61 - T11 仅 XML 改归属、未附 GPX：旧 A/新 B 都脏，路线点与已发布版本保留
+  ---
+  duration_ms: 375.895509
+  type: 'test'
+  ...
+# Subtest: T11 同批同一路径出现两次归属变更：确定性拒收，整批回滚
+ok 62 - T11 同批同一路径出现两次归属变更：确定性拒收，整批回滚
+  ---
+  duration_ms: 845.727598
+  type: 'test'
+  ...
+# Subtest: T14 上限常量未被放宽：直连 8 MiB / 删除配额 5000 / 200 / 64 MiB，data-only 2 MiB / 5000
+ok 63 - T14 上限常量未被放宽：直连 8 MiB / 删除配额 5000 / 200 / 64 MiB，data-only 2 MiB / 5000
+  ---
+  duration_ms: 0.301259
+  type: 'test'
+  ...
+# Subtest: T14 data-only 纯判据：2 MiB 恰好接收、+1 字节拒绝；5000 条接收、5001 条拒绝
+ok 64 - T14 data-only 纯判据：2 MiB 恰好接收、+1 字节拒绝；5000 条接收、5001 条拒绝
+  ---
+  duration_ms: 528.603193
+  type: 'test'
+  ...
+# Subtest: T14 直连 XML record 数不设上限（maxRecords 只限删除配额）：5001 条在 8 MiB 内必须接收
+ok 65 - T14 直连 XML record 数不设上限（maxRecords 只限删除配额）：5001 条在 8 MiB 内必须接收
+  ---
+  duration_ms: 5048.292479
+  type: 'test'
+  ...
+# Subtest: T14 GPX 边界：200 文件恰好接收、201 拒绝；64 MiB 恰好接收、+1 字节拒绝
+ok 66 - T14 GPX 边界：200 文件恰好接收、201 拒绝；64 MiB 恰好接收、+1 字节拒绝
+  ---
+  duration_ms: 297.873492
+  type: 'test'
+  ...
+# Subtest: F04 分析脏证据写入被静默忽略（回读不一致）⇒ 事实/批次/任务/回执整批回滚
+ok 67 - F04 分析脏证据写入被静默忽略（回读不一致）⇒ 事实/批次/任务/回执整批回滚
+  ---
+  duration_ms: 238.236182
+  type: 'test'
+  ...
+1..67
+# tests 67
+# suites 0
+# pass 67
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 41347.16418
+EXIT=0 DURATION=42s

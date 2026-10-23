@@ -22,7 +22,7 @@ import test from "node:test";
 
 import { CONTRACT_VERSION, DIRECT_SYNC_ANALYSIS_REQUEST_MODE } from "@rai/contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
-import { identityAlgorithmFingerprint } from "@rai/health-export-parser";
+import { identityAlgorithmFingerprint, parseAppleHealthXml } from "@rai/health-export-parser";
 
 import { ImportWorker } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
@@ -303,5 +303,190 @@ test("回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选
       assert.equal(direct?.bounds?.maxXmlBytes, 8 * 1024 * 1024, "拒因必须带上界");
       assert.ok((direct?.actual?.xmlBytes ?? 0) > 8 * 1024 * 1024, "拒因必须带实测字节数");
     } finally { await worker.close(); }
+  });
+});
+
+
+// P2 (2026-10-23 review): route ownership conflicts must be decided from the
+// complete XML declaration set, not from the order in which UPDATEs happen.
+const ownershipWorkoutXml = (uuid: string, startDate: string, routeDeclarations = 1): string => `
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Watch"
+    duration="30" durationUnit="min" startDate="${startDate} 08:00:00 +0000"
+    endDate="${startDate} 08:30:00 +0000">
+    <MetadataEntry key="RAIHealthKitWorkoutUUID" value="${uuid}"/>
+    ${Array.from({ length: routeDeclarations }, () =>
+      '<WorkoutRoute><FileReference path="/workout-routes/route-1.gpx"/></WorkoutRoute>').join("")}
+  </Workout>`;
+const ownershipXml = (...workouts: string[]): string => `<HealthData>${workouts.join("")}</HealthData>`;
+
+async function seedRouteOwner(main: string, xml: string): Promise<void> {
+  const seedPath = `${main}.ownership-seed.xml`;
+  writeFileSync(seedPath, xml);
+  const store = await RaiDatabase.open(main);
+  try {
+    await parseAppleHealthXml(seedPath, store, {
+      fileSize: statSync(seedPath).size,
+      healthKitRecordIdentity: true
+    });
+  } finally { store.close(); }
+}
+
+for (const [label, order] of [
+  ["A→B", ["a", "b"]],
+  ["B→A", ["b", "a"]]
+] as const) {
+  test(`P2 route declarations ${label}：同一路径声明给两个训练必须拒收（与 XML 顺序无关）`, async () => {
+    const workoutA = ownershipWorkoutXml("00000000-0000-0000-0000-0000000000aa", "2026-01-02");
+    const workoutB = ownershipWorkoutXml("00000000-0000-0000-0000-0000000000bb", "2026-01-03");
+    await fixture({
+      xml: ownershipXml(...order.map((side) => side === "a" ? workoutA : workoutB)),
+      gpx: { "route-1.gpx": gpx() }
+    }, async ({ main, input, make }) => {
+      await seedRouteOwner(main, ownershipXml(workoutA));
+      const worker = make();
+      forbidBulk(worker);
+      try {
+        const job = worker.create(input, undefined, `direct-sync-ownership-${label}`);
+        await wait(worker);
+        const done = worker.get(job.id)!;
+        assert.equal(done.status, "failed", JSON.stringify(done));
+        assert.equal(done.failureCode, "direct_sync_route_ownership_conflict");
+        const db = new DatabaseSync(main, { readOnly: true });
+        try {
+          const route = db.prepare("SELECT workout_id AS workoutId FROM workout_routes WHERE lower(relative_path)=?")
+            .get("workout-routes/route-1.gpx") as { workoutId: string } | undefined;
+          const seededOwner = db.prepare("SELECT id FROM workouts WHERE deleted_at IS NULL").get() as
+            { id: string } | undefined;
+          assert.equal(route?.workoutId, seededOwner?.id, "整批回滚：路线仍属于唯一保留下来的训练 A");
+          assert.equal(Number((db.prepare("SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NULL")
+            .get() as { n: number }).n), 1, "整批回滚：B 训练不得留在库中");
+        } finally { db.close(); }
+      } finally { await worker.close(); }
+    });
+  });
+}
+
+test("P2 route declarations：同一训练重复声明同一路径仍可通过", async () => {
+  const workoutA = ownershipWorkoutXml("00000000-0000-0000-0000-0000000000aa", "2026-01-02", 2);
+  await fixture({
+    xml: ownershipXml(workoutA),
+    gpx: { "route-1.gpx": gpx() }
+  }, async ({ main, input, make }) => {
+    await seedRouteOwner(main, ownershipXml(workoutA));
+    const worker = make();
+    forbidBulk(worker);
+    try {
+      const job = worker.create(input, undefined, "direct-sync-ownership-repeat");
+      await wait(worker);
+      const done = worker.get(job.id)!;
+      assert.notEqual(done.status, "failed", JSON.stringify(done));
+      const db = new DatabaseSync(main, { readOnly: true });
+      try {
+        assert.equal(Number((db.prepare("SELECT COUNT(*) AS n FROM workout_routes WHERE lower(relative_path)=?")
+          .get("workout-routes/route-1.gpx") as { n: number }).n), 1);
+      } finally { db.close(); }
+    } finally { await worker.close(); }
+  });
+});
+
+
+for (const [orderLabel, order] of [["B→A", ["b", "a"]], ["A→B", ["a", "b"]]] as const) {
+  test(`P2 route declarations：已删除父训练的同路径声明不误拒且归属确定（${orderLabel}）`, async () => {
+    const workoutA = ownershipWorkoutXml("00000000-0000-0000-0000-0000000000aa", "2026-01-02");
+    const workoutB = ownershipWorkoutXml("00000000-0000-0000-0000-0000000000bb", "2026-01-03");
+    await fixture({
+      xml: ownershipXml(...order.map((side) => side === "a" ? workoutA : workoutB)),
+      gpx: { "route-1.gpx": gpx() }
+    }, async ({ main, input, make }) => {
+      await seedRouteOwner(main, ownershipXml(workoutB));
+      // B is explicitly deleted by this batch: its XML declaration must not
+      // conflict with A even though both mention the same route path.
+      writeFileSync(join(input, "sync-manifest.json"), JSON.stringify({
+        version: 2, sourceScope: "healthkit", sourceIds: [],
+        deletedSourceIds: ["00000000-0000-0000-0000-0000000000bb"], deletedRecords: []
+      }));
+      const worker = make();
+      forbidBulk(worker);
+      try {
+        const job = worker.create(input, undefined, `direct-sync-tombstoned-parent-${orderLabel}`);
+        await wait(worker);
+        const done = worker.get(job.id)!;
+        assert.notEqual(done.status, "failed", JSON.stringify(done));
+        const db = new DatabaseSync(main, { readOnly: true });
+        try {
+          const route = db.prepare(`SELECT workout.id AS workoutId FROM workout_routes route
+            JOIN workouts workout ON workout.id = route.workout_id
+            WHERE lower(route.relative_path)=? AND workout.deleted_at IS NULL`)
+            .get("workout-routes/route-1.gpx") as { workoutId: string } | undefined;
+          const active = db.prepare("SELECT id FROM workouts WHERE deleted_at IS NULL").get() as { id: string };
+          assert.equal(route?.workoutId, active.id, "路线必须归给唯一未删除的训练 A");
+        } finally { db.close(); }
+      } finally { await worker.close(); }
+    });
+  });
+}
+
+// P2-6（2026-10-23）：同一路线在一批里改归两个训练 = 载荷自相矛盾。
+const twoOwnerXml = (): string => `<HealthData>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Watch"
+    duration="30" durationUnit="min" startDate="2026-01-02 08:00:00 +0000"
+    endDate="2026-01-02 08:30:00 +0000">
+    <MetadataEntry key="RAIHealthKitWorkoutUUID" value="00000000-0000-0000-0000-0000000000aa"/>
+    <WorkoutRoute><FileReference path="/workout-routes/route-1.gpx"/></WorkoutRoute>
+  </Workout>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Watch"
+    duration="30" durationUnit="min" startDate="2026-01-03 08:00:00 +0000"
+    endDate="2026-01-03 08:30:00 +0000">
+    <MetadataEntry key="RAIHealthKitWorkoutUUID" value="00000000-0000-0000-0000-0000000000bb"/>
+    <WorkoutRoute><FileReference path="/workout-routes/route-1.gpx"/></WorkoutRoute>
+  </Workout>
+</HealthData>`;
+
+test("P2-6：同批把同一路线二次改归 ⇒ 整批回滚 + 稳定 failureCode（不可重试）", async () => {
+  await fixture({ xml: twoOwnerXml(), gpx: { "route-1.gpx": gpx() } }, async ({ main, input, make }) => {
+    // Legacy route identity (path-derived, not workout-derived): both workouts in
+    // the batch resolve to the same row, so the second reference changes
+    // ownership a second time in one transaction.
+    const seed = new DatabaseSync(main);
+    try {
+      seed.prepare(`INSERT INTO workouts
+        (id, activity_type, source_name, source_category, start_at, end_at, duration_seconds,
+         metadata_json, raw_attributes_json)
+        VALUES ('legacy-workout-a', 'HKWorkoutActivityTypeRunning', 'Watch', 'apple_watch',
+          '2026-01-01T08:00:00.000Z', '2026-01-01T08:30:00.000Z', 1800, '{}', '{}')`).run();
+      seed.prepare(`INSERT INTO workout_routes
+        (id, workout_id, source_name, source_category, source_version, start_at, end_at,
+         created_at, relative_path, metadata_json)
+        VALUES ('legacy-route', 'legacy-workout-a', 'Watch', 'apple_watch', NULL,
+          '2026-01-01T08:00:00.000Z', '2026-01-01T08:30:00.000Z', NULL,
+          'workout-routes/route-1.gpx', '{}')`).run();
+    } finally { seed.close(); }
+
+    const worker = make();
+    forbidBulk(worker);
+    try {
+      const job = worker.create(input, undefined, "direct-sync-ownership-conflict");
+      await wait(worker);
+      const done = worker.get(job.id)!;
+      assert.equal(done.status, "failed", JSON.stringify(done));
+      assert.equal(done.failureCode, "direct_sync_route_ownership_conflict",
+        "路线归属冲突必须有稳定的、不可重试的机器码");
+      assert.doesNotMatch(String(done.error), /sqlite|\.sqlite|\/Users\//,
+        "公开错误不得带 SQLite/路径详情");
+      const db = new DatabaseSync(main, { readOnly: true });
+      try {
+        assert.equal(Number((db.prepare(
+          "SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NULL").get() as { n: number }).n), 1,
+          "整批回滚：本批的训练一条都不能留");
+        const route = db.prepare("SELECT workout_id AS workoutId FROM workout_routes WHERE id='legacy-route'")
+          .get() as { workoutId: string } | undefined;
+        assert.equal(route?.workoutId, "legacy-workout-a", "整批回滚：路线归属保持原样");
+        assert.equal(Number((db.prepare("SELECT COUNT(*) AS n FROM import_batches WHERE id=?")
+          .get(job.id) as { n: number }).n), 0);
+      } finally { db.close(); }
+      assert.equal(readImportReceipt(main, job.id), null);
+    } finally {
+      await worker.close();
+    }
   });
 });

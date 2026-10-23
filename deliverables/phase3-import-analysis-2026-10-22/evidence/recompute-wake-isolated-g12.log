@@ -1,0 +1,26 @@
+TAP version 13
+# (node:83917) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:83917) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）
+not ok 1 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）
+  ---
+  duration_ms: 2224.794453
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/recompute-worker.test.ts:1:5500'
+  failureType: 'cancelledByParent'
+  error: 'Promise resolution is still pending but the event loop has already resolved'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    process.emit (node:events:519:28)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 0
+# cancelled 1
+# skipped 0
+# todo 0
+# duration_ms 3141.225935

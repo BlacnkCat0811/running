@@ -3664,6 +3664,98 @@ export class RecomputePipeline {
     return result;
   }
 
+  /**
+   * Checkpoints are written with **run-partitioned** feature ids. A parent
+   * checkpoint's `baseline.calibrationFeatureIds` therefore cannot be carried into
+   * the child run verbatim: `fitnessEpochId()` / `calibrationCohortHash` filter
+   * the current run's features by those ids, and parent ids silently produce an
+   * empty calibration set (a different raw epoch).
+   *
+   * Remap through the stable `trainingSessionId` instead. Every inconsistency is a
+   * hard refusal of the resume (the caller falls back to a full replay) — never a
+   * silent empty cohort. The same applies to `pendingNegativeIds`, which are also
+   * persisted as feature ids.
+   */
+  private remapResumedCheckpointState(
+    state: ModelCheckpointState,
+    currentFeatures: WorkoutFeatureVector[],
+    expectedBaseline: PersonalBaseline,
+    throughSequence: number
+  ): ModelCheckpointState | null {
+    const parentIds = state.baseline.calibrationFeatureIds;
+    if (!Array.isArray(parentIds) || parentIds.length === 0) return null;
+    if (parentIds.some((id) => typeof id !== "string")) return null;
+    // No duplicates: the array is a set of sessions, and a repeated id would make
+    // the mapped calibration cohort ambiguous.
+    if (new Set(parentIds).size !== parentIds.length) return null;
+    // The current features already produced a fresh baseline; the resumed
+    // calibration cohort must describe the same number of sessions.
+    if (parentIds.length !== expectedBaseline.calibrationFeatureIds.length) return null;
+
+    const currentIndicesBySession = new Map<string, number[]>();
+    for (const [index, feature] of currentFeatures.entries()) {
+      const indices = currentIndicesBySession.get(feature.trainingSessionId) ?? [];
+      indices.push(index);
+      currentIndicesBySession.set(feature.trainingSessionId, indices);
+    }
+
+    const sessionById = this.database.prepare(
+      "SELECT training_session_id AS sessionId FROM workout_features WHERE id = ?"
+    );
+    const remapId = (featureId: string): string | null => {
+      const parent = sessionById.get(featureId) as { sessionId: string } | undefined;
+      if (!parent) return null;
+      const indices = currentIndicesBySession.get(String(parent.sessionId));
+      // Exactly one current feature per stable session; zero = missing, >1 = ambiguous.
+      if (!indices || indices.length !== 1) return null;
+      return currentFeatures[indices[0]!]!.id;
+    };
+
+    const remapped: string[] = [];
+    const indices: number[] = [];
+    for (const parentId of parentIds) {
+      const featureId = remapId(parentId);
+      if (featureId === null) return null;
+      const index = currentFeatures.findIndex((feature) => feature.id === featureId);
+      if (index < 0) return null;
+      remapped.push(featureId);
+      indices.push(index);
+    }
+    if (new Set(remapped).size !== remapped.length) return null;
+    // Preserve the parent's chronological order; the baseline interval is derived
+    // from the first/last calibration feature.
+    for (let index = 1; index < indices.length; index += 1) {
+      if (indices[index]! <= indices[index - 1]!) return null;
+    }
+    const first = currentFeatures[indices[0]!]!;
+    const last = currentFeatures[indices[indices.length - 1]!]!;
+    if (first.workoutStartAt !== state.baseline.calibrationStartAt ||
+        last.workoutStartAt !== state.baseline.calibrationEndAt) return null;
+    // Everything reused must already be committed to the checkpoint prefix.
+    if (indices.some((index) => index > throughSequence)) return null;
+    // The fresh current-run baseline is the independent witness: a resume may not
+    // quietly substitute a different cohort of the same length.
+    if (expectedBaseline.calibrationStartAt !== state.baseline.calibrationStartAt ||
+        expectedBaseline.calibrationEndAt !== state.baseline.calibrationEndAt) return null;
+    if (remapped.some((id, index) => id !== expectedBaseline.calibrationFeatureIds[index])) return null;
+    // The baseline dimensions are the other half of the epoch identity; if they
+    // drifted, the restored baseline is not the one this feature run would build.
+    if (configHash(state.baseline.dimensions) !== configHash(expectedBaseline.dimensions)) return null;
+
+    const remappedPending: string[] = [];
+    for (const pendingId of state.pendingNegativeIds) {
+      const featureId = remapId(pendingId);
+      if (featureId === null) return null;
+      remappedPending.push(featureId);
+    }
+
+    return {
+      ...state,
+      baseline: { ...state.baseline, calibrationFeatureIds: remapped },
+      pendingNegativeIds: remappedPending
+    };
+  }
+
   private resumeModelReplay(
     modelRun: ModelRun,
     request: RecomputeRequest,
@@ -3722,6 +3814,29 @@ export class RecomputePipeline {
         state.pendingNegativeIds.some((id) => typeof id !== "string")) {
       return null;
     }
+    // Do every remap/validation before touching the database: a refusal after the
+    // assessment prefix copy would leave duplicate rows behind for the full replay.
+    const resumedState = this.remapResumedCheckpointState(
+      state, features, baseline, row.sequenceNumber
+    );
+    if (resumedState === null) return null;
+    // The copied assessment prefix keeps the parent's explanation_json verbatim. If
+    // the parent lineage carries a different epoch/cohort (e.g. a pre-fix resume
+    // that filtered the current feature ids to an empty set), resuming would mix
+    // stale prefix explanations with the current run's raw lineage hash. Refuse,
+    // and let the full replay rewrite the prefix consistently.
+    const parentLineage = parseJson<ModelLineageV2 | null>(
+      this.database.prepare("SELECT lineage_json AS json FROM model_v2_runs WHERE model_run_id = ?")
+        .get(row.parentModelRunId)?.json as string | null | undefined,
+      null
+    );
+    if (parentLineage === null) return null;
+    const expectedEpoch = this.fitnessEpochId(resumedState.baseline, features, request, modelRun);
+    const expectedCohort = semanticHash(sortWorkoutFeaturesChronologically(features)
+      .filter((feature) => resumedState.baseline.calibrationFeatureIds.includes(feature.id))
+      .map((feature) => ({ sessionId: feature.trainingSessionId, at: feature.workoutStartAt })));
+    if (parentLineage.baselineEpochId !== expectedEpoch ||
+        parentLineage.calibrationCohortHash !== expectedCohort) return null;
     this.database.prepare(`
       INSERT INTO ability_assessments (
         id, model_run_id, feature_id, training_session_id, sequence_number,
@@ -3756,13 +3871,17 @@ export class RecomputePipeline {
       )
       SELECT ?, ?, sequence_number, through_at, checkpoint_version, model_version,
         model_config_hash, feature_schema_version, feature_config_hash,
-        timezone_identifier, state_json, state_hash
+        timezone_identifier, ?, ?
       FROM model_checkpoints WHERE model_run_id = ? AND sequence_number = ?
     `).run(
       deterministicId("model_checkpoint", { modelRunId: modelRun.id, sequenceNumber: row.sequenceNumber }),
-      modelRun.id, row.parentModelRunId, row.sequenceNumber
+      modelRun.id,
+      JSON.stringify(resumedState),
+      configHash(resumedState),
+      row.parentModelRunId,
+      row.sequenceNumber
     );
-    return { parentModelRunId: row.parentModelRunId, throughSequence: row.sequenceNumber, state };
+    return { parentModelRunId: row.parentModelRunId, throughSequence: row.sequenceNumber, state: resumedState };
   }
 
   private writeModelCheckpoint(

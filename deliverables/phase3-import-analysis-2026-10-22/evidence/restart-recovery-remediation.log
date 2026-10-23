@@ -1,0 +1,23 @@
+✔ helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在） (43.093687ms)
+✔ 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实 (1283.540481ms)
+✔ 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源 (64.617491ms)
+✔ 损坏数据库 + attempts=3：恢复阻断而非 failed (49.666767ms)
+✔ onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ） (53.892962ms)
+✔ 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消 (54.581514ms)
+✔ 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断 (46.789983ms)
+Main database missing; creating a fresh database before import first-import.
+Fast path rejected for first-import: continuing to the direct-sync receiver
+✔ 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入 (818.906853ms)
+✔ create 入队时把主库缺失写进持久队列证据 (40.112973ms)
+✔ 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行 (57.323588ms)
+✔ 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执 (926.821635ms)
+✔ 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope (46.4627ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4267.489436
+EXIT:0

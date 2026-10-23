@@ -1,0 +1,127 @@
+TAP version 13
+# (node:8582) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P2-1 首次安装：显式初始化写当前生效 scope 的唯一许可；首包一次；第二次初始化拒绝
+ok 1 - P2-1 首次安装：显式初始化写当前生效 scope 的唯一许可；首包一次；第二次初始化拒绝
+  ---
+  duration_ms: 4120.436363
+  type: 'test'
+  ...
+# Subtest: P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch
+ok 2 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch
+  ---
+  duration_ms: 7044.460833
+  type: 'test'
+  ...
+# Subtest: P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 scope 恢复 established，删库意图收口
+ok 3 - P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 scope 恢复 established，删库意图收口
+  ---
+  duration_ms: 3920.666525
+  type: 'test'
+  ...
+# Subtest: P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包
+ok 4 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包
+  ---
+  duration_ms: 7491.766005
+  type: 'test'
+  ...
+# Subtest: P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次
+ok 5 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次
+  ---
+  duration_ms: 6654.110403
+  type: 'test'
+  ...
+# Subtest: P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活
+ok 6 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活
+  ---
+  duration_ms: 8074.02038
+  type: 'test'
+  ...
+# Subtest: P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pristine、不建新空库
+ok 7 - P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pristine、不建新空库
+  ---
+  duration_ms: 4838.855141
+  type: 'test'
+  ...
+# Subtest: P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库
+ok 8 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库
+  ---
+  duration_ms: 8166.013111
+  type: 'test'
+  ...
+# Subtest: P2-8 恢复旧备份：删库意图收口，恢复后的 scope 为 established，旧 nextEpoch 不再是当前 scope
+ok 9 - P2-8 恢复旧备份：删库意图收口，恢复后的 scope 为 established，旧 nextEpoch 不再是当前 scope
+  ---
+  duration_ms: 2529.50762
+  type: 'test'
+  ...
+# Subtest: P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用
+ok 10 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用
+  ---
+  duration_ms: 4133.22427
+  type: 'test'
+  ...
+# Subtest: P2-10 permit_issued 丢失 scope 行但账本实例不变：CLI 不得重签许可
+ok 11 - P2-10 permit_issued 丢失 scope 行但账本实例不变：CLI 不得重签许可
+  ---
+  duration_ms: 3979.833695
+  type: 'test'
+  ...
+# Subtest: P2-11 首包消费后恢复备份：旧删库日志 superseded，主库再缺失不回到旧 nextEpoch
+ok 12 - P2-11 首包消费后恢复备份：旧删库日志 superseded，主库再缺失不回到旧 nextEpoch
+  ---
+  duration_ms: 4851.148125
+  type: 'test'
+  ...
+# Subtest: P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可
+ok 13 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可
+  ---
+  duration_ms: 3901.844363
+  type: 'test'
+  ...
+# Subtest: P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次
+ok 14 - P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次
+  ---
+  duration_ms: 7524.896863
+  type: 'test'
+  ...
+# Subtest: P1-5 写者进入后建库前 SIGKILL：显式放弃生成新 epoch，旧 scope 不复活
+ok 15 - P1-5 写者进入后建库前 SIGKILL：显式放弃生成新 epoch，旧 scope 不复活
+  ---
+  duration_ms: 6084.339281
+  type: 'test'
+  ...
+# Subtest: P2-5 不可读主库只能通过显式隔离继续原 deletionId
+ok 16 - P2-5 不可读主库只能通过显式隔离继续原 deletionId
+  ---
+  duration_ms: 8134.842957
+  type: 'test'
+  ...
+# Subtest: P1-4 待迁移主库 + 删库裁决：API 不退出 78，且恢复前不执行任何主库作业恢复
+ok 17 - P1-4 待迁移主库 + 删库裁决：API 不退出 78，且恢复前不执行任何主库作业恢复
+  ---
+  duration_ms: 1753.558239
+  type: 'test'
+  ...
+# Subtest: P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409
+ok 18 - P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409
+  ---
+  duration_ms: 3454.598761
+  type: 'test'
+  ...
+# Subtest: P1-7 停在恢复裁决的导入任务不得否决显式备份恢复
+ok 19 - P1-7 停在恢复裁决的导入任务不得否决显式备份恢复
+  ---
+  duration_ms: 1918.007153
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 109075.988798
+EXIT=0 DURATION=109s

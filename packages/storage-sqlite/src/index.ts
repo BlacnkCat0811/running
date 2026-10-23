@@ -51,6 +51,7 @@ export {
   type GenerationRemovalPreview,
   type RaiDatabaseOpenOptions,
   type RouteImportTarget,
+  type RouteOwnershipChange,
   type SupersededRunPruneResult
 } from "./database.js";
 export {

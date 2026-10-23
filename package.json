@@ -79,6 +79,8 @@
     "ml:train": "node research/scripts/python-env.mjs --train",
     "predata:migrate": "npm run check:node",
     "data:migrate": "tsx packages/storage-sqlite/src/migrate-cli.ts",
+    "predata:init-scope": "npm run check:node",
+    "data:init-scope": "tsx apps/api/src/import-scope-cli.ts",
     "predata:model-v2": "npm run check:node",
     "data:model-v2": "tsx packages/application/src/model-v2-cli.ts",
     "predata:ablation-ca-weights": "npm run check:node",

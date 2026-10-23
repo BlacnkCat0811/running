@@ -1,0 +1,48 @@
+Fast path rejected for web_import_mvj3egcb_877ce008-23e0-4eb0-bb27-fdf24d485b0e: continuing to the direct-sync receiver
+Fast path rejected for web_import_mvj3eiup_5b60a49f-6901-431c-a0b3-5f6ff1bedf30: continuing to the direct-sync receiver
+✔ A10：分析故障隔离——原回执不变、失败独立可见、重试只计算（不重新导出/不备份） (4966.259741ms)
+✔ 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果 (3563.768509ms)
+✔ 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次 (1621.941764ms)
+✔ 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算 (1873.81213ms)
+✔ 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断 (281.882846ms)
+✔ 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度 (453.969407ms)
+✔ B02: persisted epochs survive reopening while an explicit namespace change takes precedence (323.036795ms)
+✔ restore epoch commits with the replacement and rolls back with a rejected restore (931.700913ms)
+✔ malformed epoch metadata cannot silently select stale receipts (206.800577ms)
+✔ deletion epochs survive an absent or rebuilt facts database without overriding a committed restore (709.852444ms)
+✔ a failed durable epoch preparation never unlinks the facts database (296.250259ms)
+✔ damaged deletion metadata fails closed instead of reusing the default scope (14.262292ms)
+✔ restart rolls back uncommitted rename (284.915921ms)
+✔ restart acknowledges committed candidate without reimport (219.314342ms)
+✔ prepared rename with no remaining original fails closed instead of accepting candidate (85.920663ms)
+✔ runtime acknowledgement and publication intent removal are atomic (67.97744ms)
+✔ recovery never overwrites an unfamiliar active database (68.325909ms)
+✔ initial import recovery refuses an unexpected database without a candidate receipt (63.183776ms)
+Import queue execution failed: Error: fixture source cleanup unavailable
+✔ committed imports remain pending through failed cleanup and restart until acknowledgement (374.44252ms)
+✔ strict receipt read returns null only after a successful query with no receipt row (10.006223ms)
+✔ strict receipt read rejects a missing database and never creates an empty one (2.68212ms)
+✔ strict receipt read rejects corrupt databases, malformed JSON, and JSON null receipts (49.753107ms)
+✔ hasPending tracks queued and claimed jobs but not terminals (471.648622ms)
+✔ an idle drain never spawns a worker thread (438.615854ms)
+✔ a queued job still spawns a worker thread (282.285739ms)
+✔ wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底巡检的有效性） (260.62458ms)
+✔ 常驻分析线程：连续多轮只起一条线程，且轮次之间不持有线程句柄 (1463.317907ms)
+✔ 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn） (1766.134662ms)
+✔ R02：合并任务捕获时必须把未入选批次的早期更正并入计划（base 之后的全部未覆盖变更） (319.479233ms)
+✔ R01：漂移重排不得丢掉原任务尚未发布的 dirty 范围（registered 计划与漂移批次取并集） (299.183097ms)
+✔ R01（无绑定的兼容路径）：重排同样保留原任务未发布范围 (270.299805ms)
+✔ B04：退回完整计算不得清空执行覆盖批次（否则成员发布后仍被重新排队） (359.502036ms)
+✔ B04：partial 计划写出版本化的逐域边界（与 rebuild 区分） (313.588405ms)
+✔ B05：含路线证据的批次用持久证据重建计划，不再无条件全量 (273.287933ms)
+✔ B05：损坏的批次证据不得被当作「没有路线影响」（失败关闭） (239.240848ms)
+✔ B05：证据说 full 的批次让合并计划保持全量（不冒充 partial） (283.728494ms)
+✔ 兼容路径：库里存在既未登记、也无可归因归属的影响批次 ⇒ 保守全量（coverage_unverifiable） (181.018363ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15778.817621

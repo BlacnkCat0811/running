@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { ImportWorker, ImportQueueFullError } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
@@ -23,6 +24,11 @@ function fixture() {
   const mutations = new MutationCoordinator();
   const scheduler = new TaskAdmissionScheduler(mutations);
   const state = new RuntimeStateStore(root);
+  // 队列夹具只验证排队/恢复，不验证首次空库许可：先落一份可读空库，
+  // 让重启时能走 `confirmed_absent` 的既有政策（缺库 + 无 pristine 会按 P1 阻断）。
+  const readable = new DatabaseSync(join(root, "rai.sqlite"));
+  try { readable.exec("CREATE TABLE IF NOT EXISTS import_manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL)"); }
+  finally { readable.close(); }
   const worker = () => new ImportWorker(join(root, "rai.sqlite"), root, root, undefined, undefined, undefined, {
     scope: "fixture", maxPending: 2, admission: scheduler.owner("import")
   });
@@ -82,6 +88,12 @@ test("queued cancellation releases its pin without executing and survives restar
 
 test("running work restarts at safe boundary, but a different dataset scope is never replayed", async () => {
   const f = fixture();
+  // 2026-10-22 复审：主库缺失不再等于“确认没有回执”。本用例要验证的是
+  // “可读但无回执行 + attempts=1”按原政策重排，因此先创建一份可读空库；
+  // 缺失库（尤其已尝试提交的作业）另见 import-restart-receipt-recovery.test.ts。
+  const readable = new DatabaseSync(join(f.root, "rai.sqlite"));
+  try { readable.exec("CREATE TABLE IF NOT EXISTS import_manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL)"); }
+  finally { readable.close(); }
   const worker = f.worker();
   try {
     f.state.upsertJob({

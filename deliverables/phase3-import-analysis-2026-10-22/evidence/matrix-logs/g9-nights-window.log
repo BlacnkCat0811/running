@@ -1,0 +1,28 @@
+✔ windowed output equals the full rebuild for every wake_date inside the window (column by column) (192.105383ms)
+✔ windowed can run standalone (no prior full rebuild) and still matches a full rebuild (197.375652ms)
+✔ windowed repairs a deliberately corrupted window row (guards against a no-op false green) (187.425749ms)
+✔ rows outside the window are left byte-identical, including computed_at (188.245986ms)
+✔ re-running the same window is idempotent (rows and computed_at unchanged) (310.835625ms)
+✔ an empty window (no nights in range) is a no-op and touches nothing (155.832986ms)
+✔ a window over an empty database yields an empty result (both windowed and full) (137.408644ms)
+✔ fromLocalDate > toLocalDate is an explicit no-op (158.686726ms)
+✔ refuses instead of silently cascading into out-of-window hrv rows (174.169668ms)
+✔ hand-computed golden values pin the full rebuild baseline itself (153.914704ms)
+✔ hand-computed golden values also pin shapes B and C (369.21548ms)
+✔ sweep over every sub-window — shape A (cross-midnight night + nap + sparse HRV) (601.158355ms)
+✔ sweep over every sub-window — shape B (multiple Asleep sources ⇒ rank tie-break, competingSourceCount > 1) (336.933038ms)
+✔ sweep over every sub-window — shape C (sessions split by >90min gap + HRV on the closed-interval endpoints) (552.481335ms)
+✔ range read: the SQL predicate is pushed down before GROUP BY and the limits are the local-night boundaries (147.025059ms)
+✔ range read: the scoped read returns exactly the rows the legacy full-scan + JS filter returned (194.103925ms)
+✔ range read: the scoped read assembles rows for the window only, however long the history is (964.276747ms)
+✔ mixed-format timestamps fall back to the unfiltered read instead of silently dropping rows (180.38348ms)
+✔ range read: v40's (type, end_at, start_at) index serves the sleep predicate while HRV keeps the two-sided one (140.612338ms)
+✔ mixed-format timestamps outside the canonical text family are caught by the index-edge probe (151.664411ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6089.803171

@@ -1,0 +1,162 @@
+TAP version 13
+# (node:58931) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）
+ok 1 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）
+  ---
+  duration_ms: 47.646869
+  type: 'test'
+  ...
+# (node:58931) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实
+ok 2 - 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实
+  ---
+  duration_ms: 1343.856519
+  type: 'test'
+  ...
+# Subtest: 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源
+ok 3 - 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源
+  ---
+  duration_ms: 73.126911
+  type: 'test'
+  ...
+# Subtest: 损坏数据库 + attempts=3：恢复阻断而非 failed
+ok 4 - 损坏数据库 + attempts=3：恢复阻断而非 failed
+  ---
+  duration_ms: 62.068141
+  type: 'test'
+  ...
+# Subtest: onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ）
+ok 5 - onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ）
+  ---
+  duration_ms: 70.57576
+  type: 'test'
+  ...
+# Subtest: 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消
+ok 6 - 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消
+  ---
+  duration_ms: 51.758979
+  type: 'test'
+  ...
+# Subtest: 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断
+ok 7 - 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断
+  ---
+  duration_ms: 70.69811
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import first-import.
+# (node:58931) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for first-import: continuing to the direct-sync receiver
+# Subtest: 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入
+ok 8 - 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入
+  ---
+  duration_ms: 1188.005992
+  type: 'test'
+  ...
+# Subtest: create 入队时把主库缺失写进持久队列证据
+ok 9 - create 入队时把主库缺失写进持久队列证据
+  ---
+  duration_ms: 63.776005
+  type: 'test'
+  ...
+# Subtest: 只有任务自己的 databaseAbsentAtEnqueue、没有作用域账本：缺失库仍阻断
+ok 10 - 只有任务自己的 databaseAbsentAtEnqueue、没有作用域账本：缺失库仍阻断
+  ---
+  duration_ms: 56.174404
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import web_import_mvjeio9a_2c8eb341-05dd-4c3f-826c-2adb8c64d6dc.
+# (node:58931) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjeio9a_2c8eb341-05dd-4c3f-826c-2adb8c64d6dc: continuing to the direct-sync receiver
+# (node:58931) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1：A、B 双任务空库序列——A 成功后移走主库，B 不得运行/建库/清理来源，恢复后只提交一次
+ok 11 - P1：A、B 双任务空库序列——A 成功后移走主库，B 不得运行/建库/清理来源，恢复后只提交一次
+  ---
+  duration_ms: 2171.994137
+  type: 'test'
+  ...
+# Subtest: 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行
+ok 12 - 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行
+  ---
+  duration_ms: 55.873995
+  type: 'test'
+  ...
+# (node:58931) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执
+ok 13 - 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执
+  ---
+  duration_ms: 1015.899557
+  type: 'test'
+  ...
+# Subtest: 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope
+ok 14 - 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope
+  ---
+  duration_ms: 57.815172
+  type: 'test'
+  ...
+# (node:58932) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1-1 旧库升级：启动登记 established；旧账本空行迁移为 unknown 而不是 pristine
+ok 15 - P1-1 旧库升级：启动登记 established；旧账本空行迁移为 unknown 而不是 pristine
+  ---
+  duration_ms: 263.25166
+  type: 'test'
+  ...
+# (node:58932) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1-2 旧库在首次登记前暂时缺失：unknown 阻断，恢复原库后按真实状态收敛且只提交一次
+ok 16 - P1-2 旧库在首次登记前暂时缺失：unknown 阻断，恢复原库后按真实状态收敛且只提交一次
+  ---
+  duration_ms: 1341.298968
+  type: 'test'
+  ...
+# Subtest: P1-3 启动后旧库消失：已登记 established，新作业 attempts=0 也不得被当成首次空库
+ok 17 - P1-3 启动后旧库消失：已登记 established，新作业 attempts=0 也不得被当成首次空库
+  ---
+  duration_ms: 267.480214
+  type: 'test'
+  ...
+# (node:58932) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1-4 账本损坏/隔离重建：新账本 unknown，不因“无行”重建空库；恢复后收敛
+ok 18 - P1-4 账本损坏/隔离重建：新账本 unknown，不因“无行”重建空库；恢复后收敛
+  ---
+  duration_ms: 1217.017885
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import web_import_mvjeiob6_3eb1385c-a001-4d9f-b471-d54860dceba3.
+# (node:58932) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjeiob6_3eb1385c-a001-4d9f-b471-d54860dceba3: continuing to the direct-sync receiver
+# Subtest: P1-6 真正首次安装：受控 pristine 许可放行首批 v47 建库，许可在写者进入后永久失效
+ok 19 - P1-6 真正首次安装：受控 pristine 许可放行首批 v47 建库，许可在写者进入后永久失效
+  ---
+  duration_ms: 1350.953472
+  type: 'test'
+  ...
+# Subtest: P1-7 进入 writer_entered 前账本写失败：不写主库、不发布终态、来源保留
+ok 20 - P1-7 进入 writer_entered 前账本写失败：不写主库、不发布终态、来源保留
+  ---
+  duration_ms: 296.304798
+  type: 'test'
+  ...
+# Subtest: P1-8 显式删除/恢复：旧 scope 许可不复活，新 scope 只按显式初始化放行
+ok 21 - P1-8 显式删除/恢复：旧 scope 许可不复活，新 scope 只按显式初始化放行
+  ---
+  duration_ms: 73.863368
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7335.520601

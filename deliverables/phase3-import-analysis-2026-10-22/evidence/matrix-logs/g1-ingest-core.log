@@ -1,0 +1,103 @@
+✔ bounded data-only policy rejects scoring, workout, unknown, malformed and nested payloads (23.686253ms)
+✔ raw inserts, corrections, deletions, UUID facts, ledger and receipt commit together without replacement (476.770953ms)
+✔ a durable same-batch replay performs no writes and refuses a changed payload identity (544.572923ms)
+✔ SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state (1033.703661ms)
+✔ deletion before arrival cannot resurrect a carried or later UUID (339.447299ms)
+✔ a deletion-only delta restores a surviving shared UUID and records the correction (249.75094ms)
+✔ UUID fact write failure rolls back every fact, alias, tombstone, ledger and success marker (276.448962ms)
+✔ change ledger failure rolls back every fact, alias, tombstone, ledger and success marker (251.217433ms)
+✔ silently ignored raw record failure rolls back every fact, alias, tombstone, ledger and success marker (262.739542ms)
+✔ silently rewritten raw value failure rolls back every fact, alias, tombstone, ledger and success marker (325.787209ms)
+✔ silently ignored UUID identity failure rolls back every fact, alias, tombstone, ledger and success marker (283.908863ms)
+✔ silently ignored alias failure rolls back every fact, alias, tombstone, ledger and success marker (343.557175ms)
+✔ silently ignored change ledger failure rolls back every fact, alias, tombstone, ledger and success marker (336.978059ms)
+✔ silently ignored deletion failure rolls back every fact, alias, tombstone, ledger and success marker (336.249591ms)
+✔ silently ignored source tombstone failure rolls back every fact, alias, tombstone, ledger and success marker (243.741392ms)
+✔ receipt write failure rolls back every fact, alias, tombstone, ledger and success marker (268.488741ms)
+✔ silently ignored receipt failure rolls back every fact, alias, tombstone, ledger and success marker (300.838522ms)
+✔ silently rewritten receipt failure rolls back every fact, alias, tombstone, ledger and success marker (280.054429ms)
+✔ late ledger removal failure rolls back every fact, alias, tombstone, ledger and success marker (323.630538ms)
+✔ late fact corruption failure rolls back every fact, alias, tombstone, ledger and success marker (322.719151ms)
+✔ late identity removal failure rolls back every fact, alias, tombstone, ledger and success marker (287.92021ms)
+✔ ignored completion metadata failure rolls back every fact, alias, tombstone, ledger and success marker (345.298277ms)
+✔ late batch corruption failure rolls back every fact, alias, tombstone, ledger and success marker (303.95666ms)
+✔ a silently ignored canonical correction cannot be acknowledged with only the UUID fact updated (618.393551ms)
+✔ profile drift rolls back earlier records and returns a no-write fallback (641.477427ms)
+✔ an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL guards (528.703132ms)
+✔ missing/old parser attestation and uninitialized legacy hashes use the normal path without writes (644.124386ms)
+✔ a missing UUID lookup index cannot qualify for data-only (390.63676ms)
+✔ workout deletions, routes and unknown record types cannot take the fast path (376.865731ms)
+✔ 需要分析的批次：回执的 analysisJobId 等于 recompute_jobs 那一行，且与批次账本同源 (496.335331ms)
+✔ record-only 批次：analysisJobId 是 null（不是缺键） (313.239446ms)
+✔ 🔴 回执不因分析推进而变：跑完分析后重读，analysisStatus 仍是 queued、id 仍是同一个 (16139.733511ms)
+✔ 步骤 1：消费者认识 `import`，直连分析载荷会被**真正执行**（不再是 Unsupported） (563.570843ms)
+✔ 步骤 1 的边界：CLI 载荷被消费者**拒绝**，且不会跑分析（原因说清，不是 Unsupported） (400.901853ms)
+✔ 直连车道的事实范围是 full，且 worker **真的**有调用方（放开判据 ≠ 接上车道） (25.294551ms)
+✔ 两条车道的回执各守各的：record-only 恒 not_required；统一接收器按分类取 queued/not_required (8.373605ms)
+✔ 统一接收器：回执的 analysisStatus 与登记**在同一个事务里互相印证**（半落地即红） (13.774419ms)
+✔ `directSync` 直连回执今天只有三个产出方（新增第四个即红） (499.37695ms)
+✔ 直连车道登记的分析任务必须被唤醒：import 终态回调要有 schedule()，且有兜底巡检 (19.575738ms)
+✔ record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务 (452.923976ms)
+✔ P0-3/P2-3：回执带 records 计数（parsed/inserted/unchanged），提交成功的批次带四段阶段账本 (555.19036ms)
+✔ Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环） (18048.572697ms)
+✔ O04：训练内的记录变更把脏下界回退到相交训练起点（不再是变更时刻） (551.892866ms)
+✔ 删除-only 载荷：显式删除先于到达也要求分析，且不误删同来源其它事实 (363.403022ms)
+✔ GPX 路线：路线变更同样要求分析，且路线版本对读侧可见（末批发布） (457.412955ms)
+✔ manifest_exceeds_bounds 的 bounds 键必须与 actual 同指一个量（P3a） (3.918845ms)
+✔ 超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1） (455.668011ms)
+✔ 收口窗口 (2, 8] MiB：data-only 拒、统一接收器接受（P2-4） (13981.390033ms)
+✔ 边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4） (1231.029635ms)
+✔ 拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason (319.539192ms)
+✔ 空库首包（四项身份全缺）+ v2 载荷 ⇒ 就地初始化：四要素齐备、第二包照常（S3.2/D3） (543.374648ms)
+✔ 写守卫：接收事务写派生分析/发布表 ⇒ 立刻被拒；写事实表允许（阳性对照） (249.280502ms)
+✔ fail-closed：出现未表态的表时，守卫拒绝安装（而不是默认放行） (255.732448ms)
+✔ PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变 (507.62212ms)
+✔ O10（WP-31）：一批里两个**不相邻**时期 ⇒ 逐时期重建，中间那段（间隙）逐字节不变 (429.706837ms)
+✔ R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口） (506.425039ms)
+✔ PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变） (398.808145ms)
+✔ A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执整批回滚 (502.617278ms)
+✔ §4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接路径的门槛） (427.33574ms)
+✔ P1-1：source_xml_bytes 报磁盘字节数，不是解码后重编码的长度 (290.795004ms)
+✔ P1-1：prepare 阶段不得再整读 XML（AST 级，行为判据看不见这一条） (120.785965ms)
+✔ A01/§14.1 清单本身自洽：每条都声明了可观测通道，且通道名在真实实现上存在 (2.73634ms)
+✔ A01/§14.1 逐项：真实排队的 v2 增量不触发任何禁止操作，且主库文件身份不变 (1872.992359ms)
+Fast path rejected for web_import_mvj36j5k_1ff37944-7766-4580-a34e-b75039fd371d: continuing to the direct-sync receiver
+✔ A01/§14.1 全类型：含 Workout 的增量走统一接收器，同样一条禁止操作都不踩 (1367.820399ms)
+✔ A01/§14.1 阳性对照（S3.3 改写）：直接调用保留方法，守卫必须转红 —— 「全 0」不是假绿 (1427.209462ms)
+✔ A17/§10.1 直连回执把「原始已保存」与「分析已更新」分成两个字段，且与持久回执一致 (1447.536236ms)
+✔ A05/§14.1 重启后的已 committed 任务从持久回执恢复，且不投递任何数据库任务 (1407.851813ms)
+✔ §14.1 进程内通道有牙：直接调用被禁的 store 方法会被守卫判红 (284.232933ms)
+✔ 迁移产物与 INGEST_TABLE_DISPOSITIONS 双向一致（漏表态 = 整条同步车道被拒） (252.529509ms)
+✔ payload identity moves with every input that changes what an import writes (15.306283ms)
+✔ payload content digest ignores the exporter wall clock but notices real data (81.973258ms)
+✔ payload anchors round-trip, and an unusable anchor reads as absent (330.83013ms)
+Fast path rejected for web_import_preflight_tdspwyu1vjf: continuing to the direct-sync receiver
+✔ an import records the payload anchor and the next identical sync skips the whole pipeline (1710.201224ms)
+✔ a payload that declares absence-as-deletion never short-circuits (329.701955ms)
+✔ a database that moved since the anchor was recorded disables the short-circuit (395.706582ms)
+Fast path rejected for web_import_preflight_lcd4jqvt5h: continuing to the direct-sync receiver
+✔ a payload whose identity differs still runs the full pipeline (1604.664298ms)
+Payload identity unavailable for web_import_preflight_6w8y1471wo: ENOENT: no such file or directory, open '/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-payload-preflight-unreadable-FsWlm6/export/导出.xml'
+Payload identity unavailable for web_import_preflight_8hr2uid190u: ENOENT: no such file or directory, open '/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-payload-preflight-unreadable-FsWlm6/export/导出.xml'
+Payload identity unavailable for web_import_preflight_8hr2uid190u: ENOENT: no such file or directory, open '/var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-payload-preflight-unreadable-FsWlm6/export/导出.xml'
+Import job web_import_preflight_8hr2uid190u refused by the direct-sync lane: payload_identity_unavailable
+✔ an unreadable payload disables the short-circuit and is refused explicitly (not a crash) (368.901591ms)
+Fast path rejected for web_import_preflight_m592h7ww55b: continuing to the direct-sync receiver
+✔ the recorded anchor survives a real direct import into the live database (1425.679617ms)
+✔ worker no-op 回执任务：重验通过才提交，anchor 失效返回 not_verified 且不写回执 (355.971758ms)
+Fast path rejected for web_import_mvj36w3u_0189ab18-ab66-4fa3-bb73-e69c42366973: continuing to the direct-sync receiver
+✔ 2e：含 Workout 的增量在 worker 里走统一接收器——登记分析任务、回执 queued、零禁止操作 (1591.529386ms)
+Fast path rejected for web_import_mvj36xbl_b89e0c92-d199-4645-82fc-125af7b87115: continuing to the direct-sync receiver
+✔ 2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与接收复核摘要必须同源） (1451.794431ms)
+Fast path rejected for web_import_mvj36yhg_6d79f920-6e18-4b7f-9d42-41770578338f: continuing to the direct-sync receiver
+Direct sync rejected for web_import_mvj36yhg_6d79f920-6e18-4b7f-9d42-41770578338f: xml_exceeds_bounds (stage=prepare) actual={"xmlBytes":10044434} bounds={"maxXmlBytes":8388608}
+Import job web_import_mvj36yhg_6d79f920-6e18-4b7f-9d42-41770578338f refused by the direct-sync lane: xml_exceeds_bounds detail={"directSyncRejected":true,"reason":"xml_exceeds_bounds","stage":"prepare","actual":{"xmlBytes":10044434},"bounds":{"maxXmlBytes":8388608}}
+✔ 回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前） (1551.096465ms)
+ℹ tests 82
+ℹ suites 0
+ℹ pass 82
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 59079.022674

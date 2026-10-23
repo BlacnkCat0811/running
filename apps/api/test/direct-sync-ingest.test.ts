@@ -22,13 +22,13 @@ import test from "node:test";
 
 import ts from "typescript";
 
-import { CONTRACT_VERSION, healthTypes, workoutTypes } from "@rai/contracts";
+import { CONTRACT_VERSION, DATABASE_TIMEZONE, healthTypes, workoutTypes } from "@rai/contracts";
 import { RaiApplicationService } from "@rai/application";
 import { RaiDatabase } from "@rai/storage-sqlite";
-import { NATIVE_VERSION, identityAlgorithmFingerprint } from "@rai/health-export-parser";
+import { NATIVE_VERSION, canonicalizeNightsForWindow, identityAlgorithmFingerprint } from "@rai/health-export-parser";
 
 import {
-  DIRECT_SYNC_WRITE_GUARD, INGEST_TABLE_DISPOSITIONS, applyDirectSyncImport, isDirectSyncRejection,
+  DIRECT_SYNC_WRITE_GUARD, INGEST_TABLE_DISPOSITIONS, applyDirectSyncImport, fullNightRebuildPeriod, isDirectSyncRejection,
   installDirectSyncWriteGuards, preflightDirectSyncPayload, unclassifiedIngestTables,
   type DirectSyncImportInput, type DirectSyncImportResult
 } from "../src/direct-sync-ingest.js";
@@ -742,6 +742,25 @@ test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical �
     assert.equal(after.get("2026-01-11"), canaryBefore.get("2026-01-11"),
       "🔴 窗口外的 canonical 行必须**逐字节**不变（§14.1 的「不许全表重建」就是这一条）：" +
       "金丝雀值 999 必须原封不动地留在库里");
+  });
+});
+
+test("历史删除缺旧侧且是唯一睡眠记录：无界窗口覆盖并清除旧 canonical 夜", async () => {
+  await fixture(async ({ main, input }) => {
+    await applyOrFail(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000e9", "2026-01-01"),
+      { job: "legacy-night-first" }
+    ));
+    assert.ok(nightsByDate(main).has("2026-01-02"));
+    const db = new DatabaseSync(main);
+    try {
+      db.exec("DELETE FROM health_records");
+      const period = fullNightRebuildPeriod(db, ["2026-01-01T15:10:00.000Z"]);
+      assert.ok(period.from <= "2026-01-02" && period.to >= "2026-01-02",
+        `删除后的空 health_records 仍须覆盖旧夜，实际 ${period.from}..${period.to}`);
+      canonicalizeNightsForWindow(db, DATABASE_TIMEZONE, period.from, period.to);
+    } finally { db.close(); }
+    assert.equal(nightsByDate(main).size, 0, "旧夜必须被真正删除，不能留下派生残影");
   });
 });
 

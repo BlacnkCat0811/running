@@ -39,6 +39,15 @@ export interface GpxImportResult {
   /** Files refused by the per-route quotas below (V2.1 §5.2). */
   oversizedRouteCount?: number;
   /**
+   * 内容未变、但**父训练归属**在本批发生变化的路线数（T11）。
+   *
+   * 指纹缓存原先只比较文件摘要/route id/点数，不看 `workout_routes.workout_id`；
+   * 路线从训练 A 移到 B 且 GPX 字节完全相同时会命中缓存 ⇒ `changedRouteIds` 为空
+   * ⇒ A 的旧归属时刻不会进入脏范围（静默漏算）。这个计数只用于回执的可解释性；
+   * 归属变化的 route id 会一并进入 `changedRouteIds`。
+   */
+  ownershipChangedRouteCount?: number;
+  /**
    * `source_gpx_bundle_sha256` 是**复用**了上一批的值还是**重算**的。
    *
    * 可断言观测：本批没有任何路线变化时必须 `reused`（否则"小批同步"仍然每批扫全表）；
@@ -310,9 +319,12 @@ export function listGpxRelativePaths(exportRoot: string): string[] {
 export async function importGpxRoutes(
   exportRoot: string,
   store: RaiDatabase,
-  options?: { preserveAbsent?: boolean; native?: NativeOptions }
+  options?: { preserveAbsent?: boolean; native?: NativeOptions; forceChangedRouteIds?: readonly string[] }
 ): Promise<GpxImportResult> {
   const preserveAbsent = options?.preserveAbsent === true;
+  // 父训练归属已在本批 XML 解析阶段变化、但 GPX 字节与指纹都相同的路线：
+  // 缓存命中仍必须把它们记进 `changedRouteIds`，否则旧归属训练的脏时刻会丢。
+  const forcedChangedRouteIds = new Set(options?.forceChangedRouteIds ?? []);
   // 全量快照（CLI）需要"库里被引用、但本批没带文件"的完整清单 ⇒ 才建全表映射。
   // 直连批次（`preserveAbsent`）只处理本批那几十个文件：逐个点查走 `relative_path` 的 UNIQUE 索引。
   const referencedTargets = preserveAbsent
@@ -332,6 +344,7 @@ export async function importGpxRoutes(
   let pointCount = 0;
   let skippedRouteCount = 0;
   let oversizedRouteCount = 0;
+  let ownershipChangedRouteCount = 0;
   const unresolvedRoutePaths: string[] = [];
   const changedRouteIds: string[] = [];
   const bundleHash = createHash("sha256");
@@ -428,6 +441,11 @@ export async function importGpxRoutes(
         bundleHash.update("\0");
         skippedRouteCount += 1;
         pointCount += cached.pointCount;
+        // 内容缓存命中 ≠ 语义未变：父训练归属在本批变化时，旧归属必须可见。
+        if (forcedChangedRouteIds.has(routeId)) {
+          changedRouteIds.push(routeId);
+          ownershipChangedRouteCount += 1;
+        }
         continue;
       }
       // 🔴 点先写进**未发布**的版本，完全不碰 `route_points`。
@@ -628,6 +646,7 @@ export async function importGpxRoutes(
     unresolvedRoutePaths: unresolvedRoutePaths.slice(0, 10),
     changedRouteIds,
     oversizedRouteCount,
+    ownershipChangedRouteCount,
     bundleHashSource
   };
 }

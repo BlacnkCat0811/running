@@ -47,3 +47,46 @@ test("cancellation pins out a following import even after its compute worker exi
   assert.ok(imported);
   imported();
 });
+
+test("recovery blocks are token-bound, additive, and never clear permanent blocks", () => {
+  const scheduler = new TaskAdmissionScheduler(new MutationCoordinator());
+  const imports = scheduler.owner("import");
+  const first = scheduler.beginRecoveryBlock("import_publication_recovery_required", "import");
+  const again = scheduler.beginRecoveryBlock("import_publication_recovery_required", "import");
+  assert.equal(again.token, first.token, "the same identity must return the same token");
+  assert.equal(imports.acquire(), null);
+
+  scheduler.blockUntilRestart("restore_recovery_required");
+  assert.deepEqual(scheduler.activeBlocks().map((block) => block.kind), ["recovery", "permanent"]);
+  assert.equal(scheduler.snapshot().blocked, "import_publication_recovery_required");
+  assert.equal(scheduler.snapshot().blocks?.length, 2, "all active reasons stay observable");
+
+  assert.equal(scheduler.resolveRecoveryBlock({ ...first, token: "forged" }), false,
+    "a mismatched token must not clear anything");
+  assert.equal(scheduler.isBlocked, true);
+  assert.equal(scheduler.hasBlocksOtherThan([first]), true, "the permanent block is not part of the token");
+
+  assert.equal(scheduler.resolveRecoveryBlock(first), true);
+  assert.equal(scheduler.isBlocked, true, "resolving one block must not clear another");
+  assert.equal(imports.acquire(), null);
+  assert.equal(scheduler.resolveRecoveryBlock(first), false, "a resolved token is stale");
+
+  const permanent = scheduler.activeBlocks()[0]!;
+  assert.equal(permanent.kind, "permanent");
+  assert.deepEqual(scheduler.snapshot().blocks, [permanent]);
+});
+
+test("resolving a recovery block wakes waiting owners so they re-evaluate", () => {
+  const scheduler = new TaskAdmissionScheduler(new MutationCoordinator());
+  const imports = scheduler.owner("import");
+  const token = scheduler.beginRecoveryBlock("import_publication_recovery_required");
+  let notifications = 0;
+  imports.onChange?.(() => { notifications += 1; });
+  assert.equal(imports.acquire(), null);
+  assert.equal(notifications, 0, "a blocked acquire is not a state change");
+  assert.equal(scheduler.resolveRecoveryBlock(token), true);
+  assert.equal(notifications, 1, "availability rose: waiting owners must retry");
+  const release = imports.acquire();
+  assert.ok(release);
+  release!();
+});

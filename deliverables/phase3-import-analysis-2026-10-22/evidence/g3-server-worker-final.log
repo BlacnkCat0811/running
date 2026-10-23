@@ -1,0 +1,371 @@
+TAP version 13
+# (node:63631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）
+ok 1 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）
+  ---
+  duration_ms: 33.952299
+  type: 'test'
+  ...
+# (node:63631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实
+ok 2 - 已提交回执 + 持久 running：重启恢复 succeeded 原回执且不重复事实
+  ---
+  duration_ms: 928.182866
+  type: 'test'
+  ...
+# Subtest: 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源
+ok 3 - 损坏数据库 + cancelRequested：恢复阻断而非 cancelled，且不清理来源
+  ---
+  duration_ms: 50.567214
+  type: 'test'
+  ...
+# Subtest: 损坏数据库 + attempts=3：恢复阻断而非 failed
+ok 4 - 损坏数据库 + attempts=3：恢复阻断而非 failed
+  ---
+  duration_ms: 60.545707
+  type: 'test'
+  ...
+# Subtest: onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ）
+ok 5 - onRecoveryRequired 异步兑现：兼容 server.ts 在 await 之后才声明的 let（TDZ）
+  ---
+  duration_ms: 53.652903
+  type: 'test'
+  ...
+# Subtest: 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消
+ok 6 - 可读数据库 + 无回执 + cancelRequested：confirmed_absent 仍按原政策取消
+  ---
+  duration_ms: 46.058374
+  type: 'test'
+  ...
+# Subtest: 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断
+ok 7 - 可读数据库 + 无回执 + attempts=3：confirmed_absent 仍按原政策判中断
+  ---
+  duration_ms: 43.531125
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import first-import.
+# (node:63631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for first-import: continuing to the direct-sync receiver
+# Subtest: 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入
+ok 8 - 首次空库（数据库文件不存在）+ queued attempts=0：不阻断，且能完成首批 record-only 导入
+  ---
+  duration_ms: 828.0787
+  type: 'test'
+  ...
+# Subtest: create 入队时把主库缺失写进持久队列证据
+ok 9 - create 入队时把主库缺失写进持久队列证据
+  ---
+  duration_ms: 54.566279
+  type: 'test'
+  ...
+# Subtest: 只有任务自己的 databaseAbsentAtEnqueue、没有作用域账本：缺失库仍阻断
+ok 10 - 只有任务自己的 databaseAbsentAtEnqueue、没有作用域账本：缺失库仍阻断
+  ---
+  duration_ms: 49.343468
+  type: 'test'
+  ...
+# Main database missing; creating a fresh database before import web_import_mvjhamqd_2d777a3d-2ecb-45c5-af90-6954e2801ee5.
+# (node:63631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjhamqd_2d777a3d-2ecb-45c5-af90-6954e2801ee5: continuing to the direct-sync receiver
+# (node:63631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1：A、B 双任务空库序列——A 成功后移走主库，B 不得运行/建库/清理来源，恢复后只提交一次
+ok 11 - P1：A、B 双任务空库序列——A 成功后移走主库，B 不得运行/建库/清理来源，恢复后只提交一次
+  ---
+  duration_ms: 1648.003438
+  type: 'test'
+  ...
+# Subtest: 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行
+ok 12 - 缺失库 + attempts=0 但没有入队时空库证据：恢复阻断，不按首次空库放行
+  ---
+  duration_ms: 50.784003
+  type: 'test'
+  ...
+# (node:63631) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执
+ok 13 - 已提交 + 重启时主库暂时缺失 + cancelRequested：阻断而非 cancelled；恢复后返回原回执
+  ---
+  duration_ms: 943.219815
+  type: 'test'
+  ...
+# Subtest: 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope
+ok 14 - 外 scope 旧任务 + 数据库不可读：仍走旧终态并 finalize 自己的 scope，不阻断当前 scope
+  ---
+  duration_ms: 52.626536
+  type: 'test'
+  ...
+# (node:63632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:63632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjhapg3_0f66cb85-62f2-4a3d-a2c0-a95867202b22: continuing to the direct-sync receiver
+# Subtest: 2e：含 Workout 的增量在 worker 里走统一接收器——登记分析任务、回执 queued、零禁止操作
+ok 15 - 2e：含 Workout 的增量在 worker 里走统一接收器——登记分析任务、回执 queued、零禁止操作
+  ---
+  duration_ms: 848.920073
+  type: 'test'
+  ...
+# (node:63632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjhaq31_197a7646-dbdc-42fc-be5b-603c8b8cf9ba: continuing to the direct-sync receiver
+# Subtest: 2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与接收复核摘要必须同源）
+ok 16 - 2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与接收复核摘要必须同源）
+  ---
+  duration_ms: 868.248621
+  type: 'test'
+  ...
+# (node:63632) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvjhaqsi_4834ca63-9d60-49f3-b7af-28f35e09f8b3: continuing to the direct-sync receiver
+# Direct sync rejected for web_import_mvjhaqsi_4834ca63-9d60-49f3-b7af-28f35e09f8b3: xml_exceeds_bounds (stage=prepare) actual={"xmlBytes":10044434} bounds={"maxXmlBytes":8388608}
+# Import job web_import_mvjhaqsi_4834ca63-9d60-49f3-b7af-28f35e09f8b3 refused by the direct-sync lane: xml_exceeds_bounds detail={"directSyncRejected":true,"reason":"xml_exceeds_bounds","stage":"prepare","actual":{"xmlBytes":10044434},"bounds":{"maxXmlBytes":8388608}}
+# Subtest: 回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前）
+ok 17 - 回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前）
+  ---
+  duration_ms: 860.599048
+  type: 'test'
+  ...
+# (node:63633) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: hasPending tracks queued and claimed jobs but not terminals
+ok 18 - hasPending tracks queued and claimed jobs but not terminals
+  ---
+  duration_ms: 151.082173
+  type: 'test'
+  ...
+# Subtest: an idle drain never spawns a worker thread
+ok 19 - an idle drain never spawns a worker thread
+  ---
+  duration_ms: 148.573912
+  type: 'test'
+  ...
+# Subtest: a queued job still spawns a worker thread
+ok 20 - a queued job still spawns a worker thread
+  ---
+  duration_ms: 158.723705
+  type: 'test'
+  ...
+# Subtest: wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底巡检的有效性）
+ok 21 - wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底巡检的有效性）
+  ---
+  duration_ms: 166.320192
+  type: 'test'
+  ...
+# (node:63633) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 常驻分析线程：连续多轮只起一条线程，且轮次之间不持有线程句柄
+ok 22 - 常驻分析线程：连续多轮只起一条线程，且轮次之间不持有线程句柄
+  ---
+  duration_ms: 763.745531
+  type: 'test'
+  ...
+# (node:63633) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）
+ok 23 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）
+  ---
+  duration_ms: 924.921142
+  type: 'test'
+  ...
+# (node:63634) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked
+ok 24 - coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked
+  ---
+  duration_ms: 2476.940858
+  type: 'test'
+  ...
+# Subtest: retired legacy plan routes answer 410 with replacements and never publish
+ok 25 - retired legacy plan routes answer 410 with replacements and never publish
+  ---
+  duration_ms: 1870.483092
+  type: 'test'
+  ...
+# Subtest: restore and deletion reject a committed import whose acknowledgement is still pending
+ok 26 - restore and deletion reject a committed import whose acknowledgement is still pending
+  ---
+  duration_ms: 2024.364011
+  type: 'test'
+  ...
+# Subtest: prediction training reports a missing active ability baseline as a conflict
+ok 27 - prediction training reports a missing active ability baseline as a conflict
+  ---
+  duration_ms: 2150.520526
+  type: 'test'
+  ...
+# Subtest: runtime status includes persisted prediction work and restore recovers recompute jobs
+ok 28 - runtime status includes persisted prediction work and restore recovers recompute jobs
+  ---
+  duration_ms: 2815.290746
+  type: 'test'
+  ...
+# Subtest: HTTP restore remains available when the active database is corrupt at startup
+ok 29 - HTTP restore remains available when the active database is corrupt at startup
+  ---
+  duration_ms: 2146.313962
+  type: 'test'
+  ...
+# Subtest: API quarantines a corrupt runtime state database and still starts
+ok 30 - API quarantines a corrupt runtime state database and still starts
+  ---
+  duration_ms: 1900.260129
+  type: 'test'
+  ...
+# Subtest: restore request fails and keeps the current database when job recovery fails
+ok 31 - restore request fails and keeps the current database when job recovery fails
+  ---
+  duration_ms: 1997.946368
+  type: 'test'
+  ...
+# Subtest: database-backed writes cannot recreate a deleted database
+ok 32 - database-backed writes cannot recreate a deleted database
+  ---
+  duration_ms: 1919.867906
+  type: 'test'
+  ...
+# Subtest: startup foreign-key failure cannot be bypassed by the request hot-open policy
+ok 33 - startup foreign-key failure cannot be bypassed by the request hot-open policy
+  ---
+  duration_ms: 1800.443126
+  type: 'test'
+  ...
+# Subtest: retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream
+ok 34 - retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream
+  ---
+  duration_ms: 1872.845234
+  type: 'test'
+  ...
+# Subtest: startup retires legacy future plans and only preview confirmation enables them again
+ok 35 - startup retires legacy future plans and only preview confirmation enables them again
+  ---
+  duration_ms: 1902.010962
+  type: 'test'
+  ...
+# Subtest: dynamic-port startup reports readiness and workout overrides preserve service result
+ok 36 - dynamic-port startup reports readiness and workout overrides preserve service result
+  ---
+  duration_ms: 11868.574694
+  type: 'test'
+  ...
+# Subtest: upload HTTP errors distinguish limits, invalid archives, and internal I/O failures
+ok 37 - upload HTTP errors distinguish limits, invalid archives, and internal I/O failures
+  ---
+  duration_ms: 2630.392948
+  type: 'test'
+  ...
+# Subtest: scopes sync batch idempotency by dataset epoch
+ok 38 - scopes sync batch idempotency by dataset epoch
+  ---
+  duration_ms: 3208.595748
+  type: 'test'
+  ...
+# Subtest: deletion isolates receipts and rebuilds the same source without restart
+ok 39 - deletion isolates receipts and rebuilds the same source without restart
+  ---
+  duration_ms: 8195.117773
+  type: 'test'
+  ...
+# Subtest: deletion isolates receipts and rebuilds the same source after restart
+ok 40 - deletion isolates receipts and rebuilds the same source after restart
+  ---
+  duration_ms: 11069.777432
+  type: 'test'
+  ...
+# Subtest: restore advances durable dataset scope and reapplies commands instead of replaying stale success
+ok 41 - restore advances durable dataset scope and reapplies commands instead of replaying stale success
+  ---
+  duration_ms: 5529.590744
+  type: 'test'
+  ...
+# Subtest: training-zone HTTP errors expose only typed client failures
+ok 42 - training-zone HTTP errors expose only typed client failures
+  ---
+  duration_ms: 1845.250471
+  type: 'test'
+  ...
+# Subtest: mobile lock confirms a session when today has no recovery record
+ok 43 - mobile lock confirms a session when today has no recovery record
+  ---
+  duration_ms: 1848.2922
+  type: 'test'
+  ...
+# Subtest: every mounted write route is classified, whatever the source looks like
+ok 44 - every mounted write route is classified, whatever the source looks like
+  ---
+  duration_ms: 1774.85688
+  type: 'test'
+  ...
+# Subtest: snapshot capabilities and receipt lifecycle work through the production router
+ok 45 - snapshot capabilities and receipt lifecycle work through the production router
+  ---
+  duration_ms: 1993.273615
+  type: 'test'
+  ...
+# Subtest: P3-01: plan reads fail closed on an in-flight control publication and keep their shape
+ok 46 - P3-01: plan reads fail closed on an in-flight control publication and keep their shape
+  ---
+  duration_ms: 1858.78474
+  type: 'test'
+  ...
+# Subtest: summary export requires token even on a public host and validates its range before reading
+ok 47 - summary export requires token even on a public host and validates its range before reading
+  ---
+  duration_ms: 1883.53085
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=true, anonymousRoutes=unset
+ok 48 - workout route privacy: token=true, anonymousRoutes=unset
+  ---
+  duration_ms: 2834.857464
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=true, anonymousRoutes=1
+ok 49 - workout route privacy: token=true, anonymousRoutes=1
+  ---
+  duration_ms: 11892.024952
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=unset
+ok 50 - workout route privacy: token=false, anonymousRoutes=unset
+  ---
+  duration_ms: 11876.307399
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=0
+ok 51 - workout route privacy: token=false, anonymousRoutes=0
+  ---
+  duration_ms: 11935.431307
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=1
+ok 52 - workout route privacy: token=false, anonymousRoutes=1
+  ---
+  duration_ms: 11851.109219
+  type: 'test'
+  ...
+# Subtest: retired backup endpoints create and delete nothing while the recovery path stays usable
+ok 53 - retired backup endpoints create and delete nothing while the recovery path stays usable
+  ---
+  duration_ms: 1831.358531
+  type: 'test'
+  ...
+# Subtest: retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe
+ok 54 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe
+  ---
+  duration_ms: 1597.019876
+  type: 'test'
+  ...
+1..54
+# tests 54
+# suites 0
+# pass 54
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 144806.13428

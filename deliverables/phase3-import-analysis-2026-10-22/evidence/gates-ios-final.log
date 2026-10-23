@@ -1,0 +1,56 @@
+
+> rai-running-intelligence@0.1.0 check:ios-gates
+> node scripts/run-ios-python-gates.mjs
+
+iOS 结构门禁解释器：python3 3.9.6（要求 ≥ 3.9）
+
+=== apps/ios/tests/check-background-capabilities.py ===
+Background capability checks: 342 checks, 0 failed
+
+=== apps/ios/tests/check-direct-sync-analysis-reconcile.py ===
+OK: analysis terminal-state reconciliation gate (52 checks).
+    note: this is a source-level gate. It does NOT execute the Swift reconcile path;
+    the behavioural assertions run on macOS via apps/ios/tests/DirectSyncReceiptRegression.swift (H).
+
+=== apps/ios/tests/check-direct-sync-contract-parity.py ===
+server contract: packages/contracts/src/direct-sync.ts
+  DirectSyncIngestStatus == INGEST_STATUSES: ['receiving', 'validating', 'applying', 'committed', 'rejected']
+  DirectSyncAnalysisStatus == ANALYSIS_STATUSES: ['not_required', 'queued', 'running', 'published', 'failed']
+  factsAnalysisContractVersion: server ['1'], iOS ['1']
+Direct-sync contract parity checks passed (21 checks: status enums verbatim and in order, factsAnalysisContractVersion identical, lane refusal codes pinned, gate is mounted)
+
+=== apps/ios/tests/check-direct-sync-status-copy.py ===
+Direct-sync status copy checks passed (55 checks: §10.3 copy verbatim from one entry, legacy copy absent, §10.2 gate order and intent acknowledgement, gate is mounted)
+
+=== apps/ios/tests/check-export-determinism.py ===
+Export determinism checks: 14 checks, 0 failed
+
+=== apps/ios/tests/check-fresh-skin.py ===
+Athletic skin: dark surfaces/night maps, scaled type roles, native symbols, original layout and progress semantics passed
+
+=== apps/ios/tests/check-health-sync-archive.py ===
+Health sync archive execution-boundary checks: 19 checks, 0 failed
+
+=== apps/ios/tests/check-healthkit-record-sync.py ===
+HealthKit record sync wiring: 126 checks, 0 failed
+
+=== apps/ios/tests/check-pr5-facts-analysis.py ===
+contracts: packages/api-contracts/src/index.ts
+  C9 baseline: apps/ios/tests/fixtures/pr5-c9-baseline-keys.json @ 67028e1322ba38e62dc1d0c854d4b632a0338e06（3 个 interface，含**可选性**）
+  C2 rows: facts=['FactsView'] analysis=['AnalysisView']
+  capability: factsAnalysisContractVersion literal sites=[('apps/api/src/server.ts', 1128)]；view capability=factsAnalysisViewContractVersion
+PR5 facts/analysis checks passed (24 checks: C9 key set **and optionality**, C2 block disjointness, capability naming)
+
+=== apps/ios/tests/check-retired-plan-outbound.py ===
+retired-plan outbound gate passed (623 checks)
+
+=== apps/ios/tests/check-today-layout.py ===
+Today layout checks passed (order, paired summaries, sync visibility, recovery icons)
+Compact card heights, minute chart coordinates, structured steps, map consent and map gesture lock checks passed
+Workout detail layout checks passed (expandable weather summary, no duplicate panels, tap charts, kilometer markers)
+
+⏭️  跳过 apps/ios/tests/check-background-mutations.py：逐条改坏 Swift 源码再跑 bash + Xcode 门禁（需要 macOS 工具链；`test:ios:mutation` 是它的入口）
+
+⏭️  跳过 apps/ios/tests/check-export-determinism-live.py：要把探针装进已启动的 iOS 模拟器并跨进程比对导出字节（只在 macOS + Simulator 上可跑）
+
+iOS 结构门禁通过（11 支跨平台判据；跳过 2 支需外部条件的）。

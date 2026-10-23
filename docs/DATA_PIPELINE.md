@@ -37,6 +37,8 @@ ZIP 先检查路径、大小、数量、重复条目与导出根目录：不能�
 - payload 摘要包含内容、canonical 合同、preserveAbsent 语义、引擎 name@version 和身份算法 fingerprint。
 - 指纹更改必须审查是否有意、是否会触发全量重导；不能直接更新冻结值使红灯消失。
 - tombstone、来源删除和 override revision 是事实，不因重导相同 ZIP 被复活。
+- **删除的旧侧证据（P1-3，2026-10-23）**：任何写 `import_entity_changes` 的 `removed` 行都会同时保存 `previous_type / previous_effective_at / previous_end_at`。`effective_at` 只是兼容用的单点时刻；跨夜睡眠/HRV 的旧起点必须来自 `previous_effective_at`，否则删除会退化成"无边界"。历史账本里缺少旧侧的 `removed` 行一律让该批升级为 `full`（`legacy_removal_without_previous_range`），不得被同批另一条有界变更掩盖。
+- **历史删除后的夜重建**：无旧侧的删除可能已经移走最后一条睡眠记录。全量夜窗口取剩余健康记录的时间、现有 `canonical_nights.wake_date` 与 `canonical_hrv_days.local_date`，以及可用的删除时刻，再向两侧各扩一天；即使原始记录表已空，也会清掉旧 canonical 行。回执 `from`/`to` 与实际重建窗口一致。
 - **值更正取代（supersede，2026-10-18）**：没有 sample UUID 的记录，身份把 value/unit 折进 id，因此「值更正」会表现为一个新实体。`preserveAbsent` 增量会把同一自然键 `(type, source_name, start_at, end_at)` 的旧身份按**删除持久**处理（账本 `removed` + 墓碑 + 删行），而不是让两行共存。这是刻意的方向：上传是 at-least-once，延迟重试的旧批次不能把已更正的值写回去；代价是「值又改回旧值」同样会被墓碑拦住、不会复活。被拦下的数量可通过 `GET /v1/diagnostics` 的 `imports.tombstonedRecords` / `imports.supersededRecords` 观察到（来自 succeeded import_batches 的 `summary_json.xml` 聚合）。
 - `created_at` 可能是数据源创建时间，不自动等于系统首次收到记录的时间。
 
@@ -76,7 +78,7 @@ Override 保存修订和可得性。反馈保存之后的重算失败不应撤�
 | 主库 `var/rai.sqlite` | 健康事实、训练、覆盖修订、不可变派生 run、发布指针；迁移注册表唯一来源 |
 | 控制库 `var/rai-control.sqlite` | 计划状态与历史、发布结果、排期回执；schema 表 `mobile_control_schema` 当前 v2（`mobile_training_state` / `_history` / `_migration_audit` + legacy `mobile_goals`/`_history`、`mobile_plan_pushes`、`mobile_plan_operations`、`mobile_coach_loop_receipts`） |
 | 运行时 `var/runtime.sqlite` | 来源/任务状态、导入回执索引与发布 journal |
-| epoch 侧车 `var/rai.sqlite.dataset-epoch.sqlite` | dataset epoch 单行持久化；独立于可删除的事实库与 runtime 的损坏恢复，缺失时失败开放回落到 configured epoch |
+| epoch 侧车 `var/rai.sqlite.dataset-epoch.sqlite` | dataset epoch 单行 + `dataset_deletion` 阶段日志；独立于可删除的事实库与 runtime 的损坏恢复，损坏/身份不匹配时失败关闭 |
 
 主库表族（语义分组，不是完整清单）：
 

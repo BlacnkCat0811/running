@@ -1,0 +1,287 @@
+TAP version 13
+# (node:11995) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:11995) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvk0gxgz_58ba88c6-93af-4d0a-92f9-15e0fa2583d3: continuing to the direct-sync receiver
+# (node:11995) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Fast path rejected for web_import_mvk0gysi_7f767084-638c-4aa6-95aa-623b66707ff3: continuing to the direct-sync receiver
+# Subtest: A10：分析故障隔离——原回执不变、失败独立可见、重试只计算（不重新导出/不备份）
+ok 1 - A10：分析故障隔离——原回执不变、失败独立可见、重试只计算（不重新导出/不备份）
+  ---
+  duration_ms: 2779.474738
+  type: 'test'
+  ...
+# (node:12005) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果
+ok 2 - 验收①：10 条兼容排队批次只执行一份覆盖计算，10 个原 analysisJobId 各自查到真实结果
+  ---
+  duration_ms: 1759.258128
+  type: 'test'
+  ...
+# Subtest: 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次
+ok 3 - 验收②（安全重排）：计算期间来了推依赖代次的批次 ⇒ 发布被拒、成员留队列、绝不混代次
+  ---
+  duration_ms: 1020.3787
+  type: 'test'
+  ...
+# Subtest: 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算
+ok 4 - 验收②（同绑定发布）：计算期间只来了 raw-only 批次 ⇒ D4 放行、同绑定发布并结算
+  ---
+  duration_ms: 1459.807192
+  type: 'test'
+  ...
+# Subtest: 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断
+ok 5 - 验收③（新鲜度派生）：被覆盖任务的状态沿持久覆盖关系读，不由内存推断
+  ---
+  duration_ms: 146.189821
+  type: 'test'
+  ...
+# Subtest: 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度
+ok 6 - 验收④（服务端任务查询）：覆盖任务在跑时，GET /v1/jobs/:id 沿原 id 报它的真实进度
+  ---
+  duration_ms: 158.364377
+  type: 'test'
+  ...
+# (node:12008) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B02: persisted epochs survive reopening while an explicit namespace change takes precedence
+ok 7 - B02: persisted epochs survive reopening while an explicit namespace change takes precedence
+  ---
+  duration_ms: 143.478552
+  type: 'test'
+  ...
+# Subtest: restore epoch commits with the replacement and rolls back with a rejected restore
+ok 8 - restore epoch commits with the replacement and rolls back with a rejected restore
+  ---
+  duration_ms: 616.674988
+  type: 'test'
+  ...
+# Subtest: malformed epoch metadata cannot silently select stale receipts
+ok 9 - malformed epoch metadata cannot silently select stale receipts
+  ---
+  duration_ms: 134.584654
+  type: 'test'
+  ...
+# Subtest: deletion epochs survive an absent or rebuilt facts database without overriding a committed restore
+ok 10 - deletion epochs survive an absent or rebuilt facts database without overriding a committed restore
+  ---
+  duration_ms: 344.61974
+  type: 'test'
+  ...
+# Subtest: a failed durable epoch preparation never unlinks the facts database
+ok 11 - a failed durable epoch preparation never unlinks the facts database
+  ---
+  duration_ms: 203.026716
+  type: 'test'
+  ...
+# Subtest: damaged deletion metadata fails closed instead of reusing the default scope
+ok 12 - damaged deletion metadata fails closed instead of reusing the default scope
+  ---
+  duration_ms: 16.635284
+  type: 'test'
+  ...
+# (node:12009) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: restart rolls back uncommitted rename
+ok 13 - restart rolls back uncommitted rename
+  ---
+  duration_ms: 67.74144
+  type: 'test'
+  ...
+# Subtest: restart acknowledges committed candidate without reimport
+ok 14 - restart acknowledges committed candidate without reimport
+  ---
+  duration_ms: 74.858144
+  type: 'test'
+  ...
+# Subtest: committed journal + temporarily missing database: no false 'receipt missing', intent survives
+ok 15 - committed journal + temporarily missing database: no false 'receipt missing', intent survives
+  ---
+  duration_ms: 11.595517
+  type: 'test'
+  ...
+# Subtest: prepared rename with no remaining original fails closed instead of accepting candidate
+ok 16 - prepared rename with no remaining original fails closed instead of accepting candidate
+  ---
+  duration_ms: 42.593543
+  type: 'test'
+  ...
+# Subtest: runtime acknowledgement and publication intent removal are atomic
+ok 17 - runtime acknowledgement and publication intent removal are atomic
+  ---
+  duration_ms: 59.82794
+  type: 'test'
+  ...
+# Subtest: recovery never overwrites an unfamiliar active database
+ok 18 - recovery never overwrites an unfamiliar active database
+  ---
+  duration_ms: 42.064275
+  type: 'test'
+  ...
+# Subtest: initial import recovery refuses an unexpected database without a candidate receipt
+ok 19 - initial import recovery refuses an unexpected database without a candidate receipt
+  ---
+  duration_ms: 39.225125
+  type: 'test'
+  ...
+# Import queue execution failed: Error: fixture source cleanup unavailable
+# Import publication intent blocked-job (committed) needs recovery: Import database file is missing
+# Subtest: committed imports remain pending through failed cleanup and restart until acknowledgement
+ok 20 - committed imports remain pending through failed cleanup and restart until acknowledgement
+  ---
+  duration_ms: 300.731932
+  type: 'test'
+  ...
+# Subtest: strict receipt read returns null only after a successful query with no receipt row
+ok 21 - strict receipt read returns null only after a successful query with no receipt row
+  ---
+  duration_ms: 11.350707
+  type: 'test'
+  ...
+# Subtest: strict receipt read rejects a missing database and never creates an empty one
+ok 22 - strict receipt read rejects a missing database and never creates an empty one
+  ---
+  duration_ms: 1.151685
+  type: 'test'
+  ...
+# Subtest: strict receipt read rejects corrupt databases, malformed JSON, and JSON null receipts
+ok 23 - strict receipt read rejects corrupt databases, malformed JSON, and JSON null receipts
+  ---
+  duration_ms: 31.532594
+  type: 'test'
+  ...
+# Subtest: P1-6 committed intent + 损坏主库：保留 journal、报告恢复阻断、不创建空库
+ok 24 - P1-6 committed intent + 损坏主库：保留 journal、报告恢复阻断、不创建空库
+  ---
+  duration_ms: 15.816201
+  type: 'test'
+  ...
+# Subtest: P1-6 prepared intent + 不可读主库：不得用回滚点覆盖现场
+ok 25 - P1-6 prepared intent + 不可读主库：不得用回滚点覆盖现场
+  ---
+  duration_ms: 15.473183
+  type: 'test'
+  ...
+# Subtest: P1-6 构造函数不因可恢复的 missing/unreadable intent 退出，且暴露结构化阻断
+ok 26 - P1-6 构造函数不因可恢复的 missing/unreadable intent 退出，且暴露结构化阻断
+  ---
+  duration_ms: 43.127611
+  type: 'test'
+  ...
+# Subtest: P1-7 停在 recovery_required 的任务不算写者，但仍是恢复阻断证据
+ok 27 - P1-7 停在 recovery_required 的任务不算写者，但仍是恢复阻断证据
+  ---
+  duration_ms: 51.48833
+  type: 'test'
+  ...
+# (node:12010) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: hasPending tracks queued and claimed jobs but not terminals
+ok 28 - hasPending tracks queued and claimed jobs but not terminals
+  ---
+  duration_ms: 146.60815
+  type: 'test'
+  ...
+# Subtest: an idle drain never spawns a worker thread
+ok 29 - an idle drain never spawns a worker thread
+  ---
+  duration_ms: 149.515788
+  type: 'test'
+  ...
+# Subtest: a queued job still spawns a worker thread
+ok 30 - a queued job still spawns a worker thread
+  ---
+  duration_ms: 168.387589
+  type: 'test'
+  ...
+# Subtest: wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底巡检的有效性）
+ok 31 - wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底巡检的有效性）
+  ---
+  duration_ms: 172.887023
+  type: 'test'
+  ...
+# (node:12010) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 常驻分析线程：连续多轮只起一条线程，且轮次之间不持有线程句柄
+ok 32 - 常驻分析线程：连续多轮只起一条线程，且轮次之间不持有线程句柄
+  ---
+  duration_ms: 767.312183
+  type: 'test'
+  ...
+# (node:12010) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）
+ok 33 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）
+  ---
+  duration_ms: 923.321548
+  type: 'test'
+  ...
+# (node:12011) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: R02：合并任务捕获时必须把未入选批次的早期更正并入计划（base 之后的全部未覆盖变更）
+ok 34 - R02：合并任务捕获时必须把未入选批次的早期更正并入计划（base 之后的全部未覆盖变更）
+  ---
+  duration_ms: 152.295719
+  type: 'test'
+  ...
+# Subtest: R01：漂移重排不得丢掉原任务尚未发布的 dirty 范围（registered 计划与漂移批次取并集）
+ok 35 - R01：漂移重排不得丢掉原任务尚未发布的 dirty 范围（registered 计划与漂移批次取并集）
+  ---
+  duration_ms: 148.588142
+  type: 'test'
+  ...
+# Subtest: R01（无绑定的兼容路径）：重排同样保留原任务未发布范围
+ok 36 - R01（无绑定的兼容路径）：重排同样保留原任务未发布范围
+  ---
+  duration_ms: 145.375125
+  type: 'test'
+  ...
+# Subtest: B04：退回完整计算不得清空执行覆盖批次（否则成员发布后仍被重新排队）
+ok 37 - B04：退回完整计算不得清空执行覆盖批次（否则成员发布后仍被重新排队）
+  ---
+  duration_ms: 147.563956
+  type: 'test'
+  ...
+# Subtest: B04：partial 计划写出版本化的逐域边界（与 rebuild 区分）
+ok 38 - B04：partial 计划写出版本化的逐域边界（与 rebuild 区分）
+  ---
+  duration_ms: 140.783821
+  type: 'test'
+  ...
+# Subtest: B05：含路线证据的批次用持久证据重建计划，不再无条件全量
+ok 39 - B05：含路线证据的批次用持久证据重建计划，不再无条件全量
+  ---
+  duration_ms: 145.608583
+  type: 'test'
+  ...
+# Subtest: B05：损坏的批次证据不得被当作「没有路线影响」（失败关闭）
+ok 40 - B05：损坏的批次证据不得被当作「没有路线影响」（失败关闭）
+  ---
+  duration_ms: 148.103575
+  type: 'test'
+  ...
+# Subtest: B05：证据说 full 的批次让合并计划保持全量（不冒充 partial）
+ok 41 - B05：证据说 full 的批次让合并计划保持全量（不冒充 partial）
+  ---
+  duration_ms: 139.345757
+  type: 'test'
+  ...
+# Subtest: 兼容路径：库里存在既未登记、也无可归因归属的影响批次 ⇒ 保守全量（coverage_unverifiable）
+ok 42 - 兼容路径：库里存在既未登记、也无可归因归属的影响批次 ⇒ 保守全量（coverage_unverifiable）
+  ---
+  duration_ms: 147.899995
+  type: 'test'
+  ...
+1..42
+# tests 42
+# suites 0
+# pass 42
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 17254.404373
+EXIT=0 DURATION=18s

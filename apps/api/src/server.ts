@@ -44,8 +44,15 @@ import Fastify from "fastify";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 import { RestoreRecoveryRequiredError } from "./restore-journal.js";
+import { decideRestoreFailureRelease, readRestoreFailureEvidence, type RestoreFailureDecision } from "./restore-evidence.js";
 import { apiErrorPayload, ClientRequestError, retryAfterSeconds } from "./api-error.js";
-import { readDatasetEpoch, writeDatasetEpoch, writeDeletedDatasetEpoch } from "./dataset-epoch.js";
+import {
+  advanceDeletionOperation, backfillDatasetEpochToMain, beginDeletionOperation,
+  closeDeletionOperation, readDatasetEpochState, writeDatasetEpoch
+} from "./dataset-epoch.js";
+import { captureProtectionSnapshot, reconcileDatasetDeletionAtStartup } from "./deletion-recovery.js";
+import { DatabaseDeletionFailure } from "./maintenance.js";
+import { faultPoint } from "./fault-injection.js";
 import { CommandQueue, applyMutationCommand } from "./command-queue.js";
 import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
 import { RaiReadStore, mobileLocalDate } from "./data.js";
@@ -79,6 +86,9 @@ import {
 } from "./series-read-worker.js";
 import { registerCommandRoutes } from "./routes/command-routes.js";
 import { registerImportRoutes } from "./routes/import-routes.js";
+import { RuntimeStateStore } from "./runtime-state.js";
+import type { ImportRestoreFreezeHandle, ImportRestoreReloadResult } from "./import-worker.js";
+import type { RecoveryBlockToken } from "./task-admission.js";
 import { RuntimeTelemetry } from "./runtime-telemetry.js";
 // systemd readiness/watchdog（2026-10-18 事故复盘 P1）：无 NOTIFY_SOCKET 时 no-op。
 import { createSystemdNotifier } from "./systemd-notify.js";
@@ -172,8 +182,17 @@ const athleteId = process.env.RAI_ATHLETE_ID?.trim() || "athlete_1";
 const configuredDatasetEpoch = process.env.RAI_DATASET_EPOCH?.trim() || "default";
 let datasetEpoch = configuredDatasetEpoch;
 let restoringDatabase = false;
+let deletionRecoveryRequired = false;
+/**
+ * Token of the import publication/receipt recovery block owned by this
+ * process. Only a verified explicit restore may resolve it; a stale token (or
+ * a mismatch) leaves every block untouched.
+ */
+let importRecoveryToken: RecoveryBlockToken | null = null;
 const assertDatasetAccepting = (): void => {
   if (restoringDatabase) throw new ClientRequestError("database_restore_in_progress", "数据库正在恢复或删除，请完成后重试", 409);
+  if (deletionRecoveryRequired) throw new ClientRequestError(
+    "database_recovery_required", "删库状态尚未核实，请先恢复数据库并重启服务", 409);
 };
 const syncProtocolVersion = 1;
 const scopeSyncBatchId = (batchId: string): string => createHash("sha256")
@@ -447,6 +466,22 @@ const isRetiredLegacyRequest = (method: string, routeUrl: string | undefined): b
   routeUrl !== undefined && retiredTrainingPlanSurface(method, routeUrl) !== null;
 
 /**
+ * Every exact method+path that now answers `410` instead of executing.
+ *
+ * P2-9: during deletion recovery these must reach their 410 handler **before**
+ * the blanket recovery 409. A prefix test would be wrong: `GET /v1/backups`
+ * is still live while `POST /v1/backups` is retired, and
+ * `POST /v1/backups/:name/restore` is the recovery path itself.
+ */
+const retiredExactRequests = new Set<string>([
+  ...RETIRED_TRAINING_PLAN_SURFACES.map((surface) => `${surface.method} ${surface.path}`),
+  "POST /v1/backups",
+  "DELETE /v1/backups/:name"
+]);
+const isRetiredExactRequest = (method: string, routeUrl: string | undefined): boolean =>
+  routeUrl !== undefined && retiredExactRequests.has(`${method} ${routeUrl}`);
+
+/**
  * One shape for every retirement: the old surface is gone, the replacement is a
  * real route, and the answer is 410 rather than 404 so a stale client can tell
  * "removed on purpose" from "wrong URL/version".
@@ -505,6 +540,18 @@ const localRequestSecurityOptions = {
 installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
   const routeUrl = request.routeOptions.url;
+  // Retired surfaces are not dataset operations: a stale client must be able
+  // to tell `410` from `409` even while the dataset is under recovery.
+  if (isRetiredExactRequest(request.method, routeUrl)) return;
+  if (deletionRecoveryRequired) {
+    const recoveryRoute = (request.method === "GET" && [
+      "/v1/health", "/v1/runtime-status", "/v1/performance",
+      "/v1/backups", "/v1/backups/:name", "/v1/openapi.json"
+    ].includes(routeUrl ?? "")) || (request.method === "POST" && routeUrl === "/v1/backups/:name/restore");
+    if (!recoveryRoute) return reply.code(409).send({
+      code: "database_recovery_required", message: "删库状态尚未核实，请先恢复数据库并重启服务"
+    });
+  }
   if (routeUrl?.startsWith("/v1/mobile/") &&
     // Retirement answers 410 for every dataset: a managed / ended / recovering
     // dataset must not turn a deliberately-removed surface into a different 409.
@@ -519,7 +566,10 @@ app.addHook("preHandler", async (request, reply) => {
         message: "当前课表由新版教练合同管理，请使用 /v1/mobile/coach-loop；旧协议不能执行追加课。" });
     }
   }
-  if (unsafeMethods.has(request.method) || routeUrl === "/v1/handshake") assertDatasetAccepting();
+  if ((unsafeMethods.has(request.method) || routeUrl === "/v1/handshake")
+      && !(deletionRecoveryRequired && routeUrl === "/v1/backups/:name/restore")) {
+    assertDatasetAccepting();
+  }
   if (!unsafeMethods.has(request.method) || (routeUrl !== undefined && metadataOnlyMutationRoutes.has(routeUrl))) return;
   if (taskAdmission.isBlocked && routeUrl !== undefined && databaseRequiredMutationRoutes.has(routeUrl)) {
     return reply.code(409).send({ code: "publication_recovery_required", message: "数据库发布需要恢复，请先重启服务检查恢复结果" });
@@ -557,8 +607,48 @@ installMutationLifetime(app, releaseMutation);
 // the worker asks the store pool to drain before it swaps the database file, so
 // inference would chase its own tail through the two initializers.
 // Recovery runs before workers can open the main database or schedule writes.
-await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedRestore();
-datasetEpoch = readDatasetEpoch(databasePath, configuredDatasetEpoch);
+// A committed restore intent that cannot be verified is a fail-closed startup:
+// do not leave an unhandled top-level rejection, and do not open workers.
+try {
+  await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedRestore();
+} catch (error) {
+  app.log.fatal(error, "Interrupted database restore cannot be verified; refusing to start");
+  process.exit(78);
+}
+// P2（复审 2026-10-22）：删库是跨“epoch 侧车 + 文件删除 + runtime 账本”的操作，
+// 必须在任何 worker 打开/创建主库之前按持久阶段裁决。裁决失败 = 明确退出，
+// 绝不在“无法判明删除是否完成”时继续启动并自动建库。
+const startupRuntimeState = new RuntimeStateStore(runtimeRoot);
+let deletionDecision: ReturnType<typeof reconcileDatasetDeletionAtStartup>;
+try {
+  deletionDecision = reconcileDatasetDeletionAtStartup({
+    databasePath, configuredEpoch: configuredDatasetEpoch, runtimeRoot, serverId, athleteId,
+    store: startupRuntimeState
+  });
+
+} catch (error) {
+  app.log.fatal(error, "Dataset deletion recovery could not be decided; refusing to start");
+  process.exit(78);
+}
+datasetEpoch = deletionDecision.epochState.epoch;
+deletionRecoveryRequired = deletionDecision.recoveryRequired;
+if (deletionDecision.deletion !== null) {
+  app.log.info({
+    deletionId: deletionDecision.deletion.deletionId,
+    stage: deletionDecision.deletion.stage,
+    outcome: deletionDecision.outcome,
+    effectiveEpoch: datasetEpoch,
+    recoveryRequired: deletionDecision.recoveryRequired,
+    detail: deletionDecision.detail
+  }, "Dataset deletion state reconciled at startup");
+}
+// P1：在任何 importer / loadJobs / resume 之前登记当前 scope 的真实观察。
+// 旧库升级后第一次启动也必须留下 established；主库缺失时**不**写 pristine。
+const startupScope = JSON.stringify([serverId, athleteId, datasetEpoch]);
+const scopeAtStartup = deletionRecoveryRequired
+  ? startupRuntimeState.scopeEvidence(startupScope)
+  : startupRuntimeState.registerStartupDatabaseObservation(startupScope, databasePath);
+app.log.info({ scope: startupScope, scopeState: scopeAtStartup?.state ?? "unknown" }, "Import scope evidence registered at startup");
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const seriesReadWorker = new SeriesReadWorker(databasePath);
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
@@ -597,6 +687,7 @@ const importWorker: ImportWorker = new ImportWorker(
   (error) => observeWorkerDatabaseError(error),
   {
     scope: JSON.stringify([serverId, athleteId, datasetEpoch]),
+    datasetEpoch: configuredDatasetEpoch,
     assertAccepting: assertDatasetAccepting,
     admission: taskAdmission.owner("import"),
     engine: importExecutionEngine,
@@ -604,7 +695,9 @@ const importWorker: ImportWorker = new ImportWorker(
     onRecoveryRequired: () => {
       databaseRecoveryRequired = true;
       invalidateDatabaseReadiness();
-      taskAdmission.blockUntilRestart("import_publication_recovery_required");
+      // Token-bound (recoverable) block: a committed explicit restore may clear
+      // exactly this block. Permanent blocks from other failures stay.
+      importRecoveryToken ??= taskAdmission.beginRecoveryBlock("import_publication_recovery_required");
     },
     onTerminal: async (job, succeeded, durable) => {
       if (succeeded && durable) {
@@ -710,17 +803,49 @@ const recoverDatabaseJobs = async (recoverPredictionLeases = false): Promise<voi
 };
 
 let databaseReadyAtStartup = true;
-try {
-  await recoverDatabaseJobs();
-} catch (error) {
-  if (error instanceof PendingMigrationsError) {
-    app.log.fatal({ versions: error.versions, names: error.names }, error.message);
-    process.exit(78);
-  }
+if (deletionRecoveryRequired) {
+  // P1-4: the deletion decision already requires an operator. Recovering jobs
+  // would open the main database (and may enqueue work) while the only usable
+  // dataset is a protection snapshot. The recovery API must still start.
   databaseReadyAtStartup = false;
-  app.log.error(error, "Database startup recovery failed; maintenance restore remains available");
+  app.log.warn(
+    { detail: deletionDecision.detail, stage: deletionDecision.deletion?.stage },
+    "Deletion recovery required; skipping main database job recovery and all worker scheduling");
+} else {
+  try {
+    await recoverDatabaseJobs();
+  } catch (error) {
+    if (error instanceof PendingMigrationsError) {
+      // Normal policy: a pending migration is an offline operation, so refuse to
+      // start. This path is only reachable without a deletion decision.
+      app.log.fatal({ versions: error.versions, names: error.names }, error.message);
+      process.exit(78);
+    }
+    databaseReadyAtStartup = false;
+    app.log.error(error, "Database startup recovery failed; maintenance restore remains available");
+  }
 }
-let databaseRecoveryRequired = !databaseReadyAtStartup;
+// P1-1: a legacy "delete → first import created an epoch-less main database"
+// layout keeps its effective epoch only in the sidecar. More generally, a
+// pre-existing main database may never have received the `rai.dataset-epoch`
+// row (the baseline only wrote it on restore/delete). Persist the adjudicated
+// epoch before deletion/recovery can need it; a conflict is an identity error
+// and any failure keeps the adjudicated epoch but blocks writes.
+if (databaseReadyAtStartup && !deletionRecoveryRequired && existsSync(databasePath)) {
+  const startupEpochState = deletionDecision.epochState;
+  const needsEpochBackfill = startupEpochState.sidecarBackfillRequired === true
+    || (startupEpochState.mainEpochExplicit !== true && startupEpochState.source === "configured");
+  if (needsEpochBackfill) {
+    try {
+      const outcome = backfillDatasetEpochToMain(databasePath, configuredDatasetEpoch, datasetEpoch);
+      app.log.info({ datasetEpoch, outcome }, "Backfilled the effective dataset epoch into the main database");
+    } catch (error) {
+      databaseReadyAtStartup = false;
+      app.log.error(error, "Dataset epoch backfill failed; the adjudicated epoch remains authoritative but writes stay blocked");
+    }
+  }
+}
+let databaseRecoveryRequired = deletionRecoveryRequired || !databaseReadyAtStartup;
 let readinessCache: boolean | null = null;
 const invalidateDatabaseReadiness = (): void => { readinessCache = null; };
 
@@ -832,9 +957,30 @@ const isDatabaseWriteBusy = (): boolean =>
   hasActiveRecomputeJob() ||
   hasActivePredictionModelJob();
 
-const isDatabaseRestoreBusy = (): boolean => {
+const isDatabaseRestoreBusy = (allowParkedQueue = false): boolean => {
   // Terminal imports still pin the receipt DB until final acknowledgement.
-  if (taskAdmission.hasActiveControls || commandQueue.hasPending || importWorker.hasPending || recomputeWorker.isRunning || predictionModelWorker.isRunning) return true;
+  // P1-7: jobs parked at `recovery_required` are not writers; an explicit
+  // restore is exactly the sanctioned way out and must not be vetoed by them.
+  // A worker "isRunning" flag can include a short scheduled/pre-timer window.
+  // Without a main database file there is nothing it could be writing, so only
+  // task ownership (controls/queue/import writers) blocks the restore.
+  const mainExists = existsSync(databasePath);
+  // An explicit restore may adjudicate old queued work when recovery has
+  // already closed admission. Deletion still uses the conservative default.
+  const parkedByRecovery = allowParkedQueue && (taskAdmission.isBlocked || deletionRecoveryRequired);
+  if (taskAdmission.hasActiveControls || taskAdmission.activeOwner !== null
+      || commandQueue.isExecuting || importWorker.isRunning) {
+    return true;
+  }
+  if (!parkedByRecovery && (commandQueue.hasPending || importWorker.hasPendingWrites)) return true;
+  if (mainExists && taskAdmission.isBlocked) {
+    // Task admission is closed: workers may be *waiting* for a permit, not
+    // writing. Counting a waiting worker as busy made the only sanctioned way
+    // out (an explicit restore) permanently answer 409. Only an owner that
+    // already holds the permit can still be in a write window.
+    return taskAdmission.activeOwner !== null;
+  }
+  if (mainExists && (recomputeWorker.isRunning || predictionModelWorker.isRunning)) return true;
   try {
     return hasActiveRecomputeJob() || hasActivePredictionModelJob();
   } catch {
@@ -852,7 +998,7 @@ const publicPredictionRun = (run: PredictionModelRun): PredictionModelRun => ({
 const localToday = (): string => localCalendarFormatter(DATABASE_TIMEZONE, "day").format(new Date());
 
 const checkTrainingZoneBackfill = async (): Promise<void> => {
-  if (closing || taskAdmission.isBlocked) return;
+  if (closing || deletionRecoveryRequired || taskAdmission.isBlocked) return;
   let release: (() => void) | null = null;
   try {
     release = mutationCoordinator.acquire("training zone backfill");
@@ -933,13 +1079,15 @@ const ensureTrainingZoneBackfill = (): Promise<void> => {
   return promise;
 };
 
-if (databaseReadyAtStartup) {
+if (databaseReadyAtStartup && !deletionRecoveryRequired) {
   await ensureTrainingZoneBackfill();
   recomputeWorker.schedule();
   predictionModelWorker.schedule();
 }
-importWorker.resume();
-commandQueue.resume();
+if (!deletionRecoveryRequired) {
+  importWorker.resume();
+  commandQueue.resume();
+}
 const zoneRefreshTimer = setInterval(() => {
   if (closing) return;
   void ensureTrainingZoneBackfill().catch((error) => {
@@ -958,7 +1106,7 @@ zoneRefreshTimer.unref();
  * **不 spawn worker 线程**，所以稳态成本约等于零；而"漏唤醒"从"必须重启服务"降到"最多等一分钟"。
  */
 const recomputePollTimer = setInterval(() => {
-  if (closing) return;
+  if (closing || deletionRecoveryRequired) return;
   recomputeWorker.wakeIfPending();
 }, 60_000);
 recomputePollTimer.unref();
@@ -988,14 +1136,14 @@ async function sweepAbandonedDatabases(): Promise<void> {
 }
 
 const abandonedDatabaseSweepTimer = setInterval(() => {
-  if (closing) return;
+  if (closing || deletionRecoveryRequired) return;
   void sweepAbandonedDatabases();
 }, 24 * 60 * 60_000);
 abandonedDatabaseSweepTimer.unref();
 // A restart is exactly when a killed process's leftovers are most likely to be
 // sitting there, and making them wait a full day would be worse than the bug.
 const abandonedDatabaseSweepKickoff = setTimeout(() => {
-  if (closing) return;
+  if (closing || deletionRecoveryRequired) return;
   void sweepAbandonedDatabases();
 }, 60_000);
 abandonedDatabaseSweepKickoff.unref();
@@ -1011,6 +1159,10 @@ app.addHook("onClose", async () => {
  * retried the same day, and never regenerates once the week is already planned.
  */
 async function ensureWeeklyPlan(): Promise<void> {
+  // P1-4: while a deletion needs an operator decision, no background task may
+  // open or create the main database. The hourly probe keeps running but is a
+  // no-op until recovery succeeds.
+  if (closing || deletionRecoveryRequired || databaseRecoveryRequired) return;
   // Managed means an ACTIVE/PAUSED coach-loop, not "a receipt exists": an ended
   // programme must hand the legacy weekly generator back (F06). The status-aware
   // predicate is shared with the route gate so the two cannot disagree.
@@ -2293,6 +2445,61 @@ app.delete<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params
     + "已有备份不会被应用删除，见 docs/SQLITE_DIRECT_SYNC_DESIGN.md §11", 410);
 });
 
+/**
+ * Independent checks around a failed restore.
+ *
+ * The maintenance layer reports what *it* proved about the failure; this
+ * function adds the facts only the API can see (identity, required tables,
+ * effective epoch, sidecar agreement) and then applies the single decision
+ * point from `restore-evidence.ts`. No error text, `existsSync()` alone or a
+ * single `quick_check` is accepted as proof that the original dataset is intact.
+ */
+const restoreFailureCanReleaseFreeze = (
+  error: unknown, previousEpoch: string, hadRecoveryBlock: boolean
+): RestoreFailureDecision => {
+  const evidence = readRestoreFailureEvidence(error);
+  const mainPresent = existsSync(databasePath);
+  let mainDatabaseReadable = false;
+  let requiredTablesPresent = false;
+  if (evidence !== null && evidence.originalExisted === false) {
+    // The original state was "no database": no replacement may have survived.
+    mainDatabaseReadable = !mainPresent;
+    requiredTablesPresent = !mainPresent;
+  } else if (mainPresent) {
+    let database: DatabaseSync | undefined;
+    try {
+      database = new DatabaseSync(databasePath, { readOnly: true });
+      database.exec("PRAGMA busy_timeout=5000");
+      mainDatabaseReadable = (database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined)
+        ?.quick_check === "ok";
+      const tables = database.prepare(`SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN
+        ('import_manifest','schema_migrations','health_records','workouts','recompute_jobs')`).get() as { count: number };
+      requiredTablesPresent = tables.count === 5;
+    } catch {
+      mainDatabaseReadable = false;
+      requiredTablesPresent = false;
+    } finally {
+      database?.close();
+    }
+  }
+  let epochUnchanged = false;
+  let sidecarScopeConsistent = false;
+  try {
+    const state = readDatasetEpochState(databasePath, configuredDatasetEpoch, {
+      strictConfigured: true, identity: { serverId, athleteId }
+    });
+    epochUnchanged = state.epoch === previousEpoch;
+    sidecarScopeConsistent = state.configuredEpoch === configuredDatasetEpoch
+      && state.deletion?.stage !== "writer_entered";
+  } catch {
+    epochUnchanged = false;
+    sidecarScopeConsistent = false;
+  }
+  return decideRestoreFailureRelease(evidence, {
+    mainDatabaseReadable, requiredTablesPresent, epochUnchanged, sidecarScopeConsistent, hadRecoveryBlock
+  });
+};
+
 app.post<{ Params: { name: string }; Body: { confirmation: string } }>(
   "/v1/backups/:name/restore",
   { schema: { params: backupParamsSchema, body: restoreBodySchema } },
@@ -2300,26 +2507,197 @@ app.post<{ Params: { name: string }; Body: { confirmation: string } }>(
     if (request.body.confirmation !== "恢复此备份") {
       return reply.code(400).send({ message: "确认文字不匹配" });
     }
-    if (isDatabaseRestoreBusy()) {
+    if (isDatabaseRestoreBusy(true)) {
       return reply.code(409).send({ message: "任务执行期间不能恢复数据库" });
     }
-    restoringDatabase = true;
+    // Cheap, side-effect-free rejection **before** the temporary freeze. The
+    // maintenance layer repeats these checks inside the restore flow.
+    maintenance.preflightRestore(request.params.name);
+    const previousEpoch = datasetEpoch;
+    let restoreDeletionId: string | null;
     try {
+      restoreDeletionId = readDatasetEpochState(databasePath, configuredDatasetEpoch, {
+        strictConfigured: true, identity: { serverId, athleteId }
+      }).deletion?.deletionId ?? null;
+    } catch (error) {
+      throw new RestoreRecoveryRequiredError(
+        "The deletion journal cannot be read before backup restore", { cause: error });
+    }
+    // A pre-existing genuine block must not be cleared by a *failed* restore,
+    // even when that failure provably had no side effect.
+    const hadRecoveryBlock = importWorker.hasRecoveryBlock
+      || taskAdmission.hasBlocksOtherThan(importRecoveryToken === null ? [] : [importRecoveryToken]);
+    restoringDatabase = true;
+    let freeze: ImportRestoreFreezeHandle | null = null;
+    /**
+     * Kept true only when the failure leaves the dataset in a state we cannot
+     * prove safe. The temporary freeze is then intentionally retained and the
+     * recovery route stays the only way forward.
+     */
+    let keepFreeze = false;
+    try {
+      // P1-7: freeze new tasks and prove every ingest thread is gone before the
+      // file replacement. A parked recovery job does not block this step.
+      try {
+        freeze = await importWorker.prepareForRestore();
+      } catch (error) {
+        keepFreeze = true;
+        throw new RestoreRecoveryRequiredError("Import workers could not be stopped before restore", { cause: error });
+      }
       const restoredEpoch = randomUUID();
-      const result = await maintenance.restoreBackup(
-        request.params.name,
-        () => recoverDatabaseJobs(true),
-        database => writeDatasetEpoch(database, configuredDatasetEpoch, restoredEpoch)
-      );
+      let result: Awaited<ReturnType<DatabaseMaintenance["restoreBackup"]>>;
+      try {
+        result = await maintenance.restoreBackup(
+          request.params.name,
+          () => recoverDatabaseJobs(true),
+          database => writeDatasetEpoch(database, configuredDatasetEpoch, restoredEpoch),
+          {
+            plannedEpoch: restoredEpoch,
+            configuredEpoch: configuredDatasetEpoch,
+            serverId,
+            athleteId,
+            deletionId: restoreDeletionId
+          }
+        );
+      } catch (error) {
+        const decision = restoreFailureCanReleaseFreeze(error, previousEpoch, hadRecoveryBlock);
+        if (decision.safe) {
+          // The rejection (unknown name, candidate validation, verified rollback)
+          // left the original dataset intact. `finally` releases this exact
+          // freeze; the original HTTP status/code is preserved.
+          throw error;
+        }
+        keepFreeze = true;
+        databaseRecoveryRequired = true;
+        invalidateDatabaseReadiness();
+        app.log.error({ reasons: decision.reasons },
+          "Backup restore failed; the original dataset could not be verified");
+        if (error instanceof RestoreRecoveryRequiredError) throw error;
+        throw new RestoreRecoveryRequiredError(
+          "Backup restore failed and the original dataset could not be verified", { cause: error });
+      }
       changeDatasetEpoch(restoredEpoch);
+      try {
+        // Idempotently settle the durable restore intent: verify the installed
+        // bytes and epoch, revoke/close the bound deletion, register the
+        // restored scope and supersede pre-restore publication intents. The
+        // journal is cleared only after all three have succeeded.
+        await maintenance.finalizeCommittedRestore();
+        // Old-scope commands waited behind the recovery block. Their facts
+        // were replaced by this restore, so settle them before admission opens.
+        commandQueue.supersedeOtherScopes();
+      } catch (error) {
+        // The main database has already changed. Keep all business routes closed
+        // until the sidecar and scope ledger agree with the restored bytes.
+        keepFreeze = true;
+        deletionRecoveryRequired = true;
+        databaseRecoveryRequired = true;
+        throw new RestoreRecoveryRequiredError("Backup restore completed but dataset scope finalization failed", { cause: error });
+      }
+      // P1-7: rebuild job state against the restored scope. Both sources —
+      // jobs *and* publication intents — must be re-adjudicated; `true` alone
+      // would only prove the jobs were readable.
+      let reload: ImportRestoreReloadResult;
+      try {
+        reload = importWorker.reloadAfterRestore(restoredEpoch);
+      } catch (error) {
+        keepFreeze = true;
+        deletionRecoveryRequired = true;
+        databaseRecoveryRequired = true;
+        throw new RestoreRecoveryRequiredError("Backup restore completed but the import worker could not reload", { cause: error });
+      }
+      if (!reload.reconciled) {
+        // Keep task admission closed even when this process had no prior token:
+        // an unresolved post-restore receipt is a genuine recovery block.
+        importRecoveryToken ??= taskAdmission.beginRecoveryBlock("import_publication_recovery_required");
+        deletionRecoveryRequired = true;
+        databaseRecoveryRequired = true;
+        invalidateDatabaseReadiness();
+        app.log.warn(reload, "Backup restore committed but import state still needs recovery");
+        return {
+          restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup,
+          restartRequired: true,
+          recovery: {
+            supersededIntents: reload.supersededIntents,
+            blockedIntents: reload.blockedIntents,
+            blockedJobs: reload.blockedJobs
+          }
+        };
+      }
+      // Acceptance-only barrier: the database replacement, final epoch and
+      // publication supersessions are durable, but the import recovery token is
+      // still active. A restart must reach the same conclusion without replaying
+      // the restore.
+      faultPoint("restore:before-token-resolution");
+      // Order matters: confirm no other block exists *before* clearing the import
+      // recovery token. A permanent block must survive the restore and the
+      // response must not claim the process recovered.
+      if (taskAdmission.hasBlocksOtherThan(importRecoveryToken === null ? [] : [importRecoveryToken])) {
+        databaseRecoveryRequired = true;
+        invalidateDatabaseReadiness();
+        app.log.warn({ blocks: taskAdmission.snapshot().blocks },
+          "Backup restore committed but another permanent task block is active");
+        return {
+          restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup,
+          restartRequired: true
+        };
+      }
+      if (importRecoveryToken !== null) {
+        if (!taskAdmission.resolveRecoveryBlock(importRecoveryToken) || taskAdmission.isBlocked) {
+          databaseRecoveryRequired = true;
+          invalidateDatabaseReadiness();
+          return {
+            restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup,
+            restartRequired: true
+          };
+        }
+        importRecoveryToken = null;
+      }
+      deletionRecoveryRequired = false;
       databaseRecoveryRequired = false;
       invalidateDatabaseReadiness();
+      importWorker.resume();
+      commandQueue.resume();
       recomputeWorker.schedule();
       predictionModelWorker.schedule();
       return { restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup };
-    } finally { restoringDatabase = false; }
+    } finally {
+      restoringDatabase = false;
+      // Release only this attempt's temporary freeze (identity-matched), never a
+      // genuine recovery block. On unprovable failures it is retained.
+      if (!keepFreeze && freeze !== null) importWorker.releaseRestoreFreeze(freeze);
+    }
   }
 );
+
+/**
+ * P1-9: independent verification that the *previous* dataset is really back.
+ *
+ * Requires the replace gate to be released (checked by the caller), SQLite's
+ * quick_check, the tables the first request will touch, and the exact epoch the
+ * deletion intended to restore. A readable file with the wrong epoch is not a
+ * successful rollback.
+ */
+const databaseVerifiedForEpoch = (expectedEpoch: string): boolean => {
+  if (!existsSync(databasePath) || readStores.isReplacing) return false;
+  let database: DatabaseSync | undefined;
+  try {
+    const state = readDatasetEpochState(databasePath, configuredDatasetEpoch, {
+      strictConfigured: true, identity: { serverId, athleteId }
+    });
+    if (state.mainEpochExplicit !== true || state.epoch !== expectedEpoch) return false;
+    database = new DatabaseSync(databasePath, { readOnly: true });
+    database.exec("PRAGMA busy_timeout=5000");
+    if ((database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined)?.quick_check !== "ok") {
+      return false;
+    }
+    const tables = database.prepare(`SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN
+      ('import_manifest','schema_migrations','health_records','workouts','recompute_jobs')`).get() as { count: number };
+    return tables.count === 5;
+  } catch {
+    return false;
+  } finally { database?.close(); }
+};
 
 app.delete<{ Body: { confirmation: string } }>("/v1/database", { schema: { body: deleteBodySchema } }, async (request, reply) => {
   if (request.body?.confirmation !== "删除我的 RAI 数据") {
@@ -2330,30 +2708,100 @@ app.delete<{ Body: { confirmation: string } }>("/v1/database", { schema: { body:
   }
   restoringDatabase = true;
   const previousEpoch = datasetEpoch;
+  const deletionId = randomUUID();
   const deletedEpoch = randomUUID();
-  let epochPrepared = false;
+  const scopeForEpoch = (epoch: string): string => JSON.stringify([serverId, athleteId, epoch]);
+  const runtimeState = new RuntimeStateStore(runtimeRoot);
+  let deletionStarted = false;
   try {
-    const backupInfo = await maintenance.deleteDatabase(() => {
-      // Persist before unlink: a crash with no facts DB must not recover old receipts.
-      writeDeletedDatasetEpoch(databasePath, configuredDatasetEpoch, deletedEpoch);
-      epochPrepared = true;
+    const backupInfo = await maintenance.deleteDatabase((backup) => {
+      // Persist the operation identity and the next epoch in one sidecar
+      // transaction before any unlink: a crash with no facts DB must never
+      // recover old receipts or leave "no DB, no explanation".
+      faultPoint("deletion:before-prepared");
+      const protectionKind = backup.restorable === false ? "quarantine" : "backup";
+      const protectionFiles = captureProtectionSnapshot(runtimeRoot, backup.name, protectionKind);
+      beginDeletionOperation({
+        databasePath,
+        configuredEpoch: configuredDatasetEpoch,
+        serverId,
+        athleteId,
+        deletionId,
+        previousEpoch,
+        nextEpoch: deletedEpoch,
+        protectionSnapshot: backup.name,
+        protectionKind,
+        protectionFiles,
+        runtimeInstanceId: runtimeState.runtimeInstanceId()
+      });
+      deletionStarted = true;
+      faultPoint("deletion:after-prepared");
+    }, () => {
+      // The unlink and the directory flush are complete at this point. Only now
+      // may the journal claim `main_removed`; a crash one line earlier stays
+      // `prepared` and is treated as unproven by startup recovery.
+        advanceDeletionOperation(
+        databasePath, configuredDatasetEpoch, deletionId, "main_removed", undefined, { serverId, athleteId });
+      faultPoint("deletion:after-main-removed");
     });
     changeDatasetEpoch(deletedEpoch);
+    // 显式删除成功且 epoch 已切换 = 受控的数据集初始化。只为**新 scope**建立
+    // pristine 许可；旧 scope 的证据保持原样，不会复活。
+    runtimeState.establishDeletionPermit(scopeForEpoch(deletedEpoch), deletionId);
+    advanceDeletionOperation(
+      databasePath, configuredDatasetEpoch, deletionId, "permit_issued", undefined, { serverId, athleteId });
+    faultPoint("deletion:after-permit");
     databaseRecoveryRequired = true;
     invalidateDatabaseReadiness();
+    faultPoint("deletion:before-response");
     return backupInfo.restorable === false
       ? { deleted: true, preservation: { kind: "quarantine" as const, snapshot: backupInfo } }
       : { deleted: true, preservation: { kind: "backup" as const, backup: backupInfo } };
   } catch (error) {
-    if (epochPrepared) {
-      if (!existsSync(databasePath)) {
-        changeDatasetEpoch(deletedEpoch);
-        throw new RestoreRecoveryRequiredError("Database deletion failed without restoring the facts database", { cause: error });
+    if (deletionStarted) {
+      // P1-9: file existence is not evidence of a healthy dataset. The
+      // maintenance layer reports whether it restored bytes **and** released
+      // the replace gate; this layer independently re-checks identity,
+      // integrity and the expected epoch before declaring the old dataset back.
+      const evidence = error instanceof DatabaseDeletionFailure ? error.evidence : null;
+      const gateReleased = evidence?.gateReleased ?? !readStores.isReplacing;
+      const verified = gateReleased && databaseVerifiedForEpoch(previousEpoch);
+      faultPoint("deletion:rollback-verified");
+      if (!verified) {
+        deletionRecoveryRequired = true;
+        databaseRecoveryRequired = true;
+        invalidateDatabaseReadiness();
+        throw new RestoreRecoveryRequiredError(
+          existsSync(databasePath)
+            ? "Database deletion failed and the previous dataset could not be verified; manual recovery required"
+            : "Database deletion failed without restoring the facts database",
+          { cause: error });
       }
-      try { writeDeletedDatasetEpoch(databasePath, configuredDatasetEpoch, previousEpoch); }
-      catch (rollbackError) {
+      // P2-3: revoke the next-scope permit first, then close the journal, then
+      // switch the in-process scope back. Every intermediate crash leaves the
+      // journal open (re-adjudicated on restart) rather than a usable permit.
+      try {
+        runtimeState.revokeDeletionPermit(scopeForEpoch(deletedEpoch), deletionId);
+        closeDeletionOperation(databasePath, configuredDatasetEpoch, previousEpoch, {
+          deletionId,
+          reason: "deletion failed before completion; old snapshot restored"
+        });
+        runtimeState.markScopeDatasetEstablished(scopeForEpoch(previousEpoch), new Date().toISOString());
+      } catch (rollbackError) {
+        deletionRecoveryRequired = true;
+        databaseRecoveryRequired = true;
+        invalidateDatabaseReadiness();
         throw new RestoreRecoveryRequiredError("Database deletion scope rollback failed", { cause: new AggregateError([error, rollbackError]) });
       }
+      changeDatasetEpoch(previousEpoch);
+      deletionRecoveryRequired = false;
+      databaseRecoveryRequired = false;
+      invalidateDatabaseReadiness();
+      importWorker.resume();
+      commandQueue.resume();
+      recomputeWorker.schedule();
+      predictionModelWorker.schedule();
+      app.log.warn(error, "Database deletion failed; the previous, verified dataset was restored");
     }
     throw error;
   } finally { restoringDatabase = false; }

@@ -37,6 +37,7 @@ import { ImportWorker, type ImportQueueOptions } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 import { readImportReceipt } from "../src/import-publication.js";
+import { RuntimeStateStore } from "../src/runtime-state.js";
 import type { ImportDatabaseTask } from "../src/import-database-tasks.js";
 import { assertLanePlan, surveyDatabase, writeNoopReceiptTask } from "../src/import-database-thread.js";
 
@@ -1136,4 +1137,88 @@ test("恢复分支中 terminate 同步抛错：进入恢复阻断，全局写者
 
 test("恢复分支中 terminate 异步拒绝：进入恢复阻断，全局写者无法取得许可", { timeout: 30_000 }, async () => {
   await assertTerminateFailureBlocksRecovery("async");
+});
+
+test("恢复冻结是独立句柄：普通恢复尝试不写 recoveryBlocked，幂等且只按身份释放", { timeout: 30_000 }, async () => {
+  await fixture(async ({ make, writeInput }) => {
+    const scheduler = new TaskAdmissionScheduler(new MutationCoordinator());
+    const admission = scheduler.owner("import");
+    let notices = 0;
+    const worker = make({ admission, onRecoveryRequired: () => { notices += 1; } });
+    try {
+      const seed = await runBatch(worker, writeInput(0), "freeze-seed");
+      assert.equal(seed.status, "succeeded");
+      const first = await worker.prepareForRestore();
+      const second = await worker.prepareForRestore();
+      assert.equal(second.id, first.id, "重复 prepare 必须返回同一个冻结句柄");
+      assert.equal(worker.isRestoreFrozen, true);
+      assert.equal(worker.hasRecoveryBlock, false, "临时冻结不得写成持久恢复阻断");
+      assert.equal(notices, 0, "临时冻结不得触发全局恢复阻断通知");
+      assert.throws(() => worker.create(writeInput(1), undefined, "frozen-create"),
+        /恢复进行中|restore/i, "冻结期间不得接受新任务");
+
+      assert.equal(worker.releaseRestoreFreeze({ ...first, id: "foreign-handle" }), false,
+        "陌生句柄不得释放当前冻结");
+      assert.equal(worker.isRestoreFrozen, true);
+      assert.equal(worker.releaseRestoreFreeze(first), true);
+      assert.equal(worker.isRestoreFrozen, false);
+
+      const after = await runBatch(worker, writeInput(2), "freeze-after");
+      assert.equal(after.status, "succeeded", "释放冻结后同进程必须真的能继续调度");
+    } finally { await closeWithDeadline(worker, "freeze cleanup"); }
+  });
+});
+
+test("恢复后重裁决：旧 scope 作业持久 superseded，新 scope 作业可实际运行", { timeout: 30_000 }, async () => {
+  await fixture(async ({ root, make, writeInput }) => {
+    const state = new RuntimeStateStore(root);
+    const worker = make();
+    try {
+      const handle = await worker.prepareForRestore();
+      // Persisted pre-restore job in the old scope, parked at recovery_required.
+      state.upsertJob({
+        id: "old-scope-job", status: "queued", phase: "recovery_required", message: "",
+        createdAt: "2026-10-23T00:00:00.000Z", completedAt: null, error: null,
+        inputPath: root, queue: { scope: "old-scope", attempts: 1, finalized: false }
+      });
+      const reload = worker.reloadAfterRestore("restored-epoch");
+      assert.equal(reload.reconciled, true, JSON.stringify(reload));
+      assert.equal(reload.blockedJobs, 0);
+      const parked = worker.get("old-scope-job");
+      assert.equal(parked?.phase, "superseded", "旧 scope 作业不得被伪报为未提交");
+      assert.equal(state.job("old-scope-job")?.queue?.finalized, true, "superseded 终态必须持久");
+
+      worker.releaseRestoreFreeze(handle);
+      const after = await runBatch(worker, writeInput(0), "restored-first-packet");
+      assert.equal(after.status, "succeeded", "恢复后同进程的新导入必须真的完成");
+    } finally { await closeWithDeadline(worker, "reload cleanup"); }
+  });
+});
+
+test("恢复后仍有无法核实的回执：reload 返回阻断而不是 true", { timeout: 30_000 }, async () => {
+  await fixture(async ({ root, main, make }) => {
+    const state = new RuntimeStateStore(root);
+    const worker = make();
+    const hidden = `${main}.unverifiable-${Date.now()}`;
+    try {
+      const handle = await worker.prepareForRestore();
+      state.upsertJob({
+        id: "unverifiable-job", status: "running", phase: "running", message: "",
+        createdAt: "2026-10-23T00:00:00.000Z", completedAt: null, error: null,
+        inputPath: root, queue: { scope: "reuse-fixture", attempts: 1, finalized: false }
+      });
+      renameSync(main, hidden);
+      const reload = worker.reloadAfterRestore("restored-epoch");
+      assert.equal(reload.reconciled, false, "只检查作业、不检查发布日志的成功不得报告为已恢复");
+      assert.equal(reload.blockedJobs, 1);
+      assert.equal(worker.hasRecoveryBlock, true);
+      assert.equal(worker.get("unverifiable-job")?.phase, "recovery_required");
+      worker.releaseRestoreFreeze(handle);
+      assert.equal(worker.isRestoreFrozen, false, "真实阻断与临时冻结必须分离");
+      assert.equal(worker.hasRecoveryBlock, true, "释放临时冻结不得清除真实阻断");
+    } finally {
+      renameSync(hidden, main);
+      await closeWithDeadline(worker, "unverifiable cleanup");
+    }
+  });
 });

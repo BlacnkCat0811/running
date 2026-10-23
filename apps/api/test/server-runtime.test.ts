@@ -1162,6 +1162,9 @@ test("dynamic-port startup reports readiness and workout overrides preserve serv
 test("upload HTTP errors distinguish limits, invalid archives, and internal I/O failures", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-upload-errors-"));
   mkdirSync(join(runtimeRoot, "var"));
+  // 全新 var/ 的首次导入必须先有受控 pristine 许可（P1）；本用例只验证上传错误面。
+  new RuntimeStateStore(runtimeRoot).establishPristineScope(
+    JSON.stringify(["local", "athlete_1", "default"]), "test_first_install");
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
     env: {
@@ -1466,8 +1469,11 @@ for (const restartBeforeImport of [false, true]) test(`deletion isolates receipt
     await waitForApi(child, url, () => output);
     return url;
   };
-  const epoch = async (url: string): Promise<string> =>
-    (await fetch(`${url}/v1/handshake`).then(response => response.json()) as { datasetEpoch: string }).datasetEpoch;
+  const epoch = async (url: string): Promise<string> => {
+    const response = await fetch(`${url}/v1/handshake`);
+    assert.equal(response.status, 200, await response.clone().text() + output);
+    return (await response.json() as { datasetEpoch: string }).datasetEpoch;
+  };
   const upload = async (url: string): Promise<string> => {
     const form = new FormData();
     const bytes = new ArrayBuffer(archive.byteLength);

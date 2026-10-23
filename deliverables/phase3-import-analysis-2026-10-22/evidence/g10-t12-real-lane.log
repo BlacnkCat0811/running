@@ -1,0 +1,19 @@
+TAP version 13
+# (node:52565) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# P3_T12_REAL_LANE {"revisionBatchA":"t12-revision-a","revisionBatchB":"t12-revision-b","partialPlan":{"mode":"partial","dirtyFromAt":"2026-01-05T15:10:00.000Z","domains":{"features":"2026-01-05T15:10:00.000Z","fitness":"2026-01-05T15:10:00.000Z","readiness":"2026-01-05T15:10:00.000Z"}},"dirtyEvidence":{"version":1,"full":false,"dirtyFromAt":"2026-01-05T15:10:00.000Z","domains":{"features":"2026-01-05T15:10:00.000Z","fitness":"2026-01-05T15:10:00.000Z","readiness":"2026-01-05T15:10:00.000Z"},"routeDirtyTimes":[],"recoveryBoundaries":["2026-01-05T15:10:00.000Z"],"reasons":["bounded_health_change"]},"generations":{"raw":2,"dependency":2},"changedNightDates":["2026-01-06","2026-01-07","2026-02-20","2026-02-21"],"reuse":{"attempted":true,"proof":"verified","rejectionReason":null,"loads":{"reused":4,"recomputed":48},"zoneProfiles":{"reused":4,"recomputed":48},"dailyMetrics":{"reused":4,"recomputed":48},"checkpointWritten":true,"reuseFromLocalDate":"2026-01-01","reuseThroughLocalDate":"2026-01-04"}}
+# Subtest: P3-06 T12（真实车道）：v2 XML 导入→局部夜重建→任务登记→partial 分析→发布 A/B 零差分
+ok 1 - P3-06 T12（真实车道）：v2 XML 导入→局部夜重建→任务登记→partial 分析→发布 A/B 零差分
+  ---
+  duration_ms: 11472.837996
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12288.100273

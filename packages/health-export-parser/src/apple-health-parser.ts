@@ -186,6 +186,20 @@ export interface ParseProgress {
   workoutCount: number;
 }
 
+/**
+ * One explicit `<WorkoutRoute>` declaration, normalized exactly like the
+ * stored `workout_routes.relative_path`, including declarations whose ownership
+ * is unchanged. The direct-sync receiver uses the complete declaration set to
+ * reject a batch that assigns one path to two different parents regardless of
+ * XML order; the write-time observer alone cannot see an unchanged declaration.
+ */
+export interface ExplicitRouteDeclaration {
+  workoutId: string;
+  relativePath: string;
+  /** True when the parent workout is tombstoned/deleted by this batch. */
+  tombstoned: boolean;
+}
+
 export interface AppleHealthParseOptions {
   fileSize: number;
   native?: NativeOptions;
@@ -222,6 +236,12 @@ export interface AppleHealthParseOptions {
   deletedWorkoutIds?: readonly string[];
   deletedRecords?: readonly HealthKitRecordDeletion[];
   healthKitRecordIdentity?: boolean;
+  /**
+   * Called once for every explicit `WorkoutRoute` with a `FileReference` path,
+   * after the parent workout identity is known and before that workout is
+   * inserted. Callers must only collect in memory.
+   */
+  onRouteDeclaration?: (declaration: ExplicitRouteDeclaration) => void;
   /**
    * v46 / P2-2：本批记录写入 `health_records.available_at` 的值（**到达服务端的时刻**，
    * ISO 规范时刻）。省略时取解析**开始时刻**（`new Date().toISOString()`）。
@@ -418,6 +438,7 @@ export async function parseAppleHealthXml(
     throw new RecordDeltaNotEligibleError("not a bounded preserve-absent v2 record-only batch");
   }
   const native = options.recordDelta ? null : await prepareNative("health", xmlPath, options.native ?? {});
+  const deletedWorkoutIdSet = new Set(options.deletedWorkoutIds ?? []);
   // v46 / P2-2：本批的**到达服务端时刻**（`health_records.available_at`）。
   // 显式 option 优先（测试确定性 / 接收端已知上传完成时刻），否则取解析开始时刻。
   // 在**任何写入之前**校验：坏值不能落进 available_at —— 那列是"何时可得"的唯一证据，
@@ -780,7 +801,25 @@ export async function parseAppleHealthXml(
             .map((key) => lastMetadataValue(workout.metadata, key))
             .filter((value): value is string => Boolean(value))
         );
-        const shouldWrite = !observation.tombstoned
+        // P2: collect every explicit route declaration, including workouts
+        // whose generated content is unchanged (those never call insertWorkout
+        // and therefore never reach the write-time ownership observer). Carry
+        // the tombstone flag so a deleted parent cannot claim a path.
+        const workoutIdentifiers = [
+          ...(workout.metadata.HKMetadataKeySyncIdentifier ?? []),
+          ...(workout.metadata.RAIHealthKitWorkoutUUID ?? [])
+        ];
+        const tombstonedByBatch = workoutIdentifiers.some((value) => deletedWorkoutIdSet.has(value));
+        for (const route of workout.routes) {
+          if (route.relativePath) {
+            options.onRouteDeclaration?.({
+              workoutId: workout.id,
+              relativePath: route.relativePath,
+              tombstoned: observation.tombstoned || tombstonedByBatch
+            });
+          }
+        }
+        const shouldWrite = !observation.tombstoned && !tombstonedByBatch
           && (!options.incremental || observation.inserted || observation.updated);
         if (shouldWrite) {
           store.insertWorkout(

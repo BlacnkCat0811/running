@@ -1,0 +1,14 @@
+✔ no-op：新回执显式 analysisJobId=null，dependencyGeneration=null，不登记本批分析任务 (1211.825674ms)
+Fast path rejected for web_import_mvj2yzmt_55b1029a-0c45-4941-83a5-8bff25842016: continuing to the direct-sync receiver
+✔ direct-sync record-only：新回执 dependencyGeneration=null / analysisJobId=null，无本批任务 (957.129734ms)
+Fast path rejected for web_import_mvj2z0df_3ab90a57-6d41-4aab-8e4a-e089d67bca48: continuing to the direct-sync receiver
+✔ direct-sync queued：回执/批次/任务三处 analysisJobId 同源，dependencyGeneration 与两处代次一致 (1179.131916ms)
+✔ 历史回执：缺 analysisJobId / dependencyGeneration="7" 原样读取，重启恢复不改写 (249.544715ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4360.02584

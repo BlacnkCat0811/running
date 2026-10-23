@@ -1,0 +1,232 @@
+TAP version 13
+# (node:52241) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P3-06 §7.3 control: identical projections pass (the comparator is not always-throwing)
+ok 1 - P3-06 §7.3 control: identical projections pass (the comparator is not always-throwing)
+  ---
+  duration_ms: 13.098417
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a changed score fails
+ok 2 - P3-06 §7.3 control: a changed score fails
+  ---
+  duration_ms: 2.132127
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a deleted row fails
+ok 3 - P3-06 §7.3 control: a deleted row fails
+  ---
+  duration_ms: 2.091243
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a changed explanation code fails
+ok 4 - P3-06 §7.3 control: a changed explanation code fails
+  ---
+  duration_ms: 1.399525
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a tampered raw lineage baselineEpochId fails
+ok 5 - P3-06 §7.3 control: a tampered raw lineage baselineEpochId fails
+  ---
+  duration_ms: 0.946166
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a tampered raw daily-snapshot baselineEpochId fails
+ok 6 - P3-06 §7.3 control: a tampered raw daily-snapshot baselineEpochId fails
+  ---
+  duration_ms: 1.387755
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a tampered raw explanation baselineEpochId fails
+ok 7 - P3-06 §7.3 control: a tampered raw explanation baselineEpochId fails
+  ---
+  duration_ms: 4.587624
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a tampered raw explanation calibrationCohortHash fails
+ok 8 - P3-06 §7.3 control: a tampered raw explanation calibrationCohortHash fails
+  ---
+  duration_ms: 3.464367
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a broken relation fails even when both sides carry it
+ok 9 - P3-06 §7.3 control: a broken relation fails even when both sides carry it
+  ---
+  duration_ms: 1.319616
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: an unknown output field fails
+ok 10 - P3-06 §7.3 control: an unknown output field fails
+  ---
+  duration_ms: 1.418135
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: an unknown output table fails
+ok 11 - P3-06 §7.3 control: an unknown output table fails
+  ---
+  duration_ms: 1.008376
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a changed training_sessions business field fails
+ok 12 - P3-06 §7.3 control: a changed training_sessions business field fails
+  ---
+  duration_ms: 2.168002
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: a changed release evaluation report fails
+ok 13 - P3-06 §7.3 control: a changed release evaluation report fails
+  ---
+  duration_ms: 0.470298
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: an active pointer that disagrees with the bundle fails
+ok 14 - P3-06 §7.3 control: an active pointer that disagrees with the bundle fails
+  ---
+  duration_ms: 0.411028
+  type: 'test'
+  ...
+# Subtest: P3-06 §7.3 control: integers are exact, floats use the 1e-9 relative bound
+ok 15 - P3-06 §7.3 control: integers are exact, floats use the 1e-9 relative bound
+  ---
+  duration_ms: 0.628798
+  type: 'test'
+  ...
+# (node:52242) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# P3-06_EVIDENCE {"scenario":"new_workout","reuse":{"attempted":true,"proof":"verified","rejectionReason":null,"loads":{"reused":40,"recomputed":1},"zoneProfiles":{"reused":41,"recomputed":2},"dailyMetrics":{"reused":41,"recomputed":2},"checkpointWritten":true,"reuseFromLocalDate":"2026-01-01","reuseThroughLocalDate":"2026-02-10"},"featureCounters":{"reused":40,"recomputed":1},"reusedAssessmentCount":40,"tables":{"workout_features":{"rows":41,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":2009},"workout_training_loads":{"rows":41,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1471},"workout_zone_summaries":{"rows":41,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3234},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1077},"training_sessions":{"rows":41,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":287},"ability_assessments":{"rows":41,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3445},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":87,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11619},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":376},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":98},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: O09: a newly imported workout keeps the prefix and equals an offline from-scratch run
+ok 16 - O09: a newly imported workout keeps the prefix and equals an offline from-scratch run
+  ---
+  duration_ms: 5176.617537
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"route_move_xml_only","reuse":{"attempted":true,"proof":"verified","rejectionReason":null,"loads":{"reused":39,"recomputed":2},"zoneProfiles":{"reused":39,"recomputed":4},"dailyMetrics":{"reused":39,"recomputed":4},"checkpointWritten":true,"reuseFromLocalDate":"2026-01-01","reuseThroughLocalDate":"2026-02-08"},"featureCounters":{"reused":39,"recomputed":2},"reusedAssessmentCount":32,"tables":{"workout_features":{"rows":41,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":2008},"workout_training_loads":{"rows":41,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1471},"workout_zone_summaries":{"rows":41,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3234},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1077},"training_sessions":{"rows":41,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":287},"ability_assessments":{"rows":41,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3444},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":87,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11618},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":376},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":98},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: P3-06 T11: an XML-only route move dirties the old owner and equals offline-full
+ok 17 - P3-06 T11: an XML-only route move dirties the old owner and equals offline-full
+  ---
+  duration_ms: 4120.509848
+  type: 'test'
+  ...
+# Subtest: P3-06: consecutive incremental replay keeps the raw baseline epoch stable
+ok 18 - P3-06: consecutive incremental replay keeps the raw baseline epoch stable
+  ---
+  duration_ms: 2370.443946
+  type: 'test'
+  ...
+# Subtest: P3-06: a corrupt parent calibration cohort refuses the resume, never an empty cohort
+ok 19 - P3-06: a corrupt parent calibration cohort refuses the resume, never an empty cohort
+  ---
+  duration_ms: 3965.450849
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"in_training_correction","reuse":{"attempted":true,"proof":"verified","rejectionReason":null,"loads":{"reused":12,"recomputed":28},"zoneProfiles":{"reused":12,"recomputed":31},"dailyMetrics":{"reused":12,"recomputed":31},"checkpointWritten":true,"reuseFromLocalDate":"2026-01-01","reuseThroughLocalDate":"2026-01-12"},"featureCounters":{"reused":12,"recomputed":28},"reusedAssessmentCount":0,"tables":{"workout_features":{"rows":40,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":1960},"workout_training_loads":{"rows":40,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1435},"workout_zone_summaries":{"rows":40,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3155},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1073},"training_sessions":{"rows":40,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":280},"ability_assessments":{"rows":40,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3323},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":85,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11390},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":379},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":96},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: O09: an in-training heart-rate correction rewinds the boundary and equals an offline run
+ok 20 - O09: an in-training heart-rate correction rewinds the boundary and equals an offline run
+  ---
+  duration_ms: 4626.395244
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"deletion","reuse":{"attempted":true,"proof":"rejected","rejectionReason":"distance_queue_provenance","loads":{"reused":0,"recomputed":39},"zoneProfiles":{"reused":0,"recomputed":43},"dailyMetrics":{"reused":0,"recomputed":43},"checkpointWritten":true,"reuseFromLocalDate":null,"reuseThroughLocalDate":null},"featureCounters":{"reused":39,"recomputed":0},"reusedAssessmentCount":32,"tables":{"workout_features":{"rows":39,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":1911},"workout_training_loads":{"rows":39,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1399},"workout_zone_summaries":{"rows":39,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3076},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1069},"training_sessions":{"rows":40,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":280},"ability_assessments":{"rows":39,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3199},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":83,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11159},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":372},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":94},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: O09: a deletion refuses the prefix (missing rows) and still equals an offline run
+ok 21 - O09: a deletion refuses the prefix (missing rows) and still equals an offline run
+  ---
+  duration_ms: 3740.091689
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"override","reuse":{"attempted":true,"proof":"rejected","rejectionReason":"config_hash","loads":{"reused":0,"recomputed":41},"zoneProfiles":{"reused":0,"recomputed":43},"dailyMetrics":{"reused":0,"recomputed":43},"checkpointWritten":true,"reuseFromLocalDate":null,"reuseThroughLocalDate":null},"featureCounters":{"reused":0,"recomputed":41},"reusedAssessmentCount":0,"tables":{"workout_features":{"rows":41,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":2009},"workout_training_loads":{"rows":41,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1471},"workout_zone_summaries":{"rows":41,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3234},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1077},"training_sessions":{"rows":41,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":287},"ability_assessments":{"rows":41,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3445},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":87,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11619},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":376},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":98},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: O09: an override change invalidates the override digest and equals an offline run
+ok 22 - O09: an override change invalidates the override digest and equals an offline run
+  ---
+  duration_ms: 4334.11355
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"config","reuse":{"attempted":true,"proof":"rejected","rejectionReason":"zone_settings","loads":{"reused":0,"recomputed":41},"zoneProfiles":{"reused":0,"recomputed":43},"dailyMetrics":{"reused":0,"recomputed":43},"checkpointWritten":true,"reuseFromLocalDate":null,"reuseThroughLocalDate":null},"featureCounters":{"reused":40,"recomputed":1},"reusedAssessmentCount":40,"tables":{"workout_features":{"rows":41,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":2009},"workout_training_loads":{"rows":41,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1471},"workout_zone_summaries":{"rows":41,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3234},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1077},"training_sessions":{"rows":41,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":287},"ability_assessments":{"rows":41,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3445},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":87,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11619},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":376},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":98},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: O09: a zone-config change invalidates the settings digest and equals an offline run
+ok 23 - O09: a zone-config change invalidates the settings digest and equals an offline run
+  ---
+  duration_ms: 4145.849214
+  type: 'test'
+  ...
+# Subtest: O09: prefix rows are copied with run-partitioned ids and stay byte-identical
+ok 24 - O09: prefix rows are copied with run-partitioned ids and stay byte-identical
+  ---
+  duration_ms: 1710.354948
+  type: 'test'
+  ...
+# Subtest: O09: a tampered checkpoint state is refused (hash), never resumed from defaults
+ok 25 - O09: a tampered checkpoint state is refused (hash), never resumed from defaults
+  ---
+  duration_ms: 4091.435774
+  type: 'test'
+  ...
+# Subtest: O09: a prefix whose daily rows no longer match is narrowed, not copied
+ok 26 - O09: a prefix whose daily rows no longer match is narrowed, not copied
+  ---
+  duration_ms: 3907.368224
+  type: 'test'
+  ...
+# Subtest: O09: the batched recovery-fact read is field-identical to the per-day read
+ok 27 - O09: the batched recovery-fact read is field-identical to the per-day read
+  ---
+  duration_ms: 331.867127
+  type: 'test'
+  ...
+# Subtest: O09: the checkpoint records versions, digests and rolling state (and hashes them)
+ok 28 - O09: the checkpoint records versions, digests and rolling state (and hashes them)
+  ---
+  duration_ms: 1291.997975
+  type: 'test'
+  ...
+# Subtest: O09: a parent computed without an evidence source is refused, never resumed from defaults
+ok 29 - O09: a parent computed without an evidence source is refused, never resumed from defaults
+  ---
+  duration_ms: 2880.265153
+  type: 'test'
+  ...
+# Subtest: O09: a parent whose zone-chain tail no longer matches the checkpoint is refused
+ok 30 - O09: a parent whose zone-chain tail no longer matches the checkpoint is refused
+  ---
+  duration_ms: 4377.881798
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"vo2_only","reuse":{"attempted":true,"proof":"verified","rejectionReason":null,"loads":{"reused":39,"recomputed":1},"zoneProfiles":{"reused":39,"recomputed":4},"dailyMetrics":{"reused":39,"recomputed":4},"checkpointWritten":true,"reuseFromLocalDate":"2026-01-01","reuseThroughLocalDate":"2026-02-08"},"featureCounters":{"reused":39,"recomputed":1},"reusedAssessmentCount":32,"tables":{"workout_features":{"rows":40,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":1960},"workout_training_loads":{"rows":40,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1435},"workout_zone_summaries":{"rows":40,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3155},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1073},"training_sessions":{"rows":40,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":280},"ability_assessments":{"rows":40,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3323},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":85,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11390},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":374},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":96},"analysis_run_input_bindings":{"rows":0,"columns":[],"leafValues":0},"analysis_job_coverage":{"rows":0,"columns":[],"leafValues":0}}}
+# Subtest: P3-06 T13: VO2Max-only bounded reuse equals offline-full on the full business projection
+ok 31 - P3-06 T13: VO2Max-only bounded reuse equals offline-full on the full business projection
+  ---
+  duration_ms: 3661.742148
+  type: 'test'
+  ...
+# P3-06_EVIDENCE {"scenario":"direct_binding","reuse":{"attempted":true,"proof":"verified","rejectionReason":null,"loads":{"reused":40,"recomputed":1},"zoneProfiles":{"reused":41,"recomputed":2},"dailyMetrics":{"reused":41,"recomputed":2},"checkpointWritten":true,"reuseFromLocalDate":"2026-01-01","reuseThroughLocalDate":"2026-02-10"},"featureCounters":{"reused":40,"recomputed":1},"reusedAssessmentCount":40,"tables":{"workout_features":{"rows":41,"columns":["averageHeartRateBpm","averageSpeedMps","canonicalWorkoutId","distanceKm","durationSeconds","eligibilityStatus","features","heartRateCoverage","heartRateSampleCount","missingReasons","provenance","qualityScore","routePointCount","routeQuality","sessionType","sessionTypeSource","sourceConfidence","trainingSessionId","workoutStartAt"],"leafValues":2009},"workout_training_loads":{"rows":41,"columns":["averageHeartRateBpm","confidence","distanceExposureRatio","distanceFactor","distanceKm","distanceReferenceMeters","durationSeconds","elevationGainMeters","explanationCodes","heartRateCoverage","heartRateLoadConfidence","intensity","internalLoad","loadSource","localDate","paceLoad","paceLoadConfidence","provenance","rawHrrTrimp","rpe","sessionType","stimulusType","timezoneIdentifier","trainingLoad","trainingSessionId","zoneProfileDate"],"leafValues":1471},"workout_zone_summaries":{"rows":41,"columns":["explanationCodes","heartRateCoverage","heartRateExposure","paceCoverage","paceExposure","secondaryStimulusTypes","stimulusConfidence","stimulusScores","stimulusType","trainingSessionId","zoneProfileDate"],"leafValues":3234},"daily_zone_profiles":{"rows":43,"columns":["dataThroughAt","effectiveAt","evidence","heartRateBands","heartRateConfidence","heartRateSource","localDate","maximumHeartRateBpm","paceBands","paceConfidence","paceSource","profileStatus","restingHeartRateBpm","thresholdPaceSecondsPerKm","timezoneIdentifier"],"leafValues":2537},"daily_training_metrics":{"rows":43,"columns":["acuteEwma","chronicEwma","confidence","current7dLoad","dailyLoad","distanceKm","durationSeconds","explanation","explanationCodes","historyDays","loadRatio","loadWorkoutCount","localDate","monotony","previous7dLoad","rampRate","recoveryEvidence","strain","timezoneIdentifier","trainingStatus","workoutCount"],"leafValues":1077},"training_sessions":{"rows":41,"columns":["activityType","anchorDistanceKm","anchorEndAt","anchorStartAt","canonicalWorkoutId","status","trainingSessionId"],"leafValues":287},"ability_assessments":{"rows":41,"columns":["assessedAt","assessmentStatus","cardioScore","confidence","confidenceFactors","currentAbility","directionFactor","effectiveWeights","efficiencyScore","evidenceStrength","explanation","explanationCodes","featureTrainingSessionId","growthResistance","paceScore","recoveryScore","sequenceNumber","stabilityScore","trainingSessionId","trueAbilityAfter","trueAbilityBefore","trueAbilityDelta","updatedTrueAbility","workoutContribution"],"leafValues":3445},"daily_ability_snapshots":{"rows":43,"columns":["baselineEpochId","decayPoints","growthVelocityPerWeek","lastAssessmentRef","localDate","snapshotStatus","timezoneIdentifier","trueAbility"],"leafValues":344},"model_runs":{"rows":1,"columns":["datasetVersion","evaluatedAt","featureRun","modelConfig","modelConfigHash","modelVersion","singleton","summary"],"leafValues":74},"model_v2_runs":{"rows":1,"columns":["configVersion","engineVersion","lineage","singleton"],"leafValues":17},"model_domain_snapshots":{"rows":87,"columns":["asOf","domain","payload","snapshotKey"],"leafValues":11619},"model_release_bundles":{"rows":3,"columns":["activated","baseRunOrdinal","createdAt","datasetVersion","evaluation","runOrdinal","snapshotDomains","snapshotProjectionHash","status"],"leafValues":408},"release_readable_state":{"rows":1,"columns":["activePublished","activeReleaseOrdinal","activeRunOrdinal","analysisStatus","bundleStatus","freshness","readableDomains","singleton"],"leafValues":98},"analysis_run_input_bindings":{"rows":1,"columns":["capturedDependencyGeneration","capturedRawGeneration","configDigest","cutoffAt","datasetVersion","overrideDigest","scope","singleton","targetDependencyGeneration","targetRawGeneration","timezoneIdentifier"],"leafValues":11},"analysis_job_coverage":{"rows":1,"columns":["dependencyGenerationFrom","dependencyGenerationTo","importBatchId"],"leafValues":3}}}
+# Subtest: P3-06: direct-lane input binding and coverage evidence agree with offline-full
+ok 32 - P3-06: direct-lane input binding and coverage evidence agree with offline-full
+  ---
+  duration_ms: 4117.782887
+  type: 'test'
+  ...
+# Subtest: R05: 连续两次真实直连增量（代次不同）仍然复用安全前缀，不再恒定拒绝
+ok 33 - R05: 连续两次真实直连增量（代次不同）仍然复用安全前缀，不再恒定拒绝
+  ---
+  duration_ms: 1817.830692
+  type: 'test'
+  ...
+# Subtest: R05: 无可信覆盖基线（历史发布无输入绑定）的直连增量拒绝复用 —— 不允许把无法证明的前缀当安全
+ok 34 - R05: 无可信覆盖基线（历史发布无输入绑定）的直连增量拒绝复用 —— 不允许把无法证明的前缀当安全
+  ---
+  duration_ms: 1930.088578
+  type: 'test'
+  ...
+# Subtest: P3-06 T12: cross-night sleep/HRV revision — readiness output equals offline-full, middle period unchanged, Fitness isolated
+ok 35 - P3-06 T12: cross-night sleep/HRV revision — readiness output equals offline-full, middle period unchanged, Fitness isolated
+  ---
+  duration_ms: 7823.107029
+  type: 'test'
+  ...
+1..35
+# tests 35
+# suites 0
+# pass 35
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 71285.071719

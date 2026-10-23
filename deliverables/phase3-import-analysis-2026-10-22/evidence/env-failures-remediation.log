@@ -1,0 +1,54 @@
+✔ Node version gate accepts the supported Node 22 and Node 24 ranges (1.131996ms)
+✔ Node version gate rejects unsupported releases (0.853417ms)
+✖ every public runtime command executes the Node gate through npm lifecycle hooks (8.072741ms)
+✔ converts log residuals into bounded race-time corrections (1.089446ms)
+✔ rejects invalid residual outputs and correction limits (0.332839ms)
+✔ M01: validates the immutable CatBoost artifact manifest contract (0.814177ms)
+✖ installed native ONNX runtime loads and executes the production feature shape (284.563622ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 5
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 813.094354
+
+✖ failing tests:
+
+test at apps/api/test/node-version.test.ts:1:1261
+✖ every public runtime command executes the Node gate through npm lifecycle hooks (8.072741ms)
+  AssertionError [ERR_ASSERTION]: npm run --silent predev:api failed: undefined
+  
+  null !== 0
+  
+      at TestContext.<anonymous> (/Users/ta/running/apps/api/test/node-version.test.ts:71:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at packages/prediction-inference/test/prediction-inference.test.ts:1:2773
+✖ installed native ONNX runtime loads and executes the production feature shape (284.563622ms)
+  Error: dlopen(/Users/ta/running/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/onnxruntime_binding.node, 0x0001): tried: '/Users/ta/running/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/onnxruntime_binding.node' (code signature in <AE4CACC1-90D2-39D8-B48E-B27C349482CF> '/Users/ta/running/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/onnxruntime_binding.node' not valid for use in process: mapped file has no cdhash, completely unsigned? Code has to be at least ad-hoc signed.), '/System/Volumes/Preboot/Cryptexes/OS/Users/ta/running/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/onnxruntime_binding.node' (no such file), '/Users/ta/running/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/onnxruntime_binding.node' (code signature in <AE4CACC1-90D2-39D8-B48E-B27C349482CF> '/Users/ta/running/node_modules/onnxruntime-node/bin/napi-v6/darwin/x64/onnxruntime_binding.node' not valid for use in process: mapped file has no cdhash, completely unsigned? Code has to be at least ad-hoc signed.)
+      at Object..node (node:internal/modules/cjs/loader:2087:18)
+      at Module.load (node:internal/modules/cjs/loader:1651:32)
+      at Module._load (node:internal/modules/cjs/loader:1443:12)
+      at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+      at Module.require (node:internal/modules/cjs/loader:1674:12)
+      at require (node:internal/modules/helpers:157:16)
+      at Object.<anonymous> (/Users/ta/running/node_modules/onnxruntime-node/lib/binding.ts:56:3)
+      at Module._compile (node:internal/modules/cjs/loader:1929:14)
+      at Object.transformer (/Users/ta/running/node_modules/tsx/dist/register-BLUABhh3.cjs:9:3252)
+      at Module.load (node:internal/modules/cjs/loader:1651:32) {
+    code: 'ERR_DLOPEN_FAILED'
+  }

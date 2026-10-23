@@ -219,6 +219,13 @@ check(
     "(apps/api/src/import-worker.ts) — the iOS disposition pins this exact code",
 )
 check(
+    'routeOwnershipConflictCode = "direct_sync_route_ownership_conflict"' in ios_cancellation
+    and "if errorCode == routeOwnershipConflictCode { return .abandonTask }" in ios_cancellation,
+    "the iOS disposition no longer treats direct_sync_route_ownership_conflict as non-retryable "
+    "(apps/ios/RAI/HealthSyncCancellation.swift) — a deterministic ownership conflict would "
+    "livelock the sync with .keepTask",
+)
+check(
     'inputNotAllowedCode = "direct_sync_input_not_allowed"' in ios_cancellation,
     "the iOS disposition no longer pins direct_sync_input_not_allowed "
     "(apps/ios/RAI/HealthSyncCancellation.swift) — a server inspect 400 with this code would "
@@ -250,6 +257,7 @@ expected_lane_codes = [
     "direct_sync_input_not_allowed",
     "direct_sync_internal_integrity",
     "direct_sync_payload_exceeds_bounds",
+    "direct_sync_route_ownership_conflict",
     "direct_sync_unavailable",
 ]
 check(
