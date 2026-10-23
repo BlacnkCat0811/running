@@ -9,6 +9,9 @@
 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
 [项目审查](../docs/PROJECT_REVIEW.md) 后删除。
 
+- [PHASE3_IMPORT_ANALYSIS_RELEASE_2026-10-23.md](PHASE3_IMPORT_ANALYSIS_RELEASE_2026-10-23.md)：
+  阶段 3 发布记录（`d03f4ae`，2026-10-23 部署生产）——发布前冷备、主库无迁移、
+  runtime schema 启动维护、健康检查/只读冒烟与回滚边界；**按用户要求未运行测试套件**。
 - [IMPORT_RECOVERY_REVIEW_FIX_2026-10-23.md](IMPORT_RECOVERY_REVIEW_FIX_2026-10-23.md)：
   导入恢复审查三项问题修复的验收记录——恢复后任务准入 token、恢复失败的结构化证据与临时冻结、
   放弃旧 scope 的唯一 epoch 重放；含故障注入点与逐条验收映射。
