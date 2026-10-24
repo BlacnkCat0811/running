@@ -5,6 +5,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import type {
   MobileGoalsResponse,
+  MobilePlanOperationScope,
+  CoachLoopSettings,
   MobileLockedSession,
   MobilePlanAudit,
   MobilePlannedDay,
@@ -42,6 +44,9 @@ import {
   type PublicationGuardState
 } from "./publication-guard.js";
 import { TrainingPlanStore, ensureTrainingPlanSchema, type TrainingPlanState, type TrainingPlanStateRow } from "./training-plan-store.js";
+import { raceGoalFromCoachSettings, unifiedCoachSettings } from "./training-plan-ownership.js";
+import { trainingPlanContextDigest } from "./training-mode-policy.js";
+import { coachLocalDate } from "./coach-loop-facts.js";
 
 const GOALS_FILE = "mobile-goals.json";
 /** Derived from the shared list so this set cannot drift from the API's enum. */
@@ -275,6 +280,10 @@ interface ReadCache<T> {
  * read-only.
  */
 export class MobileGoalsStore {
+  private trainingIdentity: (() => MobilePlanOperationScope) | null = null;
+  private trainingBusinessDate = () => coachLocalDate(new Date().toISOString());
+  private stagedCoachReceipt: { operationId: string; state: { settings: CoachLoopSettings; policyHash: string; evaluatedAt: string };
+    raceGoal?: TrainingPlanState["raceGoal"]; replaceEnded?: boolean } | null = null;
   private publicationTransaction = false;
   private readonly filePath: string;
   private readonly controlDatabase: DatabaseSync | null;
@@ -296,6 +305,92 @@ export class MobileGoalsStore {
   }
 
   get supportsPublicationOperations(): boolean { return this.controlDatabase !== null; }
+
+  bindTrainingPlanOwner(identity: () => MobilePlanOperationScope, businessDate?: () => string): void {
+    this.trainingIdentity = identity;
+    if (businessDate !== undefined) this.trainingBusinessDate = businessDate;
+  }
+
+  currentTrainingPlan(): TrainingPlanStateRow | null {
+    const id = this.trainingIdentity?.();
+    return id ? this.trainingPlanStateRow(JSON.stringify([id.serverId, id.athleteId, id.datasetEpoch])) : null;
+  }
+
+  /** Read current configuration through unified's immutable receipt pointer. */
+  currentCoachLoopState<T extends { settings: CoachLoopSettings }>(scope: string): T | null {
+    const row = this.currentTrainingPlan();
+    if (row === null) return this.coachLoopState<T>(scope);
+    if (row.state.coachLoop === null) {
+      // A migrated scope without an owner pointer must not silently adopt the
+      // latest legacy receipt as a second current configuration. The one
+      // exception is the existing ended-release contract: an ended receipt has
+      // already handed the dataset back to legacy reads, so it is safe evidence
+      // (and required for the managed preHandler to release the read routes).
+      const legacy = this.coachLoopState<T>(scope);
+      if (legacy === null) return null;
+      const status = (legacy as { settings?: { status?: string } }).settings?.status;
+      if (status === "ended") return legacy;
+      throw new PlanOperationError("training_plan_owner_invalid", "训练配置证据与统一状态不一致，请恢复控制库。", 503);
+    }
+    const receipt = this.controlDatabase!.prepare(
+      "SELECT payload_json FROM mobile_coach_loop_receipts WHERE scope=? AND operation_id=?"
+    ).get(scope, row.state.coachLoop.operationId) as { payload_json: string } | undefined;
+    if (!receipt) throw new PlanOperationError("training_plan_owner_invalid", "训练配置证据缺失，请恢复控制库。", 503);
+    const value = JSON.parse(receipt.payload_json) as T;
+    return { ...value, settings: unifiedCoachSettings(row.state, value.settings, this.trainingBusinessDate()) };
+  }
+
+  private reconcileTrainingPlanOwner(): void {
+    const row = this.currentTrainingPlan();
+    if (row === null) return;
+    const goals = this.read();
+    const receipt = this.stagedCoachReceipt;
+    if (row.state.goalsRevision === goals.revision && receipt === null) return;
+    const state: TrainingPlanState = { ...row.state, goalsRevision: goals.revision,
+      legacyRaceTarget: goals.raceTarget ?? null,
+      weekPlan: goals.weekPlan, lockedSession: goals.lockedSession,
+      // The legacy projection stops running a programme after v2 takes over.
+      // Its migrated preferences stay in unified until a coach receipt replaces
+      // them with an explicitly configured set of current preferences.
+      runCoach: receipt !== null || row.state.coachLoop !== null ? null : goals.runCoach ?? row.state.runCoach };
+    if (receipt !== null) {
+      state.coachLoop = { operationId: receipt.operationId, policyHash: receipt.state.policyHash,
+        evaluatedAt: receipt.state.evaluatedAt };
+      // `ended` is terminal unless this receipt came from an explicit new
+      // enable. A malformed/stale pause receipt must never downgrade the owner
+      // from ended back to paused and make a v2 resume possible.
+      const keepEnded = row.state.sourceStatus === "ended" &&
+        receipt.state.settings.status !== "ended" && receipt.replaceEnded !== true;
+      state.sourceStatus = keepEnded ? "ended" : receipt.state.settings.status;
+      state.runState = keepEnded ? "paused" : receipt.state.settings.status === "active" ? "active" : "paused";
+      state.raceGoal = keepEnded ? row.state.raceGoal : receipt.raceGoal === undefined
+        ? raceGoalFromCoachSettings(receipt.state.settings, row.state.raceGoal) : receipt.raceGoal;
+      state.preferencesComplete = true;
+      state.planContextDigest = trainingPlanContextDigest(state);
+    }
+    this.commitTrainingPlanCommandState({ scope: row.scope, expectedRevision: row.revision, state,
+      eventType: receipt ? "owner:coach-loop" : "owner:projection" });
+  }
+
+  trainingPlanOwnerReady(): boolean {
+    try {
+      const row = this.currentTrainingPlan();
+      const identity = this.trainingIdentity?.();
+      if (row === null || identity === undefined || this.controlDatabase === null) return false;
+      if (row.state.goalsRevision !== this.read().revision) return false;
+      const scope = JSON.stringify(identity);
+      const latest = this.controlDatabase.prepare(
+        "SELECT operation_id FROM mobile_coach_loop_receipts WHERE scope=? ORDER BY sequence DESC LIMIT 1"
+      ).get(scope) as { operation_id: string } | undefined;
+      if ((latest?.operation_id ?? null) !== (row.state.coachLoop?.operationId ?? null)) return false;
+      this.currentCoachLoopState(scope);
+      return true;
+    } catch {
+      // Missing receipt, unreadable control DB or stale projection: keep the
+      // v2 read/write surface closed instead of guessing an owner.
+      return false;
+    }
+  }
 
   /** Coach configuration, anchor and decision receipts share the publication
    * transaction with goals/history. Not a second store of health facts. */
@@ -336,7 +431,9 @@ export class MobileGoalsStore {
       "当前存储没有控制库，不能提交统一训练状态。", 503);
     if (!this.publicationTransaction) throw new PlanOperationError("training_plan_transaction_required",
       "统一状态必须与发布在同一事务内提交。", 500);
-    return new TrainingPlanStore(this.controlDatabase).commitState(input, { inTransaction: true });
+    const result = new TrainingPlanStore(this.controlDatabase).commitState(input, { inTransaction: true });
+    if (this.stagedCoachReceipt?.operationId === input.state.coachLoop?.operationId) this.stagedCoachReceipt = null;
+    return result;
   }
 
   coachLoopReceipts<T>(scope: string, limit = 100): T[] {
@@ -345,10 +442,16 @@ export class MobileGoalsStore {
       { payload_json: string }[] | undefined ?? []).map(row => JSON.parse(row.payload_json) as T);
   }
 
-  appendCoachLoopReceipt(scope: string, operationId: string, state: unknown): void {
+  appendCoachLoopReceipt(scope: string, operationId: string, state: unknown, raceGoal?: TrainingPlanState["raceGoal"],
+    options: { replaceEnded?: boolean } = {}): void {
     if (!this.publicationTransaction || !this.controlDatabase) throw new Error("Coach receipt requires atomic plan publication");
     this.controlDatabase.prepare("INSERT INTO mobile_coach_loop_receipts(scope,operation_id,payload_json) VALUES (?,?,?)")
       .run(scope, operationId, JSON.stringify(state));
+    if (this.trainingIdentity !== null) {
+      this.stagedCoachReceipt = { operationId, state: state as { settings: CoachLoopSettings; policyHash: string; evaluatedAt: string },
+        ...(raceGoal === undefined ? {} : { raceGoal }),
+        ...(options.replaceEnded === true ? { replaceEnded: true } : {}) };
+    }
   }
 
   /**
@@ -453,6 +556,7 @@ export class MobileGoalsStore {
     this.publicationTransaction = true;
     try {
       const result = fn();
+      this.reconcileTrainingPlanOwner();
       database.exec("COMMIT");
       return result;
     } catch (error) {
@@ -462,6 +566,7 @@ export class MobileGoalsStore {
       throw mapDatabaseBusy(error);
     } finally {
       this.publicationTransaction = false;
+      this.stagedCoachReceipt = null;
     }
   }
 
@@ -551,6 +656,7 @@ export class MobileGoalsStore {
 
   /** Retire tomorrow and later from legacy model weeks, without rewriting today's prescription. */
   retireLegacyModelPlan(today: string): MobileGoalsResponse {
+    if (this.currentTrainingPlan() !== null) return this.read();
     if (!isValidLocalDate(today)) throw new MobileGoalsInputError("迁移日期无效");
     const current = this.readStored();
     if (current.weekPlanAudit?.generatedBy !== "llm") return this.toResponse(current);
@@ -577,6 +683,9 @@ export class MobileGoalsStore {
   }
 
   write(input: UpdateMobileGoalsInput, options?: PlanMergeOptions): MobileGoalsResponse {
+    if (!this.publicationTransaction && this.currentTrainingPlan() !== null) {
+      return this.withPublicationTransaction(() => this.write(input, options));
+    }
     if (input.raceTarget !== undefined && input.raceTarget !== null &&
         !isValidLocalDate(input.raceTarget.date)) {
       throw new MobileGoalsInputError("raceTarget.date must be a real YYYY-MM-DD date");

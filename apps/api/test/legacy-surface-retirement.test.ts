@@ -250,7 +250,7 @@ test("every retired legacy plan route answers 410 legacy_surface_retired with a 
     ];
     for (const [path, body] of replacements) {
       const response = await fetch(server.url + path, { method: "POST",
-        headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+        headers: { "content-type": "application/json", "X-RAI-Client-Training-Commands": "2" }, body: JSON.stringify(body) });
       assert.notEqual(response.status, 404, `${path} is a replacement surface and must be registered`);
       const payload = await response.json() as { code?: string };
       assert.equal(payload.code, "training_plan_not_migrated", `${path}: ${JSON.stringify(payload)}`);

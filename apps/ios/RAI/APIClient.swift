@@ -226,7 +226,8 @@ struct RaiAPIClient {
     }
 
     func handshake(baseURL: URL, token: String) async throws -> RaiHandshake {
-        try await get(path: "/v1/handshake", baseURL: baseURL, token: token)
+        try await get(path: "/v1/handshake", baseURL: baseURL, token: token,
+                      headers: ["X-RAI-Client-Training-Commands": "2"])
     }
 
     func today(baseURL: URL, token: String) async throws -> MobileTodayResponse {
@@ -303,6 +304,23 @@ struct RaiAPIClient {
 
     func planOperation<Result: Decodable>(id: String, baseURL: URL, token: String) async throws -> PlanPublicationResult<Result> {
         try await get(path: "/v1/mobile/plan-operations/\(escapedPath(id))", baseURL: baseURL, token: token)
+    }
+
+    func previewTrainingPlanCommand(_ input: TrainingPlanCommandPreviewRequest, baseURL: URL, token: String) async throws -> TrainingPlanCommandPreview {
+        try await send(path: "/v1/mobile/training-plan/commands/preview", method: "POST", body: input,
+                       baseURL: baseURL, token: token,
+                       headers: ["X-RAI-Client-Training-Commands": "2"])
+    }
+
+    func submitTrainingPlanCommand(_ pending: PendingPlanPublication, baseURL: URL, token: String) async throws -> TrainingPlanCommandResult {
+        let path: String
+        switch pending.route {
+        case "training-command": path = "/v1/mobile/training-plan/commands"
+        case "training-refresh": path = "/v1/mobile/training-plan/commands/refresh"
+        default: throw RaiAPIClientError.decoding("该操作不是 v2 训练命令")
+        }
+        return try await request(path: path, query: [], method: "POST", body: pending.payload, baseURL: baseURL, token: token,
+                                 headers: ["X-RAI-Client-Training-Commands": "2"])
     }
     func replayPlanPublication<Result: Decodable>(_ operation: PendingPlanPublication, baseURL: URL, token: String) async throws -> Result {
         let paths = ["coach": "/v1/mobile/run-coach", "coach-loop": "/v1/mobile/coach-loop", "confirm": "/v1/mobile/workout-plan/confirm", "goals": "/v1/mobile/goals", "lock": "/v1/mobile/lock"]
@@ -494,7 +512,8 @@ struct RaiAPIClient {
         body: T,
         baseURL: URL,
         token: String,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        headers: [String: String] = [:]
     ) async throws -> U {
         let bodyData: Data
         do {
@@ -502,7 +521,8 @@ struct RaiAPIClient {
         } catch {
             throw RaiAPIClientError.decoding(error.localizedDescription)
         }
-        return try await request(path: path, query: [], method: method, body: bodyData, baseURL: baseURL, token: token, timeout: timeout)
+        return try await request(path: path, query: [], method: method, body: bodyData, baseURL: baseURL, token: token,
+                                 timeout: timeout, headers: headers)
     }
 
     private func request<T: Decodable>(

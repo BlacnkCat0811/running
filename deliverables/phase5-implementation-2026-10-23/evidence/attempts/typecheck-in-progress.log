@@ -1,0 +1,10 @@
+
+> rai-running-intelligence@0.1.0 pretypecheck
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json
+
+apps/api/src/mobile-goals.ts(333,69): error TS2322: Type 'MobileRunCoachPlan | null | undefined' is not assignable to type 'MobileRunCoachPlan | null'.
+  Type 'undefined' is not assignable to type 'MobileRunCoachPlan | null'.

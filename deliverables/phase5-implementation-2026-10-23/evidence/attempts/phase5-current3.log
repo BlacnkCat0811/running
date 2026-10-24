@@ -1,0 +1,203 @@
+TAP version 13
+# (node:16172) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+not ok 1 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 4719.690501
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/phase5-training-plan.test.ts:1:2014'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    ... Skipped lines
+    
+      [
+        {
+          distanceKm: 5,
+          kind: 'easy',
+          localDate: '2026-10-23',
+    ...
+          reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。',
+    +     structure: null
+        },
+        {
+          distanceKm: null,
+          kind: 'rest',
+          localDate: '2026-10-25',
+          reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。',
+    +     structure: null
+        },
+        {
+          distanceKm: null,
+          kind: 'rest',
+          localDate: '2026-10-26',
+          reason: '完整课不可行或等待今日追加评估',
+    +     structure: null
+        },
+        {
+          distanceKm: null,
+          kind: 'rest',
+          localDate: '2026-10-27',
+          reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。',
+    +     structure: null
+        },
+        {
+          distanceKm: null,
+          kind: 'rest',
+          localDate: '2026-10-28',
+          reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。',
+    +     structure: null
+        },
+        {
+          distanceKm: null,
+          kind: 'rest',
+          localDate: '2026-10-29',
+          reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。',
+    +     structure: null
+        }
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0:
+      localDate: '2026-10-23'
+      kind: 'easy'
+      distanceKm: 5
+      structure:
+        warmup:
+          purpose: 'warmup'
+          goal:
+            type: 'time'
+            seconds: 300
+          alert: ~
+        blocks:
+          0:
+            iterations: 1
+            steps:
+              0:
+                purpose: 'work'
+                goal:
+                  type: 'time'
+                  seconds: 1200
+                alert: ~
+        cooldown:
+          purpose: 'cooldown'
+          goal:
+            type: 'time'
+            seconds: 300
+          alert: ~
+      reason: '完整剂量优先；rai-coach-session-dose-v2，未分配建议量不产生补课义务。'
+    1:
+      localDate: '2026-10-24'
+      kind: 'rest'
+      distanceKm: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    2:
+      localDate: '2026-10-25'
+      kind: 'rest'
+      distanceKm: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    3:
+      localDate: '2026-10-26'
+      kind: 'rest'
+      distanceKm: ~
+      reason: '完整课不可行或等待今日追加评估'
+    4:
+      localDate: '2026-10-27'
+      kind: 'rest'
+      distanceKm: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    5:
+      localDate: '2026-10-28'
+      kind: 'rest'
+      distanceKm: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    6:
+      localDate: '2026-10-29'
+      kind: 'rest'
+      distanceKm: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+  actual:
+    0:
+      localDate: '2026-10-23'
+      kind: 'easy'
+      distanceKm: 5
+      structure:
+        warmup:
+          purpose: 'warmup'
+          goal:
+            type: 'time'
+            seconds: 300
+          alert: ~
+        blocks:
+          0:
+            iterations: 1
+            steps:
+              0:
+                purpose: 'work'
+                goal:
+                  type: 'time'
+                  seconds: 1200
+                alert: ~
+        cooldown:
+          purpose: 'cooldown'
+          goal:
+            type: 'time'
+            seconds: 300
+          alert: ~
+      reason: '完整剂量优先；rai-coach-session-dose-v2，未分配建议量不产生补课义务。'
+    1:
+      localDate: '2026-10-24'
+      kind: 'rest'
+      distanceKm: ~
+      structure: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    2:
+      localDate: '2026-10-25'
+      kind: 'rest'
+      distanceKm: ~
+      structure: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    3:
+      localDate: '2026-10-26'
+      kind: 'rest'
+      distanceKm: ~
+      structure: ~
+      reason: '完整课不可行或等待今日追加评估'
+    4:
+      localDate: '2026-10-27'
+      kind: 'rest'
+      distanceKm: ~
+      structure: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    5:
+      localDate: '2026-10-28'
+      kind: 'rest'
+      distanceKm: ~
+      structure: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+    6:
+      localDate: '2026-10-29'
+      kind: 'rest'
+      distanceKm: ~
+      structure: ~
+      reason: '本自然周剩余 0.0 km 不足以再安排一堂完整课；不切碎剂量。'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/phase5-training-plan.test.ts:103:14)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5133.763074

@@ -108,6 +108,24 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
          "syncProtocolVersion":1,"apiVersion":"v1"}
         """
         let legacyHandshake = try JSONDecoder().decode(RaiHandshake.self, from: Data(legacyHandshakeJSON.utf8))
+        check(legacyHandshake.legacyPlanWritesSupported && !legacyHandshake.trainingPlanV2CommandsSupported,
+              "an explicitly negotiated legacy protocol does not imply v2 writes")
+        for (read, write, publication, allowed) in [
+            (2, 2, 1, true), (2, 999, 1, false), (999, 2, 1, false),
+            (2, 2, 999, false), (2, 0, 1, false)
+        ] {
+            var capabilities = legacyHandshake
+            capabilities.trainingPlanContractVersion = read
+            capabilities.trainingPlanCommandContractVersion = write
+            capabilities.planPublicationContractVersion = publication
+            check(capabilities.trainingPlanV2CommandsSupported == allowed && !capabilities.legacyPlanWritesSupported,
+                  "exact read/write/publication versions negotiate independently; v2 never authorizes legacy")
+        }
+        var missingDurability = legacyHandshake
+        missingDurability.trainingPlanContractVersion = 2
+        missingDurability.trainingPlanCommandContractVersion = 2
+        check(!missingDurability.trainingPlanV2CommandsSupported && !missingDurability.legacyPlanWritesSupported,
+              "v2 commands require the durable operation capability")
         check(legacyHandshake.factsAnalysisContractVersion == nil && legacyHandshake.factsAnalysisViewContractVersion == nil,
               "an old server's missing capability keys decode as nil, never as a zero/empty view")
 

@@ -662,6 +662,20 @@ test("native session and race pickers exactly match their API contracts", () => 
         }
         continue;
       }
+      if (name.endsWith("TechPlanView.swift")) {
+        const options = balancedBlock(source, source.indexOf("{", close));
+        const tags = [...options.matchAll(/\.tag\(\s*([^)]*)\)/g)].map(match => match[1]!.trim());
+        if (args.includes('"操作"')) {
+          // The v2 command sheet's action picker is the user-visible wire enum:
+          // keep it pinned to TrainingPlanCommandAction, never to a free string.
+          assert.deepEqual(tags.map(value => value.replace("TrainingPlanCommandAction.", "")),
+            ["setRaceGoal", "clearRaceGoal", "pause", "resume"]);
+        } else {
+          assert.ok(args.includes('"目标"'), name + " 出现未登记的 Picker");
+          assert.deepEqual(tags.map(value => value.replace(/"/g, "")), ["finish", "time"]);
+        }
+        continue;
+      }
       const isRace = args.includes('"比赛距离"');
       const isInputMode = args.includes('"目标输入方式"');
       assert.ok(isRace || isInputMode || args.includes('"训练类型"'), name + " 出现未登记的 Picker，请补充对应 API 契约扫描");

@@ -3,6 +3,15 @@ import Foundation
 /// Shared builders: safety metadata is explicit, never supplied by optimistic
 /// decode defaults. JSON fixtures are derived from real Codable DTOs.
 enum PlanTestFixtures {
+    static func unified(stateRevision: Int = 2, goalsRevision: Int = 12, runState: String = "active") -> TrainingPlanStateResponseV2 {
+        .init(contractVersion: 2, scope: .init(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch"),
+            businessDate: "2026-10-09", stateRevision: stateRevision, migratedAt: "2026-10-09T00:00:00Z",
+            migration: .init(version: 1, source: "legacy_goals", sourceStatus: "active", sourceDigest: String(repeating: "a", count: 64)),
+            mode: "coach", modeReason: "no_race_goal", daysToRace: nil, runState: runState, admission: "ready", raceGoal: nil,
+            plan: .init(goalsRevision: goalsRevision, currentGoalsRevision: goalsRevision, current: true, days: [], lockedToday: false),
+            execution: .init(permitted: false, reasonCodes: ["projection_only", "facts_freshness_not_evaluated", "device_coordination_not_evaluated"]))
+    }
+
     static func day(_ date: String, executable: Bool = true, meters: Double = 4000) -> MobileWorkoutPlanDay {
         .init(localDate: date, kind: "easy", title: "轻松跑", reason: "",
             distanceKm: meters / 1000, durationMinutes: nil, paceSecondsPerKmLower: nil,

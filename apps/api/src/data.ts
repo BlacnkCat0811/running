@@ -656,7 +656,9 @@ export class RaiReadStore {
         const measuredGoals = store.read({ prescription });
         const history = store.planHistory(200);
         const controlDigest = digest({ goals: measuredGoals, history });
-        const computed = this.mobileTodayWithExecutablePlan(measuredGoals, history);
+        const owner = store.currentTrainingPlan();
+        const trainingStopped = owner !== null && (owner.state.runState !== "active" || owner.state.sourceStatus === "ended");
+        const computed = this.mobileTodayWithExecutablePlan(measuredGoals, history, trainingStopped);
         const { today, effective } = computed;
         const inputs = this.mobileWeeklyPlanInputs(measuredGoals, undefined, computed);
         const ruleVersion = "rai-effective-plan-v1";
@@ -757,9 +759,10 @@ export class RaiReadStore {
 
   mobileToday(
     goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
-    planHistory?: PlanHistoryRevision[]
+    planHistory?: PlanHistoryRevision[],
+    trainingStopped = false
   ): MobileTodayResponse {
-    return this.mobileTodayWithExecutablePlan(goals, planHistory).today;
+    return this.mobileTodayWithExecutablePlan(goals, planHistory, trainingStopped).today;
   }
 
   /**
@@ -772,10 +775,11 @@ export class RaiReadStore {
    */
   mobileTodayWithViews(
     goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
-    planHistory?: PlanHistoryRevision[]
+    planHistory?: PlanHistoryRevision[],
+    trainingStopped = false
   ): MobileTodayResponse {
     return this.factAnalysisBlocks(
-      () => this.mobileToday(goals, planHistory),
+      () => this.mobileToday(goals, planHistory, trainingStopped),
       (base, view) => ({ ...base, currentFacts: view.facts, publishedAnalysis: view.analysis })
     );
   }
@@ -797,7 +801,8 @@ export class RaiReadStore {
   private mobileTodayWithExecutablePlan(
     goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach"> &
       Partial<Pick<MobileGoalsResponse, "weekPlanAudit">>,
-    planHistory?: PlanHistoryRevision[]
+    planHistory?: PlanHistoryRevision[],
+    trainingStopped = false
   ): { today: MobileTodayResponse; effective: MobileWorkoutPlanResponse; preparation: ReturnType<typeof assembleMobileCoach>["preparation"] } {
     const today = mobileLocalDate();
     // A paused/ended programme never falls back to an invented daily run after
@@ -1006,6 +1011,7 @@ export class RaiReadStore {
     const todayCeilingKm = preservedToday ? Math.max(capacityCeilingKm, weekDistanceKm +
       (plannedDayNumbers(preservedToday.kind, preservedToday.structure, preservedToday.distanceKm, zonePrescription(zones)).distanceKm ?? 0)) : capacityCeilingKm;
     const { preparation, ...coach } = assembleMobileCoach({
+      trainingStopped,
       database: this.database,
       dashboard,
       latestMetric,
@@ -1092,7 +1098,9 @@ export class RaiReadStore {
       ...coach,
       recommendation: { ...coach.recommendation, planRevision: (goals as { revision?: number } | undefined)?.revision ?? 0 }
     };
-    const effective = this.executableMobilePlan(result, capacityBaselineKm, recentWeeklyKmValue, goals);
+    const planned = this.executableMobilePlan(result, capacityBaselineKm, recentWeeklyKmValue, goals);
+    const effective = trainingStopped
+      ? { ...planned, days: planned.days.map(day => ({ ...day, executable: false })) } : planned;
     result.weekPlan = result.weekPlan.map(day => {
       if (day.localDate <= today) return day;
       const prescribed = effective.days.find(item => item.localDate === day.localDate);

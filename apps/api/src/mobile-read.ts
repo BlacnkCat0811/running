@@ -154,6 +154,8 @@ function planSurfaces(args: {
 }
 
 export function assembleMobileCoach(args: {
+  /** Unified owner revokes new execution independently of the legacy programme. */
+  trainingStopped?: boolean;
   database: DatabaseSync;
   dashboard: DashboardResponse;
   latestMetric: DailyTrainingMetric | null;
@@ -337,9 +339,9 @@ export function assembleMobileCoach(args: {
     })),
     todayWorkoutCount: weekDaily.find((day) => day.localDate === today)?.workoutCount ?? 0,
     storedWeekPlan: args.goals.weekPlan ?? [],
-    lockedSession: args.goals.lockedSession ?? null,
+    lockedSession: args.trainingStopped ? null : args.goals.lockedSession ?? null,
     storedPlanSource: args.goals.weekPlanAudit?.generatedBy ?? null,
-    trainingStopped: args.goals.runCoach != null && !runCoachIsTraining(args.goals.runCoach, today)
+    trainingStopped: args.trainingStopped || (args.goals.runCoach != null && !runCoachIsTraining(args.goals.runCoach, today))
   };
 
   const calibration: MobileTodayResponse["calibration"] = {

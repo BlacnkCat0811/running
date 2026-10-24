@@ -36,6 +36,7 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
   apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanWatchSyncCoordinator.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift apps/ios/RAI/TrainingPlanStore.swift \
+  apps/ios/RAI/TrainingPlanPublisher.swift \
   apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/PlanMutationDisposition.swift apps/ios/RAI/SyncPresentationPolicy.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
@@ -48,6 +49,11 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/UserDataNoticePolicy.swift \
   apps/ios/tests/TrainingPlanV2Regression.swift -o "$tmp/training-plan-v2-tests"
 "$tmp/training-plan-v2-tests"
+xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
+  apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/UserDataNoticePolicy.swift \
+  apps/ios/RAI/TrainingPlanPublisher.swift apps/ios/tests/TrainingPlanPublisherRegression.swift \
+  -o "$tmp/training-plan-publisher-tests"
+"$tmp/training-plan-publisher-tests"
 bash apps/ios/tests/run-plan-watch-tests.sh
 bash apps/ios/tests/run-training-plan-store-tests.sh
 bash apps/ios/tests/run-user-experience-tests.sh

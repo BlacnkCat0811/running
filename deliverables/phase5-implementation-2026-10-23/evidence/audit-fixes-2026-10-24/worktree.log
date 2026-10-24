@@ -1,0 +1,48 @@
+ M apps/api/src/coach-loop-runtime.ts
+ M apps/api/src/data.ts
+ M apps/api/src/mobile-goals.ts
+ M apps/api/src/mobile-read.ts
+ M apps/api/src/server.ts
+ M apps/api/src/training-plan-commands.ts
+ M apps/api/src/training-plan-routes.ts
+ M apps/api/src/training-plan-store.ts
+ M apps/api/test/handshake-registry.test.ts
+ M apps/api/test/schemas.test.ts
+ M apps/api/test/training-plan-commands.test.ts
+ M apps/api/test/training-plan-coordinator.test.ts
+ M apps/ios/RAI/APIClient.swift
+ M apps/ios/RAI/APIModels.swift
+ M apps/ios/RAI/CacheStore.swift
+ M apps/ios/RAI/NativeAppModel.swift
+ M apps/ios/RAI/PlanStatePolicy.swift
+ M apps/ios/RAI/Skins/Technology/TechCoachLoopSection.swift
+ M apps/ios/RAI/Skins/Technology/TechPlanView.swift
+ M apps/ios/RAI/Skins/Technology/TechViews.swift
+ M apps/ios/RAI/TrainingPlanStore.swift
+ M apps/ios/tests/ModelRegression.swift
+ M apps/ios/tests/PlanTestFixtures.swift
+ M apps/ios/tests/StoreRegression.swift
+ M apps/ios/tests/TrainingPlanV2Regression.swift
+ M apps/ios/tests/VisualAcceptance.swift
+ M apps/ios/tests/check-export-determinism-live.py
+ M apps/ios/tests/run-model-tests.sh
+ M apps/ios/tests/run-plan-state-mutations.sh
+ M apps/ios/tests/run-visual-tests.sh
+ M apps/ios/tests/visual-state-proxy.py
+ M deliverables/README.md
+ M docs/DECISIONS.md
+ M docs/IOS_NATIVE_API_CONTRACT.md
+ M docs/IOS_NATIVE_RUNBOOK.md
+ M docs/PROJECT_REVIEW.md
+ M packages/api-contracts/src/handshake-registry.ts
+ M packages/api-contracts/src/index.ts
+ M scripts/coach-runtime-fixtures.mts
+?? apps/api/src/training-plan-generation.ts
+?? apps/api/src/training-plan-ownership.ts
+?? apps/api/test/phase5-training-plan.test.ts
+?? apps/api/test/training-plan-ownership.test.ts
+?? apps/ios/RAI/TrainingPlanPublisher.swift
+?? apps/ios/tests/TrainingPlanPublisherRegression.swift
+?? deliverables/phase5-implementation-2026-10-23/
+?? deliverables/phase5-review-2026-10-23/
+?? scripts/prepare-phase5-fixture.mts

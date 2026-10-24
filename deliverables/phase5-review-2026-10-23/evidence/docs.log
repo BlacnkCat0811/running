@@ -1,0 +1,6 @@
+
+> rai-running-intelligence@0.1.0 check:docs
+> node scripts/check-doc-links.mjs
+
+Documentation: 81 files, 672 local links, 2 anchors, 1 problems
+deliverables/phase5-review-2026-10-23/PHASE5_REVIEW_AND_IMPLEMENTATION_PLAN.md: not reachable from README.md

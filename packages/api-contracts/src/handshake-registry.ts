@@ -83,11 +83,11 @@ export const HANDSHAKE_KEY_REGISTRY = [
     whenAbsent: "客户端不得请求 v2 统一读；按未支持/只读处理"
   },
   {
-    key: "trainingPlanCommandContractVersion", kind: "capability",
+    key: "trainingPlanCommandContractVersion", kind: "capability", version: 2,
     semantics: "统一训练写命令合同（`/training-plan/commands*`）",
-    advertisedWhen: "PR-03 所有权闭环与 PR-04 Publisher 验收后（当前故意省略）",
-    consumer: "deferred (PR-04)",
-    whenAbsent: "只读；不得回退到已退役的旧写面"
+    advertisedWhen: "仅隔离验收候选（RAI_TRAINING_PLAN_COMMAND_MODE=validation）且客户端发送 X-RAI-Client-Training-Commands: 2；生产能力在阶段 5 G6/G7 完成前保持关闭",
+    consumer: "iOS TrainingPlanPublisher（阶段 5）",
+    whenAbsent: "只读；命令路由也拒绝新的写；不得回退到已退役的旧写面"
   },
   {
     key: "coachLoopContractVersion", kind: "capability", version: 1,

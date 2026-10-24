@@ -17,6 +17,7 @@ import {
   type TrainingPlanCommandService
 } from "./training-plan-commands.js";
 import { isValidLocalDate } from "./local-date.js";
+import { PlanOperationError } from "./plan-publication.js";
 import {
   admissionStateFor,
   raceGoalSupport,
@@ -213,8 +214,8 @@ export function createTrainingPlanStateRoute(deps: TrainingPlanStateRouteDeps) {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function commandRequestError(message: string): { statusCode: number; code: string; message: string } {
-  return { statusCode: 422, code: "training_command_invalid", message };
+function commandRequestError(message: string): PlanOperationError {
+  return new PlanOperationError("training_command_invalid", message, 422);
 }
 
 /**
@@ -224,7 +225,9 @@ function commandRequestError(message: string): { statusCode: number; code: strin
 function parseCommandBody<T extends { operationScope?: unknown; action?: unknown }>(body: unknown): T {
   if (!isRecord(body)) throw commandRequestError("命令体必须是 JSON 对象。");
   if (!isRecord(body.operationScope)) throw commandRequestError("operationScope 必须声明服务、运动员与数据集。");
-  if (typeof body.action !== "string") throw commandRequestError("action 必须是 set_race_goal/clear_race_goal/pause/resume。");
+  if (!["set_race_goal", "clear_race_goal", "pause", "resume"].includes(body.action as string)) {
+    throw commandRequestError("action 必须是 set_race_goal/clear_race_goal/pause/resume。");
+  }
   return body as T;
 }
 
@@ -233,7 +236,9 @@ export interface TrainingPlanPlanDeps {
   fingerprint: () => string;
 }
 
-export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandService, planDeps?: TrainingPlanPlanDeps) {
+export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandService, planDeps?: TrainingPlanPlanDeps,
+  admit: (request: FastifyRequest) => void = () => {},
+  withGenerationLease: <T>(fn: () => Promise<T>) => Promise<T> = fn => fn()) {
   /** One place that both logs internal detail and keeps the wire answer fixed. */
   const errorContext = (request: FastifyRequest) => ({
     requestId: request.id,
@@ -245,6 +250,7 @@ export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandSe
     preview: async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
       try {
         const body = parseCommandBody<TrainingPlanCommandPreviewRequest>(request.body);
+        admit(request);
         return service.preview(body);
       } catch (error) {
         const mapped = error instanceof Error && error.message.includes("必须") && !(error as { statusCode?: number }).statusCode
@@ -255,14 +261,22 @@ export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandSe
     submit: async (request: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
       try {
         const body = parseCommandBody<TrainingPlanCommandRequest>(request.body);
+        const replayed = service.replayCommand(body);
+        if (replayed !== null) return replayed;
+        admit(request);
         // PR4-4: configuration and plan publish in ONE operation. The candidate is
         // generated outside the control transaction (plan §8.1) for the exact next
         // configuration; `submit` re-derives it and verifies the configuration
         // digest before the atomic write. A pause publishes no plan.
         if (planDeps !== undefined && body.action !== "pause") {
           const next = service.planFor(body);
-          const prepared = await planDeps.prepare(next.afterState);
-          return service.submit(body, { prepared, fingerprint: planDeps.fingerprint });
+          // Generation reads the main DB; hold the same lease as legacy main-DB
+          // writers so a zones/profile write cannot commit between generation and
+          // the fingerprint re-check unnoticed.
+          return await withGenerationLease(async () => {
+            const prepared = await planDeps.prepare(next.afterState);
+            return service.submit(body, { prepared, fingerprint: planDeps.fingerprint });
+          });
         }
         return service.submit(body);
       } catch (error) {

@@ -1,0 +1,190 @@
+TAP version 13
+# (node:16549) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unsupported-race protection rejects both new and retained long runs in the last two days
+ok 1 - unsupported-race protection rejects both new and retained long runs in the last two days
+  ---
+  duration_ms: 672.369053
+  type: 'test'
+  ...
+# Subtest: today's locked rest is authoritative with or without a conflicting stored day
+ok 2 - today's locked rest is authoritative with or without a conflicting stored day
+  ---
+  duration_ms: 1165.927514
+  type: 'test'
+  ...
+# Subtest: a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+ok 3 - a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+  ---
+  duration_ms: 1006.458941
+  type: 'test'
+  ...
+# Subtest: locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+ok 4 - locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+  ---
+  duration_ms: 243.340933
+  type: 'test'
+  ...
+# Subtest: frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+ok 5 - frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+  ---
+  duration_ms: 156.446163
+  type: 'test'
+  ...
+# Subtest: HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+ok 6 - HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+  ---
+  duration_ms: 649.401787
+  type: 'test'
+  ...
+# Subtest: an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+ok 7 - an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+  ---
+  duration_ms: 351.203376
+  type: 'test'
+  ...
+# Subtest: G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+ok 8 - G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+  ---
+  duration_ms: 164.367124
+  type: 'test'
+  ...
+# (node:16588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+ok 9 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 6447.356443
+  type: 'test'
+  ...
+# (node:16638) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 10 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 45.784171
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 11 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 24.54183
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 12 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 31.716823
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 13 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 26.352647
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 14 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 23.691408
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 15 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 55.595575
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 16 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 20.093036
+  type: 'test'
+  ...
+# Subtest: generation latch: facts changed during generation cannot be stamped with the new version
+ok 17 - generation latch: facts changed during generation cannot be stamped with the new version
+  ---
+  duration_ms: 27.16422
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 18 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 199.712633
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 19 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 42.274724
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals: all business rows roll back and lane can retry
+ok 20 - publication abort at mobile_goals: all business rows roll back and lane can retry
+  ---
+  duration_ms: 30.069369
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals_history: all business rows roll back and lane can retry
+ok 21 - publication abort at mobile_goals_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 33.082508
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state: all business rows roll back and lane can retry
+ok 22 - publication abort at mobile_training_state: all business rows roll back and lane can retry
+  ---
+  duration_ms: 33.821005
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+ok 23 - publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 29.339743
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+ok 24 - publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+  ---
+  duration_ms: 32.176972
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 25 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 30.683116
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 26 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 23.296044
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 27 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 43.561389
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 28 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 33.298952
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 29 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 24.783044
+  type: 'test'
+  ...
+1..29
+# tests 29
+# suites 0
+# pass 29
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 14765.333696

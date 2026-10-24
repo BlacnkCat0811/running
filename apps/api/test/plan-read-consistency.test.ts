@@ -301,7 +301,11 @@ test("trainingPlanState reads one control pair before and one after the build", 
     planHistory: (limit?: number) => {
       calls.push("history");
       return store.planHistory(limit);
-    }
+    },
+    // The read model now also asks the owner whether execution is paused/ended.
+    // Keep this proxy complete; the real store is not bound to an owner in this
+    // read-amplification fixture, so it correctly returns null.
+    currentTrainingPlan: () => store.currentTrainingPlan()
   };
   try {
     const state = read.trainingPlanState(counted as unknown as MobileGoalsStore,

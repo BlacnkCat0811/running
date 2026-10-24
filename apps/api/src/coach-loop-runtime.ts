@@ -24,6 +24,9 @@ import { recordCoachLoopDeviceReceipt } from "./coach-loop-device-sync.js";
 import { normalizeSessionStructure } from "./session-structure.js";
 import { plannedDayNumbers } from "./mobile-coach.js";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
+import { raceGoalFromCoachSettings, unifiedCoachSettings } from "./training-plan-ownership.js";
+import type { TrainingPlanState } from "./training-plan-store.js";
+import { assertTrainingFactsReady } from "./training-plan-generation.js";
 
 /** Explicit version negotiation + per-user acceptance. No environment activation. */
 export const COACH_RUNTIME_MANIFEST: CoachPolicyManifest = { ...COACH_POLICY_MANIFEST,
@@ -128,7 +131,33 @@ export class CoachLoopRuntime {
       : (options.memo ?? new CoachLoopMemo<CoachLoopRuntimeResponse>(COACH_LOOP_MEMO_TTL_MS, this.now));
   }
   private scope() { return JSON.stringify(this.identity()); }
-  private saved() { return this.store.coachLoopState<CoachRuntimeReceipt>(this.scope()); }
+  private saved() { return this.store.currentCoachLoopState<CoachRuntimeReceipt>(this.scope()); }
+
+  /** Generate for a proposed unified configuration without publishing or changing receipts. */
+  prepareUnified(state: TrainingPlanState) {
+    assertTrainingFactsReady(this.publicationReady);
+    const saved = this.saved();
+    if (saved === null) throw new PlanOperationError("training_plan_owner_invalid", "训练配置证据缺失。", 503);
+    if (saved.policyHash !== COACH_RUNTIME_POLICY_HASH) {
+      throw new PlanOperationError("coach_policy_changed", "规则版本变化，需要通过update明确确认；暂停和结束始终可用。");
+    }
+    const settings = unifiedCoachSettings(state, saved.settings, this.localDate());
+    const goals = this.store.read();
+    const facts = this.readFacts(this.effectiveGoals(goals, settings), this.store.planHistory(200));
+    const evaluated = this.evaluate(goals, facts, saved, settings, true);
+    assertTrainingFactsReady(this.publicationReady);
+    const coachReceipt: Omit<CoachRuntimeReceipt, "goalsRevision"> = {
+      settings, policyHash: COACH_RUNTIME_POLICY_HASH, policyManifest: COACH_RUNTIME_MANIFEST,
+      factsHash: facts.factsHash, inputDigest: evaluated.inputDigest,
+      effectiveDigest: digest(evaluated.response.days.map(row => [row.day.localDate, key(row.day), row.executable, row.decisionRef])),
+      anchor: evaluated.response.volumePolicy.anchor, reservations: evaluated.reservations,
+      volumePolicy: evaluated.response.volumePolicy, templateIds: evaluated.templateIds,
+      evaluatedAt: facts.asOf, result: "patched", changes: []
+    };
+    return { days: evaluated.planned,
+      audit: { generatedBy: "heuristic" as const, model: null, promptVersion: null, generatedAt: facts.asOf },
+      prescription: facts.inputs.prescription, warnings: [] as string[], coachReceipt };
+  }
   private effectiveGoals(goals: MobileGoalsResponse, settings: CoachLoopSettings | null): MobileGoalsResponse {
     return settings ? { ...goals, runCoach: null,
       raceTarget: settings.race ? runCoachRaceTarget(settings.race) : null } : goals;
@@ -236,7 +265,7 @@ export class CoachLoopRuntime {
   }
 
   command(command: CoachLoopCommand): CoachLoopRuntimeResponse {
-    if (!this.publicationReady()) throw new PlanOperationError("coach_sync_pending", "训练事实正在更新，请完成后重新读取并刷新。");
+    assertTrainingFactsReady(this.publicationReady);
     if (command.contractVersion !== 1 || !command.operationId || !command.expectedFactsHash)
       throw new PlanOperationError("coach_contract_required", "需要教练合同版本、事实令牌和操作键。", 422);
     const publication = new PlanPublicationService(this.store, () => this.scope(), this.identity);
@@ -259,6 +288,11 @@ export class CoachLoopRuntime {
         settings = { ...command.settings, status: "active" };
       } else {
         if (!previous || !settings) throw new PlanOperationError("coach_not_enabled", "请先启用持续训练或比赛模式。");
+        // `end` is terminal for the legacy lifecycle. Allowing pause here used to
+        // rewrite an ended receipt as paused, which let a later v2 resume revive
+        // the ended programme. A new enable is the only way to start again.
+        if (command.action === "pause" && settings.status === "ended")
+          throw new PlanOperationError("coach_cannot_pause", "已结束的训练节目不能暂停；请创建新的配置。", 409);
         if (previous.policyHash !== COACH_RUNTIME_POLICY_HASH && !["pause", "end"].includes(command.action) &&
           !(command.action === "update" && command.acceptedPolicyHash === COACH_RUNTIME_POLICY_HASH))
           throw new PlanOperationError("coach_policy_changed", "规则版本变化，需要通过update明确确认；暂停和结束始终可用。");
@@ -280,6 +314,20 @@ export class CoachLoopRuntime {
         }
       }
       if (!settings) throw new Error("Coach settings missing");
+      const owner = this.store.currentTrainingPlan();
+      // Resolve the configuration that reconciliation will commit before facts,
+      // generation and receipt digests are evaluated. In particular, a first
+      // daily enable preserves an existing unified race and therefore runs in
+      // race mode immediately, rather than changing mode on the next read.
+      // A new enable after end may explicitly replace that race with daily mode.
+      const raceGoal = owner === null ? undefined
+        : settings.race !== null ? raceGoalFromCoachSettings(settings, owner.state.raceGoal)
+          : command.action === "enable" && previous?.settings.status === "ended" ? null : owner.state.raceGoal;
+      if (owner !== null) {
+        settings = unifiedCoachSettings({ ...owner.state, raceGoal: raceGoal ?? null,
+          sourceStatus: settings.status, runState: settings.status === "active" ? "active" : "paused"
+        }, settings, before.date);
+      }
       const facts = this.readFacts(this.effectiveGoals(goals, settings), this.store.planHistory(200));
       if (facts.factsHash !== before.factsHash) throw new PlanOperationError("coach_facts_changed", "发布前训练事实发生变化，原课表保持不变。");
       const evaluation = this.evaluate(goals, facts, previous, settings, true);
@@ -313,10 +361,16 @@ export class CoachLoopRuntime {
         digest(previous?.reservations) !== digest(evaluation.reservations) ||
         previous?.effectiveDigest !== effectiveDigest;
       const planAudit = { generatedBy: "heuristic" as const, model: null, promptVersion: null, generatedAt: facts.asOf };
+      const ownerMirror = settings.race ? runCoachRaceTarget(settings.race) : null;
       const updated = changed ? this.store.write({
         expectedRevision: goals.revision,
         ...(publishesPlan ? { weekPlan: planned, weekPlanAudit: planAudit } : {}),
-        ...(declaredRace === null ? {} : { raceTarget: declaredRace }),
+        // A daily programme never writes the public race target: it does not own
+        // that goal. Preserve it on enable/update/pause/resume/end; only an
+        // explicitly declared race (or the legacy non-owner path) may mirror one.
+        ...(owner !== null
+          ? ownerMirror === null ? {} : { raceTarget: ownerMirror }
+          : declaredRace === null ? {} : { raceTarget: declaredRace }),
         ...(settings.status !== "active" ? { lockedSession: null } : {})
       }, { prescription: facts.inputs.prescription, runCoach: null,
         ...(publishesPlan ? { confirmCoachPlan: true } : {}), evaluatedAt: facts.asOf }) : goals;
@@ -336,8 +390,10 @@ export class CoachLoopRuntime {
             after: key(day), reason: day.reason ?? "coach_rule_changed" }];
         }) : []
       };
-      if (changed || previous?.inputDigest !== receipt.inputDigest)
-        this.store.appendCoachLoopReceipt(this.scope(), command.operationId, receipt);
+      if (changed || previous?.inputDigest !== receipt.inputDigest) {
+        this.store.appendCoachLoopReceipt(this.scope(), command.operationId, receipt, raceGoal,
+          { replaceEnded: command.action === "enable" });
+      }
       return this.evaluate(updated, facts, receipt, settings).response;
     });
   }

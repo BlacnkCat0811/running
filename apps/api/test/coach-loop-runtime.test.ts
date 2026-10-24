@@ -151,6 +151,19 @@ test("F04: a daily-adaptive programme never writes the public race goal, so enab
   } finally { f.close(); }
 });
 
+test("F07: an ended programme cannot be paused back into a resumable state", () => {
+  const f = fixture();
+  try {
+    f.runtime.command(f.command("enable", { settings, acceptedPolicyHash: COACH_RUNTIME_POLICY_HASH }));
+    const ended = f.runtime.command(f.command("end"));
+    assert.equal(ended.settings?.status, "ended");
+    assert.throws(() => f.runtime.command(f.command("pause")),
+      (error: unknown) => (error as { code?: string }).code === "coach_cannot_pause");
+    const receipt = f.store.coachLoopState<CoachRuntimeReceipt>(JSON.stringify(scope))!;
+    assert.equal(receipt.settings.status, "ended", "pause must not rewrite the ended receipt");
+  } finally { f.close(); }
+});
+
 test("F04: a race-mode enable still publishes its declared race and end keeps that published goal", () => {
   const f = fixture();
   try {

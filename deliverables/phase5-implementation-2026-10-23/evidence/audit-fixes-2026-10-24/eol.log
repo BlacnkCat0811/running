@@ -1,0 +1,9 @@
+i/lf    w/lf    attr/                 	apps/api/src/coach-loop-runtime.ts
+i/lf    w/lf    attr/                 	apps/api/src/data.ts
+i/lf    w/lf    attr/                 	apps/api/src/mobile-read.ts
+i/lf    w/lf    attr/                 	apps/api/src/server.ts
+i/lf    w/lf    attr/                 	apps/api/src/training-plan-commands.ts
+i/lf    w/lf    attr/                 	apps/api/test/training-plan-commands.test.ts
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/NativeAppModel.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechPlanView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/ModelRegression.swift

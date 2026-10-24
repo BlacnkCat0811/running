@@ -6,6 +6,7 @@ Port 8794: cold loading screenshot. POST /__mode accepts {"mode": "..."}.
 No endpoint or scoring logic in the production app is replaced.
 """
 import json
+import os
 import threading
 import time
 import urllib.request
@@ -60,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, {'items': [], 'total': 0, 'limit': 30, 'offset': 0})
             return
         try:
-            with urllib.request.urlopen(BACKEND + self.path, timeout=60) as response:
+            with urllib.request.urlopen(urllib.request.Request(BACKEND + self.path, headers={'Authorization':'Bearer '+os.environ['RAI_VISUAL_API_TOKEN']}), timeout=60) as response:
                 payload = json.load(response)
             if mode == 'lock-preview' and path == '/v1/mobile/today':
                 # Only enable the presentation of a normally stale recommendation.

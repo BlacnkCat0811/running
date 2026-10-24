@@ -1,0 +1,13 @@
+{
+  "name": "docs",
+  "command": [
+    "npm",
+    "run",
+    "check:docs"
+  ],
+  "startedAt": "2026-10-23T17:04:11.892Z",
+  "completedAt": "2026-10-23T17:04:12.578Z",
+  "exitCode": 0,
+  "signal": null,
+  "concurrency": null
+}

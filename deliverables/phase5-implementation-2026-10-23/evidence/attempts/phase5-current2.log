@@ -1,0 +1,35 @@
+TAP version 13
+# (node:15983) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+not ok 1 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 4973.367525
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/phase5-training-plan.test.ts:1:2014'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    400 !== 409
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 409
+  actual: 400
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/phase5-training-plan.test.ts:91:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5387.05299

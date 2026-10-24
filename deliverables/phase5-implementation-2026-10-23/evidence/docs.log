@@ -1,0 +1,8 @@
+{"command":["npm","run","check:docs"],"startedAt":"2026-10-23T17:04:11.892Z","concurrency":null,"node":"v22.23.2","platform":"darwin","arch":"x64"}
+
+> rai-running-intelligence@0.1.0 check:docs
+> node scripts/check-doc-links.mjs
+
+Documentation: 86 files, 682 local links, 2 anchors, 0 problems
+
+{"name":"docs","command":["npm","run","check:docs"],"startedAt":"2026-10-23T17:04:11.892Z","completedAt":"2026-10-23T17:04:12.578Z","exitCode":0,"signal":null,"concurrency":null}

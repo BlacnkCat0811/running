@@ -628,3 +628,10 @@ struct PlanDiagnosticEvent: Codable {
     let errorCode: String?
     var durationMilliseconds: Double? = nil
 }
+
+@MainActor protocol TrainingPlanCommandPersistence: AnyObject {
+    func pendingPublication(scope: String) -> CacheReadResult<PendingPlanPublication?>
+    func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool
+    func trainingPlanCommandWatermark(scope: String) -> CacheReadResult<TrainingPlanCommandWatermark>
+    func saveTrainingPlanCommandWatermark(_ value: TrainingPlanCommandWatermark, scope: String) -> Bool
+}

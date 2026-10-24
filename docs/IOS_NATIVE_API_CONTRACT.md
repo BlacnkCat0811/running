@@ -1,6 +1,6 @@
 # RAI 原生 iOS API 契约
 
-状态：**现行（2026-10-21 增补 PR-02 能力位与客户端止血说明）**。本文只写「iOS ↔ API 的 wire 事实」；设备侧排课/回执不变量见
+状态：**现行（2026-10-23 阶段 5 增补 v2 命令 Publisher 与候选能力说明）**。本文只写「iOS ↔ API 的 wire 事实」；设备侧排课/回执不变量见
 [IOS_NATIVE_PLAN_SCHEDULING](IOS_NATIVE_PLAN_SCHEDULING.md)，同步协议见 [IOS_NATIVE_SYNC_PROTOCOL](IOS_NATIVE_SYNC_PROTOCOL.md)，
 运行与真机步骤见 [IOS_NATIVE_RUNBOOK](IOS_NATIVE_RUNBOOK.md)。未决缺口见 [PROJECT_REVIEW](PROJECT_REVIEW.md) 的 AR-1。
 
@@ -17,10 +17,11 @@ Web SPA 退役后不存在匿名业务读。
 （缓存见 `CacheStore.scope`，同步任务见 `SyncTaskStore`）。服务端恢复/替换数据集时 `datasetEpoch` 改变，
 旧缓存与游标不得继续当作当前结果。
 
-数据域被新版教练合同托管（coach-loop managed）时，`/v1/mobile/today`、`/v1/mobile/training-plan-state`、
-`/v1/mobile/workout-plan`（及其子路径，含 `/workout-plan/synced`）与 `/v1/mobile/lock` 返回
-`409 coach_loop_contract_required`；退役面不参与这条（仍返回 410），教练闭环路由本身不受影响。
-老服务端/未托管数据域维持原行为。
+数据域被新版教练合同托管（coach-loop managed）时，`/v1/mobile/today`、`/v1/mobile/workout-plan`
+（及其子路径，含 `/workout-plan/synced`）与 `/v1/mobile/lock`（以及缺省/`1` 的
+`/v1/mobile/training-plan-state`）返回 `409 coach_loop_contract_required`；已迁移且
+`trainingPlanOwnerReady` 的 scope 可用 `X-RAI-Training-Contract: 2` 读取统一投影（阶段 5/D20）。
+退役面不参与这条（仍返回 410），教练闭环路由本身不受影响。老服务端/未托管数据域维持原行为。
 
 ## 2. 握手（`GET /v1/handshake`）
 
@@ -55,8 +56,8 @@ Web SPA 退役后不存在匿名业务读。
 | `healthKitRecordSyncVersion` | `2` | 类型作用域 UUID 删除的 v2 记录同步；不改变 `syncProtocolVersion` |
 | `planReceiptMetadata` | `true` | 旧回执扩展字段能力（legacy 形状） |
 | `planSnapshotContractVersion` | `1` | **条件返回**：coach-loop 托管的数据域省略（避免宣告同一份握手文档无法履约的读路由） |
-| `trainingPlanContractVersion` | `2` | **统一训练读能力**（`X-RAI-Training-Contract: 2`）；与 `planSnapshotContractVersion` 同样在 coach-loop 托管的数据域省略 |
-| `trainingPlanCommandContractVersion` | **当前省略** | 统一训练写命令能力。仅在 PR-03 所有权闭环与 PR-04 Publisher 验收后宣告；缺位 ⇒ 客户端按只读处理，不得用 `coachLoopContractVersion` 猜测 |
+| `trainingPlanContractVersion` | `2` | **统一训练读能力**（`X-RAI-Training-Contract: 2`）；非托管数据域返回，coach-loop 托管但 `trainingPlanOwnerReady`（已迁移、投影/回执一致）时也返回；损坏/缺口继续省略 |
+| `trainingPlanCommandContractVersion` | **生产省略；隔离候选 `2`** | 统一训练写命令能力。仅在 `RAI_TRAINING_PLAN_COMMAND_MODE=validation` 且客户端发送 `X-RAI-Client-Training-Commands: 2` 时宣告；命令路由本身也要求同一请求头，缺位 ⇒ 只读，不得用 `coachLoopContractVersion` 猜测。生产启用是独立发布动作（D20/D5-E） |
 | `coachLoopContractVersion` | `1` | 新教练闭环合同 |
 | `planPublicationContractVersion` | `1` | 控制库持久发布操作能力；不支持控制库时省略 |
 | `planReceiptContractVersion` | `2` | 回执 v2（独立版本，不复用 `planReceiptMetadata` 布尔） |
@@ -68,8 +69,11 @@ Web SPA 退役后不存在匿名业务读。
 🔴 **读能力不等于写能力，也不等于该 scope 已迁移。** `trainingPlanContractVersion` 只说明
 `GET /v1/mobile/training-plan-state` 接受 `X-RAI-Training-Contract: 2`（§3.1）；未迁移的 scope
 仍返回 `409 training_plan_not_migrated`，客户端必须分别处理「能力存在」与「scope 未迁移」。
-`trainingPlanCommandContractVersion` 是独立的写侧注册项，当前服务端**故意省略**；缺位时客户端
-不得回退到已退役的旧写面，也不得把 `coachLoopContractVersion == 1` 当成统一命令可用。
+`trainingPlanCommandContractVersion` 是独立的写侧注册项：**生产当前省略**，只有隔离验收候选
+才会在收到 `X-RAI-Client-Training-Commands: 2` 后宣告；缺位时客户端不得回退到已退役的旧写面，
+也不得把 `coachLoopContractVersion == 1` 当成统一命令可用。iOS 的
+`legacyPlanWritesSupported` 与 `trainingPlanV2CommandsSupported` 是两个独立判定：
+精确匹配版本才允许 v2 写，v2 能力永远不放行旧 URL。
 
 兼容规则：老服务端省略某能力位 ⇒ 客户端按「不支持」保守回落，不得假设服务端具备该能力；
 能力位只用于选实现路径，不改变数据集身份。
@@ -141,18 +145,29 @@ v2 载荷（`TrainingPlanStateResponseV2`）：
 
 ### 3.3 提交：`POST /v1/mobile/training-plan/commands`
 
+所有新的命令请求（preview/submit/refresh）必须同时带
+`X-RAI-Client-Training-Commands: 2`；缺失或未知值返回 `409 training_commands_disabled`，不得执行。
+已提交 `operationId` 的幂等重放先于该检查，仍可在只读模式下查询原结果。
+
 请求体（`TrainingPlanCommandRequest`）：`contractVersion: 2`、`operationId`（UUID，持久幂等键）、
 `operationScope`、`expectedStateRevision`、`candidateId`、`action`、可选 `raceGoal`。
 
-响应：`operationId`、`stateRevision`、`before`/`after`、`changes`、`planRefreshRequired`、
-`plan`（`days`/`audit`/`contextDigest`/`goalsRevision`，未发布计划时为 `null`）、`warnings`。
+响应：`operationId`、`stateRevision`、`goalsRevision`（与 unified stateRevision 及设备执行水位**分开**保存）、
+`before`/`after`、`changes`、`planRefreshRequired`、`plan`（`days`/`audit`/`contextDigest`/`goalsRevision`，
+未发布计划时为 `null`）、`warnings`。
 配置（赛事目标/暂停/恢复）与计划在**同一发布事务**内提交；`pause` 永不发布计划，因此 `planRefreshRequired` 保持 `true`。
+`pause` 在该事务内清空 unified 与 goals 的当前锁课；历史处方、回执与设备撤回账目保留。
+暂停后的 `/today` 与 v1 聚合返回停止训练的休息建议、无当前锁；所有执行窗口均不可执行。
+恢复须重新生成计划，不能恢复已撤销的锁课。
 
 ### 3.4 刷新：`POST /v1/mobile/training-plan/commands/refresh`
 
 请求体（`TrainingPlanRefreshRequest`）：`contractVersion: 2`、`operationId`、`operationScope`、`expectedStateRevision`。
 响应：`operationId`、`stateRevision`、`goalsRevision`、`plan { days, audit, current: true, contextDigest }`、`warnings`。
 计划在控制事务外生成（读主库事实），提交时复核事实指纹与配置摘要；并发生成返回 `409 weekly_plan_generation_busy`。
+所有新生成路径（设置/清除目标、恢复、显式刷新与自动刷新）在读取事实前及提交前检查事实更新任务是否完成，
+导入/重算仍在进行时返回 `409 coach_sync_pending`。已提交结果的幂等重放先于该检查；暂停不生成计划，允许在事实更新期间撤销执行。
+已迁移且 owner-ready 的 managed scope 由启动后及每小时的统一 Coordinator 判断刷新；暂停或所有权损坏时不发布。
 
 ### 3.5 命令错误码
 
@@ -167,6 +182,11 @@ v2 载荷（`TrainingPlanStateResponseV2`）：
 | 409 | `training_cannot_resume` | 已结束的训练节目不能恢复 |
 | 409 | `training_paused` | 暂停中不能刷新课表 |
 | 409 | `training_snapshot_changed` | 生成期间配置/事实变化；原计划未改动 |
+| 409 | `coach_sync_pending` | 训练事实仍在更新；待导入/重算完成后重新读取并生成 |
+| 409 | `training_commands_disabled` | 服务端未处于隔离候选/写能力未宣告；只读 |
+| 409 | `coach_policy_changed` | coach-loop 规则版本变化；须先通过既有 update 合同明确接受当前规则，统一生成不会代替用户接受 |
+| 503 | `training_plan_owner_invalid` | 统一状态与 coach-loop receipt 的所有权指针不一致；fail-closed |
+| 422 | `training_command_invalid` | 缺少 `operationId`、scope 不完整或动作不在四动作内 |
 | 422 | `training_plan_empty` | 未生成有效课表；原计划保持不变 |
 | 503 | `training_plan_state_invalid` / `training_plan_state_unavailable` | 统一状态不可读 |
 
@@ -182,30 +202,39 @@ v2 载荷（`TrainingPlanStateResponseV2`）：
   只有明确的 `notFound` 才允许按原键、原字节、原身份重试；`scopeMismatch`/`expired` 都是终局。
 - 老服务端没有该端点（缺 `planPublicationContractVersion`）时，客户端不得把「查不到」当成 `notFound` 去重放。
 
-### 3.7 客户端现状（AR-1 渐进收口）
+### 3.7 客户端现状（阶段 5 收口）
 
-2026-10-21（PR-02 止血）：iOS 统一训练页已**移除「手动课表」导航入口**，改为只读说明
-「该编辑方式尚未适配当前服务」（`TechPlanView.swift` 的 `manualPlanEntry`）；
-`NativeAppModel` 增加 `planWritesAvailable`，当服务端宣告 `trainingPlanContractVersion`
-而未宣告 `trainingPlanCommandContractVersion` 时：
+2026-10-23 阶段 5（D20）：iOS 已接入 v2 命令编排，且仍保留“未宣告能力即只读”的边界：
 
-- `persistGoals` / `createWeeklyPlanPreview` 在发请求前直接拒绝，不产生 pending 发布账目；
-- `publishPlan` 对 `coach` / `confirm` / `goals` 三条旧写 route 同样拒绝；
-- 老服务（无统一读能力、无 coach-loop）继续使用其既有协议（兼容路径，不属于当前生产请求清单）；
-  受 coach-loop 管理但未宣告统一读能力的错峰组合也按只读处理（legacy 读本身已 409）。
+- `APIClient` 新增 preview/submit/refresh 的 v2 DTO 与请求方法；
+  `TrainingPlanPublisher.swift` 持久化 `operationId`、原始请求 Data、命令类别与独立
+  `stateRevision`/`goalsRevision` 水位，负责 preview→确认→提交→完整重读与 `plan-operations` 恢复。
+  关闭预览（按钮或手势）及草稿改变会作废在途预览；迟到回包不能恢复候选，重新打开须重新预览。
+  确认还须匹配当前编辑草稿；提交或查询中的 journal 不因关闭面板而删除。
+- `NativeAppModel` 把 `legacyPlanWritesSupported`（旧服务器兼容）与
+  `trainingPlanV2CommandsSupported`（精确 `trainingPlanContractVersion=2`、
+  `trainingPlanCommandContractVersion=2`、`planPublicationContractVersion=1`）分开；
+  未完成握手/未知版本不会发出任何 v2 写，v2 能力也不会放行 `/goals`、`/run-coach`、
+  `/workout-plan/preview|confirm|generate`。
+- 统一训练页的配置面板只对四动作 expose：设置/清除比赛目标、暂停、恢复；刷新走独立
+  `POST /training-plan/commands/refresh` 并单独确认。手动逐日课表继续只读说明
+  （`manualPlanEntry`），不把 refresh 冒充手动保存；完整偏好/start-end 仍由既有 coach-loop
+  合同处理并汇入同一 unified 所有者。
+- 服务端仍保留 5 条路径 / 7 个操作并一律 410；旧服务器页面（`TechRunCoachView`）只在使用
+  旧协议的服务上展示。客户端把 410 映射为终局升级状态：`legacy_surface_retired` 与任意未知
+  410 都清掉本地 pending 发布并提示「已退役」，不写回排期 ledger / 回执历史 / revision 水位。
 
-服务端仍保留 5 条路径 / 7 个操作并一律 410；旧服务器页面（`TechRunCoachView`）仍可到达
-旧协议，只在新服务缺 `coachLoopContractVersion` 时展示。当前构建不再有可达的退役写面，
-但**尚未**完成 v2 命令编排（PR-04）：
+剩余缺口不是重新打开旧端点：手动课表/完整偏好需要方案 §4.2 的独立原子合同扩展；
+Simulator、配对设备与生产能力启用按阶段 5 G6/G7 分层验收（见
+[阶段 5 报告](../deliverables/phase5-implementation-2026-10-23/PHASE5_REPORT.md)）。
+本文与实现不一致时以代码与报告中的实测证据为准。
 
-- `apps/ios` 对 `/v1/mobile/training-plan/commands` 的引用仍为 **0**；配置写实际走
-  `POST /v1/mobile/coach-loop`；
-- 客户端已把 410 映射为终局升级状态：`legacy_surface_retired` 与任意未知 410 都清掉本地
-  pending 发布并提示「已退役」，不写回排期 ledger / 回执历史 / revision 水位；
-- 剩余缺口是训练偏好、手动周课表的 v2 命令映射与 Publisher（PR-03/04），不是重新打开旧端点。
-
-这是**已知缺口，不是设计意图**（[DECISIONS](DECISIONS.md) D19 已承认，[PROJECT_REVIEW](PROJECT_REVIEW.md) AR-1 记录）。
-**不得**因为缺口把旧端点重新打开。
+统一状态保留迁移来的 `runCoach` 偏好证据，直到显式配置的 coach-loop 回执接替它；
+兼容 goals 中的旧 programme 清空不删除该证据。同一赛事的日期、距离不变时保留其 ID；
+比赛日期过去后保留历史目标，当前执行按上海业务日切回日常训练。
+首次发布意图落盘失败且尚未发送时，客户端重读后允许重新预览、明确确认；
+服务端已提交后的确认/清账失败仍保留原操作并阻止新增排期。待重读状态不阻止显式撤回旧排期，
+撤回仍须通过本机排期账目的持久化与读回校验。
 
 ## 4. 已退役面（410 矩阵）
 

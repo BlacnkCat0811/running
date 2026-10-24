@@ -1,0 +1,12 @@
+(node:12417) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "evidence": "Fastify inject + production command handler/service + temporary control SQLite; synthetic plan generator; not full server or iOS E2E",
+  "firstStatus": 200,
+  "replayStatus": 409,
+  "replayCode": "training_revision_conflict",
+  "afterFirst": 2,
+  "afterReplay": 2,
+  "generations": 1,
+  "serviceReplayMatches": true
+}

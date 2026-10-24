@@ -288,6 +288,22 @@ final class TrainingPlanStore {
                 minimumGoalsRevision: minimumRevision,
                 now: now()
             )
+            let watermark = repository.cache.trainingPlanCommandWatermark(scope: scope)
+            guard !watermark.isFailure else {
+                throw RaiAPIClientError.decoding("已确认写入水位不可读，请恢复本地存储后重读。")
+            }
+            // A fresh migration has no confirmed write watermark and may legitimately
+            // report plan.current == false (no plan has been generated yet). Accept
+            // that configuration snapshot as current; after a confirmed command,
+            // however, the plan itself must be at or beyond the confirmed goals row.
+            if let mark = watermark.value, mark.stateRevision > 0 || mark.goalsRevision > 0 {
+                guard value.stateRevision >= mark.stateRevision,
+                      value.plan.currentGoalsRevision >= mark.goalsRevision,
+                      value.plan.current,
+                      (value.plan.goalsRevision ?? 0) >= mark.goalsRevision else {
+                    throw RaiAPIClientError.decoding("统一状态或已发布计划低于已确认写入水位，请重读。")
+                }
+            }
             unified = value
             unifiedIsCurrent = true
             unifiedIssue = nil

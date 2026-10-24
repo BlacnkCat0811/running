@@ -10,8 +10,12 @@ final class NativeAppModel {
     private let now: () -> Date
     private let cache: CacheStore
     let trainingPlanStore: TrainingPlanStore
+    let trainingPlanPublisher: TrainingPlanPublisher
 
     private(set) var handshake: RaiHandshake?
+    private var negotiatedConfiguration: UUID?
+    private var negotiatedCredential: String?
+    private var negotiatedURL: URL?
     var today: MobileTodayResponse? { trainingPlanStore.today }
     private(set) var statistics: MobileStatisticsResponse?
     private(set) var trends: MobileTrendsResponse?
@@ -77,27 +81,12 @@ final class NativeAppModel {
     /// "先结束一个再创建另一个"。
     var usesUnifiedTrainingPage: Bool { usesCoachLoopContract || isCoachLoopManaged }
 
-    /// PR-02（2026-10-21）：旧计划写面是否仍可用。
-    ///
-    /// 新服务宣告 `trainingPlanContractVersion`（统一读）后，旧写路由
-    /// `/goals`、`/run-coach`、`/workout-plan/preview|confirm|generate` 已退役，
-    /// 只有 `trainingPlanCommandContractVersion` 宣告后才允许改走命令面。
-    /// 老服务两个键都没有 ⇒ 继续使用它自己的既有协议（兼容只读之外的旧服务器
-    /// 路径，不属于当前生产请求清单）。
-    var planWritesAvailable: Bool {
-        guard let handshake else { return true }
-        if handshake.trainingPlanContractVersion != nil {
-            // New server: the old surfaces are gone; only the explicit command
-            // capability may authorize a write.
-            return handshake.trainingPlanCommandContractVersion != nil
-        }
-        if handshake.coachLoopContractVersion != nil && handshake.planSnapshotContractVersion == nil {
-            // Managed (or staggered) dataset: legacy reads already answer 409,
-            // so legacy writes must fail closed even though the new read key is
-            // absent. The unified page is the only reachable UI in this state.
-            return false
-        }
-        return true
+    /// Legacy transport authorization is independent of v2 command negotiation.
+    /// Kept under this name for existing compatibility editors only.
+    var planWritesAvailable: Bool { handshake?.legacyPlanWritesSupported == true }
+    var v2CommandCapability: Bool {
+        negotiatedConfiguration == configurationID && negotiatedCredential == session.apiToken &&
+        negotiatedURL == session.serverURL && handshake?.trainingPlanV2CommandsSupported == true
     }
 
     /// 旧写路由的 route 名（与 `APIClient.replayPlanPublication` 的映射同源）。
@@ -193,7 +182,7 @@ final class NativeAppModel {
     /// 也不清 `isLoadingWorkouts`（见 `refreshWorkouts`）。
     private var workoutRefreshTask: Task<Bool, Never>?
     private var workoutReadGeneration = 0
-    var isPlanBusy: Bool { isSavingGoals || isLockingSession || isRegeneratingPlan || isSyncingPlan || isUpdatingRunCoach }
+    var isPlanBusy: Bool { isSavingGoals || isLockingSession || isRegeneratingPlan || isSyncingPlan || isUpdatingRunCoach || trainingPlanPublisher.isBusy }
     var currentPlanRevision: Int { trainingPlanStore.revision }
     /// Human-readable result of the last plan generation, including fallbacks.
     var planMessage: String?
@@ -317,6 +306,7 @@ final class NativeAppModel {
         let scope = CacheStore.scope(baseURL: baseURL, handshake: knownHandshake)
         self.cacheScope = scope
         self.trainingPlanStore = TrainingPlanStore(cache: cache, api: resolvedAPI, scope: scope, now: now)
+        self.trainingPlanPublisher = TrainingPlanPublisher(api: resolvedAPI, persistence: cache, now: now)
         restorePlanSafetyState()
         watchLedger = cache.watchLedger()
         scheduleStateChanged()
@@ -370,6 +360,8 @@ final class NativeAppModel {
             guard isCurrent() else { return }
             HealthSyncIdentityPublisher.publish(identity, baseURL: baseURL)
             setCacheScope(baseURL: baseURL, handshake: identity)
+            negotiatedConfiguration = configurationID
+            negotiatedCredential = token; negotiatedURL = baseURL
             session.isReachable = true
             session.lastError = nil
             await session.probe()
@@ -429,6 +421,8 @@ final class NativeAppModel {
                 guard isCurrent() else { return }
                 HealthSyncIdentityPublisher.publish(identity, baseURL: baseURL)
                 setCacheScope(baseURL: baseURL, handshake: identity)
+                negotiatedConfiguration = configurationID
+                negotiatedCredential = token; negotiatedURL = baseURL
             } catch {
                 guard isCurrent() else { return }
                 isOffline = true
@@ -1481,6 +1475,8 @@ final class NativeAppModel {
     }
 
     private func invalidatePlanOperations() {
+        negotiatedConfiguration = nil
+        trainingPlanPublisher.invalidate()
         invalidatePlanReads()
         saveGoalsRequestID = UUID()
         runCoachRequestID = UUID()
@@ -1628,8 +1624,74 @@ final class NativeAppModel {
         return result
     }
 
+    private var commandContext: TrainingPlanPublisher.Context? {
+        guard let baseURL = session.serverURL, let handshake else { return nil }
+        return .init(baseURL: baseURL, cacheScope: cacheScope,
+            identity: .init(serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch),
+            sessionID: configurationID, credential: session.apiToken)
+    }
+    var canEditTrainingPlanV2: Bool {
+        v2CommandCapability && !isOffline && trainingPlanStore.unifiedIsCurrent &&
+        !isPlanBusy && !hasPendingPlanPublication && !trainingPlanPublisher.executionBlocked
+    }
+    func previewTrainingPlanCommand(_ action: TrainingPlanCommandAction, raceGoal: TrainingPlanRaceGoalDraft? = nil) async -> Bool {
+        guard canEditTrainingPlanV2, let context = commandContext, let snapshot = trainingPlanStore.unified else { return false }
+        return await trainingPlanPublisher.makePreview(.init(operationScope: context.identity, action: action,
+            expectedStateRevision: snapshot.stateRevision, raceGoal: raceGoal), context: context) {
+            self.commandContext == context && !Task.isCancelled
+        }
+    }
+    func confirmTrainingPlanCommand(refresh: Bool = false, action: TrainingPlanCommandAction? = nil,
+                                    raceGoal: TrainingPlanRaceGoalDraft? = nil) async -> Bool {
+        guard canEditTrainingPlanV2, let context = commandContext,
+              let snapshot = trainingPlanStore.unified else { return false }
+        if let action, !refresh, !trainingPlanPublisher.matchesPreview(action: action, raceGoal: raceGoal) {
+            trainingPlanPublisher.cancelPreview()
+            return false
+        }
+        cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
+        let value: TrainingPlanCommandResult?
+        if refresh {
+            value = await trainingPlanPublisher.refresh(revision: snapshot.stateRevision, context: context) { self.commandContext == context }
+        } else {
+            value = await trainingPlanPublisher.confirm(context: context) { self.commandContext == context }
+        }
+        guard commandContext == context else { return false }
+        guard let value else {
+            if trainingPlanPublisher.phase == .needsPreview && !hasPendingPlanPublication {
+                // A known rejection/unsent intent needs no operation recovery.
+                // Restore the reads invalidated before confirm so preview can
+                // be retried in this session after local storage recovers.
+                _ = await refreshPlanState()
+                _ = await refreshUnifiedTrainingPlan()
+            }
+            return false
+        }
+        return await acceptTrainingCommand(value, context: context)
+    }
+    private func acceptTrainingCommand(_ value: TrainingPlanCommandResult, context: TrainingPlanPublisher.Context) async -> Bool {
+        guard trainingPlanPublisher.phase == .committedAwaitingRead else { return false }
+        planMutationEpoch = UUID(); cancelInFlightPlanRefresh()
+        trainingPlanStore.acknowledge(revision: value.goalsRevision, action: "v2-command")
+        guard !trainingPlanStore.persistenceFailed else { return false }
+        _ = await refreshPlanState()
+        let executionRead = trainingPlanStore.isCurrent
+        let unifiedRead = await refreshUnifiedTrainingPlan()
+        guard commandContext == context, executionRead, unifiedRead else { return false }
+        return trainingPlanPublisher.finishRead(context: context)
+    }
+    func recoverTrainingPlanCommand() async -> Bool {
+        guard !isOffline, !isPlanBusy, let context = commandContext else { return false }
+        let value = await trainingPlanPublisher.recover(context: context, mayReplay: v2CommandCapability) { self.commandContext == context }
+        guard commandContext == context, let value else { return false }
+        return await acceptTrainingCommand(value, context: context)
+    }
+
     /// Device scheduling shares the mutation gate with saves and generation.
     func beginPlanSync(allowOffline: Bool = false) -> UUID? {
+        // Offline leases are used only to verify/withdraw existing entries.
+        // Their own durable journal still guards every device side effect.
+        guard allowOffline || !trainingPlanPublisher.executionBlocked else { return nil }
         guard !isPlanBusy, (allowOffline || !isOffline), (allowOffline || !hasPendingPlanPublication) else { return nil }
         isSyncingPlan = true
         planSyncBaseURL = session.serverURL
@@ -1805,6 +1867,10 @@ final class NativeAppModel {
         let result = cache.pendingPublication(scope: cacheScope)
         guard !result.isFailure else { return "发布账目无法读取，不能当作无操作；请恢复本地存储。" }
         guard let pending = result.value ?? nil else { return "没有待确认发布。" }
+        if ["training-command", "training-refresh"].contains(pending.route) {
+            _ = await recoverTrainingPlanCommand()
+            return trainingPlanPublisher.message ?? "请查询原操作。"
+        }
         let scope = cacheScope; let configuration = configurationID; let token = session.apiToken
         let requestID = UUID(); saveGoalsRequestID = requestID
         isSavingGoals = true
@@ -1858,9 +1924,17 @@ final class NativeAppModel {
     /// 操作账本中供人工核对；本动作不声明该操作从未生效，放弃后应刷新完整计划核对。
     func abandonPendingPlanPublication() -> String {
         guard !isPlanBusy else { return "当前有操作进行中，请稍后再试。" }
-        guard cache.savePublication(nil, scope: cacheScope) else {
+        // Inspect both safety rows even if the pending operation is readable.
+        // Repair unreadable command watermarks in the same transaction as the
+        // explicit abandonment; valid confirmed floors remain intact.
+        guard cache.abandonPublication(scope: cacheScope) else {
             return "放弃失败：本地账目无法清除；请恢复本地存储后重试。"
         }
+        // Clearing the durable row is not enough: a failed acknowledgement leaves
+        // the publisher in committedAwaitingRead/storageFailure, which keeps
+        // executionBlocked true after the row is gone. Reset that in-memory
+        // state so the user is not wedged until the next process start.
+        trainingPlanPublisher.invalidate()
         planMessage = "已放弃本次未确认发布（服务端记录保留在操作账本中）。如担心该操作曾生效，请刷新完整计划核对。"
         return planMessage ?? ""
     }

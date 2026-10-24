@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import Fastify from "fastify";
 
 import type { TrainingPlanCommandPreviewRequest, TrainingPlanCommandRequest } from "@rai/api-contracts";
 
@@ -15,6 +16,10 @@ import {
 } from "../src/training-plan-commands.js";
 import { trainingPlanContextDigest } from "../src/training-mode-policy.js";
 import { TrainingPlanStore, type TrainingPlanState } from "../src/training-plan-store.js";
+import { createTrainingPlanCommandHandlers } from "../src/training-plan-routes.js";
+import { trainingPlanGenerationDeps } from "../src/training-plan-generation.js";
+import { TryAcquireGate } from "../src/try-acquire-gate.js";
+import { TrainingPlanCoordinator } from "../src/training-plan-coordinator.js";
 
 /**
  * PR4-2: configuration commands over the unified state.
@@ -70,7 +75,7 @@ const createFixture = () => {
   const service = (now = () => Date.parse("2026-10-20T04:00:00.000Z")) =>
     new TrainingPlanCommandService(goals, () => scopeKey, identity, () => BUSINESS_DATE, now);
   const close = () => { database.close(); goals.close(); rmSync(root, { recursive: true, force: true }); };
-  return { goals, database, unified, migrate, service, close };
+  return { goals, database, controlPath, unified, migrate, service, close };
 };
 
 const preview = (overrides: Partial<TrainingPlanCommandPreviewRequest> = {}): TrainingPlanCommandPreviewRequest => ({
@@ -276,6 +281,240 @@ const generatedAudit = (): import("@rai/api-contracts").MobilePlanAudit => ({
   generatedBy: "heuristic", model: null, promptVersion: null, generatedAt: "2026-10-20T04:30:00.000Z"
 });
 
+test("migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening", async () => {
+  const fixture = createFixture();
+  try {
+    const preferences: import("@rai/api-contracts").MobileRunCoachPlan = {
+      id: "migrated-preferences", goal: "fitness", raceDate: null, raceDistanceKm: null, targetTimeSeconds: null,
+      runningDays: [2, 4, 6], longRunDays: [6], targetType: "heart_rate", strengthTraining: true,
+      durationWeeks: 12, startedOn: BUSINESS_DATE, status: "active", pausedOn: null, endedOn: null,
+      adaptationKey: null, adaptedAt: null
+    };
+    fixture.goals.write({}, { runCoach: preferences });
+    fixture.migrate({ source: "run_coach", runCoach: preferences });
+    fixture.goals.bindTrainingPlanOwner(identity, () => BUSINESS_DATE);
+    const service = fixture.service();
+    for (const action of ["pause", "set_race_goal", "clear_race_goal", "resume"] as const) {
+      const revision = fixture.goals.currentTrainingPlan()!.revision;
+      const draft = preview({ action, expectedStateRevision: revision });
+      const candidate = service.preview(draft);
+      service.submit({ ...draft, operationId: `preserve-${action}`, expectedStateRevision: revision,
+        candidateId: candidate.candidateId });
+      assert.deepEqual(fixture.goals.currentTrainingPlan()!.state.runCoach, preferences);
+      assert.equal(fixture.goals.read().runCoach, null, "the legacy programme no longer owns execution");
+    }
+    const coordinator = new TrainingPlanCoordinator({
+      scopeKey: () => scopeKey, readState: () => fixture.goals.currentTrainingPlan(), businessDate: () => BUSINESS_DATE,
+      refresh: input => service.refresh({ contractVersion: 2, operationScope: scope, operationId: input.operationId,
+        expectedStateRevision: input.stateRevision }, {
+        prepare: async () => ({ days: generatedDays(), audit: generatedAudit(), warnings: [], prescription: null, fingerprint: "facts" }),
+        fingerprint: () => "facts"
+      })
+    });
+    assert.equal((await coordinator.tick()).ran, true, "automatic refresh uses the same preference-preserving write");
+    fixture.goals.write({ qualitySessionCap: 1 });
+    const reopened = new MobileGoalsStore("unused", fixture.controlPath);
+    try {
+      reopened.bindTrainingPlanOwner(identity, () => BUSINESS_DATE);
+      assert.deepEqual(reopened.currentTrainingPlan()!.state.runCoach, preferences);
+      assert.equal(reopened.currentTrainingPlan()!.state.preferencesComplete, true);
+      assert.equal(reopened.read().runCoach, null);
+    } finally { reopened.close(); }
+  } finally { fixture.close(); }
+});
+
+test("generation latch: facts changed during generation cannot be stamped with the new version", async () => {
+  const fixture = createFixture();
+  try {
+    fixture.migrate();
+    const factsPath = fixture.controlPath + ".facts";
+    const factsReader = new DatabaseSync(factsPath);
+    factsReader.exec("CREATE TABLE facts(value INTEGER); INSERT INTO facts VALUES(1)");
+    const factsWriter = new DatabaseSync(factsPath);
+    const version = () => String(factsReader.prepare("PRAGMA data_version").get()!.data_version);
+    const originalVersion = version();
+    try {
+    let started!: () => void;
+    let finish!: () => void;
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    const latch = new Promise<void>(resolve => { finish = resolve; });
+    const gate = new TryAcquireGate();
+    const deps = trainingPlanGenerationDeps({
+      publicationReady: () => true,
+      snapshot: () => ({ fingerprint: "unchanged-recommendation-and-goals" }),
+      dataVersion: version,
+      tryAcquire: () => gate.tryAcquire(),
+      generate: async () => {
+        started(); await latch;
+        return { days: generatedDays(), audit: generatedAudit(), warnings: [], prescription: null };
+      }
+    });
+    const before = fixture.goals.read();
+    const request = { contractVersion: 2 as const, operationScope: scope, operationId: "facts-latch", expectedStateRevision: 1 };
+    const running = fixture.service().refresh(request, deps);
+    await entered;
+    await assert.rejects(fixture.service().refresh({ ...request, operationId: "busy" }, deps),
+      (error: unknown) => (error as { code?: string }).code === "weekly_plan_generation_busy");
+    factsWriter.exec("UPDATE facts SET value=2");
+    assert.notEqual(version(), originalVersion, "a real external SQLite commit changes the read connection version");
+    finish();
+    await assert.rejects(running, (error: unknown) => (error as { code?: string }).code === "training_snapshot_changed");
+    assert.deepEqual(fixture.goals.read(), before);
+    assert.equal(fixture.goals.trainingPlanStateRow(scopeKey)!.revision, 1);
+    assert.equal(fixture.goals.publicationInFlight(), false);
+    assert.equal(fixture.goals.publicationGuardState().pendingSince, null);
+    const release = gate.tryAcquire(); assert.ok(release); release();
+    } finally { factsWriter.close(); factsReader.close(); }
+  } finally { fixture.close(); }
+});
+
+test("facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first", async () => {
+  const fixture = createFixture();
+  const app = Fastify();
+  try {
+    fixture.migrate();
+    const service = fixture.service();
+    const gate = new TryAcquireGate();
+    let ready = true;
+    let reads = 0;
+    let becomeBusyDuringGeneration = false;
+    const deps = trainingPlanGenerationDeps({
+      publicationReady: () => ready,
+      snapshot: () => { reads++; return { fingerprint: "stable-facts" }; },
+      dataVersion: () => "stable-version",
+      tryAcquire: () => gate.tryAcquire(),
+      generate: async () => {
+        if (becomeBusyDuringGeneration) ready = false;
+        return { days: generatedDays(), audit: generatedAudit(), warnings: [], prescription: null };
+      }
+    });
+    const handlers = createTrainingPlanCommandHandlers(service, deps);
+    app.post("/commands", handlers.submit);
+    const candidate = service.preview(preview({ expectedStateRevision: 1 }));
+    const body = { ...preview({ expectedStateRevision: 1 }), expectedStateRevision: 1,
+      operationId: "readiness-command", candidateId: candidate.candidateId };
+    const before = () => ["mobile_goals", "mobile_goals_history", "mobile_training_state", "mobile_training_state_history", "mobile_plan_operations"]
+      .map(table => fixture.database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const frozen = before();
+    ready = false;
+    const busy = await app.inject({ method: "POST", url: "/commands", payload: body });
+    assert.equal(busy.statusCode, 409);
+    assert.equal(busy.json().code, "coach_sync_pending");
+    assert.equal(reads, 0, "busy facts cannot enter snapshot generation");
+    assert.deepEqual(before(), frozen);
+    ready = true; becomeBusyDuringGeneration = true;
+    const lateBusy = await app.inject({ method: "POST", url: "/commands", payload: body });
+    assert.equal(lateBusy.json().code, "coach_sync_pending");
+    assert.deepEqual(before(), frozen, "busy during generation writes no operation, history or state");
+    const release = gate.tryAcquire(); assert.ok(release); release();
+    ready = true; becomeBusyDuringGeneration = false;
+    const prepared = await deps.prepare(service.planFor(body).afterState);
+    ready = false;
+    assert.throws(() => service.submit(body, { prepared, fingerprint: deps.fingerprint }),
+      (error: unknown) => (error as { code?: string }).code === "coach_sync_pending");
+    assert.deepEqual(before(), frozen, "commit rechecks task readiness even when fact fingerprints have not moved");
+    ready = true;
+    const committed = await app.inject({ method: "POST", url: "/commands", payload: body });
+    assert.equal(committed.statusCode, 200, committed.body);
+    const after = before(); const readsAfter = reads;
+    ready = false;
+    const replayed = await app.inject({ method: "POST", url: "/commands", payload: body });
+    assert.deepEqual(replayed.json(), committed.json());
+    assert.equal(reads, readsAfter, "committed replay precedes readiness and generation");
+    assert.deepEqual(before(), after);
+  } finally { await app.close(); fixture.close(); }
+});
+
+for (const action of ["set_race_goal", "pause"] as const) {
+  test(`HTTP ${action}: durable replay precedes revision/TTL/generation, including restart`, async () => {
+    const fixture = createFixture();
+    const app = Fastify({ logger: false });
+    let generations = 0;
+    let clock = Date.parse("2026-10-20T04:00:00.000Z");
+    try {
+      fixture.migrate();
+      const service = fixture.service(() => clock);
+      const handlers = createTrainingPlanCommandHandlers(service, {
+        prepare: async () => {
+          generations++;
+          return { days: generatedDays(), audit: generatedAudit(), warnings: [], prescription: null,
+            fingerprint: "facts" };
+        }, fingerprint: () => "facts"
+      });
+      app.post("/v1/mobile/training-plan/commands", handlers.submit);
+      const draft = preview({ action, ...(action === "pause" ? { raceGoal: null } : {}) });
+      const candidate = service.preview(draft);
+      const payload = { ...draft, operationId: `http-${action}`, candidateId: candidate.candidateId,
+        expectedStateRevision: candidate.expectedStateRevision };
+      const send = (body: unknown) => app.inject({ method: "POST", url: "/v1/mobile/training-plan/commands", payload: body as object });
+      const first = await send(payload);
+      assert.equal(first.statusCode, 200, first.body);
+      const snapshot = () => fixture.database.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'mobile_%' ORDER BY name"
+      ).all().map(row => ({ name: row.name, rows: fixture.database.prepare(`SELECT * FROM ${row.name}`).all() }));
+      const after = snapshot();
+      clock += 121_000; // A committed result survives candidate expiry.
+      const retry = await send(payload);
+      assert.equal(retry.statusCode, 200, retry.body);
+      assert.deepEqual(retry.json(), first.json());
+      const conflict = await send({ ...payload, candidateId: "different" });
+      assert.equal(conflict.json().code, "plan_operation_key_conflict", conflict.body);
+      assert.equal((await send({ ...payload, operationScope: { ...scope, datasetEpoch: "other" } })).json().code,
+        "training_scope_mismatch");
+      // Fresh service + fresh SQLite connection: no in-memory candidate/result can answer this.
+      const reopened = new MobileGoalsStore("unused", fixture.controlPath);
+      try {
+        const restarted = new TrainingPlanCommandService(reopened, () => scopeKey, identity, () => BUSINESS_DATE, () => clock);
+        const restartApp = Fastify({ logger: false });
+        restartApp.post("/commands", createTrainingPlanCommandHandlers(restarted, {
+          prepare: async () => { throw new Error("replay must never generate"); }, fingerprint: () => "changed"
+        }).submit);
+        try {
+          const restored = await restartApp.inject({ method: "POST", url: "/commands", payload });
+          assert.equal(restored.statusCode, 200, restored.body);
+          assert.deepEqual(restored.json(), first.json());
+        } finally { await restartApp.close(); }
+      } finally { reopened.close(); }
+      assert.equal(generations, action === "pause" ? 0 : 1);
+      assert.deepEqual(snapshot(), after, "replay/conflicts must not change goals, unified, history or operation tables");
+      fixture.database.prepare("UPDATE mobile_plan_operations SET expires_at = '2000-01-01T00:00:00Z'").run();
+      const expired = await send(payload);
+      assert.equal(expired.statusCode, 410, expired.body);
+      assert.equal(expired.json().code, "plan_operation_expired");
+      assert.equal(generations, action === "pause" ? 0 : 1);
+    } finally { await app.close(); fixture.close(); }
+  });
+}
+
+for (const [table, event] of [["mobile_goals", "UPDATE"], ["mobile_goals_history", "INSERT"],
+  ["mobile_training_state", "UPDATE"], ["mobile_training_state_history", "INSERT"], ["mobile_plan_operations", "INSERT"]]) {
+  test(`publication abort at ${table}: all business rows roll back and lane can retry`, () => {
+    const fixture = createFixture();
+    try {
+      fixture.migrate();
+      fixture.goals.bindTrainingPlanOwner(identity);
+      const service = fixture.service();
+      const candidate = service.preview(preview());
+      const request = { ...preview(), operationId: "atomic-failure", expectedStateRevision: candidate.expectedStateRevision,
+        candidateId: candidate.candidateId } as TrainingPlanCommandRequest;
+      const beforeGoals = fixture.goals.read();
+      const beforeUnified = fixture.goals.trainingPlanStateRow(scopeKey);
+      const counts = () => ["mobile_goals_history", "mobile_training_state_history", "mobile_plan_operations"].map(name =>
+        fixture.database.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get()!.n);
+      const beforeCounts = counts();
+      fixture.database.exec(`CREATE TRIGGER phase5_abort BEFORE ${event} ON ${table} BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END`);
+      assert.throws(() => service.submit(request), /synthetic failure/);
+      assert.deepEqual(fixture.goals.read(), beforeGoals);
+      assert.deepEqual(fixture.goals.trainingPlanStateRow(scopeKey), beforeUnified);
+      assert.deepEqual(counts(), beforeCounts);
+      assert.equal(fixture.goals.publicationGuardState().pendingSince, null);
+      assert.equal(fixture.goals.publicationInFlight(), false);
+      fixture.database.exec("DROP TRIGGER phase5_abort");
+      assert.equal(service.submit(request).stateRevision, 2);
+    } finally { fixture.close(); }
+  });
+}
+
 test("刷新：生成在事务外、提交在事务内；计划与统一状态一起落库", async () => {
   const fixture = createFixture();
   try {
@@ -325,6 +564,33 @@ test("刷新：事实在生成期间变化 → 409，且不写任何行", async 
     }, refreshDeps), (error: unknown) => (error as { code?: string }).code === "training_snapshot_changed");
     assert.equal(fixture.goals.trainingPlanStateRow(scopeKey)!.revision, row.revision);
     assert.equal(fixture.goals.read().weekPlanReplanRequired, false);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("刷新：空计划不写行、准入释放，后续合法请求仍可继续", async () => {
+  const fixture = createFixture();
+  try {
+    fixture.migrate();
+    const row = fixture.goals.trainingPlanStateRow(scopeKey)!;
+    const service = fixture.service();
+    const gate = new TryAcquireGate();
+    const deps = trainingPlanGenerationDeps({
+      publicationReady: () => true,
+      snapshot: () => ({ fingerprint: "empty-plan-facts" }),
+      dataVersion: () => "v1",
+      tryAcquire: () => gate.tryAcquire(),
+      generate: async () => ({ days: [], audit: generatedAudit(), warnings: [], prescription: null })
+    });
+    await assert.rejects(() => service.refresh({
+      contractVersion: 2, operationId: "op-empty-plan", operationScope: scope, expectedStateRevision: row.revision
+    }, deps), (error: unknown) => (error as { code?: string }).code === "training_plan_empty");
+    assert.equal(fixture.goals.trainingPlanStateRow(scopeKey)!.revision, row.revision);
+    assert.equal(fixture.goals.publicationInFlight(), false);
+    const release = gate.tryAcquire();
+    assert.ok(release, "the generation gate must be released after an empty result");
+    release();
   } finally {
     fixture.close();
   }
@@ -414,6 +680,27 @@ test("单次命令：配置+计划同一操作发布，指纹不一致则整体�
       (error as { code?: string }).code === "training_snapshot_changed");
     assert.equal(fixture.goals.trainingPlanStateRow(scopeKey)!.revision, before);
   } finally {
+    fixture.close();
+  }
+});
+
+test("命令体形状错误返回 422 training_command_invalid，而不是 500", async () => {
+  const fixture = createFixture();
+  const app = Fastify({ logger: false });
+  try {
+    fixture.migrate();
+    app.post("/commands", createTrainingPlanCommandHandlers(fixture.service()).preview);
+    for (const payload of [
+      { operationScope: scope, action: "delete" },
+      { action: "pause" },
+      { contractVersion: 2, operationScope: scope }
+    ]) {
+      const response = await app.inject({ method: "POST", url: "/commands", payload });
+      assert.equal(response.statusCode, 422, response.body);
+      assert.equal(response.json().code, "training_command_invalid");
+    }
+  } finally {
+    await app.close();
     fixture.close();
   }
 });

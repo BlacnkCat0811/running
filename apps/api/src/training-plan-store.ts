@@ -150,7 +150,7 @@ export interface TrainingPlanState {
   /** Stored weekly intent; empty when an ended loop left an all-rest window. */
   weekPlan: MobilePlannedDay[];
   lockedSession: MobileLockedSession | null;
-  /** Legacy run-coach programme row, preserved for the future coordinator. */
+  /** Migrated configuration/preferences evidence. Its lifecycle is never an execution authority. */
   runCoach: MobileRunCoachPlan | null;
   coachLoop: TrainingPlanCoachLoopRef | null;
   goalsRevision: number | null;

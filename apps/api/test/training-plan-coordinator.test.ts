@@ -59,6 +59,17 @@ test("刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要
   assert.deepEqual(refreshDecision(row({ weekPlan: [] }), BUSINESS_DATE), { needed: true, reason: "business_date_changed" });
 });
 
+test("七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息", () => {
+  // The product decision keeps the existing bounded trigger: a partial week is
+  // still "current" (the page labels missing days as not generated), so this test
+  // pins the absence of an implicit fill/rest loop.
+  const oneDay = row({ weekPlan: [{ localDate: "2026-10-26", kind: "easy", distanceKm: 5, structure: null }] });
+  assert.deepEqual(refreshDecision(oneDay, BUSINESS_DATE), { needed: false, reason: "current" });
+  const outsideWindow = row({ weekPlan: [{ localDate: "2026-10-27", kind: "easy", distanceKm: 5, structure: null }] });
+  assert.deepEqual(refreshDecision(outsideWindow, BUSINESS_DATE), { needed: true, reason: "business_date_changed" });
+  assert.deepEqual(refreshDecision(row({ weekPlan: [] }), BUSINESS_DATE), { needed: true, reason: "business_date_changed" });
+});
+
 test("自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键", () => {
   const base = { scopeKey: "s", reason: "config_changed" as const, businessDate: BUSINESS_DATE, stateRevision: 3 };
   assert.equal(coordinatorOperationId(base), coordinatorOperationId({ ...base }));

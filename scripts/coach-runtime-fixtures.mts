@@ -17,7 +17,8 @@ export const runtimeReplaySettings: Omit<CoachLoopSettings, "status"> = {
 /** Synthetic frozen facts + actual SQLite publication, never the user's DB. */
 export function coachRuntimeFixture() {
   const root = mkdtempSync(join(tmpdir(), "coach-runtime-"));
-  let store = new MobileGoalsStore(root, join(root, "control.sqlite"));
+  const controlPath = join(root, "control.sqlite");
+  let store = new MobileGoalsStore(root, controlPath);
   const input = coachReplayInput();
   let facts: CoachRuntimeFacts = {
     asOf: input.asOf, date: "2026-10-08", facts: [...input.facts, replayRun("monday-20", "2026-10-05", 20)],
@@ -31,18 +32,19 @@ export function coachRuntimeFixture() {
         sync: { status: "ok" }, verdict: { tone: "green" }, weekStructure: { easyDurationFraction: 1, qualitySessionCount: 0 },
         week: { distanceKm: 20, durationSeconds: 7200 } } as unknown as MobileTodayResponse }
   };
-  let runtime = new CoachLoopRuntime(store, () => runtimeReplayScope, () => facts);
+  const runtimeOptions = { now: () => Date.parse(facts.asOf) };
+  let runtime = new CoachLoopRuntime(store, () => runtimeReplayScope, () => facts, undefined, runtimeOptions);
   const command = (action: CoachLoopCommand["action"], extra: Partial<CoachLoopCommand> = {}): CoachLoopCommand => ({
     contractVersion: 1, operationId: randomUUID(), operationScope: runtimeReplayScope,
     expectedRevision: store.read().revision, expectedFactsHash: facts.factsHash, action, ...extra
   });
   return {
-    get store() { return store; }, get runtime() { return runtime; }, command,
+    controlPath, get store() { return store; }, get runtime() { return runtime; }, command,
     get facts() { return facts; }, set facts(value: CoachRuntimeFacts) { facts = value; },
     restart() {
       store.close();
-      store = new MobileGoalsStore(root, join(root, "control.sqlite"));
-      runtime = new CoachLoopRuntime(store, () => runtimeReplayScope, () => facts);
+      store = new MobileGoalsStore(root, controlPath);
+      runtime = new CoachLoopRuntime(store, () => runtimeReplayScope, () => facts, undefined, runtimeOptions);
     },
     close: () => { store.close(); rmSync(root, { recursive: true, force: true }); }
   };

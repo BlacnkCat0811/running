@@ -9,7 +9,7 @@ struct CachedValue<Value: Codable>: Codable {
 }
 
 @MainActor
-final class CacheStore: PlanSchedulePersistence {
+final class CacheStore: PlanSchedulePersistence, TrainingPlanCommandPersistence {
     enum ReadIssue: String { case unavailable, unsupportedSchema, corruptPayload }
     private(set) var lastReadIssue: ReadIssue?
     private var database: OpaquePointer?
@@ -273,6 +273,40 @@ final class CacheStore: PlanSchedulePersistence {
     func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool {
         guard !pendingPublication(scope: scope).isFailure else { return false }
         return saveMetadata(value, key: "publication." + scope)
+    }
+
+    func trainingPlanCommandWatermark(scope: String) -> CacheReadResult<TrainingPlanCommandWatermark> {
+        readMetadata(TrainingPlanCommandWatermark.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "training-command-watermark." + scope)
+    }
+
+    func saveTrainingPlanCommandWatermark(_ value: TrainingPlanCommandWatermark, scope: String) -> Bool {
+        let previous = trainingPlanCommandWatermark(scope: scope)
+        guard !previous.isFailure,
+              value.stateRevision >= (previous.value?.stateRevision ?? 0),
+              value.goalsRevision >= (previous.value?.goalsRevision ?? 0) else { return false }
+        return saveMetadata(value, key: "training-command-watermark." + scope)
+    }
+
+    /// Explicit user-confirmed abandonment also repairs an unreadable watermark.
+    /// Preserve valid confirmation floors, and keep the pending operation if
+    /// either delete or the commit fails so the recovery entry stays available.
+    @discardableResult
+    func abandonPublication(scope: String) -> Bool {
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer { if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) } }
+        let watermark = trainingPlanCommandWatermark(scope: scope)
+        guard watermark.failureCode != .storageUnavailable else { return false }
+        let keys = ["publication." + scope] + (watermark.isFailure ? ["training-command-watermark." + scope] : [])
+        for key in keys {
+            guard let statement = prepare("DELETE FROM app_metadata WHERE metadata_key = ?") else { return false }
+            defer { sqlite3_finalize(statement) }
+            bind(key, to: statement, at: 1)
+            if sqlite3_step(statement) != SQLITE_DONE { return false }
+        }
+        guard SQLiteSupport.execute("COMMIT", database: database) else { return false }
+        committed = true
+        return true
     }
 
     func pendingCoachFeedback(scope: String) -> CacheReadResult<CoachLoopFeedbackCommand?> {

@@ -76,6 +76,11 @@ P3 = 低影响/防御性/可维护性/文档。细节与逐行证据见
 **不做什么**：不在客户端硬编码“忽略 410 当成功”；不把旧路由重新打开。
 **收口条件**：客户端接入 v2 写端点或按能力隐藏手动入口；补 handshake 能力位；
 新增“客户端源码不得出现已退役路径”的结构门禁。
+**2026-10-23 阶段 5 状态**：上述收口条件已在隔离候选实现——iOS 有 `TrainingPlanPublisher`
+与 v2 preview/submit/refresh，旧写路径由 `legacyPlanWritesSupported` 独立门控，410 映射终局；
+`trainingPlanCommandContractVersion=2` 只在验证候选宣告。2026-10-24 审计 R1–R4 已修复并补隔离回归；
+Simulator 用户链路仅部分通过，仍缺未知提交恢复/能力关闭、配对设备、交错升级/回滚与生产能力启用证据（见 [阶段 5 报告](../deliverables/phase5-implementation-2026-10-23/PHASE5_REPORT.md)），
+因此本条暂不标为生产完成。
 
 ### P2（主题合并；逐条见 lane 报告）
 
@@ -83,6 +88,10 @@ P3 = 低影响/防御性/可维护性/文档。细节与逐行证据见
    v2 配置单向镜像进 goals，而 lock/排期回执/教练闭环只写 goals、不回写 unified。
    coach-loop managed 数据集上 `/v1/mobile/training-plan-state` 的 v1+v2 一起 409，
    新合同可用性仍由旧合同生命周期决定。**未决产品/架构决定**：唯一真相与退出条件。
+   **2026-10-23 阶段 5/D20**：已选定 unified 为配置/运行状态/意图/当前锁的权威，goals 只作兼容投影；
+   coach-loop、lock、统一命令都在同一 publication transaction 内回写 unified，managed 且 owner-ready 的
+   v2 读已开放。2026-10-24 补齐事实更新准入、暂停清锁及跨读模型一致性、managed 真实定时入口回归；
+   生产启用与设备层验收仍按阶段报告分层记录。
 2. **契约四面手写漂移**：同一 HTTP 形状有 TS DTO / JSON Schema+OpenAPI / Swift DTO / Fastify 四处手写，
    响应成功形状只有手写 required 名单；2026-09-01 起 454 个提交中 32 个同时改 ≥3 面。
 3. **读路径无预算**：约 37 个读方法同步跑在主事件循环，无 `requestTimeout`、无“超预算 503 + Retry-After”，

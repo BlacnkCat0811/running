@@ -176,3 +176,28 @@
 - **控制库 schema v2**：`mobile_training_state` / `_history` / `_migration_audit` 为**加表**，不改历史行；schema 由 API 启动时幂等追加。**数据**迁移只由 `scripts/migrate-training-planner.mts` 执行（默认 dry-run；`--apply` 必须带 dry-run 的 `sourceDigest`；只开控制库）。**2026-10-23（阶段 4）起**：API 启动即持有控制库 publication lock（`<control>.import.lock`），planner `--apply` 取同一把锁，因此在 API 在线时会以 `control_database_locked` 拒绝；仍要求停服窗口，锁只负责“拒绝交叉”，不替运维决定数据语义。
 - **iOS 统一入口是客户端路径**：统一训练页是正式入口。已知缺口（发布记录 §5 已承认）：统一页仍保留「手动课表」入口，其保存仍调用已退役的 `PUT /v1/mobile/goals`，在该构建上会失败；后续应重接统一命令或隐藏该入口。**不得**因为该缺口恢复旧端点。
 
+
+**2026-10-23 阶段 5 更新**：统一页的「手动课表」已降级为只读说明，不再调用退役的 `PUT /v1/mobile/goals`；
+v2 Publisher 与四个配置动作已在隔离候选实现，生产能力仍未宣告。边界见 D20。
+
+## D20. 阶段 5：训练计划 v2 的所有权、能力与手动编辑边界（2026-10-23）
+
+依据：[阶段 5 审查与实施方案](../deliverables/phase5-review-2026-10-23/PHASE5_REVIEW_AND_IMPLEMENTATION_PLAN.md)。
+本决定落实方案 §4 的 D5-A～E；它不宣称生产能力已启用，也不恢复任何退役写面。
+
+- **D5-A 当前状态所有权**：`mobile_training_state`（unified）是配置、运行状态、计划意图与当前锁的唯一权威；
+  `mobile_goals` 只是兼容投影/执行快照来源。统一命令、自动刷新、lock/relock 与 coach-loop 的配置变更都经
+  `MobileGoalsStore` 的同一 publication transaction 写入，并在同一事务内同步 goals 投影与计划历史；
+  coach-loop 的决策回执以不可变 receipt 追加，由 unified 的 `coachLoop` 指针引用。历史/回执/操作账本仍独立追加，
+  不塞进 unified JSON。managed 的 v2 读只在已迁移且 owner-ready 时开放；损坏/缺失 receipt 继续 fail-closed。
+- **D5-B 手动课表与偏好**：阶段 5 只接现有四动作（`set_race_goal` / `clear_race_goal` / `pause` / `resume`）
+  与独立 `refresh`。逐日手动课表继续只读；`refresh` 不得冒充“保存我编辑的逐日课表”；完整偏好、start/end 等
+  没有逐日候选合同的动作不新增 v2 action。恢复手动编辑必须先按方案 §4.2 交付独立、原子的合同扩展。
+- **D5-C 旧教练动作**：`start/end`、lock、反馈、排期回执与手表同步继续走各自有效的既有合同，不因 v2 迁移删除；
+  `end` 是生命周期结束，不是 `pause`，也不是删除历史；coach-loop 写路径必须汇入 D5-A 的同一所有者。
+- **D5-D 七日窗口**：展示只列已发布意图；缺失的日期显示“未生成/待刷新”，**不算休息**；阶段 5 不自动补齐未来窗口，
+  也不改变 `refreshDecision` 的“窗口内任一天命中”判据，避免无法补齐的计划触发无限生成。补齐判据另列产品决定。
+- **D5-E 写能力版本与发布条件**：`trainingPlanCommandContractVersion: 2` 只在隔离验收候选
+  (`RAI_TRAINING_PLAN_COMMAND_MODE=validation`) 且客户端发送 `X-RAI-Client-Training-Commands: 2` 时宣告；
+  生产能力保持关闭，直至方案 G6/G7（Simulator、配对设备、兼容/回滚演练）完成。缺失、未知或协商未完成的版本
+  一律只读；v2 能力永远不放行退役的旧 URL，旧服务器按其已登记的旧协议处理。

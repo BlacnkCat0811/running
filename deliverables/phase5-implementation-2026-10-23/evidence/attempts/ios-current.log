@@ -1,0 +1,82 @@
+
+> rai-running-intelligence@0.1.0 test:ios
+> node scripts/run-ios.mjs gates
+
+类型检查 99 个文件（已跳过 3 个仅依赖高德 SDK 的文件）
+
+iOS 类型检查通过
+PASS: September 14 pace display orders fast to slow
+PASS: historical corrupt target is not displayed as a valid range
+PASS: blank target pace is optional
+PASS: finish time parses hours minutes seconds
+PASS: finish time parses minutes seconds
+PASS: invalid finish time is rejected
+PASS: ten-kilometer finish time matches pace
+PASS: half-marathon conversion uses full distance
+PASS: race pace converts minutes and seconds
+PASS: race pace includes API boundaries
+PASS: invalid race pace rejected: 2:29
+PASS: invalid race pace rejected: 15:01
+PASS: invalid race pace rejected: 5:60
+PASS: invalid race pace rejected: 5:3
+PASS: invalid race pace rejected: abc
+PASS: invalid race pace rejected: -5:30
+PASS: invalid race pace rejected: 5.5:30
+PASS: race-only save does not replace weekly plan
+PASS: race target is encoded for persistence
+PASS: race-only save does not replace weekly plan
+PASS: clear emits explicit null instead of omitting race target
+PASS: old API/cache is not mistaken for empty weekly statistics
+PASS: a legacy week payload still decodes with the retired goal keys present
+PASS: new API empty zones remain a valid no-data result
+PASS: native decoder preserves all five weekly statistics from the API
+PASS: recovery state recovered is not pending
+PASS: recovery state reduced is not pending
+PASS: recovery state depleted is not pending
+PASS: recovery state unknown is not pending
+PASS: prediction DTO preserves fatigue adjustment
+PASS: prediction DTO preserves recovery provenance
+PASS: prediction DTO preserves missing readiness
+PASS: heart rate ignores invalid samples and sorts time
+PASS: heart rate time axis fits endpoint without overlap
+PASS: heart rate uses minutes and seconds
+PASS: heart rate matches reference scale
+PASS: empty heart rate has valid scale
+PASS: late filter response cannot replace current list
+PASS: a new workouts request cancels the old URLSession request, not merely discards its result
+PASS: uncached failed filter does not retain another filter's rows
+PASS: failed list exits loading and reports offline
+PASS: detail failure exits spinner with retryable error
+PASS: old server response cannot publish into new server scope
+PASS: clear cache invalidates pending list response
+PASS: cancelled detail does not present a failure
+PASS: late detail cannot replace newly selected workout
+PASS: series failure keeps detail available with explicit feedback
+PASS: opening another workout clears both previous detail and series
+PASS: concurrent plan refreshes both observe the shared completed read
+PASS: a concurrent refreshPlanState reuses the in-flight Task instead of issuing a second plan read
+PASS: a configuration change cancels the in-flight plan read so an old scope can never publish
+PASS: a refresh after the cancelled single-flight task starts a fresh read for the new configuration
+PASS: a queued refreshAll waits out the coalescing window instead of rerunning immediately
+PASS: the coalesced refreshAll runs exactly once after the ~350ms window
+PASS: an all-failure refreshAll leaves reachability to the probe failure threshold
+PASS: the all-panel failure classification and copy stay unchanged
+PASS: race save updates model after server acknowledgement and refresh
+PASS: race save carries editor revision without replacing the plan
+PASS: race save touches only the race target
+PASS: race conflict preserves persisted target and reports failure
+PASS: failed clear does not optimistically erase the target
+PASS: race clear refreshes to persisted empty state
+PASS: real clear request sends explicit JSON null
+PASS: saving training settings succeeds
+PASS: plan save keeps revision conflict protection
+PASS: remaining weekly settings are still editable
+PASS: plan save preserves the stored race target
+PASS: plan save still submits the daily plan
+PASS: old API and cache payloads default to no pending migration
+PASS: pending retirement loads from the API
+PASS: pending retirement survives cache encoding and decoding
+PASS: saving settings cannot clear pending confirmation
+PASS: pending settings save omits even a nonempty daily plan
+PASS: clients cannotmain/ModelRegression.swift:209: Precondition failed: a plan generation reports success
+apps/ios/tests/run-model-tests.sh: line 43: 17626 Illegal instruction: 4  "$tmp/model-tests"

@@ -328,10 +328,57 @@ struct StoreRegression {
               reopenedJournal.scheduleJournalResult().value?.terminal == false,
               "unfinished operation survives clear-cache, eviction and simulated process restart")
         let publication = PendingPlanPublication(operationId: UUID().uuidString, route: "coach", payload: Data("{}".utf8), preparedAt: Date())
+        let watermark = TrainingPlanCommandWatermark(stateRevision: 3, goalsRevision: 17)
+        check(safety.saveTrainingPlanCommandWatermark(watermark, scope: "journal-scope"), "v2 confirmation watermarks persist separately")
+        safety.clear(scope: "journal-scope"); safety.clearAll(); safety.prune(maxEntries: 0)
+        check(CacheStore(fileURL: safetyURL).trainingPlanCommandWatermark(scope: "journal-scope").value == watermark,
+              "v2 watermarks survive cache clearing, pruning and reopening the real SQLite store")
+        check(!safety.saveTrainingPlanCommandWatermark(.init(stateRevision: 2, goalsRevision: 18), scope: "journal-scope") &&
+              !safety.saveTrainingPlanCommandWatermark(.init(stateRevision: 4, goalsRevision: 16), scope: "journal-scope"),
+              "neither state nor goals confirmation watermarks can regress independently")
         check(safety.savePublication(publication, scope: "journal-scope"), "pending business publication is safety metadata")
         safety.clearAll()
         check((CacheStore(fileURL: safetyURL).pendingPublication(scope: "journal-scope").value ?? nil)?.operationId == publication.operationId,
               "lost-response business operation survives clear-cache and reopen")
+        for damaged in ["watermark", "publication", "both"] {
+            let repairScope = "abandon-" + damaged
+            check(safety.savePublication(publication, scope: repairScope) &&
+                  safety.saveTrainingPlanCommandWatermark(watermark, scope: repairScope), "abandonment fixture persists both safety rows")
+            let damagedKeys = damaged == "both"
+                ? ["publication." + repairScope, "training-command-watermark." + repairScope]
+                : [(damaged == "watermark" ? "training-command-watermark." : "publication.") + repairScope]
+            for key in damagedKeys {
+                precondition(sqlite3_exec(failureDB, "UPDATE app_metadata SET payload=x'00' WHERE metadata_key='\(key)'", nil, nil, nil) == SQLITE_OK)
+            }
+            check(safety.abandonPublication(scope: repairScope), "explicit abandonment repairs \(damaged) corruption")
+            let repaired = CacheStore(fileURL: safetyURL)
+            check(!repaired.pendingPublication(scope: repairScope).isFailure &&
+                  (repaired.pendingPublication(scope: repairScope).value ?? nil) == nil,
+                  "abandonment leaves no pending row after reopening")
+            let repairedMark = repaired.trainingPlanCommandWatermark(scope: repairScope)
+            check(!repairedMark.isFailure && repairedMark.value == (damaged == "publication" ? watermark : nil),
+                  "abandonment removes corrupt watermarks and preserves valid confirmed floors")
+        }
+        let rollbackScope = "abandon-rollback"
+        check(safety.savePublication(publication, scope: rollbackScope) &&
+              safety.saveTrainingPlanCommandWatermark(watermark, scope: rollbackScope), "atomic abandonment fixture is durable")
+        precondition(sqlite3_exec(failureDB, """
+            UPDATE app_metadata SET payload=x'00' WHERE metadata_key='training-command-watermark.abandon-rollback';
+            CREATE TRIGGER fail_abandon_watermark BEFORE DELETE ON app_metadata
+            WHEN OLD.metadata_key='training-command-watermark.abandon-rollback'
+            BEGIN SELECT RAISE(ABORT, 'injected'); END;
+            """, nil, nil, nil) == SQLITE_OK)
+        check(!safety.abandonPublication(scope: rollbackScope), "failed watermark repair cannot report a successful abandonment")
+        let rolledBack = CacheStore(fileURL: safetyURL)
+        check((rolledBack.pendingPublication(scope: rollbackScope).value ?? nil)?.operationId == publication.operationId &&
+              rolledBack.trainingPlanCommandWatermark(scope: rollbackScope).isFailure,
+              "failed abandonment rolls back the pending delete and preserves the recovery entry")
+        precondition(sqlite3_exec(failureDB, "DROP TRIGGER fail_abandon_watermark", nil, nil, nil) == SQLITE_OK)
+        check(safety.abandonPublication(scope: rollbackScope), "abandonment succeeds after storage recovers")
+        check(safety.trainingPlanCommandWatermark(scope: "journal-scope").value == watermark &&
+              (safety.pendingPublication(scope: "journal-scope").value ?? nil)?.operationId == publication.operationId,
+              "abandonment never changes another scope's pending row or confirmed floors")
+        check(!brokenCache.abandonPublication(scope: rollbackScope), "unavailable SQLite cannot report abandonment success")
         // 2026-10-15（审查 🟡-C2）：上面那条钉的是 `clearAll()`；"清除缓存"按钮实际走
         // `clear(scope:)` —— 两者都不得删除未决发布账目。这条钉 scope 版，并与模型回归里
         // 替身 `clear` 的对齐改动构成同一事实的两端（替身给反向绿灯曾让这条性质无人守）。

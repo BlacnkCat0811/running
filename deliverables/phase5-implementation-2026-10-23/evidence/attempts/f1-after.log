@@ -1,0 +1,114 @@
+TAP version 13
+# (node:14165) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 1 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 51.860189
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 2 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 29.420552
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 3 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 33.331507
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 4 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 34.437453
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 5 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 47.777634
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 6 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 62.697209
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 7 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 21.302842
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 8 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 235.091994
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 9 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 51.5349
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 10 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 27.529419
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 11 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 25.273216
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 12 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 46.120291
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 13 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 29.443992
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 14 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 28.827243
+  type: 'test'
+  ...
+# Subtest: known business errors keep code/message; internal details never reach the wire
+ok 15 - known business errors keep code/message; internal details never reach the wire
+  ---
+  duration_ms: 2.185402
+  type: 'test'
+  ...
+# Subtest: command route answers a fixed 5xx, never the thrown message
+ok 16 - command route answers a fixed 5xx, never the thrown message
+  ---
+  duration_ms: 161.129896
+  type: 'test'
+  ...
+# Subtest: v2 read route does not echo an unknown exception, but keeps known projection errors
+ok 17 - v2 read route does not echo an unknown exception, but keeps known projection errors
+  ---
+  duration_ms: 13.506285
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2244.717149

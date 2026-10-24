@@ -25,7 +25,7 @@ for name, (text, before, after) in mutants.items():
 PY
 for mutant in forgot-watermark id-only-lease; do
   xcrun swiftc -parse-as-library -disable-sandbox \
-    apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift apps/ios/RAI/NativeFormat.swift \
+    apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift apps/ios/RAI/NativeFormat.swift apps/ios/RAI/TrainingPlanPublisher.swift \
     apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/CalibrationState.swift apps/ios/RAI/UserDataNoticePolicy.swift \
     apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
     apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift apps/ios/RAI/PlanReceiptMatcher.swift \

@@ -1,0 +1,359 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -destination "platform=iOS Simulator,id=91C2D1F3-FB19-4843-B892-1A4F4AAF6D16" -derivedDataPath /Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/test-derived -resultBundlePath /Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/tests.xcresult CODE_SIGNING_ALLOWED=NO "-only-testing:VisualAcceptance/Phase5Acceptance" test
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+
+Writing result bundle at path:
+	/Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/tests.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'VisualAcceptance' in project 'VisualAcceptance' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+2026-10-24 00:42:43.097457+0800 VisualAcceptance-Runner[48868:3145523] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-10-24 00:42:49.038.
+Test Suite 'VisualAcceptance.xctest' started at 2026-10-24 00:42:49.039.
+Test Suite 'Phase5Acceptance' started at 2026-10-24 00:42:49.040.
+Test Case '-[VisualAcceptance.Phase5Acceptance testPreviewCancelConfirmConflictAndRestart]' started.
+    t =     0.01s Start Test at 2026-10-24 00:42:49.054
+    t =     0.09s Set Up
+    t =     0.10s Open app.rai.running.debug
+    t =     0.11s     Launch app.rai.running.debug
+    t =     0.44s         Setting up automation session
+    t =     3.67s         Wait for app.rai.running.debug to idle
+    t =     8.72s Waiting 40.0s for "tab.设置" Button to exist
+    t =     9.78s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =     9.78s         Checking existence of `"tab.设置" Button`
+    t =     9.96s Tap "tab.设置" Button
+    t =     9.96s     Wait for app.rai.running.debug to idle
+    t =     9.98s     Find the "tab.设置" Button
+    t =    10.06s     Check for interrupting elements affecting "tab.设置" Button
+    t =    10.14s     Synthesize event
+    t =    10.51s     Wait for app.rai.running.debug to idle
+    t =    11.45s Waiting 20.0s for Button (First Match) to exist
+    t =    12.49s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    12.49s         Checking existence of `Button (First Match)`
+    t =    12.56s Tap Button (First Match)
+    t =    12.56s     Wait for app.rai.running.debug to idle
+    t =    12.58s     Find the Button (First Match)
+    t =    12.64s     Check for interrupting elements affecting "RAI 服务, 待连接" Button
+    t =    12.72s     Synthesize event
+    t =    13.07s     Wait for app.rai.running.debug to idle
+    t =    13.48s Waiting 15.0s for SecureTextField (First Match) to exist
+    t =    14.51s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =    14.51s         Checking existence of `SecureTextField (First Match)`
+    t =    14.61s Tap SecureTextField (First Match)
+    t =    14.61s     Wait for app.rai.running.debug to idle
+    t =    14.64s     Find the SecureTextField (First Match)
+    t =    14.73s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    14.84s     Synthesize event
+    t =    15.18s     Wait for app.rai.running.debug to idle
+    t =    16.86s Find the "云端部署时填写" SecureTextField
+    t =    17.31s Type 'rai-visua...' into "云端部署时填写" SecureTextField
+    t =    17.31s     Wait for app.rai.running.debug to idle
+    t =    17.32s     Find the "云端部署时填写" SecureTextField
+    t =    17.69s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    17.93s     Synthesize event
+    t =    18.81s     Wait for app.rai.running.debug to idle
+    t =    20.65s Checking existence of `"连接服务" Button`
+    t =    20.85s Tap "连接服务" Button
+    t =    20.85s     Wait for app.rai.running.debug to idle
+    t =    20.86s     Find the "连接服务" Button
+    t =    21.08s     Check for interrupting elements affecting "连接服务" Button
+    t =    21.31s     Synthesize event
+    t =    21.66s     Wait for app.rai.running.debug to idle
+    t =    21.80s Waiting 30.0s for "服务：phase5-validation" StaticText to exist
+    t =    22.80s     Checking `Expect predicate `existsNoRetry == 1` for object "服务：phase5-validation" StaticText`
+    t =    22.81s         Checking existence of `"服务：phase5-validation" StaticText`
+    t =    23.84s Checking existence of `Button (Element at index 0)`
+    t =    24.64s Tap Button (Element at index 0)
+    t =    24.64s     Wait for app.rai.running.debug to idle
+    t =    24.74s     Find the Button (Element at index 0)
+    t =    25.30s     Check for interrupting elements affecting "navigation.back" Button
+    t =    25.64s     Synthesize event
+    t =    26.03s     Wait for app.rai.running.debug to idle
+    t =    28.36s Waiting 15.0s for "tab.今日" Button to exist
+    t =    29.41s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.今日" Button`
+    t =    29.41s         Checking existence of `"tab.今日" Button`
+    t =    29.49s Tap "tab.今日" Button
+    t =    29.49s     Wait for app.rai.running.debug to idle
+    t =    29.50s     Find the "tab.今日" Button
+    t =    29.58s     Check for interrupting elements affecting "tab.今日" Button
+    t =    29.69s     Synthesize event
+    t =    30.03s     Wait for app.rai.running.debug to idle
+    t =    31.06s Waiting 15.0s for "打开训练计划" Button to exist
+    t =    32.11s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    32.11s         Checking existence of `"打开训练计划" Button`
+    t =    32.34s Tap "打开训练计划" Button
+    t =    32.34s     Wait for app.rai.running.debug to idle
+    t =    32.35s     Find the "打开训练计划" Button
+    t =    32.55s     Check for interrupting elements affecting "calendar" Button
+    t =    32.72s     Synthesize event
+    t =    33.07s     Wait for app.rai.running.debug to idle
+    t =    33.87s Waiting 30.0s for "training.commands.open" Button to exist
+    t =    34.91s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.open" Button`
+    t =    34.91s         Checking existence of `"training.commands.open" Button`
+    t =    35.15s Checking existence of `"training.commands.open" Button`
+    t =    35.34s Find the "training.commands.open" Button
+    t =    35.55s Tap "training.commands.open" Button
+    t =    35.55s     Wait for app.rai.running.debug to idle
+    t =    35.57s     Find the "training.commands.open" Button
+    t =    35.76s     Check for interrupting elements affecting "training.commands.open" Button
+    t =    35.95s     Synthesize event
+    t =    36.30s     Wait for app.rai.running.debug to idle
+    t =    37.42s Waiting 10.0s for "training.commands.preview" Button to exist
+    t =    38.47s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.preview" Button`
+    t =    38.47s         Checking existence of `"training.commands.preview" Button`
+    t =    39.05s Waiting 10.0s for "training.commands.date" TextField to exist
+    t =    40.07s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.date" TextField`
+    t =    40.07s         Checking existence of `"training.commands.date" TextField`
+    t =    40.45s Tap "training.commands.date" TextField
+    t =    40.45s     Wait for app.rai.running.debug to idle
+    t =    40.46s     Find the "training.commands.date" TextField
+    t =    40.77s     Check for interrupting elements affecting "training.commands.date" TextField
+    t =    41.04s     Synthesize event
+    t =    41.40s     Wait for app.rai.running.debug to idle
+    t =    42.00s Type '2026-12-20' into "training.commands.date" TextField
+    t =    42.00s     Wait for app.rai.running.debug to idle
+    t =    42.38s     Find the "training.commands.date" TextField
+    t =    43.10s     Check for interrupting elements affecting "training.commands.date" TextField
+    t =    43.97s     Synthesize event
+    t =    44.37s     Wait for app.rai.running.debug to idle
+    t =    45.36s Tap "training.commands.preview" Button
+    t =    45.36s     Wait for app.rai.running.debug to idle
+    t =    45.37s     Find the "training.commands.preview" Button
+    t =    46.30s     Check for interrupting elements affecting "training.commands.preview" Button
+    t =    47.16s     Synthesize event
+    t =    47.50s     Wait for app.rai.running.debug to idle
+    t =    49.11s Waiting 20.0s for "training.commands.confirm" Button to exist
+    t =    50.13s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.confirm" Button`
+    t =    50.13s         Checking existence of `"training.commands.confirm" Button`
+    t =    50.62s Find the Application 'app.rai.running.debug'
+    t =    51.56s Added attachment named 'phase5-preview'
+    t =    51.56s Requesting snapshot of accessibility hierarchy for app with pid 48881
+    t =    57.44s Requesting snapshot of accessibility hierarchy for app with pid 48881
+    t =    58.30s Added attachment named 'phase5-preview-accessibility'
+    t =    58.67s Tap "training.commands.close" Button
+    t =    58.67s     Wait for app.rai.running.debug to idle
+    t =    58.71s     Find the "training.commands.close" Button
+    t =    59.30s     Check for interrupting elements affecting "training.commands.close" Button
+    t =    60.11s     Synthesize event
+    t =    60.60s     Wait for app.rai.running.debug to idle
+    t =    61.60s Waiting 30.0s for "training.commands.open" Button to exist
+    t =    62.66s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.open" Button`
+    t =    62.66s         Checking existence of `"training.commands.open" Button`
+    t =    62.99s Checking existence of `"training.commands.open" Button`
+    t =    63.30s Find the "training.commands.open" Button
+    t =    63.72s Tap "training.commands.open" Button
+    t =    63.72s     Wait for app.rai.running.debug to idle
+    t =    63.75s     Find the "training.commands.open" Button
+    t =    64.49s     Check for interrupting elements affecting "training.commands.open" Button
+    t =    64.86s     Synthesize event
+    t =    65.39s     Wait for app.rai.running.debug to idle
+    t =    66.61s Waiting 10.0s for "training.commands.preview" Button to exist
+    t =    67.68s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.preview" Button`
+    t =    67.68s         Checking existence of `"training.commands.preview" Button`
+    t =    68.26s Tap "training.commands.date" TextField
+    t =    68.26s     Wait for app.rai.running.debug to idle
+    t =    68.28s     Find the "training.commands.date" TextField
+    t =    68.77s     Check for interrupting elements affecting "training.commands.date" TextField
+    t =    69.17s     Synthesize event
+    t =    69.60s     Wait for app.rai.running.debug to idle
+    t =    70.40s Type '2026-12-20' into "training.commands.date" TextField
+    t =    70.40s     Wait for app.rai.running.debug to idle
+    t =    70.75s     Find the "training.commands.date" TextField
+    t =    71.64s     Check for interrupting elements affecting "training.commands.date" TextField
+    t =    72.49s     Synthesize event
+    t =    72.97s     Wait for app.rai.running.debug to idle
+    t =    73.37s Tap "training.commands.preview" Button
+    t =    73.37s     Wait for app.rai.running.debug to idle
+    t =    73.39s     Find the "training.commands.preview" Button
+    t =    74.35s     Check for interrupting elements affecting "training.commands.preview" Button
+    t =    75.14s     Synthesize event
+    t =    75.74s     Wait for app.rai.running.debug to idle
+    t =    77.01s Waiting 20.0s for "training.commands.confirm" Button to exist
+    t =    78.01s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.confirm" Button`
+    t =    78.02s         Checking existence of `"training.commands.confirm" Button`
+    t =    78.35s Tap "training.commands.confirm" Button
+    t =    78.35s     Wait for app.rai.running.debug to idle
+    t =    78.36s     Find the "training.commands.confirm" Button
+    t =    78.76s     Check for interrupting elements affecting "training.commands.confirm" Button
+    t =    79.18s     Synthesize event
+    t =    79.64s     Wait for app.rai.running.debug to idle
+    t =    80.36s Waiting 35.0s for "已保存并刷新。" StaticText to exist
+    t =    81.39s     Checking `Expect predicate `existsNoRetry == 1` for object "已保存并刷新。" StaticText`
+    t =    81.40s         Checking existence of `"已保存并刷新。" StaticText`
+    t =    82.37s         Capturing element debug description
+    t =    83.41s     Checking `Expect predicate `existsNoRetry == 1` for object "已保存并刷新。" StaticText`
+    t =    83.41s         Checking existence of `"已保存并刷新。" StaticText`
+    t =    83.86s Find the Application 'app.rai.running.debug'
+    t =    84.49s Added attachment named 'phase5-committed'
+    t =    84.49s Requesting snapshot of accessibility hierarchy for app with pid 48881
+    t =    88.18s Requesting snapshot of accessibility hierarchy for app with pid 48881
+    t =    89.03s Added attachment named 'phase5-committed-accessibility'
+    t =    89.04s Tap "training.commands.close" Button
+    t =    89.04s     Wait for app.rai.running.debug to idle
+    t =    89.06s     Find the "training.commands.close" Button
+    t =    89.85s     Check for interrupting elements affecting "training.commands.close" Button
+    t =    90.38s     Synthesize event
+    t =    90.82s     Wait for app.rai.running.debug to idle
+    t =    91.57s Waiting 30.0s for "training.commands.open" Button to exist
+    t =    92.61s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.open" Button`
+    t =    92.61s         Checking existence of `"training.commands.open" Button`
+    t =    92.89s Checking existence of `"training.commands.open" Button`
+    t =    93.21s Find the "training.commands.open" Button
+    t =    93.73s Tap "training.commands.open" Button
+    t =    93.73s     Wait for app.rai.running.debug to idle
+    t =    93.74s     Find the "training.commands.open" Button
+    t =    94.07s     Check for interrupting elements affecting "training.commands.open" Button
+    t =    94.33s     Synthesize event
+    t =    94.81s     Wait for app.rai.running.debug to idle
+    t =    95.83s Waiting 10.0s for "training.commands.preview" Button to exist
+    t =    96.86s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.preview" Button`
+    t =    96.86s         Checking existence of `"training.commands.preview" Button`
+    t =    97.49s Tap "training.commands.preview" Button
+    t =    97.49s     Wait for app.rai.running.debug to idle
+    t =    97.55s     Find the "training.commands.preview" Button
+    t =    98.17s     Check for interrupting elements affecting "training.commands.preview" Button
+    t =    98.69s     Synthesize event
+    t =    99.24s     Wait for app.rai.running.debug to idle
+    t =   100.09s Waiting 20.0s for "training.commands.confirm" Button to exist
+    t =   101.11s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.confirm" Button`
+    t =   101.11s         Checking existence of `"training.commands.confirm" Button`
+    t =   101.52s Tap "training.commands.confirm" Button
+    t =   101.52s     Wait for app.rai.running.debug to idle
+    t =   101.53s     Find the "training.commands.confirm" Button
+    t =   102.03s     Check for interrupting elements affecting "training.commands.confirm" Button
+    t =   102.49s     Synthesize event
+    t =   102.91s     Wait for app.rai.running.debug to idle
+    t =   103.54s Waiting 20.0s for "当前状态或候选已变化。草稿仍保留，请重读后重新预览并确认。" StaticText to exist
+    t =   104.58s     Checking `Expect predicate `existsNoRetry == 1` for object "当前状态或候选已变化。草稿仍保留，请重读后重新预览并确认。" StaticText`
+    t =   104.58s         Checking existence of `"当前状态或候选已变化。草稿仍保留，请重读后重新预览并确认。" StaticText`
+    t =   104.86s Find the Application 'app.rai.running.debug'
+    t =   105.44s Added attachment named 'phase5-conflict'
+    t =   105.45s Requesting snapshot of accessibility hierarchy for app with pid 48881
+    t =   108.26s Requesting snapshot of accessibility hierarchy for app with pid 48881
+    t =   108.70s Added attachment named 'phase5-conflict-accessibility'
+    t =   108.71s Terminate app.rai.running.debug:48881
+    t =   109.73s Open app.rai.running.debug
+    t =   109.73s     Launch app.rai.running.debug
+    t =   110.13s         Setting up automation session
+    t =   113.77s         Wait for app.rai.running.debug to idle
+    t =   121.24s Waiting 40.0s for "tab.设置" Button to exist
+    t =   122.26s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =   122.26s         Checking existence of `"tab.设置" Button`
+    t =   123.19s Tap "tab.设置" Button
+    t =   123.19s     Wait for app.rai.running.debug to idle
+    t =   123.26s     Find the "tab.设置" Button
+    t =   123.80s     Check for interrupting elements affecting "tab.设置" Button
+    t =   124.11s     Synthesize event
+    t =   124.57s     Wait for app.rai.running.debug to idle
+    t =   125.67s Waiting 20.0s for Button (First Match) to exist
+    t =   126.73s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =   126.73s         Checking existence of `Button (First Match)`
+    t =   126.78s Tap Button (First Match)
+    t =   126.78s     Wait for app.rai.running.debug to idle
+    t =   126.79s     Find the Button (First Match)
+    t =   126.85s     Check for interrupting elements affecting "RAI 服务, 待连接" Button
+    t =   126.93s     Synthesize event
+    t =   127.35s     Wait for app.rai.running.debug to idle
+    t =   127.95s Waiting 15.0s for SecureTextField (First Match) to exist
+    t =   128.98s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =   128.98s         Checking existence of `SecureTextField (First Match)`
+    t =   129.09s Tap SecureTextField (First Match)
+    t =   129.09s     Wait for app.rai.running.debug to idle
+    t =   129.10s     Find the SecureTextField (First Match)
+    t =   129.20s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =   129.29s     Synthesize event
+    t =   129.67s     Wait for app.rai.running.debug to idle
+    t =   131.04s Find the "云端部署时填写" SecureTextField
+    t =   131.56s Type 'rai-visua...' into "云端部署时填写" SecureTextField
+    t =   131.56s     Wait for app.rai.running.debug to idle
+    t =   131.58s     Find the "云端部署时填写" SecureTextField
+    t =   131.87s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =   132.05s     Synthesize event
+    t =   132.98s     Wait for app.rai.running.debug to idle
+    t =   135.77s Checking existence of `"连接服务" Button`
+    t =   136.01s Tap "连接服务" Button
+    t =   136.01s     Wait for app.rai.running.debug to idle
+    t =   136.02s     Find the "连接服务" Button
+    t =   136.17s     Check for interrupting elements affecting "连接服务" Button
+    t =   136.39s     Synthesize event
+    t =   136.79s     Wait for app.rai.running.debug to idle
+    t =   137.12s Waiting 30.0s for "服务：phase5-validation" StaticText to exist
+    t =   138.17s     Checking `Expect predicate `existsNoRetry == 1` for object "服务：phase5-validation" StaticText`
+    t =   138.18s         Checking existence of `"服务：phase5-validation" StaticText`
+    t =   138.73s Checking existence of `Button (Element at index 0)`
+    t =   138.93s Tap Button (Element at index 0)
+    t =   138.94s     Wait for app.rai.running.debug to idle
+    t =   139.00s     Find the Button (Element at index 0)
+    t =   139.32s     Check for interrupting elements affecting "navigation.back" Button
+    t =   139.52s     Synthesize event
+    t =   140.03s     Wait for app.rai.running.debug to idle
+    t =   141.90s Waiting 15.0s for "tab.今日" Button to exist
+    t =   142.93s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.今日" Button`
+    t =   142.93s         Checking existence of `"tab.今日" Button`
+    t =   143.01s Tap "tab.今日" Button
+    t =   143.01s     Wait for app.rai.running.debug to idle
+    t =   143.04s     Find the "tab.今日" Button
+    t =   143.12s     Check for interrupting elements affecting "tab.今日" Button
+    t =   143.21s     Synthesize event
+    t =   143.61s     Wait for app.rai.running.debug to idle
+    t =   143.88s Waiting 30.0s for "打开训练计划" Button to exist
+    t =   144.93s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =   144.93s         Checking existence of `"打开训练计划" Button`
+    t =   145.15s Tap "打开训练计划" Button
+    t =   145.15s     Wait for app.rai.running.debug to idle
+    t =   145.16s     Find the "打开训练计划" Button
+    t =   145.35s     Check for interrupting elements affecting "calendar" Button
+    t =   145.56s     Synthesize event
+    t =   145.98s     Wait for app.rai.running.debug to idle
+    t =   146.74s Waiting 30.0s for "training.commands.open" Button to exist
+    t =   147.81s     Checking `Expect predicate `existsNoRetry == 1` for object "training.commands.open" Button`
+    t =   147.81s         Checking existence of `"training.commands.open" Button`
+    t =   148.03s Checking existence of `"training.commands.open" Button`
+    t =   148.27s Find the "training.commands.open" Button
+    t =   148.48s Find the Application 'app.rai.running.debug'
+    t =   148.90s Added attachment named 'phase5-restart'
+    t =   148.90s Requesting snapshot of accessibility hierarchy for app with pid 48978
+    t =   150.05s Requesting snapshot of accessibility hierarchy for app with pid 48978
+    t =   150.30s Added attachment named 'phase5-restart-accessibility'
+    t =   150.32s Tear Down
+Test Case '-[VisualAcceptance.Phase5Acceptance testPreviewCancelConfirmConflictAndRestart]' passed (151.091 seconds).
+Test Suite 'Phase5Acceptance' passed at 2026-10-24 00:45:20.145.
+	 Executed 1 test, with 0 failures (0 unexpected) in 151.091 (151.105) seconds
+Test Suite 'VisualAcceptance.xctest' passed at 2026-10-24 00:45:20.146.
+	 Executed 1 test, with 0 failures (0 unexpected) in 151.091 (151.107) seconds
+Test Suite 'Selected tests' passed at 2026-10-24 00:45:20.147.
+	 Executed 1 test, with 0 failures (0 unexpected) in 151.091 (151.109) seconds
+2026-10-24 00:45:20.854 xcodebuild[48828:3144940] [MT] IDETestOperationsObserverDebug: 166.212 elapsed -- Testing started completed.
+2026-10-24 00:45:20.854 xcodebuild[48828:3144940] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-24 00:45:20.854 xcodebuild[48828:3144940] [MT] IDETestOperationsObserverDebug: 166.212 sec, +166.212 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/tests.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

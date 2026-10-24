@@ -65,6 +65,10 @@ UNSORTED_LOOP = (
 # enclosing declaration and its same-file extensions, but not to a sibling type.
 PROBE = """
 
+// The probe only exercises export metadata; this tiny stand-in keeps the
+// progress copy out of the compile graph without changing any exported byte.
+nonisolated enum DirectSyncCopy { static let readingIncrement = "正在读取健康增量" }
+
 // ===================== probe appendix (added by check-export-determinism-live.py) =====================
 // HealthKit validates metadata while the HKWorkout is being built and throws
 // `_HKObjectValidationFailureException` unless HKMetadataKeySyncIdentifier comes
@@ -184,6 +188,15 @@ def build(source_text: str, work: Path) -> Path:
             str(REPO / "apps/ios/RAI/RouteSyncState.swift"),
             str(REPO / "apps/ios/RAI/RouteSyncStateMachine.swift"),
             str(REPO / "apps/ios/RAI/HealthKitRecordCursor.swift"),
+            # 2026-10-23 阶段 5 复核：HealthKitExport.swift 在直连/分页/预算改造后
+            # 直接引用以下类型的定义；清单过期会让 run-visual-tests 的第一步静默失败。
+            str(REPO / "apps/ios/RAI/APIModels.swift"),
+            str(REPO / "apps/ios/RAI/DirectSyncBatchBudget.swift"),
+            str(REPO / "apps/ios/RAI/WorkoutWindowPaging.swift"),
+            str(REPO / "apps/ios/RAI/SyncTaskState.swift"),
+            str(REPO / "apps/ios/RAI/DirectSyncReceiptState.swift"),
+            str(REPO / "apps/ios/RAI/SyncPhase.swift"),
+            str(REPO / "apps/ios/RAI/RouteGpxWriter.swift"),
             str(module),
             "-o", str(binary),
             "-lz",

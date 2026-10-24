@@ -1,0 +1,263 @@
+PASS: September 14 pace display orders fast to slow
+PASS: historical corrupt target is not displayed as a valid range
+PASS: blank target pace is optional
+PASS: finish time parses hours minutes seconds
+PASS: finish time parses minutes seconds
+PASS: invalid finish time is rejected
+PASS: ten-kilometer finish time matches pace
+PASS: half-marathon conversion uses full distance
+PASS: race pace converts minutes and seconds
+PASS: race pace includes API boundaries
+PASS: invalid race pace rejected: 2:29
+PASS: invalid race pace rejected: 15:01
+PASS: invalid race pace rejected: 5:60
+PASS: invalid race pace rejected: 5:3
+PASS: invalid race pace rejected: abc
+PASS: invalid race pace rejected: -5:30
+PASS: invalid race pace rejected: 5.5:30
+PASS: race-only save does not replace weekly plan
+PASS: race target is encoded for persistence
+PASS: race-only save does not replace weekly plan
+PASS: clear emits explicit null instead of omitting race target
+PASS: old API/cache is not mistaken for empty weekly statistics
+PASS: a legacy week payload still decodes with the retired goal keys present
+PASS: new API empty zones remain a valid no-data result
+PASS: native decoder preserves all five weekly statistics from the API
+PASS: recovery state recovered is not pending
+PASS: recovery state reduced is not pending
+PASS: recovery state depleted is not pending
+PASS: recovery state unknown is not pending
+PASS: prediction DTO preserves fatigue adjustment
+PASS: prediction DTO preserves recovery provenance
+PASS: prediction DTO preserves missing readiness
+PASS: heart rate ignores invalid samples and sorts time
+PASS: heart rate time axis fits endpoint without overlap
+PASS: heart rate uses minutes and seconds
+PASS: heart rate matches reference scale
+PASS: empty heart rate has valid scale
+PASS: late filter response cannot replace current list
+PASS: a new workouts request cancels the old URLSession request, not merely discards its result
+PASS: uncached failed filter does not retain another filter's rows
+PASS: failed list exits loading and reports offline
+PASS: detail failure exits spinner with retryable error
+PASS: old server response cannot publish into new server scope
+PASS: clear cache invalidates pending list response
+PASS: cancelled detail does not present a failure
+PASS: late detail cannot replace newly selected workout
+PASS: series failure keeps detail available with explicit feedback
+PASS: opening another workout clears both previous detail and series
+PASS: concurrent plan refreshes both observe the shared completed read
+PASS: a concurrent refreshPlanState reuses the in-flight Task instead of issuing a second plan read
+PASS: a configuration change cancels the in-flight plan read so an old scope can never publish
+PASS: a refresh after the cancelled single-flight task starts a fresh read for the new configuration
+PASS: a queued refreshAll waits out the coalescing window instead of rerunning immediately
+PASS: the coalesced refreshAll runs exactly once after the ~350ms window
+PASS: an all-failure refreshAll leaves reachability to the probe failure threshold
+PASS: the all-panel failure classification and copy stay unchanged
+PASS: race save updates model after server acknowledgement and refresh
+PASS: race save carries editor revision without replacing the plan
+PASS: race save touches only the race target
+PASS: race conflict preserves persisted target and reports failure
+PASS: failed clear does not optimistically erase the target
+PASS: race clear refreshes to persisted empty state
+PASS: real clear request sends explicit JSON null
+PASS: saving training settings succeeds
+PASS: plan save keeps revision conflict protection
+PASS: remaining weekly settings are still editable
+PASS: plan save preserves the stored race target
+PASS: plan save still submits the daily plan
+PASS: old API and cache payloads default to no pending migration
+PASS: pending retirement loads from the API
+PASS: pending retirement survives cache encoding and decoding
+PASS: saving settings cannot clear pending confirmation
+PASS: pending settings save omits even a nonempty daily plan
+PASS: clients cannot write the server-owned migration state
+PASS: training settings remain writable while a rule preview needs confirmation
+PASS: an offline cache does not silently remove the confirmation gate
+AUDIT stale-refresh: saveAcknowledged=true, immediatelyAfterSaveRevision=13, finalRevision=13, raceDisappeared=false
+PASS: older GET cannot overwrite acknowledged PUT or clear the race target
+PASS: partial legacy reads retain editable goals without promoting a stale execution response
+PASS: the session structure survives the round trip
+PASS: an executable day is marked as such
+PASS: the plan revision is carried for conflict messages
+PASS: a plan generation reports success
+PASS: preview exposes rule coach provenance
+PASS: rule coach previews have no language model or prompt metadata
+PASS: a generated plan posts the loaded goals revision
+PASS: preview never confirms implicitly
+PASS: offline confirmation is rejected without discarding the preview
+PASS: confirmation acknowledgement survives stale follow-up reads
+PASS: saved acknowledgement plus old goals exposes saved-awaiting-refresh, not old current controls
+PASS: partial refresh is not reported as failed persistence
+PASS: old read revision cannot satisfy acknowledged confirmation revision
+PASS: manual confirm watermark survives all failed reads and offline restart
+PASS: clear-cache preserves acknowledged execution safety floor
+PASS: matching acknowledged revision refreshes every dependent plan surface
+PASS: a verified matching watch plan is current
+PASS: a changed reminder hour dirties the Watch plan against the hour actually synced
+PASS: read timestamps alone do not dirty device scheduling
+PASS: same goals revision with a newly vetoed prescription needs device update
+PASS: verified withdrawal commits its safety records together
+PASS: a verified Watch withdrawal clears the stale acknowledgement
+PASS: a revision conflict is reported as a failure
+PASS: a revision conflict tells the user to regenerate
+PASS: generation fails closed when the goals revision cannot be read
+PASS: a failed goals read never posts an unlocked generation
+PASS: a failed goals read explains that generation was cancelled safely
+PASS: cancelling while goals load never posts generation
+PASS: switching servers while goals load never posts to the old server
+PASS: switching configurations clears the old plan message
+PASS: an old plan response cannot stop the new configuration's plan loading
+PASS: the owning plan request clears its loading state
+PASS: an old generation cannot stop the new configuration's generation spinner
+PASS: the owning generation request clears its spinner
+PASS: fixture business date is confirmable under the injected clock
+PASS: crossing Shanghai midnight revokes confirmation without changing the payload
+PASS: model rejects a previous-day recommendation
+PASS: an old lock response cannot stop the new configuration's lock spinner
+PASS: the owning lock request clears its spinner
+PASS: a coach plan is labelled as rule generation
+PASS: rule adjustments are still surfaced
+PASS: normal rule generation is never labelled as failure or fallback
+PASS: legacy plans are not relabelled as rule generation
+PASS: manual provenance stays distinct
+PASS: unknown provenance does not pretend to be a rule plan
+PASS: a rewritten plan still names its rule coach
+PASS: an overwrite of stored work is surfaced
+PASS: the rule adjustment is still surfaced
+PASS: the summary stays short instead of listing every warning
+PASS: failed registration retains exact confirmed receipts for foreground retry
+PASS: partial sync registers exactly two verified days, not the unverified day
+PASS: retained journal carries actual exported day IDs and structures
+PASS: foreground retry clears only successfully registered entries
+PASS: empty confirmed set emits no guessed receipts
+PASS: older server wire contract omits new metadata but retains actual export
+PASS: advertised receipt capability sends actual verified UUID/time and stable idempotency key
+PASS: a padded distance parses
+PASS: an empty field means unset, not zero
+PASS: a non-numeric distance does not parse
+PASS: a day may be unset or sit exactly on the cap
+PASS: a day outside 0–80 is rejected
+PASS: drafts seed one text field per stored day
+PASS: a seeded draft parses back to its distance
+PASS: a day with no distance seeds an empty field
+PASS: a week of valid drafts passes
+PASS: one out-of-range draft fails the whole week
+PASS: a missing draft falls back to unset rather than invalid
+PASS: an untouched day keeps its distance
+PASS: an untouched day keeps its prescription
+PASS: a day whose kind changed drops the stale prescription
+PASS: the unchanged distance is still applied
+PASS: a resized day takes the new distance
+PASS: a resized day drops the stale prescription
+PASS: clearing the field unsets the distance
+PASS: unsetting the distance drops the stale prescription
+PASS: calibration 'completed' needs attention == false
+PASS: calibration 'calibrating' needs attention == true
+PASS: calibration 'not_started' needs attention == true
+PASS: calibration 'ready' needs attention == true
+PASS: calibration '' needs attention == true
+PASS: calibration 'nil' needs attention == true
+PASS: lost feedback reply retains durable command
+PASS: feedback preserves all override fields
+PASS: analysis failure cannot turn saved feedback into unsaved
+PASS: uncertain feedback retries reuse the same key
+PASS: successful feedback clears pending command
+PASS: rejected enqueue does not pin the form forever
+PASS: feedback conflict is actionable and preserves draft
+PASS: Applied correction has its own wording
+PASS: Reference conditions say so explicitly
+PASS: Missing weather must not read as no adjustment
+PASS: The two states a reader must never confuse stay distinguishable
+PASS: An unknown status falls to the safe side, never to 'not needed'
+PASS: coach DTO preserves training preferences
+PASS: coach plan survives the offline cache round trip
+PASS: coach acknowledgement remains saved even when dependent reads fail
+PASS: coach write refreshes the matching goals revision
+PASS: a partial refresh is not reported as a failed coach save
+PASS: coach commands carry the editor's CAS revision
+PASS: fitness commands explicitly encode nullable fields required by the API schema
+PASS: coach mutation always releases the shared plan gate
+PASS: A failed today read does not mark successful goals and schedule reads offline
+PASS: a partial legacy schedule remains a reference, never current execution when today fails
+PASS: a coach reply from the old server cannot publish into the new scope
+PASS: obsolete coach requests release only their own spinner
+PASS: the coach acknowledgement establishes the display revision even when every dependent read fails
+PASS: a saved coach acknowledgement survives an offline restart independently of the old goals cache
+PASS: older goal and workout caches cannot masquerade as the acknowledged coach revision
+PASS: an offline paused-coach retry restores connectivity and the acknowledged state
+PASS: paused-coach retry repairs dependent reads and clears the partial-refresh error
+PASS: paused-coach retry remains read-only and does not resume the plan
+PASS: a newer coach read cannot be undone by older dependent snapshots
+PASS: stale dependent reads keep the retry error visible and cannot enable today's training
+PASS: goals: coherent safety fixtures contain real today revision
+PASS: goals: acknowledgement survives failed dependent reads
+PASS: goals: offline restart cannot expose old v12 executable cache
+PASS: goals: independent quarantine survives a failed SQLite acknowledgement
+PASS: goals: online coherent confirmation repairs persistence and execution
+PASS: goals: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: snapshot lease invalidates structure, not merely revision changes
+PASS: snapshot lease invalidates timezone, not merely revision changes
+PASS: snapshot lease invalidates hour, not merely revision changes
+PASS: snapshot lease invalidates completed, not merely revision changes
+PASS: snapshot lease invalidates midnight, not merely revision changes
+PASS: snapshot lease invalidates token, not merely revision changes
+PASS: shared coordinator registers partial confirmed day, never calls it full coverage
+PASS: ledger stores actual confirmed coverage and separate server registration
+PASS: same-scope ordinary refresh preserves this session's actual partial system verification
+PASS: a changed effective plan makes a partial persisted ledger stale, not partially current
+PASS: partial operation after restart remains interrupted, never becomes current verification
+PASS: same-revision mid-schedule mutation uses targeted cleanup in shared coordinator
+PASS: serial coordinator rejects next operation until old cleanup completes
+PASS: effective change during server receipt registration withdraws all of this operation's submitted IDs
+PASS: superseded withdrawn days are not queued for later registration or retained as verified current
+PASS: offline restart with no current plan still supports explicit withdrawal
+PASS: scope switch does not carry A's revision or verification into B
+PASS: goals: coherent safety fixtures contain real today revision
+PASS: goals: acknowledgement survives failed dependent reads
+PASS: goals: failed durable write is visible and execution is quarantined
+PASS: goals: offline restart cannot expose old v12 executable cache
+PASS: goals: independent quarantine survives a failed SQLite acknowledgement
+PASS: goals: online coherent confirmation repairs persistence and execution
+PASS: goals: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: lock: coherent safety fixtures contain real today revision
+PASS: lock: acknowledgement survives failed dependent reads
+PASS: lock: offline restart cannot expose old v12 executable cache
+PASS: lock: independent quarantine survives a failed SQLite acknowledgement
+PASS: lock: online coherent confirmation repairs persistence and execution
+PASS: lock: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: lock: coherent safety fixtures contain real today revision
+PASS: lock: acknowledgement survives failed dependent reads
+PASS: lock: failed durable write is visible and execution is quarantined
+PASS: lock: offline restart cannot expose old v12 executable cache
+PASS: lock: independent quarantine survives a failed SQLite acknowledgement
+PASS: lock: online coherent confirmation repairs persistence and execution
+PASS: lock: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: coach: coherent safety fixtures contain real today revision
+PASS: coach: acknowledgement survives failed dependent reads
+PASS: coach: offline restart cannot expose old v12 executable cache
+PASS: coach: independent quarantine survives a failed SQLite acknowledgement
+PASS: coach: online coherent confirmation repairs persistence and execution
+PASS: coach: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: coach: coherent safety fixtures contain real today revision
+PASS: coach: acknowledgement survives failed dependmain/ModelRegression.swift:197: Precondition failed: no handshake must not authorize legacy plan writes
+apps/ios/tests/run-model-tests.sh: line 42: 14413 Illegal instruction: 4  "$tmp/model-tests"

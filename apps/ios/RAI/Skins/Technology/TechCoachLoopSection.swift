@@ -113,12 +113,19 @@ struct TechCoachLoopSection: View {
                                 Text("参考未校准，不是达标概率。").font(.caption2).foregroundStyle(TechColor.muted)
                             } else { Text("目标差距：\(gap.status)").font(.caption).foregroundStyle(TechColor.muted) }
                         }
-                        Button("按最新事实刷新训练安排") { Task { await native.changeCoachLoop(action: "refresh") } }.disabled(disabled || settings.status != "active")
+                        // 只有统一命令面板**实际可编辑**时才隐藏旧生命周期入口；
+                        // 仅握手协商成功但统一读失败/陈旧时，旧 coach-loop 路径仍是
+                        // 用户唯一可用的暂停/恢复/刷新入口。
+                        if !native.canEditTrainingPlanV2 {
+                            Button("按最新事实刷新训练安排") { Task { await native.changeCoachLoop(action: "refresh") } }.disabled(disabled || settings.status != "active")
+                        }
                         Button("训练偏好 / 确认当前规则") { sheet = .preferences }.disabled(disabled || settings.status == "ended")
                         Button("训练前感受（可跳过）") { sheet = .feedback }.disabled(disabled)
-                        Button(settings.status == "paused" ? "恢复训练" : "暂停训练") {
-                            prepareStop(settings.status == "paused" ? "resume" : "pause", loop)
-                        }.disabled(disabled || settings.status == "ended")
+                        if !native.canEditTrainingPlanV2 {
+                            Button(settings.status == "paused" ? "恢复训练" : "暂停训练") {
+                                prepareStop(settings.status == "paused" ? "resume" : "pause", loop)
+                            }.disabled(disabled || settings.status == "ended")
+                        }
                         Button("结束当前模式", role: .destructive) { prepareStop("end", loop) }.disabled(disabled || settings.status == "ended")
                         if settings.status == "ended" { Button("创建新的训练模式") { sheet = .preferences }.disabled(disabled) }
                         Button("更新预测摘要（独立命令）") { Task { await native.refreshCoachPrediction() } }.disabled(disabled)

@@ -1,0 +1,9 @@
+{"command":["npm","run","check:training-plan-single-writer"],"startedAt":"2026-10-23T16:58:58.036Z","concurrency":null,"node":"v22.23.2","platform":"darwin","arch":"x64"}
+
+> rai-running-intelligence@0.1.0 check:training-plan-single-writer
+> node scripts/check-training-plan-single-writer.mjs
+
+single-writer 结构门禁：R1–R5 / 生产源文件 508 / 测试文件 146（R1/R2/R4 豁免）/ 违规 0
+single-writer 结构门禁通过。
+
+{"name":"single-writer","command":["npm","run","check:training-plan-single-writer"],"startedAt":"2026-10-23T16:58:58.036Z","completedAt":"2026-10-23T16:58:59.094Z","exitCode":0,"signal":null,"concurrency":null}

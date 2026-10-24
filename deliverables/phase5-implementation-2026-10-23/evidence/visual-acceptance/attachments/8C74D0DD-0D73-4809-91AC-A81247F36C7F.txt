@@ -1,0 +1,147 @@
+Attributes: Application, 0x10d505f20, pid: 48978, label: 'RAI'
+Element subtree:
+ →Application, 0x10d505f20, pid: 48978, label: 'RAI'
+    Window (Main), 0x10d51b480, {{0.0, 0.0}, {428.0, 926.0}}
+      Other, 0x10d519ec0, {{0.0, 0.0}, {428.0, 926.0}}
+        Other, 0x10d519aa0, {{0.0, 0.0}, {428.0, 926.0}}
+          Other, 0x10d51b8a0, {{0.0, 0.0}, {428.0, 926.0}}
+            Other, 0x10d51a2e0, {{0.0, 0.0}, {428.0, 926.0}}
+              Other, 0x10d519680, {{0.0, 0.0}, {428.0, 836.0}}
+                NavigationBar, 0x10d51bcc0, {{0.0, 47.0}, {428.0, 54.0}}, identifier: '训练'
+                  Other, 0x10d52f1a0, {{24.0, 51.0}, {44.0, 36.0}}, identifier: 'navigation.back', label: '返回'
+                    Other, 0x10d51f190, {{24.0, 51.0}, {44.0, 36.0}}
+                      Button, 0x10d51f2b0, {{24.0, 47.0}, {44.0, 44.0}}, identifier: 'navigation.back', label: '返回'
+                  StaticText, 0x10d51f3d0, {{197.0, 58.7}, {34.0, 20.7}}, label: '训练'
+                Other, 0x10d51f4f0, {{0.0, 0.0}, {428.0, 836.0}}
+                  Other, 0x10d51f610, {{0.0, 0.0}, {428.0, 836.0}}
+                    Other, 0x10d51f730, {{0.0, 0.0}, {428.0, 836.0}}
+                      Other, 0x10d51f850, {{0.0, 0.0}, {428.0, 836.0}}
+                        Other, 0x10d51f970, {{0.0, 101.0}, {428.0, 735.0}}
+                        ScrollView, 0x10d51fa90, {{0.0, 0.0}, {428.0, 836.0}}
+                          Other, 0x10d51fbb0, {{0.0, 0.0}, {428.0, 836.0}}
+                            Other, 0x10d51fcd0, {{0.0, 0.0}, {428.0, 155.8}}
+                          Other, 0x10d51fdf0, {{0.0, 0.0}, {428.0, 836.0}}
+                          Other, 0x10d51ff10, {{0.0, 101.0}, {428.0, 1758.3}}
+                            StaticText, 0x10d520030, {{36.0, 133.0}, {42.0, 26.3}}, label: '训练'
+                            StaticText, 0x10d520150, {{356.0, 142.7}, {36.0, 14.3}}, label: '已暂停'
+                            StaticText, 0x10d520270, {{36.0, 167.3}, {118.0, 20.3}}, label: '训练模式已暂停'
+                            StaticText, 0x10d520390, {{36.0, 195.7}, {139.3, 15.7}}, label: '比赛备赛 · 距比赛 57 天'
+                            StaticText, 0x10d5204b0, {{37.3, 219.3}, {295.7, 14.3}}, label: '训练事实新鲜度尚未评估：本版本不据此下发执行。'
+                            StaticText, 0x10d5205d0, {{38.0, 241.7}, {343.7, 30.3}}, label: '设备（手表）排程协调尚未完成：先核验/撤回旧排期，再下发新安排。'
+                            Button, 0x10d5206f0, {{36.0, 320.0}, {195.7, 20.3}}, identifier: 'training.commands.open', label: '编辑目标 / 暂停恢复 / 刷新'
+                            StaticText, 0x10d520810, {{36.0, 388.4}, {136.0, 20.3}}, label: '未来 7 日训练意图'
+                            StaticText, 0x10d520930, {{332.3, 391.4}, {59.7, 14.3}}, label: '已发布计划'
+                            StaticText, 0x10d520a50, {{36.0, 422.7}, {356.0, 29.7}}, label: '周六, 10月24日, 轻松跑, 5.0 km'
+                              StaticText, 0x10d520b70, {{36.0, 422.7}, {24.0, 14.3}}, label: '周六'
+                              StaticText, 0x10d520c90, {{36.0, 439.1}, {49.3, 13.3}}, label: '10月24日'
+                              StaticText, 0x10d520db0, {{120.0, 428.6}, {44.7, 18.0}}, label: '轻松跑'
+                              StaticText, 0x10d520ed0, {{352.7, 430.4}, {39.3, 14.3}}, label: '5.0 km'
+                            StaticText, 0x10d520ff0, {{36.0, 470.4}, {356.0, 29.7}}, label: '周日, 10月25日, 休息, --'
+                              StaticText, 0x10d521110, {{36.0, 470.4}, {24.0, 14.3}}, label: '周日'
+                              StaticText, 0x10d521230, {{36.0, 486.7}, {49.0, 13.3}}, label: '10月25日'
+                              StaticText, 0x10d521350, {{120.0, 476.2}, {30.0, 18.0}}, label: '休息'
+                              StaticText, 0x10d521470, {{380.7, 478.1}, {11.3, 14.3}}, label: '--'
+                            StaticText, 0x10d521590, {{36.0, 518.1}, {356.0, 29.7}}, label: '周一, 10月26日, 轻松跑, 5.0 km'
+                              StaticText, 0x10d5216b0, {{36.0, 518.1}, {24.0, 14.3}}, label: '周一'
+                              StaticText, 0x10d5217d0, {{36.0, 534.4}, {49.3, 13.3}}, label: '10月26日'
+                              StaticText, 0x10d5218f0, {{120.0, 523.9}, {44.7, 18.0}}, label: '轻松跑'
+                              StaticText, 0x10d521a10, {{352.7, 525.7}, {39.3, 14.3}}, label: '5.0 km'
+                            StaticText, 0x10d521b30, {{36.0, 565.7}, {356.0, 29.7}}, label: '周二, 10月27日, 休息, --'
+                              StaticText, 0x10d521c50, {{36.0, 565.7}, {24.0, 14.3}}, label: '周二'
+                              StaticText, 0x10d521d70, {{36.0, 582.1}, {48.7, 13.3}}, label: '10月27日'
+                              StaticText, 0x10d521e90, {{120.0, 571.6}, {30.0, 18.0}}, label: '休息'
+                              StaticText, 0x10d521fb0, {{380.7, 573.4}, {11.3, 14.3}}, label: '--'
+                            StaticText, 0x10d5220d0, {{36.0, 613.4}, {356.0, 29.7}}, label: '周三, 10月28日, 休息, --'
+                              StaticText, 0x10d5221f0, {{36.0, 613.4}, {24.0, 14.3}}, label: '周三'
+                              StaticText, 0x10d522310, {{36.0, 629.7}, {49.3, 13.3}}, label: '10月28日'
+                              StaticText, 0x10d522430, {{120.0, 619.2}, {30.0, 18.0}}, label: '休息'
+                              StaticText, 0x10d522550, {{380.7, 621.1}, {11.3, 14.3}}, label: '--'
+                            StaticText, 0x10d522670, {{36.0, 661.1}, {356.0, 29.7}}, label: '周四, 10月29日, 休息, --'
+                              StaticText, 0x10d522790, {{36.0, 661.1}, {24.0, 14.3}}, label: '周四'
+                              StaticText, 0x10d5228b0, {{36.0, 677.4}, {49.3, 13.3}}, label: '10月29日'
+                              StaticText, 0x10d5229d0, {{120.0, 666.9}, {30.0, 18.0}}, label: '休息'
+                              StaticText, 0x10d522af0, {{380.7, 668.7}, {11.3, 14.3}}, label: '--'
+                            StaticText, 0x10d522c10, {{36.0, 708.7}, {356.0, 29.7}}, label: '周五, 10月30日, 休息, --'
+                              StaticText, 0x10d522d30, {{36.0, 708.7}, {24.0, 14.3}}, label: '周五'
+                              StaticText, 0x10d522e50, {{36.0, 725.1}, {49.3, 13.3}}, label: '10月30日'
+                              StaticText, 0x10d522f70, {{120.0, 714.6}, {30.0, 18.0}}, label: '休息'
+                              StaticText, 0x10d523090, {{380.7, 716.4}, {11.3, 14.3}}, label: '--'
+                            StaticText, 0x10d5231b0, {{36.0, 752.4}, {350.0, 26.3}}, label: '这里只是已发布的意图；今天能否执行由执行快照与设备协调决定，两者不会互相代替。'
+                            StaticText, 0x10d5232d0, {{36.0, 826.7}, {67.7, 20.3}}, label: '本周回顾'
+                            StaticText, 0x10d5233f0, {{308.3, 829.7}, {83.7, 14.3}}, label: '观测与意图分开'
+                            StaticText, 0x10d523510, {{36.0, 858.1}, {87.7, 14.3}}, label: '周一 · 10月19日'
+                            StaticText, 0x10d523630, {{131.7, 858.1}, {24.0, 14.3}}, label: '休息'
+                            StaticText, 0x10d523750, {{271.3, 858.6}, {120.7, 13.3}}, label: '未排课，也未观测到训练'
+                            StaticText, 0x10d523870, {{36.0, 874.4}, {55.0, 13.3}}, label: '未安排训练'
+                            StaticText, 0x10d523990, {{36.0, 901.7}, {89.3, 14.3}}, label: '周二 · 10月20日'
+                            StaticText, 0x10d523ab0, {{133.3, 901.7}, {24.0, 14.3}}, label: '休息'
+                            StaticText, 0x10d523bd0, {{271.3, 902.2}, {120.7, 13.3}}, label: '未排课，也未观测到训练'
+                            StaticText, 0x10d523cf0, {{36.0, 918.1}, {55.0, 13.3}}, label: '未安排训练'
+                            StaticText, 0x10d523f60, {{36.0, 945.4}, {87.3, 14.3}}, label: '周三 · 10月21日'
+                            StaticText, 0x10d524080, {{131.3, 945.4}, {24.0, 14.3}}, label: '休息'
+                            StaticText, 0x10d5241a0, {{271.3, 945.9}, {120.7, 13.3}}, label: '未排课，也未观测到训练'
+                            StaticText, 0x10d5242c0, {{36.0, 961.7}, {55.0, 13.3}}, label: '未安排训练'
+                            StaticText, 0x10d5243e0, {{36.0, 989.1}, {89.0, 14.3}}, label: '周四 · 10月22日'
+                            StaticText, 0x10d524500, {{133.0, 989.1}, {24.0, 14.3}}, label: '休息'
+                            StaticText, 0x10d524620, {{271.3, 989.6}, {120.7, 13.3}}, label: '未排课，也未观测到训练'
+                            StaticText, 0x10d524740, {{36.0, 1005.4}, {55.0, 13.3}}, label: '未安排训练'
+                            StaticText, 0x10d524860, {{36.0, 1032.7}, {89.3, 14.3}}, label: '周五 · 10月23日'
+                            StaticText, 0x10d524980, {{133.3, 1032.7}, {24.0, 14.3}}, label: '休息'
+                            StaticText, 0x10d524aa0, {{271.3, 1033.2}, {120.7, 13.3}}, label: '未排课，也未观测到训练'
+                            StaticText, 0x10d524bc0, {{36.0, 1049.1}, {55.0, 13.3}}, label: '未安排训练'
+                            StaticText, 0x10d524ce0, {{36.0, 1113.4}, {168.0, 20.3}}, identifier: 'coach.loop', label: '每日自适应 · 持续训练'
+                            StaticText, 0x10d524e00, {{36.0, 1145.7}, {345.7, 30.3}}, identifier: 'coach.loop', label: '尚未配置训练模式。配置一次即可：有比赛目标时按比赛备赛，否则按持续训练；旧系统排期会先核验／撤回。'
+                            Button, 0x10d524f20, {{36.0, 1188.0}, {283.3, 20.3}}, identifier: 'coach.loop', label: '配置训练模式（持续训练 / 比赛备赛）'
+                            Button, 0x10d525040, {{36.0, 1220.3}, {151.7, 20.3}}, identifier: 'coach.loop', label: '重新读取（不改课）'
+                            Button, 0x10d523e10, {{36.0, 1252.7}, {168.7, 20.3}}, identifier: 'coach.loop', label: '确认上次反馈保存结果'
+                            StaticText, 0x10d525380, {{36.0, 1321.1}, {67.7, 20.3}}, label: '比赛目标'
+                            StaticText, 0x10d5254a0, {{344.0, 1324.1}, {48.0, 14.3}}, label: '比赛备赛'
+                            StaticText, 0x10d5255c0, {{36.0, 1349.4}, {220.3, 20.3}}, label: '10 公里 · 2026-12-20 · 完赛'
+                            StaticText, 0x10d5256e0, {{36.0, 1377.7}, {236.0, 14.3}}, label: '备赛窗口：8 周 · 准备度正常 · 距比赛 57 天'
+                            StaticText, 0x10d525800, {{36.0, 1400.1}, {349.7, 26.3}}, label: '比赛目标在同一个配置里修改（模式选“比赛备赛”），不另开一份独立的目标编辑器；准备度不是目标成绩达成概率。'
+                            Button, 0x10d525920, {{36.0, 1434.3}, {114.3, 18.0}}, identifier: 'race-goal-edit', label: '调整比赛目标'
+                              Image, 0x10d525a40, {{38.3, 1436.0}, {13.3, 14.7}}, identifier: 'flag.checkered', label: 'flag.checkered'
+                              StaticText, 0x10d525b60, {{36.0, 1434.3}, {114.3, 18.0}}, label: '调整比赛目标'
+                            StaticText, 0x10d525c80, {{22.0, 1487.9}, {158.7, 18.5}}, identifier: 'training.manual-plan.retired', label: '手动课表与本周安排'
+                            StaticText, 0x10d525da0, {{20.0, 1511.6}, {317.3, 13.3}}, identifier: 'training.manual-plan.retired', label: '该编辑方式尚未适配当前服务；本版只展示服务端已发布的安排。'
+                            StaticText, 0x10d525ec0, {{36.0, 1560.4}, {67.7, 20.3}}, label: '手表课表'
+                            StaticText, 0x10d525fe0, {{356.0, 1563.4}, {36.0, 14.3}}, label: '未核验'
+                            StaticText, 0x10d526100, {{36.0, 1592.7}, {345.7, 30.3}}, label: '核验的是本机系统训练日程，不代表配对手表已收到；请在手表确认实际可见。'
+                            StaticText, 0x10d526220, {{36.0, 1635.1}, {345.7, 30.3}}, label: '旧模型课表的未来安排已停用，请重新预览规则课表。手表上的旧排期不会自动撤回，请手动同步以撤回或替换。'
+                            StaticText, 0x10d526340, {{36.0, 1677.4}, {65.7, 13.3}}, label: '规则教练生成'
+                            Button, 0x10d526460, {{36.0, 1702.7}, {356.0, 52.0}}, label: '未来 7 日系统排期（含今天） · v4'
+                              StaticText, 0x10d526580, {{36.0, 1702.7}, {356.0, 52.0}}, label: '未来 7 日系统排期（含今天） · v4'
+                              Image, 0x10d5266a0, {{384.3, 1722.7}, {7.0, 12.0}}, identifier: 'collapsed'
+                            Button, 0x10d5267c0, {{36.0, 1766.7}, {152.7, 20.3}}, identifier: 'plan.watch.clear', label: '撤回 RAI 系统旧排期'
+                            Button, 0x10d5268e0, {{36.0, 1799.0}, {151.7, 20.3}}, label: '准备脱敏计划诊断包'
+                          Other, 0x10d526a00, {{395.0, 101.0}, {30.0, 735.0}}, label: 'Vertical scroll bar, 3 pages', value: 0%
+                            Other, 0x10d526b20, {{422.0, 104.0}, {3.0, 321.0}}
+                          Other, 0x10d526c40, {{395.0, 101.0}, {30.0, 735.0}}, label: 'Vertical scroll bar, 3 pages', value: 0%
+                            Other, 0x10d526d60, {{422.0, 104.0}, {3.0, 321.0}}
+                Other, 0x10d526e80, {{0.0, 0.0}, {428.0, 836.0}}
+                  Other, 0x10d526fa0, {{0.0, 0.0}, {428.0, 836.0}}
+              Button, 0x10d5270c0, {{12.0, 844.0}, {80.7, 48.0}}, identifier: 'tab.今日', label: '今日', Selected
+                Image, 0x10d5271e0, {{38.7, 847.3}, {27.0, 23.3}}, identifier: 'house.fill', label: 'Home'
+                StaticText, 0x10d527300, {{41.3, 876.3}, {22.0, 13.3}}, label: '今日'
+              Button, 0x10d527420, {{92.7, 844.0}, {81.0, 48.0}}, identifier: 'tab.训练', label: '训练'
+                Image, 0x10d527540, {{123.7, 846.7}, {19.0, 24.7}}, identifier: 'figure.run', label: 'Running'
+                StaticText, 0x10d527660, {{122.2, 876.3}, {22.0, 13.3}}, label: '训练'
+              Button, 0x10d527780, {{173.7, 844.0}, {80.7, 48.0}}, identifier: 'tab.统计', label: '统计'
+                Image, 0x10d5278a0, {{199.7, 848.7}, {28.7, 20.3}}, identifier: 'chart.bar.fill', label: 'Chart Column'
+                StaticText, 0x10d5279c0, {{203.0, 876.3}, {22.0, 13.3}}, label: '统计'
+              Button, 0x10d527ae0, {{254.3, 844.0}, {81.0, 48.0}}, identifier: 'tab.趋势', label: '趋势'
+                Image, 0x10d527c00, {{283.0, 848.3}, {24.0, 21.0}}, identifier: 'chart.line.uptrend.xyaxis', label: 'Chart Line'
+                StaticText, 0x10d527d20, {{283.8, 876.3}, {22.0, 13.3}}, label: '趋势'
+              Button, 0x10d527e40, {{335.3, 844.0}, {80.7, 48.0}}, identifier: 'tab.设置', label: '设置'
+                Image, 0x10d527f60, {{364.0, 847.3}, {23.3, 23.3}}, identifier: 'gearshape.fill', label: 'gearshape.fill'
+                StaticText, 0x10d528080, {{364.7, 876.3}, {22.0, 13.3}}, label: '设置'
+    Window, 0x10d5281a0, {{0.0, 0.0}, {428.0, 926.0}}
+      Other, 0x10d5282c0, {{0.0, 0.0}, {428.0, 926.0}}
+        Other, 0x10d5283e0, {{0.0, 0.0}, {428.0, 926.0}}
+Path to element:
+ →Application, 0x10d505f20, pid: 48978, label: 'RAI'
+Query chain:
+ →Find: Application 'app.rai.running.debug'
+  Output: {
+    Application, 0x10d236ff0, pid: 48978, label: 'RAI'
+  }

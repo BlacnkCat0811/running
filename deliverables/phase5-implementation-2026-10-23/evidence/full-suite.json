@@ -1,0 +1,19 @@
+{
+  "command": [
+    "node",
+    "scripts/run-tests.mjs"
+  ],
+  "cwd": "/Users/ta/running",
+  "env": {
+    "RAI_TEST_CONCURRENCY": "2"
+  },
+  "node": "v22.23.2",
+  "startedAt": "2026-10-24T00:09:31+08:00",
+  "completedAt": "2026-10-24T00:34:32.906190+08:00",
+  "exitCode": 0,
+  "tests": 2548,
+  "pass": 2535,
+  "fail": 0,
+  "skipped": 13,
+  "log": "full-suite.log"
+}

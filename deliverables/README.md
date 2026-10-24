@@ -4,7 +4,16 @@
 现行说明统一从 [项目 README](../README.md) 进入；现行状态、未决问题与已收尾批次指针只维护
 [项目审查](../docs/PROJECT_REVIEW.md)。
 
-## 1. 当前证据（2026-10-23）
+## 1. 当前证据（2026-10-24）
+
+- [阶段 5 训练计划 v2 实施与验收](phase5-implementation-2026-10-23/PHASE5_REPORT.md)：
+  5A 主要修复与 5B R1–R4 审计修复已落地；当轮回归与边界见 [2026-10-24 修复记录](phase5-implementation-2026-10-23/PHASE5_AUDIT_FIXES_2026-10-24.md)。
+  T26 Simulator 部分通过、T27 配对设备未执行、T30 交错升级/回滚部分；生产能力仍关闭。分册：[入口矩阵](phase5-implementation-2026-10-23/ENTRY_MATRIX.md)、
+  [命令状态](phase5-implementation-2026-10-23/COMMAND_STATE_MATRIX.md)、
+  [所有权矩阵](phase5-implementation-2026-10-23/OWNERSHIP_MATRIX.md)、`phase5-implementation-2026-10-23/evidence/`。
+- [阶段 5 训练计划 v2 审查与实施方案](phase5-review-2026-10-23/PHASE5_REVIEW_AND_IMPLEMENTATION_PLAN.md)：
+  方案交付；31 项定向 API 回归通过，隔离复现命令 HTTP handler 的幂等重放缺陷。该报告是实施前基线，
+  实施结果以上一行的阶段 5 报告为准。
 
 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
 [项目审查](../docs/PROJECT_REVIEW.md) 后删除。

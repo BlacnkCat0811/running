@@ -168,7 +168,7 @@ Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 
 
 | 脚本 | 额外前置 | 用途 |
 |---|---|---|
-| `bash apps/ios/tests/run-visual-tests.sh` | 已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库） | 模拟器交互/截图验收，不替代真机观感（`-only-testing:…` 可只跑单个用例） |
+| `bash apps/ios/tests/run-visual-tests.sh` | 已启动的模拟器 + `apps/ios/Pods`；脚本在临时目录生成合成 fixture 并迁移，不读取 `var/rai.sqlite` | 模拟器交互/截图验收；默认跑阶段 5 的 `Phase5Acceptance`，也可用 `-only-testing:…` 选历史用例 |
 | `bash apps/ios/tests/run-coordinate-sdk-check.sh` | `apps/ios/Pods`（先 `pod install`）+ 已启动模拟器 | 用高德 SDK 对拍本地 GCJ02 转换 |
 
 在**会拒绝嵌套沙箱**的外层环境（如加固沙箱）里跑 `run-visual-tests.sh`，要额外传
@@ -208,12 +208,13 @@ App 通过现有 ZIP/XML 导入接口上传。后台同步由三个机制承担�
 [IOS_NATIVE_PLAN_SCHEDULING](IOS_NATIVE_PLAN_SCHEDULING.md)。旧「跑步教练」独立编辑器已随
 `/v1/mobile/run-coach` 退役（410），不要再按旧流程排查。
 
-⚠️ 训练页仍保留「手动课表与本周安排」入口，但它的保存/预览/确认调用的是**已退役的旧写路由**
-（`PUT /v1/mobile/goals`、`POST /v1/mobile/workout-plan/preview`、`POST /v1/mobile/workout-plan/confirm`），
-在当前构建上会收到 `410 legacy_surface_retired`。这是**已知缺口 AR-1**（[PROJECT_REVIEW](PROJECT_REVIEW.md)），
-不是用户操作错误；需要调整周计划时以训练页的 v2 配置命令为准，修复前不要重试旧保存。
+✅ 阶段 5（D20.2）起，训练页的「手动课表与本周安排」是**只读说明**，不再调用旧写路由；
+需要调整配置时使用统一命令面板的四动作或独立 refresh，旧保存入口不再出现。
 
-暂停或结束后，应显式点“撤回 RAI 系统旧排期”并检查同步结果，不能把服务端状态变更当成设备已清空。模拟器用例 15/16 覆盖教练生命周期、大字体和目标时间计划；运行时可设 `RAI_VISUAL_DATABASE` 指向隔离验收数据库，不使用真实健康数据也能验证创建流程。
+暂停或结束后，应显式点“撤回 RAI 系统旧排期”并检查同步结果，不能把服务端状态变更当成设备已清空。
+模拟器默认用例 `Phase5Acceptance` 覆盖 v2 预览、取消、确认、冲突与重启；历史用例 15/16 仍可用
+`-only-testing:` 选择。脚本只在临时目录生成合成 fixture，不读取个人 `var/rai.sqlite`，也不接受
+`RAI_VISUAL_DATABASE` 覆盖。
 
 | 现象 | 处理 |
 | --- | --- |
@@ -221,7 +222,7 @@ App 通过现有 ZIP/XML 导入接口上传。后台同步由三个机制承担�
 | 无法连接 | 确认桥接网络、服务监听地址、手机与主机路由和证书 |
 | 页面可见但数据过期 | 展开首页「数据状态」横幅的「数据覆盖明细」，分别看三件事：**同步状态**（`sync.status`：`正常`/`尚未同步`/`同步失败`）、**训练数据截至**（`latestDataDate`）、**最近健康样本**（`coverage.latestHealthSampleAt`）。只有 `同步失败` 才需要重新同步 HealthKit；「尚未同步」表示这台设备还没跑成过一次刷新 |
 | 横幅写「今天没有恢复监测记录」 | 预期结果，不是故障：没戴表的夜晚属于**覆盖缺口**，只减少一份判断依据，不构成负面判断，也不再阻断锁定安排。要让今天纳入恢复数据，同步一次含昨夜记录的 Apple Health 导出即可 |
-| 手动课表保存/预览/确认返回 `410 legacy_surface_retired` | 已知缺口（AR-1）：当前构建的手动课表入口仍调用已退役的旧写路由。这不是数据损坏；改用训练页的 v2 配置（模式/比赛目标），不要重试旧保存 |
+| 手动课表入口只读 | 阶段 5（D20.2）的预期行为：本版不提供逐日手动保存；使用统一配置的四动作或独立 refresh。恢复手动编辑需先交付 §4.2 的原子合同扩展 |
 | 训练详情没有底图 | 先确认已同意隐私说明（设置 → 地图底图）；再确认 `pod install` 打印了「已注入高德 Key」，Key 已绑本 App Bundle ID |
 | 同步中断 | 再次打开 App，任务会从本机 `sync.sqlite` 和保留的 ZIP 恢复 |
 | 模拟器上「同步未完成」 | 预期结果：模拟器包没有 HealthKit entitlement、Health 库也没有样本（见上文「模拟器验收不到健康同步」）；到真机按「首次连接」授权后验收 |

@@ -25,6 +25,7 @@ private struct TechUnifiedTrainingView: View {
     @Environment(NativeAppModel.self) private var native
     @State private var showingPreferences = false
     @State private var showingLock = false
+    @State private var showingCommands = false
 
     private var state: TrainingPlanUnifiedView { native.trainingPlanUnifiedView }
     private var businessDate: String? {
@@ -35,6 +36,12 @@ private struct TechUnifiedTrainingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 stateHeader
+                // 只有协商到统一读合同的服务才显示 v2 命令入口；老服务继续用
+                // TechRunCoachView 自己的既有协议，不能让“未启用训练编辑”的
+                // 文案冒充旧服务的真实可用性。
+                if native.handshake?.trainingPlanContractVersion == 2 || native.hasPendingPlanPublication {
+                    commandPanel
+                }
                 if !state.weekDays.isEmpty { weekPanel }
                 reviewPanel
                 TechCoachLoopSection(context: .page)
@@ -77,7 +84,28 @@ private struct TechUnifiedTrainingView: View {
             }
         }
         .sheet(isPresented: $showingLock) { TechLockSheet() }
-        .onChange(of: native.feedbackSessionID) { _, _ in showingPreferences = false; showingLock = false }
+        .sheet(isPresented: $showingCommands) { TechTrainingCommandSheet() }
+        .onChange(of: native.feedbackSessionID) { _, _ in showingPreferences = false; showingLock = false; showingCommands = false }
+    }
+
+    private var commandPanel: some View {
+        TechPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                Button("编辑目标 / 暂停恢复 / 刷新") { showingCommands = true }
+                    .disabled(!native.canEditTrainingPlanV2)
+                    .accessibilityIdentifier("training.commands.open")
+                if !native.v2CommandCapability {
+                    Text("当前服务未启用训练编辑，已发布安排仍可只读查看。")
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                }
+                if let message = native.trainingPlanPublisher.message { Text(message).font(.footnote) }
+                if native.hasPendingPlanPublication {
+                    Button("查询原操作结果") { Task { _ = await native.resolvePlanPublication() } }
+                        .disabled(native.isPlanBusy || native.isOffline)
+                        .accessibilityIdentifier("training.commands.recover")
+                }
+            }
+        }
     }
 
     // MARK: - 统一状态
@@ -236,6 +264,10 @@ private struct TechUnifiedTrainingView: View {
         TechPanel {
             VStack(alignment: .leading, spacing: 10) {
                 TechSectionHeader(title: "未来 7 日训练意图", trailing: "已发布计划")
+                if state.weekDays.count < 7 {
+                    Text("当前窗口已发布 \(state.weekDays.count)/7 天；未列出的日期尚未生成，不代表休息。")
+                        .font(.caption).foregroundStyle(TechColor.yellow)
+                }
                 ForEach(state.weekDays, id: \.localDate) { day in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -325,13 +357,20 @@ private struct TechUnifiedTrainingView: View {
                     .font(.caption2).foregroundStyle(TechColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
-                    showingPreferences = true
+                    if native.canEditTrainingPlanV2 {
+                        showingCommands = true
+                    } else {
+                        // v2 命令尚未真正可用（未宣告，或统一状态陈旧/失败）时
+                        // 保留既有 coach-loop 配置入口；不能只剩一个禁用的按钮。
+                        showingPreferences = true
+                    }
                 } label: {
                     Label(state.mode == "race" ? "调整比赛目标" : "设置比赛目标",
                         systemImage: "flag.checkered")
                         .font(.subheadline.weight(.semibold))
                 }
-                .disabled(native.coachLoop == nil || native.isOffline || native.isPlanBusy)
+                .disabled(!native.canEditTrainingPlanV2
+                    && !(native.coachLoop != nil && !native.isOffline && !native.isPlanBusy))
                 .accessibilityIdentifier("race-goal-edit")
             }
         }
@@ -339,11 +378,10 @@ private struct TechUnifiedTrainingView: View {
 
     // MARK: - 手动覆盖 / 提示
 
-    /// PR-02（2026-10-21）：手动周课表编辑器仍通过已退役的
-    /// `/v1/mobile/goals`、`/workout-plan/preview|confirm|generate` 写入。
-    /// 服务端对这些 method/path 一律 410，继续展示入口只会把用户送进
-    /// "重试永远失败"的循环。这里保留只读说明，等 PR-04 的 v2 Publisher 接管后
-    /// 再恢复；旧服务器页面（TechRunCoachView）不在本页，不受影响。
+    /// 阶段 5（D20.2）：v2 现有四动作与 refresh 不表达“逐日手动课表”，
+    /// 因此这里保持只读说明，不把 refresh 冒充“保存我编辑的逐日课表”。
+    /// 旧服务器页面（TechRunCoachView）仍按自己的旧协议工作，不在本页。
+    /// 若以后要恢复编辑，必须先交付 §4.2 的独立原子合同扩展。
     private var manualPlanEntry: some View {
         VStack(alignment: .leading, spacing: 4) {
             Label("手动课表与本周安排", systemImage: "calendar.badge.clock")
@@ -382,6 +420,117 @@ private struct TechUnifiedTrainingView: View {
                 Label("离线时只能显示上次参考状态；联网后才能确认安排。", systemImage: "wifi.slash")
                     .font(.footnote).foregroundStyle(TechColor.yellow)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct TechTrainingCommandSheet: View {
+    @Environment(NativeAppModel.self) private var native
+    @Environment(\.dismiss) private var dismiss
+    @State private var action = TrainingPlanCommandAction.setRaceGoal
+    @State private var date = ""
+    @State private var distance = "10"
+    @State private var goal = "finish"
+    @State private var minutes = "60"
+    @State private var refreshConfirmation = false
+    @State private var previewTask: Task<Void, Never>?
+    private var publisher: TrainingPlanPublisher { native.trainingPlanPublisher }
+    private var draftKey: String { [action.rawValue, date, distance, goal, minutes].joined(separator: "|") }
+    private var raceGoalDraft: TrainingPlanRaceGoalDraft? {
+        action == .setRaceGoal ? .init(date: date, distanceKm: Double(distance) ?? 0, goal: goal,
+            targetTimeSeconds: goal == "time" ? (Double(minutes) ?? 0) * 60 : nil) : nil
+    }
+    private var validDraft: Bool {
+        action != .setRaceGoal || (!date.isEmpty && (Double(distance) ?? 0) > 0 && (goal != "time" || (Double(minutes) ?? 0) > 0))
+    }
+    private var canRefresh: Bool {
+        native.canEditTrainingPlanV2 && native.trainingPlanStore.unified?.runState == "active"
+    }
+    private static func numberText(_ value: Double) -> String {
+        value.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(value)) : String(value)
+    }
+    private func discardPreview() {
+        previewTask?.cancel(); previewTask = nil
+        publisher.cancelPreview()
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("训练配置") {
+                    Picker("操作", selection: $action) {
+                        Text("设置赛事目标").tag(TrainingPlanCommandAction.setRaceGoal)
+                        Text("清除赛事目标").tag(TrainingPlanCommandAction.clearRaceGoal)
+                        Text("暂停训练").tag(TrainingPlanCommandAction.pause)
+                        Text("恢复训练").tag(TrainingPlanCommandAction.resume)
+                    }.accessibilityIdentifier("training.commands.action")
+                    Button("关闭编辑") { discardPreview(); dismiss() }
+                        .accessibilityIdentifier("training.commands.close")
+                    if action == .setRaceGoal {
+                        TextField("比赛日期 YYYY-MM-DD", text: $date).accessibilityIdentifier("training.commands.date")
+                        TextField("距离 km", text: $distance).keyboardType(.decimalPad)
+                        Picker("目标", selection: $goal) { Text("完赛").tag("finish"); Text("成绩").tag("time") }
+                        if goal == "time" { TextField("目标分钟", text: $minutes).keyboardType(.decimalPad) }
+                    }
+                    Button("预览配置变化") {
+                        let requestedAction = action
+                        let requestedGoal = raceGoalDraft
+                        previewTask = Task {
+                            _ = await native.previewTrainingPlanCommand(requestedAction, raceGoal: requestedGoal)
+                        }
+                    }.disabled(!validDraft || !native.canEditTrainingPlanV2)
+                        .accessibilityIdentifier("training.commands.preview")
+                }.disabled(publisher.isBusy)
+                if let preview = publisher.preview {
+                    Section("配置预览") {
+                        Text("\(preview.before.mode) / \(preview.before.runState) → \(preview.after.mode) / \(preview.after.runState)")
+                        if let target = preview.after.raceGoal {
+                            let targetText = target.goal == "time" && target.targetTimeSeconds != nil
+                                ? "成绩 \(Int((target.targetTimeSeconds ?? 0) / 60)) 分" : "完赛"
+                            Text("\(target.date) · \(nativeKilometers(target.distanceKm)) · \(targetText)")
+                        }
+                        Text("这是配置变化预览。确认时按最新事实生成计划；不会自动同步手表。")
+                        ForEach(preview.warnings, id: \.self) { Text($0).font(.footnote) }
+                        Text("预览有效至 \(preview.expiresAt)").font(.caption)
+                        Button("确认这次配置变化") { Task { _ = await native.confirmTrainingPlanCommand(action: action, raceGoal: raceGoalDraft) } }
+                            .disabled(!native.canEditTrainingPlanV2 || !publisher.matchesPreview(action: action, raceGoal: raceGoalDraft) || native.isPlanBusy)
+                            .accessibilityIdentifier("training.commands.confirm")
+                    }
+                }
+                Section("按当前配置刷新") {
+                    Text("重新生成会更新未来安排，需要单独确认。")
+                    Button("刷新训练安排") { refreshConfirmation = true }
+                        .disabled(!canRefresh)
+                        .accessibilityIdentifier("training.commands.refresh")
+                    if native.trainingPlanStore.unified?.runState != "active" {
+                        Text("训练已暂停或结束；恢复后才能重新生成安排。")
+                            .font(.caption).foregroundStyle(TechColor.muted)
+                    }
+                }
+                if let message = publisher.message { Section { Text(message) } }
+                if native.hasPendingPlanPublication {
+                    Button("查询原操作结果") { Task { _ = await native.resolvePlanPublication() } }
+                        .disabled(native.isPlanBusy || native.isOffline)
+                }
+                Button("重新读取当前状态") { Task { _ = await native.refreshUnifiedTrainingPlan() } }.disabled(native.isPlanBusy)
+            }
+            .navigationTitle("训练配置")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { discardPreview(); dismiss() } } }
+            .confirmationDialog("确认按最新事实重新生成？", isPresented: $refreshConfirmation) {
+                Button("确认刷新") { Task { _ = await native.confirmTrainingPlanCommand(refresh: true) } }
+            }
+            .onChange(of: draftKey) { _, _ in discardPreview() }
+            .onDisappear { discardPreview() }
+            .onChange(of: native.feedbackSessionID) { _, _ in publisher.invalidate(); dismiss() }
+            .onAppear {
+                discardPreview()
+                guard let existing = native.trainingPlanStore.unified?.raceGoal else { return }
+                date = existing.date
+                distance = Self.numberText(existing.distanceKm)
+                goal = existing.goal
+                if existing.goal == "time", let seconds = existing.targetTimeSeconds {
+                    minutes = Self.numberText(seconds / 60)
+                }
             }
         }
     }

@@ -1,0 +1,157 @@
+TAP version 13
+# (node:15871) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+not ok 1 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 5304.147577
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/phase5-training-plan.test.ts:1:1978'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"code":"FST_ERR_VALIDATION","message":"body/operationId must match format \"uuid\""}
+    
+    400 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 400
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/phase5-training-plan.test.ts:82:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# (node:15933) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 2 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 46.549478
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 3 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 25.656415
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 4 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 29.500871
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 5 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 32.889579
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 6 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 27.104749
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 7 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 54.698888
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 8 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 21.316302
+  type: 'test'
+  ...
+# Subtest: generation latch: facts changed during generation cannot be stamped with the new version
+ok 9 - generation latch: facts changed during generation cannot be stamped with the new version
+  ---
+  duration_ms: 27.926397
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 10 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 237.013887
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 11 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 44.58302
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals: all business rows roll back and lane can retry
+ok 12 - publication abort at mobile_goals: all business rows roll back and lane can retry
+  ---
+  duration_ms: 36.000407
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals_history: all business rows roll back and lane can retry
+ok 13 - publication abort at mobile_goals_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 30.475608
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state: all business rows roll back and lane can retry
+ok 14 - publication abort at mobile_training_state: all business rows roll back and lane can retry
+  ---
+  duration_ms: 35.883818
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+ok 15 - publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 42.939591
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+ok 16 - publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+  ---
+  duration_ms: 42.277975
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 17 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 71.733315
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 18 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 38.466268
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 19 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 58.480124
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 20 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 38.1861
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 21 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 34.082845
+  type: 'test'
+  ...
+1..21
+# tests 21
+# suites 0
+# pass 20
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8030.988278

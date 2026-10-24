@@ -1,16 +1,35 @@
 import Foundation
 
 @MainActor final class ServerSession {
-    var serverURL: URL? = URL(string: "https://\(UUID().uuidString).invalid")
+    /// A legacy transport only becomes writable after its handshake is known. The
+    /// stub keeps that fact across `serverURL` changes so tests that simulate a
+    /// reconfiguration still describe an explicitly negotiated old server, not
+    /// an unknown one (unknown servers must fail closed).
+    private var legacyHandshake = false
+    var serverURL: URL? = URL(string: "https://\(UUID().uuidString).invalid") {
+        didSet { if legacyHandshake { installLegacyHandshake() } }
+    }
     var apiToken = ""
     var isReachable = false
     var lastError: String?
     func probe() async {}
+    static func legacy() -> ServerSession {
+        let value = ServerSession()
+        value.legacyHandshake = true
+        value.installLegacyHandshake()
+        return value
+    }
+    private func installLegacyHandshake() {
+        guard let url = serverURL else { return }
+        CacheStore.saveHandshake(.init(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+            syncProtocolVersion: 1, apiVersion: "v1"), baseURL: url)
+    }
 }
 struct CachedValue<Value> { let value: Value; let cachedAt: Date }
-@MainActor final class CacheStore: PlanSchedulePersistence {
+@MainActor final class CacheStore: PlanSchedulePersistence, TrainingPlanCommandPersistence {
     private static var entries: [String: Data] = [:]
     static var failPlanWrites = false
+    static var failPublicationWrites = false
     static var failWrites = false
     /// 与真实 `CacheStore` 的嵌套类型同名（`CacheStore.swift:13`）：模型代码读
     /// `cache.lastReadIssue` 做损坏自愈判断时，两套实现必须能互换编译。
@@ -53,6 +72,18 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
         return true
     }
     func planRevisionFloor(scope: String) -> Int? { Self.acknowledgements[scope]?.revision ?? 0 }
+    func trainingPlanCommandWatermark(scope: String) -> CacheReadResult<TrainingPlanCommandWatermark> {
+        guard let data = Self.entries[scope + "v2-watermark"] else { return .notFound }
+        guard let value = try? JSONDecoder().decode(TrainingPlanCommandWatermark.self, from: data) else { return .corruptPayload }
+        return value.schemaVersion == 1 ? .value(value) : .unsupportedSchema
+    }
+    func saveTrainingPlanCommandWatermark(_ value: TrainingPlanCommandWatermark, scope: String) -> Bool {
+        let previous = trainingPlanCommandWatermark(scope: scope)
+        guard !Self.failPlanWrites, !previous.isFailure,
+              value.stateRevision >= (previous.value?.stateRevision ?? 0),
+              value.goalsRevision >= (previous.value?.goalsRevision ?? 0) else { return false }
+        return write(value, scope: scope, key: "v2-watermark") != nil
+    }
     func pendingPlanReceipts(scope: String) -> [PlanSyncReceipt] { read([PlanSyncReceipt].self, scope: scope, key: "receipt-journal")?.value ?? [] }
     func pendingPlanReceiptsResult(scope: String) -> CacheReadResult<[PlanSyncReceipt]> { .value(pendingPlanReceipts(scope: scope)) }
     func savePendingPlanReceipts(_ receipts: [PlanSyncReceipt], scope: String) -> Bool { write(receipts, scope: scope, key: "receipt-journal") != nil }
@@ -67,7 +98,7 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
     /// 而发布/回执/台账整条行为链都跑在替身上 ⇒ 给出一批与生产相反的绿灯
     /// （🔴-1 的"清除缓存解不开楔死"因此没有任何断言会变红）。
     func clear(scope: String) {
-        let persistent = ["publication", "coach-feedback", "receipt-journal"]
+        let persistent = ["publication", "v2-watermark", "coach-feedback", "receipt-journal"]
         Self.entries = Self.entries.filter { entry in
             guard entry.key.hasPrefix(scope) else { return true }
             return persistent.contains { entry.key.hasPrefix(scope + $0) }
@@ -75,6 +106,16 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
     }
     /// 单条删除（真实 `CacheStore.remove` 的替身；自愈路径调用）。
     func remove(scope: String, key: String) { Self.entries.removeValue(forKey: scope + key) }
+    /// Match the real atomic abandonment: preserve valid confirmation floors,
+    /// and remove an unreadable watermark only through the explicit repair path.
+    func abandonPublication(scope: String) -> Bool {
+        guard !Self.failWrites else { return false }
+        if trainingPlanCommandWatermark(scope: scope).isFailure {
+            Self.entries.removeValue(forKey: scope + "v2-watermark")
+        }
+        Self.entries.removeValue(forKey: scope + "publication")
+        return true
+    }
     func scheduleJournalResult() -> CacheReadResult<PlanScheduleOperationJournal> { Self.scheduleJournal.map { .value($0) } ?? .notFound }
     func saveScheduleJournal(_ value: PlanScheduleOperationJournal) -> Bool { Self.scheduleJournal = value; return !Self.failWrites }
     func commitScheduleResult(_ operation: PlanScheduleOperationJournal, ledger: PlanWatchLedger?, receipts: [PlanSyncReceipt]) -> Bool {
@@ -89,7 +130,10 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
         return savePendingPlanReceipts(pending, scope: operation.scope)
     }
     func pendingPublication(scope: String) -> CacheReadResult<PendingPlanPublication?> { .value(read(PendingPlanPublication.self, scope: scope, key: "publication")?.value) }
-    func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool { write(value, scope: scope, key: "publication") != nil }
+    func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool {
+        if Self.failPublicationWrites && value != nil { return false }
+        return write(value, scope: scope, key: "publication") != nil
+    }
     func pendingCoachFeedback(scope: String) -> CacheReadResult<CoachLoopFeedbackCommand?> { .value(read(CoachLoopFeedbackCommand?.self, scope: scope, key: "coach-feedback")?.value ?? nil) }
     func saveCoachFeedback(_ value: CoachLoopFeedbackCommand?, scope: String) -> Bool { write(value, scope: scope, key: "coach-feedback") != nil }
 }
@@ -190,7 +234,7 @@ final class RequestLog: @unchecked Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubProtocol.self]
         let api = RaiAPIClient(session: URLSession(configuration: config))
-        let session = ServerSession()
+        let session = ServerSession.legacy()
         var modelNow = ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")!
         let model = NativeAppModel(session: session, api: api, now: { modelNow })
         func check(_ condition: @autoclosure () -> Bool, _ name: String) {
@@ -442,7 +486,7 @@ final class RequestLog: @unchecked Sendable {
                 default: return (503, "{}", 0)
                 }
             }
-            let flightModel = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let flightModel = NativeAppModel(session: ServerSession.legacy(), api: api, now: { modelNow })
             let firstRead = Task { await flightModel.refreshPlanState() }
             try await Task.sleep(for: .milliseconds(30))
             let reusedRead = await flightModel.refreshPlanState()
@@ -456,7 +500,7 @@ final class RequestLog: @unchecked Sendable {
 
             // 配置变化必须取消在飞读：旧 scope 的结果不得写回新配置，也不得让下一次
             // 刷新复用一个已作废的读。
-            let staleModel = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let staleModel = NativeAppModel(session: ServerSession.legacy(), api: api, now: { modelNow })
             let staleRead = Task { await staleModel.refreshPlanState() }
             try await Task.sleep(for: .milliseconds(30))
             staleModel.session.serverURL = URL(string: "https://rai-ios-lane-new-server.invalid")
@@ -495,7 +539,7 @@ final class RequestLog: @unchecked Sendable {
                 default: return (503, "{}", 0)
                 }
             }
-            let coalesceModel = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let coalesceModel = NativeAppModel(session: ServerSession.legacy(), api: api, now: { modelNow })
             let firstRefresh = Task { await coalesceModel.refreshAll(requestHandshake: false) }
             for _ in 0..<100 {
                 if coalesceLog.count(method: "GET", path: "/v1/mobile/goals") > 0 { break }
@@ -516,7 +560,7 @@ final class RequestLog: @unchecked Sendable {
             // 2026-10-18（事故复盘 P0-3）：一次 refreshAll 全失败**不**把 isReachable 打回
             // false。失败判定交给 ServerSession 的 3 次探针阈值；否则一次慢刷新就会把探针
             // 间隔从 30s 收紧到 ~5s、禁用同步入口，等于制造更多请求。
-            let offlineSession = ServerSession()
+            let offlineSession = ServerSession.legacy()
             offlineSession.isReachable = true
             let offlineModel = NativeAppModel(session: offlineSession, api: api, now: { modelNow })
             StubProtocol.handler = { _ in (503, "{}", 0) }
@@ -528,7 +572,7 @@ final class RequestLog: @unchecked Sendable {
         }
 
         // Race editor uses the real API client/model, including refresh and conflict recovery.
-        let raceModel = NativeAppModel(session: ServerSession(), api: api)
+        let raceModel = NativeAppModel(session: ServerSession.legacy(), api: api)
         let raceRequests = RequestLog()
         func raceHandler(_ goals: String, putStatus: Int = 200) {
             StubProtocol.handler = { request in
@@ -571,7 +615,7 @@ final class RequestLog: @unchecked Sendable {
         check(clearBody["raceTarget"] is NSNull, "real clear request sends explicit JSON null")
 
         do {
-            let planModel = NativeAppModel(session: ServerSession(), api: api)
+            let planModel = NativeAppModel(session: ServerSession.legacy(), api: api)
             let storedPlanJSON = savedRaceJSON
             raceHandler(storedPlanJSON)
             await planModel.refreshAll(requestHandshake: false)
@@ -611,7 +655,7 @@ final class RequestLog: @unchecked Sendable {
             let pendingJSON = goalsJSON
                 .replacingOccurrences(of: "\"weekPlanAudit\":null", with: "\"weekPlanAudit\":null,\"weekPlanReplanRequired\":true")
                 .replacingOccurrences(of: "\"weekPlan\":[]", with: "\"weekPlan\":[{\"localDate\":\"2026-09-18\",\"kind\":\"easy\",\"distanceKm\":8}]")
-            let pendingModel = NativeAppModel(session: ServerSession(), api: api)
+            let pendingModel = NativeAppModel(session: ServerSession.legacy(), api: api)
             raceHandler(pendingJSON)
             await pendingModel.refreshAll(requestHandshake: false)
             check(pendingModel.goals?.weekPlanReplanRequired == true, "pending retirement loads from the API")
@@ -634,7 +678,7 @@ final class RequestLog: @unchecked Sendable {
 
         // Regression: an older full refresh must not undo an acknowledged save.
         do {
-            let concurrentModel = NativeAppModel(session: ServerSession(), api: api)
+            let concurrentModel = NativeAppModel(session: ServerSession.legacy(), api: api)
             raceHandler(goalsJSON)
             await concurrentModel.refreshAll(requestHandshake: false)
             let auditRequests = RequestLog()
@@ -947,7 +991,7 @@ final class RequestLog: @unchecked Sendable {
             let fake = FakeWorkoutScheduler(); fake.silentDates = ["2026-10-10"]
             let outcome = await PlanWatchScheduling.sync(scheduler: fake, plan: receiptPlan, completedDates: [], hour: 8,
                 now: ISO8601DateFormatter().date(from: "2026-10-08T00:00:00Z")!, journal: FakePlanScheduleStorage.journal(), isCurrent: { true })
-            let receiptSession = ServerSession()
+            let receiptSession = ServerSession.legacy()
             let receiptModel = NativeAppModel(session: receiptSession, api: api)
             let log = RequestLog()
             StubProtocol.handler = { request in
@@ -966,7 +1010,7 @@ final class RequestLog: @unchecked Sendable {
             check(log.count(method: "POST", path: "/v1/mobile/workout-plan/synced") == 4, "empty confirmed set emits no guessed receipts")
             let body = try JSONSerialization.jsonObject(with: log.lastBody(method: "POST", path: "/v1/mobile/workout-plan/synced")!) as! [String: Any]
             check(body["workoutID"] == nil && body["idempotencyKey"] == nil && body["structure"] != nil, "older server wire contract omits new metadata but retains actual export")
-            let modernSession = ServerSession()
+            let modernSession = ServerSession.legacy()
             CacheStore.saveHandshake(RaiHandshake(serverId: "fixture-server", athleteId: "fixture-athlete",
                 datasetEpoch: "fixture-epoch", syncProtocolVersion: 1, apiVersion: "v1", planReceiptMetadata: true),
                 baseURL: modernSession.serverURL!)
@@ -1078,7 +1122,7 @@ final class RequestLog: @unchecked Sendable {
         }
 
         // Feedback uses the real HTTP client and model. Lost acknowledgements retain the key and payload.
-        let feedbackModel = NativeAppModel(session: ServerSession(), api: api)
+        let feedbackModel = NativeAppModel(session: ServerSession.legacy(), api: api)
         let feedbackInput = try JSONDecoder().decode(NativeWorkoutFeedbackInput.self, from: Data("""
         {"trainingSessionId":"feedback-run","expectedRevision":0,"eligibilityOverride":"exclude","statisticsParticipation":"include",
          "sessionType":"race","performanceProtocol":"five_k_time_trial","rpe":7,"conditionTags":["hot"],"note":"draft"}
@@ -1108,7 +1152,7 @@ final class RequestLog: @unchecked Sendable {
         check(retried.idempotencyKey == firstPayload.idempotencyKey, "uncertain feedback retries reuse the same key")
         check(feedbackModel.pendingFeedback(for: "feedback-run") == nil, "successful feedback clears pending command")
 
-        let rejectedModel = NativeAppModel(session: ServerSession(), api: api)
+        let rejectedModel = NativeAppModel(session: ServerSession.legacy(), api: api)
         StubProtocol.handler = { _ in (400, "{\"code\":\"request_error\",\"message\":\"invalid feedback\"}", 0) }
         if case .failed = await rejectedModel.saveFeedback(feedbackInput) {} else { preconditionFailure("rejected enqueue must unlock editing") }
         check(rejectedModel.pendingFeedback(for: "feedback-run") == nil, "rejected enqueue does not pin the form forever")
@@ -1147,7 +1191,7 @@ final class RequestLog: @unchecked Sendable {
          "weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,
          "runCoach":\(revision == 1 ? "null" : coachPlanJSON),"updatedAt":"2026-09-16T01:00:00Z"}
         """ }
-        let coachSession = ServerSession()
+        let coachSession = ServerSession.legacy()
         let coachModel = NativeAppModel(session: coachSession, api: api)
         let coachLog = RequestLog()
         StubProtocol.handler = { request in
@@ -1192,7 +1236,7 @@ final class RequestLog: @unchecked Sendable {
         check(!obsoleteCoachSaved, "a coach reply from the old server cannot publish into the new scope")
         check(!coachModel.isUpdatingRunCoach, "obsolete coach requests release only their own spinner")
 
-        let partialCoachSession = ServerSession()
+        let partialCoachSession = ServerSession.legacy()
         let partialCoachLog = RequestLog()
         let partialCoachModel = NativeAppModel(session: partialCoachSession, api: api)
         StubProtocol.handler = { request in
@@ -1259,7 +1303,7 @@ final class RequestLog: @unchecked Sendable {
         // All four durable write paths, including a failed acknowledgement store.
         for action in ["goals", "lock", "coach", "confirm"] {
             for persistenceFails in [false, true] {
-                let isolatedSession = ServerSession()
+                let isolatedSession = ServerSession.legacy()
                 var clock = ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")!
                 let isolated = NativeAppModel(session: isolatedSession, api: api, now: { clock })
                 let oldPlan = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16", "2026-09-17"]))
@@ -1478,7 +1522,7 @@ final class RequestLog: @unchecked Sendable {
         }
 
         do {
-            let publicationSession = ServerSession()
+            let publicationSession = ServerSession.legacy()
             let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let initial = try PlanTestFixtures.json(PlanTestFixtures.state())
             let published = try PlanTestFixtures.state(revision: 13)
@@ -1530,7 +1574,7 @@ final class RequestLog: @unchecked Sendable {
             // 旧文案会在收到 410 后仍提示"发布结果尚未确认"，把用户留在一个
             // 永远不会成功的重试循环里；未知 410 码同样不得自动重试。
             CacheStore.resetScheduleSafety()
-            let retireSession = ServerSession()
+            let retireSession = ServerSession.legacy()
             let retireClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let retireState = try PlanTestFixtures.json(PlanTestFixtures.state())
             let retireCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete",
@@ -1577,6 +1621,121 @@ final class RequestLog: @unchecked Sendable {
         }
 
         do {
+            CacheStore.resetScheduleSafety()
+            let commandSession = ServerSession()
+            let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let commandModel = NativeAppModel(session: commandSession, api: api, now: { clock })
+            let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, trainingPlanContractVersion: 2,
+                trainingPlanCommandContractVersion: 2, planPublicationContractVersion: 1, planReceiptContractVersion: 2))
+            let before = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let after = try PlanTestFixtures.json(PlanTestFixtures.state(revision: 13, empty: true))
+            let beforeUnified = try PlanTestFixtures.json(PlanTestFixtures.unified())
+            let afterUnified = try PlanTestFixtures.json(PlanTestFixtures.unified(stateRevision: 3, goalsRevision: 13, runState: "paused"))
+            let summary = "{\"mode\":\"coach\",\"modeReason\":\"no_race_goal\",\"daysToRace\":null,\"runState\":\"active\",\"admission\":\"ready\",\"raceGoal\":null}"
+            let preview = "{\"contractVersion\":2,\"candidateId\":\"candidate:2026-10-09T04:02:00Z\",\"expiresAt\":\"2026-10-09T04:02:00Z\",\"expectedStateRevision\":2,\"before\":\(summary),\"after\":\(summary),\"warnings\":[]}"
+            let commandLog = RequestLog()
+            var committed = false
+            var failReads = false
+            func result(_ id: String) -> String {
+                "{\"contractVersion\":2,\"operationId\":\"\(id)\",\"stateRevision\":3,\"goalsRevision\":13,\"warnings\":[]}"
+            }
+            StubProtocol.handler = { request in
+                commandLog.record(request)
+                let path = request.url!.path
+                if path == "/v1/handshake" { return (200, capabilities, 0) }
+                if path == "/v1/mobile/training-plan-state" {
+                    if failReads { return (503, "{}", 0) }
+                    if request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" {
+                        return (200, committed ? afterUnified : beforeUnified, 0)
+                    }
+                    return (200, committed ? after : before, 0)
+                }
+                if path.hasSuffix("/commands/preview") { return (200, preview, 0) }
+                if path == "/v1/mobile/training-plan/commands" {
+                    let data = commandLog.lastBody(method: "POST", path: path)!
+                    let envelope = try! JSONDecoder().decode(TrainingPlanRefreshRequest.self, from: data)
+                    committed = true; failReads = true
+                    return (200, result(envelope.operationId), 0)
+                }
+                if path.contains("/plan-operations/") {
+                    let id = request.url!.lastPathComponent
+                    return (200, "{\"status\":\"committed\",\"operationId\":\"\(id)\",\"result\":\(result(id))}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            await commandModel.bootstrap()
+            _ = await commandModel.refreshUnifiedTrainingPlan()
+            check(commandModel.canEditTrainingPlanV2, "fixture: v2 editing requires fresh negotiated reads")
+            let firstPreviewAccepted = await commandModel.previewTrainingPlanCommand(.pause)
+            check(firstPreviewAccepted, "fixture: preview belongs to the old editor action")
+            let mismatchedDraft = await commandModel.confirmTrainingPlanCommand(action: .resume)
+            check(!mismatchedDraft && !commandModel.hasPendingPlanPublication && commandModel.trainingPlanPublisher.preview == nil &&
+                  commandLog.count(method: "POST", path: "/v1/mobile/training-plan/commands") == 0 && commandModel.canEditTrainingPlanV2,
+                  "confirming a changed editor draft cannot submit the previous action or invalidate current reads")
+            let firstPreview = await commandModel.previewTrainingPlanCommand(.pause)
+            check(firstPreview, "v2 preview reaches the production publisher through the model")
+            CacheStore.failPublicationWrites = true
+            let unsent = await commandModel.confirmTrainingPlanCommand()
+            CacheStore.failPublicationWrites = false
+            check(!unsent && !commandModel.hasPendingPlanPublication && commandModel.canEditTrainingPlanV2 &&
+                  commandLog.count(method: "POST", path: "/v1/mobile/training-plan/commands") == 0,
+                  "an unsent storage failure restores reads and leaves the same session editable without a pending row")
+            let secondPreview = await commandModel.previewTrainingPlanCommand(.pause)
+            check(secondPreview && commandLog.count(method: "POST", path: "/v1/mobile/training-plan/commands") == 0,
+                  "repairing storage still requires a fresh preview and explicit confirmation")
+            let awaitingRead = await commandModel.confirmTrainingPlanCommand()
+            check(!awaitingRead && commandModel.hasPendingPlanPublication && commandModel.trainingPlanPublisher.phase == .committedAwaitingRead,
+                  "a committed command whose reads fail retains its original pending operation")
+            check(commandModel.beginPlanSync() == nil, "committed-awaiting-read still blocks new schedules")
+            let scheduler = FakeWorkoutScheduler()
+            scheduler.listed = [.init(workoutID: UUID(), at: DateComponents(year: 2026, month: 10, day: 9, hour: 8), contentMatches: true, complete: false)]
+            let coordinator = PlanWatchSyncCoordinator()
+            _ = await coordinator.clear(model: commandModel, scheduler: scheduler)
+            check(scheduler.clearCalls == 1 && scheduler.listed.isEmpty && scheduler.submitted.isEmpty && commandModel.hasPendingPlanPublication,
+                  "withdrawal succeeds during failed command reads without new schedules or clearing the business operation")
+            CacheStore.failPlanWrites = true
+            _ = await commandModel.recoverTrainingPlanCommand()
+            CacheStore.failPlanWrites = false
+            check(commandModel.trainingPlanPublisher.phase == .storageFailure && commandModel.beginPlanSync() == nil,
+                  "an unresolved acknowledgement storage failure continues to block new schedules")
+            scheduler.listed = [.init(workoutID: UUID(), at: DateComponents(year: 2026, month: 10, day: 9, hour: 8), contentMatches: true, complete: false)]
+            _ = await coordinator.clear(model: commandModel, scheduler: scheduler)
+            check(scheduler.clearCalls == 2 && scheduler.listed.isEmpty && commandModel.hasPendingPlanPublication,
+                  "acknowledgement failure does not prevent journaled withdrawal of existing schedules")
+            failReads = false
+            let recovered = await commandModel.recoverTrainingPlanCommand()
+            check(recovered && !commandModel.hasPendingPlanPublication && commandModel.trainingPlanPublisher.phase == .ready &&
+                  commandLog.count(method: "POST", path: "/v1/mobile/training-plan/commands") == 1,
+                  "recovery finishes the original command after coherent reads without another submission")
+            let commandCache = CacheStore()
+            let commandScope = CacheStore.scope(baseURL: commandSession.serverURL!, handshake: commandModel.handshake)
+            _ = commandCache.write("corrupt watermark", scope: commandScope, key: "v2-watermark")
+            _ = commandCache.savePublication(.init(operationId: UUID().uuidString, route: "training-command",
+                payload: Data("{}".utf8), preparedAt: clock), scope: commandScope)
+            _ = await commandModel.refreshUnifiedTrainingPlan()
+            check(!commandModel.canEditTrainingPlanV2 && commandModel.hasPendingPlanPublication,
+                  "a corrupt watermark with a readable pending row blocks edits until explicit repair")
+            CacheStore.failWrites = true
+            let rejectedAbandon = commandModel.abandonPendingPlanPublication()
+            CacheStore.failWrites = false
+            check(rejectedAbandon.contains("放弃失败") && commandModel.hasPendingPlanPublication &&
+                  commandCache.trainingPlanCommandWatermark(scope: commandScope).isFailure,
+                  "failed abandonment retains the pending operation and the unreadable watermark")
+            let repairedAbandon = commandModel.abandonPendingPlanPublication()
+            check(repairedAbandon.contains("已放弃") && !commandModel.hasPendingPlanPublication &&
+                  !commandCache.trainingPlanCommandWatermark(scope: commandScope).isFailure &&
+                  !commandModel.trainingPlanPublisher.executionBlocked,
+                  "explicit abandonment repairs a corrupt watermark even when the pending row is readable")
+            _ = await commandModel.refreshPlanState()
+            _ = await commandModel.refreshUnifiedTrainingPlan()
+            check(commandModel.canEditTrainingPlanV2 && commandLog.count(method: "POST", path: "/v1/mobile/training-plan/commands") == 1,
+                  "coherent reads restore editing after abandonment without submitting another command")
+            CacheStore.resetScheduleSafety()
+        }
+
+        for commandVersion in [nil, 2, 999] as [Int?] {
+            // Phase 5: even supported v2 commands cannot authorize a legacy URL.
             // PR-02：新服务宣告统一**读**能力（trainingPlanContractVersion=2）但
             // 未宣告写命令能力时，旧写面必须 fail-closed，且连本地 pending 账目
             // 都不应产生。老服务两个新键都缺 ⇒ 既有协议不受影响（其他用例覆盖）。
@@ -1586,9 +1745,11 @@ final class RequestLog: @unchecked Sendable {
             let readOnlyState = try PlanTestFixtures.json(PlanTestFixtures.state())
             let readOnlyCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete",
                 datasetEpoch: "epoch", syncProtocolVersion: 1, apiVersion: "v1",
-                planSnapshotContractVersion: 1, trainingPlanContractVersion: 2, planReceiptContractVersion: 2))
+                planSnapshotContractVersion: 1, trainingPlanContractVersion: 2,
+                trainingPlanCommandContractVersion: commandVersion, planPublicationContractVersion: 1, planReceiptContractVersion: 2))
             let readOnlyLog = RequestLog()
             let readOnlyModel = NativeAppModel(session: readOnlySession, api: api, now: { readOnlyClock })
+            check(!readOnlyModel.planWritesAvailable, "no handshake must not authorize legacy plan writes")
             StubProtocol.handler = { request in
                 readOnlyLog.record(request)
                 if request.url!.path == "/v1/handshake" { return (200, readOnlyCapabilities, 0) }
@@ -1597,7 +1758,7 @@ final class RequestLog: @unchecked Sendable {
             }
             await readOnlyModel.bootstrap()
             check(!readOnlyModel.planWritesAvailable,
-                  "a server advertising the unified read capability without the write command capability is read-only")
+                  "v2 command capability \(String(describing: commandVersion)) never authorizes a legacy URL")
             let blocked = await readOnlyModel.saveRaceTarget(nil, expectedRevision: 12)
             check(!blocked && !readOnlyModel.hasPendingPlanPublication &&
                   readOnlyLog.count(method: "PUT", path: "/v1/mobile/goals") == 0 &&
@@ -1724,7 +1885,7 @@ final class RequestLog: @unchecked Sendable {
             let decodeClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let decodeCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete",
                 datasetEpoch: "epoch", syncProtocolVersion: 1, apiVersion: "v1", planReceiptContractVersion: 2))
-            let decodeModel = NativeAppModel(session: ServerSession(), api: api, now: { decodeClock })
+            let decodeModel = NativeAppModel(session: ServerSession.legacy(), api: api, now: { decodeClock })
             StubProtocol.handler = { request in
                 if request.url!.path == "/v1/handshake" { return (200, decodeCapabilities, 0) }
                 return (200, "{\"junk\":", 0)
@@ -1732,7 +1893,7 @@ final class RequestLog: @unchecked Sendable {
             await decodeModel.bootstrap()
             check(!decodeModel.isOffline && ((decodeModel.errorMessage ?? "").contains("版本不兼容")),
                   "200-with-bad-JSON must be reported as a version mismatch, never as offline")
-            let networkModel = NativeAppModel(session: ServerSession(), api: api, now: { decodeClock })
+            let networkModel = NativeAppModel(session: ServerSession.legacy(), api: api, now: { decodeClock })
             StubProtocol.handler = { request in
                 // 握手成功、四个面板全失败 —— 才走到 refreshAll 的全失败分类
                 // （握手本身失败会停在 connect 的"连不上"分支，那是另一条既有路径）。
@@ -1748,7 +1909,7 @@ final class RequestLog: @unchecked Sendable {
             // 终局答复的清算（审查 🔴-1）：expired（410）必须作废本地账目，
             // 否则 `plan_publication_pending` 会永久拒绝后续全部计划写与手表排期。
             CacheStore.resetScheduleSafety()
-            let terminalSession = ServerSession()
+            let terminalSession = ServerSession.legacy()
             let terminalClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let terminalInitial = try PlanTestFixtures.json(PlanTestFixtures.state())
             let terminalCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
@@ -1796,7 +1957,7 @@ final class RequestLog: @unchecked Sendable {
             // scopeMismatch（409）与 expired 同族：同样必须清账；未知答复则必须保留账目、
             // 并由显式的「放弃本次未确认发布」出口兜底（审查 🔴-1）。
             CacheStore.resetScheduleSafety()
-            let mismatchSession = ServerSession()
+            let mismatchSession = ServerSession.legacy()
             let mismatchClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let mismatchInitial = try PlanTestFixtures.json(PlanTestFixtures.state())
             let mismatchCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
@@ -1836,7 +1997,7 @@ final class RequestLog: @unchecked Sendable {
             // 回执终局拒绝的清算（审查 🟡-C1）：内容级终局必须作废该条回执，
             // 瞬时失败必须保留 —— 否则要么永久锁死教练启用，要么把断点续传删了。
             CacheStore.resetScheduleSafety()
-            let receiptSession = ServerSession()
+            let receiptSession = ServerSession.legacy()
             let receiptClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let receiptState = try PlanTestFixtures.json(PlanTestFixtures.state())
             let receiptCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
@@ -1885,7 +2046,7 @@ final class RequestLog: @unchecked Sendable {
             let feedbackData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
             let feedbackLoop = try JSONDecoder().decode(CoachLoopResponse.self, from: feedbackData)
             let feedbackJSON = String(decoding: feedbackData, as: UTF8.self)
-            let feedbackSession = ServerSession()
+            let feedbackSession = ServerSession.legacy()
             let feedbackHandshake = RaiHandshake(serverId: feedbackLoop.scope.serverId, athleteId: feedbackLoop.scope.athleteId,
                 datasetEpoch: feedbackLoop.scope.datasetEpoch, syncProtocolVersion: 1, apiVersion: "v1",
                 planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2, coachLoopContractVersion: 1)
@@ -1924,7 +2085,7 @@ final class RequestLog: @unchecked Sendable {
 
         do {
             CacheStore.resetScheduleSafety()
-            let recoverySession = ServerSession()
+            let recoverySession = ServerSession.legacy()
             let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let state = try PlanTestFixtures.json(PlanTestFixtures.state())
             let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
@@ -1988,7 +2149,7 @@ final class RequestLog: @unchecked Sendable {
 
         do {
             CacheStore.resetScheduleSafety()
-            let receiptSession = ServerSession()
+            let receiptSession = ServerSession.legacy()
             let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let initial = try PlanTestFixtures.json(PlanTestFixtures.state())
             let updated = try PlanTestFixtures.json(PlanTestFixtures.state(revision: 13, coherence: String(repeating: "c", count: 64)))
@@ -2052,7 +2213,7 @@ final class RequestLog: @unchecked Sendable {
 
         // Legacy missing revision is separately tested; it never enables execution.
         do {
-            let legacy = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let legacy = NativeAppModel(session: ServerSession.legacy(), api: api, now: { modelNow })
             let plan12 = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16"]))
             StubProtocol.handler = { request in
                 if request.url!.path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
@@ -2066,7 +2227,7 @@ final class RequestLog: @unchecked Sendable {
         }
 
         do {
-            let unknownState = NativeAppModel(session: ServerSession(), api: api, now: { ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")! })
+            let unknownState = NativeAppModel(session: ServerSession.legacy(), api: api, now: { ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")! })
             let unknownGoals = coachGoals(2).replacingOccurrences(of: "\"status\":\"active\"", with: "\"status\":\"future-status\"")
             let plan2 = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 2, dates: ["2026-09-16"]))
             StubProtocol.handler = { request in
@@ -2087,7 +2248,7 @@ final class RequestLog: @unchecked Sendable {
             let data = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
             let loop = try JSONDecoder().decode(CoachLoopResponse.self, from: data)
             let json = String(decoding: data, as: UTF8.self)
-            let session = ServerSession()
+            let session = ServerSession.legacy()
             let handshake = RaiHandshake(serverId: loop.scope.serverId, athleteId: loop.scope.athleteId,
                 datasetEpoch: loop.scope.datasetEpoch, syncProtocolVersion: 1, apiVersion: "v1",
                 planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2, coachLoopContractVersion: 1)
@@ -2171,7 +2332,7 @@ final class RequestLog: @unchecked Sendable {
         do {
             let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubProtocol.self]
             let wireAPI = RaiAPIClient(session: URLSession(configuration: configuration))
-            let session = ServerSession()
+            let session = ServerSession.legacy()
             let noOptionalTargets = MobileSessionStructure(warmup: nil, blocks: [.init(iterations: 2, steps: [
                 .init(purpose: "work", goal: .time(seconds: 600), alert: nil)])], cooldown: nil)
             let v2Log = RequestLog()
@@ -2227,7 +2388,7 @@ final class RequestLog: @unchecked Sendable {
             // 2026-10-18（审查 P2-9）：coachLoop=1 且无 planSnapshotContractVersion 的
             // 错峰能力组合。所有"完整计划读取"必须走新教练合同，不得回落到旧 run-coach。
             CacheStore.resetScheduleSafety()
-            let mixedSession = ServerSession()
+            let mixedSession = ServerSession.legacy()
             let mixedLoopData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
             let mixedLoop = try JSONDecoder().decode(CoachLoopResponse.self, from: mixedLoopData)
             let mixedLoopJSON = String(decoding: mixedLoopData, as: UTF8.self)
@@ -2257,7 +2418,7 @@ final class RequestLog: @unchecked Sendable {
 
         do {
             // 2026-10-18（审查 P2-8）：安全校验失败的面板分类与文案。
-            let validationSession = ServerSession()
+            let validationSession = ServerSession.legacy()
             let validationClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
             let validationCapabilities = try PlanTestFixtures.json(RaiHandshake(
                 serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
@@ -2447,7 +2608,7 @@ final class RequestLog: @unchecked Sendable {
             {"workoutId":"\(id)","facts":{"committedAt":"2026-10-18T12:29:38Z","lastBatchAt":"2026-10-18T12:31:43Z","batches":6},"analysis":{"status":"\(analysis)","jobId":"job","publishedAt":null},"series":[{"metric":"heartRate","samples":505,"state":"present"},{"metric":"speed","samples":0,"state":"not_seen_yet"}],"completeness":"\(completeness)"}
             """
         }
-        let refreshSession = ServerSession()
+        let refreshSession = ServerSession.legacy()
         refreshSession.serverURL = URL(string: "https://workout-refresh.invalid")
         let refreshModel = NativeAppModel(session: refreshSession, api: api, now: { refreshNow })
         let refreshLog = RequestLog()
@@ -2494,7 +2655,7 @@ final class RequestLog: @unchecked Sendable {
         check(refreshLog.count(method: "GET", path: detailPath) == 3,
               "the coalescing window merges a burst into a single refetch")
         // 老服务端（freshness 404）：详情照常可用，只是没有补齐状态 —— 绝不把整页报成失败。
-        let legacySession = ServerSession()
+        let legacySession = ServerSession.legacy()
         legacySession.serverURL = URL(string: "https://workout-legacy.invalid")
         let legacyModel = NativeAppModel(session: legacySession, api: api, now: { refreshNow })
         StubProtocol.handler = { request in

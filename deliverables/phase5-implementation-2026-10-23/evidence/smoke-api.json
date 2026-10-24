@@ -1,0 +1,13 @@
+{
+  "name": "smoke-api",
+  "command": [
+    "npm",
+    "run",
+    "smoke:api"
+  ],
+  "startedAt": "2026-10-23T16:59:32.527Z",
+  "completedAt": "2026-10-23T16:59:39.397Z",
+  "exitCode": 0,
+  "signal": null,
+  "concurrency": null
+}

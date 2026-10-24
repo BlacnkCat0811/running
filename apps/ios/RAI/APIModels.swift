@@ -49,6 +49,27 @@ struct RaiHandshake: Codable, Equatable {
     var directSyncBounds: DirectSyncBounds? = nil
     /// 服务端覆盖探测能力（P1-1）：1 = 支持 `GET /v1/sync/coverage`。老服务端省略。
     var syncCoverageVersion: Int? = nil
+
+    /// A negotiated old protocol may use its own routes. New/unknown command
+    /// capabilities never grant permission to invoke the retired write surface.
+    var legacyPlanWritesSupported: Bool {
+        guard syncProtocolCompatible, apiVersion == "v1",
+              trainingPlanContractVersion == nil, trainingPlanCommandContractVersion == nil else { return false }
+        guard planSnapshotContractVersion == nil || planSnapshotContractVersion == 1,
+              planPublicationContractVersion == nil || planPublicationContractVersion == 1,
+              coachLoopContractVersion == nil || coachLoopContractVersion == 1 else { return false }
+        return coachLoopContractVersion == nil || planSnapshotContractVersion == 1
+    }
+
+    var trainingPlanV2ReadsSupported: Bool {
+        syncProtocolCompatible && apiVersion == "v1" && trainingPlanContractVersion == 2
+    }
+
+    /// Capability only: scope freshness, durable intent and execution permission
+    /// remain separate checks. This never authorizes a legacy URL or WorkoutKit.
+    var trainingPlanV2CommandsSupported: Bool {
+        trainingPlanV2ReadsSupported && trainingPlanCommandContractVersion == 2 && planPublicationContractVersion == 1
+    }
 }
 
 /// 服务端 `/v1/handshake` 的 `directSyncBounds`（与 `packages/api-contracts/src/index.ts`
@@ -1407,6 +1428,76 @@ extension TrainingPlanStateResponseV2 {
     func intent(on localDate: String) -> MobilePlannedDay? {
         plan.days.first { $0.localDate == localDate }
     }
+}
+
+enum TrainingPlanCommandAction: String, Codable, CaseIterable {
+    case setRaceGoal = "set_race_goal", clearRaceGoal = "clear_race_goal", pause, resume
+}
+
+struct TrainingPlanRaceGoalDraft: Codable, Equatable {
+    var date: String
+    var distanceKm: Double
+    var goal: String
+    var targetTimeSeconds: Double?
+}
+
+struct TrainingPlanCommandPreviewRequest: Codable, Equatable {
+    var contractVersion = 2
+    let operationScope: PlanReceiptScope
+    let action: TrainingPlanCommandAction
+    let expectedStateRevision: Int
+    let raceGoal: TrainingPlanRaceGoalDraft?
+}
+
+struct TrainingPlanCommandSummary: Codable, Equatable {
+    let mode: String
+    let modeReason: String
+    let daysToRace: Int?
+    let runState: String
+    let admission: String
+    let raceGoal: TrainingPlanStateResponseV2.RaceGoal?
+}
+
+struct TrainingPlanCommandPreview: Codable, Equatable {
+    let contractVersion: Int
+    let candidateId: String
+    let expiresAt: String
+    let expectedStateRevision: Int
+    let before: TrainingPlanCommandSummary
+    let after: TrainingPlanCommandSummary
+    let warnings: [String]
+}
+
+struct TrainingPlanCommandRequest: Codable {
+    var contractVersion = 2
+    let operationId: String
+    let operationScope: PlanReceiptScope
+    let expectedStateRevision: Int
+    let candidateId: String
+    let action: TrainingPlanCommandAction
+    let raceGoal: TrainingPlanRaceGoalDraft?
+}
+
+struct TrainingPlanRefreshRequest: Codable {
+    var contractVersion = 2
+    let operationId: String
+    let operationScope: PlanReceiptScope
+    let expectedStateRevision: Int
+}
+
+/// Both command and refresh replies share these durable acknowledgement fields.
+struct TrainingPlanCommandResult: Codable, Equatable {
+    let contractVersion: Int
+    let operationId: String
+    let stateRevision: Int
+    let goalsRevision: Int
+    let warnings: [String]
+}
+
+struct TrainingPlanCommandWatermark: Codable, Equatable {
+    var schemaVersion = 1
+    let stateRevision: Int
+    let goalsRevision: Int
 }
 
 /// A locally verified system-schedule receipt, NOT physical Watch delivery.

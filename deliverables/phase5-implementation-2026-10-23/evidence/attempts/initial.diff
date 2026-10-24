@@ -1,0 +1,15 @@
+diff --git a/deliverables/README.md b/deliverables/README.md
+index c851bb0..c0c7808 100644
+--- a/deliverables/README.md
++++ b/deliverables/README.md
+@@ -6,6 +6,10 @@
+ 
+ ## 1. 当前证据（2026-10-23）
+ 
++- [阶段 5 训练计划 v2 审查与实施方案](phase5-review-2026-10-23/PHASE5_REVIEW_AND_IMPLEMENTATION_PLAN.md)：
++  方案交付，尚未实施；31 项定向 API 回归通过，隔离复现命令 HTTP handler 的幂等重放缺陷。
++  包含 8 个实施步骤、30 项验收场景及能力启用前置条件，不代表阶段 5 验收通过。
++
+ 按“每个交付面一份最新记录”保留；被下一版发布或下一轮审查取代后，按下文约定并入
+ [项目审查](../docs/PROJECT_REVIEW.md) 后删除。
+ 

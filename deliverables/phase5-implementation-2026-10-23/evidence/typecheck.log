@@ -1,0 +1,11 @@
+{"command":["npm","run","typecheck"],"startedAt":"2026-10-23T16:58:59.199Z","concurrency":null,"node":"v22.23.2","platform":"darwin","arch":"x64"}
+
+> rai-running-intelligence@0.1.0 pretypecheck
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json
+
+
+{"name":"typecheck","command":["npm","run","typecheck"],"startedAt":"2026-10-23T16:58:59.199Z","completedAt":"2026-10-23T16:59:20.349Z","exitCode":0,"signal":null,"concurrency":null}

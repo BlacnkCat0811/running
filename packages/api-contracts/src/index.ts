@@ -2266,7 +2266,7 @@ export interface TrainingPlanCommandPreviewResponse {
   before: TrainingPlanStateSummary;
   after: TrainingPlanStateSummary;
   changes: TrainingPlanCommandChangeSet;
-  /** The published plan was not regenerated in this slice. */
+  /** Preview never generates or publishes a plan; submit decides whether one is attached. */
   planRefreshRequired: true;
   warnings: string[];
 }
@@ -2285,6 +2285,8 @@ export interface TrainingPlanCommandResponse {
   contractVersion: 2;
   operationId: string;
   stateRevision: number;
+  /** Separate from unified stateRevision and the device execution watermark. */
+  goalsRevision: number;
   before: TrainingPlanStateSummary;
   after: TrainingPlanStateSummary;
   changes: TrainingPlanCommandChangeSet;

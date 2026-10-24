@@ -19,6 +19,7 @@ import type { CoachZonePrescription } from "./mobile-coach.js";
 
 import type { MobileGoalsStore } from "./mobile-goals.js";
 import { PlanOperationError, PlanPublicationService } from "./plan-publication.js";
+import { MutationConflictError } from "./mutation-coordinator.js";
 import { mergePlanWindow } from "./weekly-plan-service.js";
 import { digest } from "./plan-digest.js";
 import {
@@ -45,12 +46,10 @@ import {
  * - **preview** is stateless and never writes. It returns a candidate id bound to
  *   the exact draft, state revision and expiry, so a later submit cannot silently
  *   apply a different configuration.
- * - **submit** changes the configuration only (race goal, pause, resume). The
- *   published week plan is NOT regenerated here; both responses say
- *   `planRefreshRequired: true` and the v2 read reports `plan.current: false`
- *   while `planContextDigest` differs, so no caller can mistake an old plan for a
- *   current one. Regenerating and publishing the plan in the same transaction is
- *   the next slice, not a behaviour this module pretends to have.
+ * - **submit** publishes configuration and an externally prepared plan together.
+ *   The route generates outside the transaction; submit rechecks revision and
+ *   facts before committing. Pause generates nothing and clears the current lock.
+ *   Configuration-only callers retain `planRefreshRequired: true`.
  * - the unified state write, its history row, the legacy goals mirror and the
  *   operation result all commit in ONE control-database transaction (the caller
  *   provides `PlanPublicationService`, which runs the action inside
@@ -75,9 +74,25 @@ function requireContractTwo(version: unknown): void {
 }
 
 function assertScope(actual: TrainingPlanScope, identity: TrainingPlanScope): void {
+  if (!actual || typeof actual !== "object" ||
+    ![actual.serverId, actual.athleteId, actual.datasetEpoch].every(value => typeof value === "string" && value.length > 0)) {
+    throw new PlanOperationError("training_command_invalid", "operationScope 必须声明服务、运动员与数据集。", 422);
+  }
   if (actual.serverId !== identity.serverId || actual.athleteId !== identity.athleteId ||
     actual.datasetEpoch !== identity.datasetEpoch) {
     throw new PlanOperationError("training_scope_mismatch", "命令属于其他服务或数据集，不能跨域执行。", 409);
+  }
+}
+
+function requireOperationId(value: unknown): void {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new PlanOperationError("training_command_invalid", "提交必须声明持久 operationId。", 422);
+  }
+}
+
+function requireAction(action: unknown): void {
+  if (!["set_race_goal", "clear_race_goal", "pause", "resume"].includes(action as string)) {
+    throw new PlanOperationError("training_command_invalid", "不支持该训练命令。", 422);
   }
 }
 
@@ -122,15 +137,16 @@ function changeSet(before: TrainingPlanStateSummary, after: TrainingPlanStateSum
 /**
  * Legacy `mobile_goals.race_target` mirror.
  *
- * `undefined` = leave the stored value untouched (pause/resume, custom distance).
+ * `undefined` = leave the stored value untouched (pause/resume).
  * A standard-distance race goal is mirrored so v1 readers see the same goal; a
  * custom distance cannot be expressed by `MobileRaceTarget`, so it stays in the
- * unified state only and the response says so.
+ * unified state only and the legacy projection is cleared (`null`) rather than
+ * leaving a stale target that disagrees with the unified owner.
  */
 export function legacyRaceTargetMirror(state: TrainingPlanState): MobileRaceTarget | null | undefined {
   if (state.raceGoal === null) return null;
   const distance = raceDistanceFor(state.raceGoal.distanceKm);
-  if (distance === null) return undefined;
+  if (distance === null) return null;
   return { date: state.raceGoal.date, distance, targetPaceSecondsPerKm: null };
 }
 
@@ -176,6 +192,8 @@ export class TrainingPlanCommandService {
       ...row.state,
       raceGoal: decision.state.raceGoal,
       runState: decision.state.runState,
+      // Pause revokes the current prescription, while append-only history stays.
+      lockedSession: decision.state.runState === "paused" ? null : row.state.lockedSession,
       planContextDigest: trainingPlanContextDigest({ raceGoal: decision.state.raceGoal, runState: decision.state.runState })
     };
     return { decision, afterState };
@@ -190,8 +208,27 @@ export class TrainingPlanCommandService {
   }
 
   private candidateIdFor(input: CommandInput, expectedStateRevision: number, expiresAt: string): string {
-    return `${digest({ action: input.action, raceGoal: input.raceGoal ?? null, expectedStateRevision,
+    return `${digest({ scope: this.scopeKey(), action: input.action, raceGoal: input.raceGoal ?? null, expectedStateRevision,
       policy: TRAINING_MODE_POLICY_VERSION, expiresAt })}:${expiresAt}`;
+  }
+
+  /** Immutable results are checked before current-state validation or generation. */
+  replayCommand(request: TrainingPlanCommandRequest): TrainingPlanCommandResponse | null {
+    requireContractTwo(request.contractVersion);
+    requireOperationId(request.operationId);
+    assertScope(request.operationScope, this.identity());
+    return this.store.replayOperation<TrainingPlanCommandResponse>(
+      this.scopeKey(), request.operationId, "training-plan-command", request);
+  }
+
+  private validateCandidate(request: TrainingPlanCommandRequest): void {
+    const expiresAt = typeof request.candidateId === "string" ? this.candidateExpiry(request.candidateId) : null;
+    if (expiresAt === null) {
+      throw new PlanOperationError("training_candidate_expired", "预览已过期或候选不合法，请重新预览。", 409);
+    }
+    if (this.candidateIdFor(request, request.expectedStateRevision, expiresAt) !== request.candidateId) {
+      throw new PlanOperationError("training_candidate_mismatch", "提交内容与预览的候选不一致，请重新预览。", 409);
+    }
   }
 
   /**
@@ -201,12 +238,14 @@ export class TrainingPlanCommandService {
    */
   planFor(request: TrainingPlanCommandRequest): { row: TrainingPlanStateRow; afterState: TrainingPlanState } {
     requireContractTwo(request.contractVersion);
+    requireAction(request.action);
     assertScope(request.operationScope, this.identity());
     const { row, state } = this.readState();
     if (request.expectedStateRevision !== row.revision) {
       throw new PlanOperationError("training_revision_conflict",
         `训练状态已更新（当前 revision ${row.revision}），请重新读取并重新预览。`, 409);
     }
+    this.validateCandidate(request);
     if (state.sourceStatus === "ended" && request.action === "resume") {
       throw new PlanOperationError("training_cannot_resume", "已结束的训练节目不能恢复，请建立新的配置。", 409);
     }
@@ -218,6 +257,7 @@ export class TrainingPlanCommandService {
 
   preview(request: TrainingPlanCommandPreviewRequest): TrainingPlanCommandPreviewResponse {
     requireContractTwo(request.contractVersion);
+    requireAction(request.action);
     assertScope(request.operationScope, this.identity());
     const { row, state } = this.readState();
     if (request.expectedStateRevision != null && request.expectedStateRevision !== row.revision) {
@@ -234,7 +274,7 @@ export class TrainingPlanCommandService {
     const expiresAt = new Date(this.now() + TRAINING_PLAN_PREVIEW_TTL_SECONDS * 1000).toISOString();
     const warnings: string[] = [];
     if (input.action === "set_race_goal" && decision.state.raceGoal !== null && raceDistanceFor(decision.state.raceGoal.distanceKm) === null) {
-      warnings.push("自定义距离只保存在统一状态中；旧版 raceTarget 无法表达该距离，旧客户端看不到这个赛事。");
+      warnings.push("自定义距离只保存在统一状态中；旧版 raceTarget 无法表达该距离，旧版兼容字段会被清空，旧客户端看不到这个赛事。");
     }
     return {
       contractVersion: TRAINING_PLAN_CONTRACT_VERSION,
@@ -254,6 +294,8 @@ export class TrainingPlanCommandService {
     fingerprint?: () => string;
   } = {}): TrainingPlanCommandResponse {
     requireContractTwo(request.contractVersion);
+    requireAction(request.action);
+    requireOperationId(request.operationId);
     assertScope(request.operationScope, this.identity());
     const input: CommandInput = { action: request.action, raceGoal: request.raceGoal ?? null };
     return this.publication().publish("training-plan-command", request, () => {
@@ -262,14 +304,7 @@ export class TrainingPlanCommandService {
         throw new PlanOperationError("training_revision_conflict",
           `训练状态已更新（当前 revision ${row.revision}），请重新读取并重新预览。`, 409);
       }
-      const expiresAt = this.candidateExpiry(request.candidateId);
-      if (expiresAt === null) {
-        throw new PlanOperationError("training_candidate_expired", "预览已过期或候选不合法，请重新预览。", 409);
-      }
-      if (this.candidateIdFor(input, request.expectedStateRevision, expiresAt) !== request.candidateId) {
-        throw new PlanOperationError("training_candidate_mismatch",
-          "提交内容与预览的候选不一致，请重新预览。", 409);
-      }
+      this.validateCandidate(request);
       if (state.sourceStatus === "ended" && request.action === "resume") {
         throw new PlanOperationError("training_cannot_resume", "已结束的训练节目不能恢复，请建立新的配置。", 409);
       }
@@ -277,11 +312,11 @@ export class TrainingPlanCommandService {
       this.rejectIfInvalid(decision);
       const warnings: string[] = [];
       const beforeSummary = summarize(state, this.businessDate());
+      // An unsupported custom distance cannot be represented by the legacy
+      // mirror; clearing it is safer than leaving a stale old race visible to
+      // old clients. The preview already explains the compatibility warning.
       const mirror = input.action === "clear_race_goal" || input.action === "set_race_goal"
         ? legacyRaceTargetMirror(afterState) : undefined;
-      if (mirror === undefined && input.action === "set_race_goal") {
-        warnings.push("自定义距离只保存在统一状态中；旧版 raceTarget 未改动。");
-      }
       // PR4-4: one operation may publish configuration AND plan. The candidate was
       // generated outside this transaction for the configuration `planFor()` returned;
       // re-derive it here and verify the digest, so a concurrent edit cannot pair a
@@ -308,6 +343,7 @@ export class TrainingPlanCommandService {
       }
       const goals = this.store.write({
         expectedRevision: this.store.read().revision,
+        ...(afterState.runState === "paused" ? { lockedSession: null } : {}),
         ...(mirror === undefined ? {} : { raceTarget: mirror }),
         ...(publishesPlan && preparedDays !== null && preparedAudit !== null
           ? { weekPlan: preparedDays, weekPlanAudit: preparedAudit, weekPlanReplanRequired: false }
@@ -317,12 +353,18 @@ export class TrainingPlanCommandService {
             weekPlanReplanRequired: true
           })
       }, publishesPlan && preparedAudit !== null
-        ? { prescription: options.prepared!.prescription, confirmCoachPlan: true } : {});
+        ? { prescription: options.prepared!.prescription, confirmCoachPlan: true, runCoach: null } : { runCoach: null });
       const committed = this.store.commitTrainingPlanCommandState({
         scope: this.scopeKey(),
         expectedRevision: row.revision,
         state: {
           ...afterState,
+          // Keep unified's migrated preference evidence even though the legacy
+          // projection's programme was cleared above to revoke its authority.
+          ...(mirror === undefined ? {} : { legacyRaceTarget: mirror }),
+          ...(options.prepared?.coachReceipt === undefined ? {} : {
+            coachLoop: this.publishCoachEvidence(request.operationId, goals.revision, options.prepared)
+          }),
           ...(publishesPlan && preparedDays !== null
             ? { weekPlan: preparedDays, planContextDigest: afterState.planContextDigest } : {}),
           goalsRevision: goals.revision
@@ -334,6 +376,7 @@ export class TrainingPlanCommandService {
         contractVersion: TRAINING_PLAN_CONTRACT_VERSION,
         operationId: request.operationId,
         stateRevision: committed.revision,
+        goalsRevision: goals.revision,
         before: beforeSummary,
         after: afterSummary,
         changes: changeSet(beforeSummary, afterSummary, decision.goalIdentity),
@@ -357,6 +400,7 @@ export class TrainingPlanCommandService {
    */
   async refresh(request: TrainingPlanRefreshRequest, deps: TrainingPlanRefreshDeps): Promise<TrainingPlanRefreshResponse> {
     requireContractTwo(request.contractVersion);
+    requireOperationId(request.operationId);
     assertScope(request.operationScope, this.identity());
     // Retry of an already-committed refresh: answer the frozen result first, because
     // the state revision it expects is the one this operation itself advanced.
@@ -403,12 +447,15 @@ export class TrainingPlanCommandService {
         weekPlanAudit: prepared.audit,
         ...(mirror === undefined ? {} : { raceTarget: mirror }),
         weekPlanReplanRequired: false
-      }, { prescription: prepared.prescription, confirmCoachPlan: true });
+      }, { prescription: prepared.prescription, confirmCoachPlan: true, runCoach: null });
       const committed = this.store.commitTrainingPlanCommandState({
         scope: this.scopeKey(),
         expectedRevision: current.row.revision,
         state: {
           ...current.state,
+          ...(prepared.coachReceipt === undefined ? {} : {
+            coachLoop: this.publishCoachEvidence(request.operationId, written.revision, prepared)
+          }),
           weekPlan,
           planContextDigest: contextDigest,
           goalsRevision: written.revision
@@ -433,12 +480,26 @@ export class TrainingPlanCommandService {
     if (separator <= 0) return null;
     const expiresAt = candidateId.slice(separator + 1);
     const parsed = Date.parse(expiresAt);
-    if (!Number.isFinite(parsed) || parsed < this.now()) return null;
+    if (!Number.isFinite(parsed) || parsed <= this.now()) return null;
     return expiresAt;
+  }
+
+  replayRefresh(request: TrainingPlanRefreshRequest): TrainingPlanRefreshResponse | null {
+    requireContractTwo(request.contractVersion);
+    requireOperationId(request.operationId);
+    assertScope(request.operationScope, this.identity());
+    return this.store.replayOperation<TrainingPlanRefreshResponse>(this.scopeKey(), request.operationId, "training-plan-refresh", request);
+  }
+
+  private publishCoachEvidence(operationId: string, goalsRevision: number, prepared: PreparedTrainingPlan): TrainingPlanState["coachLoop"] {
+    const receipt = prepared.coachReceipt!;
+    this.store.appendCoachLoopReceipt(JSON.stringify(this.identity()), operationId, { ...receipt, goalsRevision });
+    return { operationId, policyHash: receipt.policyHash, evaluatedAt: receipt.evaluatedAt };
   }
 }
 
 export interface PreparedTrainingPlan {
+  coachReceipt?: Omit<import("./coach-loop-runtime.js").CoachRuntimeReceipt, "goalsRevision">;
   days: MobilePlannedDay[];
   audit: MobilePlanAudit;
   warnings: string[];
@@ -509,6 +570,9 @@ export function trainingPlanCommandError(
 ): { statusCode: number; code: string; message: string } {
   if (error instanceof PlanOperationError) {
     return { statusCode: error.statusCode, code: error.code, message: error.message };
+  }
+  if (error instanceof MutationConflictError) {
+    return { statusCode: 409, code: error.code, message: error.message };
   }
   if (error instanceof TrainingPlanStateConflictError) {
     return {

@@ -30,10 +30,18 @@ cleanup() {
   rm -rf "$runtime"
 }
 trap cleanup EXIT
-mkdir -p "$runtime/var"
-sqlite3 "${RAI_VISUAL_DATABASE:-$root/var/rai.sqlite}" ".backup '$runtime/var/rai.sqlite'"
-RAI_RUNTIME_ROOT="$runtime" RAI_DATABASE="$runtime/var/rai.sqlite" RAI_API_PORT=8792 RAI_LOG_LEVEL=warn \
-  RAI_SERVER_ID=visual-acceptance RAI_DATASET_EPOCH="visual-$(basename "$runtime")" RAI_API_TOKEN="" \
+# A new synthetic fixture is initialized and migrated while the API is stopped.
+# Never read the repository's personal var/rai.sqlite implicitly.
+if [ -n "${RAI_VISUAL_DATABASE:-}" ]; then
+  echo 'RAI_VISUAL_DATABASE is no longer copied implicitly. Use the synthetic fixture, or prepare a reviewed isolated harness.' >&2
+  exit 1
+fi
+node --import tsx scripts/prepare-phase5-fixture.mts "$runtime" > "$out/fixture.json"
+export RAI_VISUAL_API_TOKEN="rai-visual-isolated-test-token"
+RAI_RUNTIME_ROOT="$runtime" RAI_DATABASE="$runtime/var/rai.sqlite" \
+  RAI_CONTROL_DATABASE="$runtime/var/rai-control.sqlite" RAI_API_PORT=8792 RAI_API_HOST=127.0.0.1 RAI_LOG_LEVEL=warn \
+  RAI_SERVER_ID=phase5-validation RAI_ATHLETE_ID=athlete_1 RAI_DATASET_EPOCH=phase5-synthetic \
+  RAI_API_TOKEN="$RAI_VISUAL_API_TOKEN" RAI_TRAINING_PLAN_COMMAND_MODE=validation \
   node --import tsx apps/api/src/server.ts > "$out/api.log" 2>&1 & api_pid=$!
 ready=false
 # Startup includes validation/migration of the isolated database. A real
@@ -44,37 +52,42 @@ while [ "$SECONDS" -lt "$startup_deadline" ]; do
     echo "Isolated API exited during startup; see $out/api.log" >&2
     exit 1
   fi
-  if curl -fsS --max-time 2 http://127.0.0.1:8792/v1/health >/dev/null 2>&1; then ready=true; break; fi
+  if curl -fsS --max-time 2 -H "Authorization: Bearer $RAI_VISUAL_API_TOKEN" http://127.0.0.1:8792/v1/health >/dev/null 2>&1; then ready=true; break; fi
   sleep 0.5
 done
 $ready || { echo 'Isolated API did not start'; exit 1; }
-# Populate only this copy's blank day editor with the API's own recommended week.
-python3 - <<'PY'
-import json, urllib.request, urllib.error
+# Real authenticated v2 preparation plus retirement/authentication negative cases.
+python3 - <<'PYV2'
+import json, os, urllib.request, urllib.error
 base='http://127.0.0.1:8792'
-g=json.load(urllib.request.urlopen(base+'/v1/mobile/goals'))
-t=json.load(urllib.request.urlopen(base+'/v1/mobile/today'))
-if not g['weekPlan']:
-    # Use the measured preview/confirmation flow, never copy a read-model fallback
-    # into the manual editor or overwrite completed dates in the fixture.
-    def post(path, value):
-        req=urllib.request.Request(base+path, data=json.dumps(value).encode(), method='POST',
-                                  headers={'Content-Type':'application/json'})
-        return json.load(urllib.request.urlopen(req))
-    preview=post('/v1/mobile/workout-plan/preview', {'expectedRevision':g['revision']})
-    post('/v1/mobile/workout-plan/confirm', {'candidateId':preview['candidateId'], 'expectedRevision':preview['revision']})
-# Warm the expensive read-only physiology/route queries before the UI timeout begins.
-for endpoint in ['/v1/predictions','/v1/training-zones/current','/v1/training-statistics/overview']:
+token=os.environ['RAI_VISUAL_API_TOKEN']
+def call(path, value=None, headers=None):
+    h={'Authorization':'Bearer '+token, 'Content-Type':'application/json', **(headers or {})}
+    if path.startswith('/v1/mobile/training-plan/commands'):
+        h['X-RAI-Client-Training-Commands']='2'
+    req=urllib.request.Request(base+path, data=None if value is None else json.dumps(value).encode(), headers=h)
+    return json.load(urllib.request.urlopen(req))
+try:
+    urllib.request.urlopen(base+'/v1/handshake')
+    raise RuntimeError('Authentication unexpectedly disabled')
+except urllib.error.HTTPError as e:
+    assert e.code == 401
+for path in ['/v1/mobile/goals','/v1/mobile/run-coach']:
     try:
-        urllib.request.urlopen(base+endpoint, timeout=90).read()
-    except urllib.error.HTTPError as error:
-        if error.code != 404: raise
-rows=json.load(urllib.request.urlopen(base+'/v1/workouts?limit=100'))['items']
-route=next((w['id'] for w in rows if w['hasRoute']), None)
-if route:
-    for suffix in ['', '/series']:
-        urllib.request.urlopen(base+'/v1/workouts/'+route+suffix, timeout=90).read()
-PY
+        call(path)
+        raise RuntimeError('Retired read unexpectedly succeeded')
+    except urllib.error.HTTPError as e:
+        assert e.code == 410
+        assert json.load(e)['code'] == 'legacy_surface_retired'
+h=call('/v1/handshake', headers={'X-RAI-Client-Training-Commands':'2'})
+assert h['trainingPlanCommandContractVersion'] == 2
+assert 'trainingPlanCommandContractVersion' not in call('/v1/handshake')
+s=call('/v1/mobile/training-plan-state', headers={'X-RAI-Training-Contract':'2'})
+assert s['scope'] == {k:h[k] for k in ['serverId','athleteId','datasetEpoch']}
+call('/v1/mobile/training-plan/commands/refresh', {'contractVersion':2,'operationId':'visual-fixture-refresh',
+    'operationScope':s['scope'],'expectedStateRevision':s['stateRevision']})
+print('Authenticated synthetic fixture ready; v2 refresh committed; legacy 410 and unauthenticated 401 verified.')
+PYV2
 python3 apps/ios/tests/visual-state-proxy.py > "$out/state-proxy.log" 2>&1 & proxy_pid=$!
 xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl bootstatus "$device" -b > "$out/simulator.log"
@@ -102,7 +115,18 @@ xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug 
   -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RAI_VISUAL_DERIVED_DATA:-$out/derived}" \
   CODE_SIGNING_ALLOWED=NO ${swift_flag_args[@]+"${swift_flag_args[@]}"} \
   build > "$out/build.log" 2>&1
+# A reused acceptance Simulator keeps the app container (including a pending
+# v2 operation from an earlier failed run). Start each harness from a clean
+# container; Keychain entries are re-entered by the acceptance flow. This is
+# still an isolated build/device, never the user's personal app data.
+xcrun simctl uninstall "$device" app.rai.running.debug >/dev/null 2>&1 || true
 xcrun simctl install "$device" "${RAI_VISUAL_DERIVED_DATA:-$out/derived}/Build/Products/Debug-iphonesimulator/RAI.app"
+# The default harness covers the current v2 flow. Historical visual scenarios
+# may still be selected explicitly when their dedicated fixtures are available.
+if [ "$#" -eq 0 ]; then
+  set -- -only-testing:VisualAcceptance/Phase5Acceptance
+fi
+rm -rf "$out/tests.xcresult" "$out/attachments" "$out/screenshots"
 set +e
 xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance \
   -destination "platform=iOS Simulator,id=$device" -derivedDataPath "${RAI_VISUAL_TEST_DERIVED_DATA:-$out/test-derived}" \

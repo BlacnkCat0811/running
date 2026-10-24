@@ -1,0 +1,2 @@
+main/ModelRegression.swift:203: Precondition failed: race save updates model after server acknowledgement and refresh
+apps/ios/tests/run-model-tests.sh: line 43: 15087 Illegal instruction: 4  "$tmp/model-tests"

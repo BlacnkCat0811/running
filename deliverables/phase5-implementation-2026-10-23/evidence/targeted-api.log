@@ -1,0 +1,291 @@
+{"command":["node","--import","tsx","--test","--test-concurrency=1","apps/api/test/phase5-training-plan.test.ts","apps/api/test/training-plan-commands.test.ts","apps/api/test/training-plan-v2-route.test.ts","apps/api/test/handshake-registry.test.ts","apps/api/test/training-plan-coordinator.test.ts","apps/api/test/legacy-surface-retirement.test.ts","apps/api/test/training-plan-error-sanitization.test.ts"],"startedAt":"2026-10-23T17:01:31.628Z","concurrency":null,"node":"v22.23.2","platform":"darwin","arch":"x64"}
+TAP version 13
+# Subtest: handshake registry covers exactly every HandshakeResponse key
+ok 1 - handshake registry covers exactly every HandshakeResponse key
+  ---
+  duration_ms: 3.373618
+  type: 'test'
+  ...
+# Subtest: every registration states semantics, precondition, consumer and old-server behaviour
+ok 2 - every registration states semantics, precondition, consumer and old-server behaviour
+  ---
+  duration_ms: 0.362839
+  type: 'test'
+  ...
+# Subtest: deferred capabilities are explicit and mirrored where the contract says
+ok 3 - deferred capabilities are explicit and mirrored where the contract says
+  ---
+  duration_ms: 0.981656
+  type: 'test'
+  ...
+# (node:51531) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the request fixture is exactly the shared method+path retirement table
+ok 4 - the request fixture is exactly the shared method+path retirement table
+  ---
+  duration_ms: 1.663054
+  type: 'test'
+  ...
+# Subtest: every retired legacy plan route answers 410 legacy_surface_retired with a real replacement
+ok 5 - every retired legacy plan route answers 410 legacy_surface_retired with a real replacement
+  ---
+  duration_ms: 2225.59765
+  type: 'test'
+  ...
+# Subtest: a managed dataset does not turn retirement into the generic 409 contract error
+ok 6 - a managed dataset does not turn retirement into the generic 409 contract error
+  ---
+  duration_ms: 2145.035231
+  type: 'test'
+  ...
+# Subtest: real router matrix: receipt lifecycle, header negotiation and migrated scope
+ok 7 - real router matrix: receipt lifecycle, header negotiation and migrated scope
+  ---
+  duration_ms: 2317.400166
+  type: 'test'
+  ...
+# (node:51556) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+ok 8 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 8057.224132
+  type: 'test'
+  ...
+# (node:51585) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 9 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 50.221885
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 10 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 23.728213
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 11 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 29.952749
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 12 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 27.796208
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 13 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 31.171851
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 14 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 54.890002
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 15 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 21.351002
+  type: 'test'
+  ...
+# Subtest: generation latch: facts changed during generation cannot be stamped with the new version
+ok 16 - generation latch: facts changed during generation cannot be stamped with the new version
+  ---
+  duration_ms: 38.452659
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 17 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 257.099373
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 18 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 37.866411
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals: all business rows roll back and lane can retry
+ok 19 - publication abort at mobile_goals: all business rows roll back and lane can retry
+  ---
+  duration_ms: 36.154256
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals_history: all business rows roll back and lane can retry
+ok 20 - publication abort at mobile_goals_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 34.886271
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state: all business rows roll back and lane can retry
+ok 21 - publication abort at mobile_training_state: all business rows roll back and lane can retry
+  ---
+  duration_ms: 27.630668
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+ok 22 - publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 29.398012
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+ok 23 - publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+  ---
+  duration_ms: 32.75959
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 24 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 31.229025
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 25 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 27.668508
+  type: 'test'
+  ...
+# Subtest: 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+ok 26 - 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+  ---
+  duration_ms: 25.886874
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 27 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 51.301031
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 28 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 33.450142
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 29 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 24.30109
+  type: 'test'
+  ...
+# Subtest: 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+ok 30 - 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+  ---
+  duration_ms: 17.085807
+  type: 'test'
+  ...
+# Subtest: 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+ok 31 - 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+  ---
+  duration_ms: 0.685368
+  type: 'test'
+  ...
+# Subtest: 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+ok 32 - 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+  ---
+  duration_ms: 0.581867
+  type: 'test'
+  ...
+# Subtest: 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+ok 33 - 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+  ---
+  duration_ms: 1.205226
+  type: 'test'
+  ...
+# Subtest: 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+ok 34 - 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+  ---
+  duration_ms: 0.255899
+  type: 'test'
+  ...
+# Subtest: known business errors keep code/message; internal details never reach the wire
+ok 35 - known business errors keep code/message; internal details never reach the wire
+  ---
+  duration_ms: 4.433109
+  type: 'test'
+  ...
+# Subtest: command route answers a fixed 5xx, never the thrown message
+ok 36 - command route answers a fixed 5xx, never the thrown message
+  ---
+  duration_ms: 152.102065
+  type: 'test'
+  ...
+# Subtest: v2 read route does not echo an unknown exception, but keeps known projection errors
+ok 37 - v2 read route does not echo an unknown exception, but keeps known projection errors
+  ---
+  duration_ms: 14.826895
+  type: 'test'
+  ...
+# (node:51588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+ok 38 - 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+  ---
+  duration_ms: 1.889563
+  type: 'test'
+  ...
+# Subtest: v2 投影：模式按业务日期派生，读取不带执行授权
+ok 39 - v2 投影：模式按业务日期派生，读取不带执行授权
+  ---
+  duration_ms: 3.070669
+  type: 'test'
+  ...
+# Subtest: v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+ok 40 - v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+  ---
+  duration_ms: 0.314079
+  type: 'test'
+  ...
+# Subtest: v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+ok 41 - v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+  ---
+  duration_ms: 12.032415
+  type: 'test'
+  ...
+# Subtest: 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+ok 42 - 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+  ---
+  duration_ms: 132.711751
+  type: 'test'
+  ...
+# Subtest: 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+ok 43 - 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+  ---
+  duration_ms: 7.127323
+  type: 'test'
+  ...
+# Subtest: 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+ok 44 - 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+  ---
+  duration_ms: 28.877224
+  type: 'test'
+  ...
+# Subtest: 未迁移的 store 读返回 null（不是伪造的空状态）
+ok 45 - 未迁移的 store 读返回 null（不是伪造的空状态）
+  ---
+  duration_ms: 20.417305
+  type: 'test'
+  ...
+1..45
+# tests 45
+# suites 0
+# pass 45
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 20087.764613
+
+{"name":"targeted-api","command":["node","--import","tsx","--test","--test-concurrency=1","apps/api/test/phase5-training-plan.test.ts","apps/api/test/training-plan-commands.test.ts","apps/api/test/training-plan-v2-route.test.ts","apps/api/test/handshake-registry.test.ts","apps/api/test/training-plan-coordinator.test.ts","apps/api/test/legacy-surface-retirement.test.ts","apps/api/test/training-plan-error-sanitization.test.ts"],"startedAt":"2026-10-23T17:01:31.628Z","completedAt":"2026-10-23T17:01:51.854Z","exitCode":0,"signal":null,"concurrency":null}

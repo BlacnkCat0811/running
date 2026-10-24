@@ -2342,6 +2342,10 @@ struct TechNativeSettingsView: View {
                     } else {
                         session.serverURLString = draftURL
                         session.apiToken = draftToken
+                        // The panel is also the first place a token is entered;
+                        // persist it and connect in the same tap instead of
+                        // requiring the user to press the button twice.
+                        Task { await native.connect() }
                     }
                 }
                 if let identity = native.handshake {

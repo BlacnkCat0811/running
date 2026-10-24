@@ -1,0 +1,313 @@
+diff-check-exit:0
+i/lf    w/lf    attr/                 	apps/ios/Configs/AmapKey.xcconfig.example
+i/lf    w/lf    attr/                 	apps/ios/Podfile
+i/lf    w/lf    attr/                 	apps/ios/Podfile.lock
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI.xcodeproj/project.pbxproj
+i/lf    w/lf    attr/                 	apps/ios/RAI.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+i/lf    w/lf    attr/                 	apps/ios/RAI.xcodeproj/xcshareddata/xcschemes/RAI.xcscheme
+i/lf    w/lf    attr/                 	apps/ios/RAI.xcworkspace/contents.xcworkspacedata
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/APIClient.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/APIModels.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/AppDelegate.swift
+i/lf    w/lf    attr/                 	apps/ios/RAI/Assets.xcassets/AccentColor.colorset/Contents.json
+i/-text w/-text attr/                 	apps/ios/RAI/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+i/lf    w/lf    attr/                 	apps/ios/RAI/Assets.xcassets/AppIcon.appiconset/Contents.json
+i/lf    w/lf    attr/                 	apps/ios/RAI/Assets.xcassets/Contents.json
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/BackgroundSyncPolicy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/BackgroundUploadSession.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/CacheStore.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/CalibrationState.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/CoordinateConversion.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/DirectSyncBatchBudget.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/DirectSyncCursorPolicy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/DirectSyncReceiptState.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthKitExport.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthKitRecordCursor.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthKitSync.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncArchive.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncBackgroundRecovery.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncBlockedRecovery.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncCancellation.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncIdentityPublisher.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncIntentJournal.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncLifecycle.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/HealthSyncWorkPlanner.swift
+i/lf    w/lf    attr/                 	apps/ios/RAI/Info.plist
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Keychain.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/MapPrivacy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/MapPrivacyConsentView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/NativeAppModel.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/NativeFormat.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/NativeViews.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/PlanMutationDisposition.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/PlanReceiptMatcher.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/PlanScheduleOperationJournal.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/PlanStatePolicy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/PlanWatchScheduling.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/PlanWatchSyncCoordinator.swift
+i/lf    w/lf    attr/                 	apps/ios/RAI/RAI.entitlements
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/RAIApp.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/RootView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/RouteGpxWriter.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/RouteSyncState.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/RouteSyncStateMachine.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SQLiteSupport.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/ServerDiscovery.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/ServerSession.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechAbilityDetailView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechBackGesture.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCharts.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachDaySheet.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachEvidenceSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachLoopSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachOverviewSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachStrengthSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachUpcomingSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechCoachWeekSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechConfirmationSheet.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechDataSyncDetailView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechDayWorkoutsView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechFlowLayout.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechIllustrations.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechLayout.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechLockSheet.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechManualPlanView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechPlanPreviewSheet.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechPlanView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechPlanWatchSection.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechPlotData.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechRaceGoalEditor.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechRouteView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechRunCoachPresentation.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechRunCoachSetup.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechRunCoachView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechSeriesChart.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechSetupView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechShareCardView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechSleepHistory.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechSurfaceStyle.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechSyncStatus.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechTheme.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechTodayMetrics.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechTodayRecovery.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechTrainingReminderView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechViews.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechWorkoutDetailPresentation.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechWorkoutExportView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/Skins/Technology/TechWorkoutFeedbackView.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/StoredZip.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SyncHealthIntent.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SyncPhase.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SyncPresentationPolicy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SyncStateCommitPlan.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SyncTaskState.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/SyncTaskStore.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/TrainingPlanRepository.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/TrainingPlanStore.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/TrainingReminderPolicy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/TrainingReminders.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/UserDataNoticePolicy.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/VerdictPresentation.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/WorkoutKitBridge.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/WorkoutPlanMapper.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/RAI/WorkoutWindowPaging.swift
+i/lf    w/lf    attr/                 	apps/ios/README.md
+i/lf    w/lf    attr/                 	apps/ios/design/README.md
+i/lf    w/lf    attr/                 	apps/ios/design/TECHNOLOGY_SKIN.md
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/build.log
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/model-tests.log
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/pixel-launch.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/technology-launch.png
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/build.log
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/device-build.log
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/index.html
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/model-tests.log
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshot-manifest.json
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/01-body.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/01-today-links.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/01-today-lower.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/01-today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/01-week-daily.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/01-week.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-load-evidence.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-load.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-metrics.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-quality.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-route.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-series.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-splits.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail-zones.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-detail.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/02-workouts.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-lock-preview-fixture.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-plan-cancelled.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-plan-editor.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-plan-invalid.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-plan.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-revision-conflict.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/03-revision-reloaded.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-ability-zones.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-ability.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-records.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-statistics-bottom.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-statistics.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-trends-insights.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/04-trends.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-cache-confirm.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-cache.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-health-actions.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-health.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-settings.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-setup.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/05-skin-picker.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-body-predictions.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-body-zones.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-cold-loading.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-empty-workouts.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-offline-plan.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-offline.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-sync-busy.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/06-sync-failed.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/large-settings.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/large-statistics.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/large-today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/large-workouts.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/pixel-restored.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/screenshots/pixel-settings-before-switch.png
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-09/visual-review/ui-tests.log
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-ios-fixes/heart-rate.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-ios-fixes/route.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-ios-fixes/today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/01-body.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/01-today-lower.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/01-today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/03-plan.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/03-revision-conflict.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/04-records.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/04-trends.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/05-cache-confirm.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-10-replica/screenshots/06-empty-workouts.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-ability-card/screenshots/01-today-top.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-ability-card/screenshots/02-today-ability-and-metrics.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-ability-card/screenshots/07-ability-dimensions.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-ability-card/screenshots/07-ability-missing-dimensions.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-ability-card/screenshots/07-ability-trend.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-ability-card/screenshots/07-ability.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/island-ability.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/island-home-safe-area.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/island-today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/island-visible-back.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/main-ability.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/main-sync-busy.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/main-today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/main-workout-series.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/small-home-safe-area.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/small-large-editor-keyboard.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/small-large-today.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/small-plan.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-16-tech-polish/screenshots/small-series-inspection.png
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/screenshot-manifest.json
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/screenshots/01-body.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/screenshots/01-today-ability-card.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/screenshots/01-today-links.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/screenshots/01-today-lower.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/screenshots/01-today.png
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-17-field-coverage/ui-tests.log
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-19-freshness-semantics/api.log
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-19-freshness-semantics/build.log
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-19-freshness-semantics/screenshots/01-today-freshness-banner.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-19-freshness-semantics/screenshots/02-today-top.png
+i/-text w/-text attr/                 	apps/ios/design/acceptance/2026-09-19-freshness-semantics/screenshots/03-visible-back.png
+i/lf    w/lf    attr/                 	apps/ios/design/acceptance/2026-09-19-freshness-semantics/ui-tests.log
+i/lf    w/lf    attr/                 	apps/ios/design/ios-app-design.html
+i/lf    w/lf    attr/                 	apps/ios/design/technology-v1/prompts.jsonl
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/BackgroundSyncPolicyRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/CoordinateConversionRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/CoordinateSDKComparison.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/DirectSyncBatchBudgetTests.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/DirectSyncReceiptRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthKitRecordCursorRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncArchiveRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncBackgroundRecoveryRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncBlockedRecoveryRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncCancellationRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncIntentJournalRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncLifecycleRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/HealthSyncResumeRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/KeychainRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/ModelRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/PlanTestFixtures.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/PlanWatchContextRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/PlanWatchSchedulingRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/RouteCommitSettlementRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/RouteGpxStreamingRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/RouteSyncStateMachineTests.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/RouteSyncStatePersistenceRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/ServerSessionRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/StoreRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/SyncAtomicUnitRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/SyncStateCommitRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/SyncTaskMigrationRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/TechPresentationRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/TrainingPlanStoreRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/TrainingPlanV2Regression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/UserExperienceRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/VisualAcceptance.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/VisualAcceptance.xcodeproj/project.pbxproj
+i/lf    w/lf    attr/                 	apps/ios/tests/VisualAcceptance.xcodeproj/xcshareddata/xcschemes/VisualAcceptance.xcscheme
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/WorkoutPlanMapperRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/WorkoutWindowPagingRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/WorkoutWindowPagingStoreRegression.swift
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-background-capabilities.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-background-mutations.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-direct-sync-analysis-reconcile.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-direct-sync-contract-parity.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-direct-sync-status-copy.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-export-determinism-live.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-export-determinism.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-fresh-skin.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-health-sync-archive.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-healthkit-record-sync.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-pr5-facts-analysis.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-retired-plan-outbound.py
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/check-today-layout.py
+i/lf    w/lf    attr/                 	apps/ios/tests/fixtures/coach-loop-v1.json
+i/lf    w/lf    attr/                 	apps/ios/tests/fixtures/plan-v1.json
+i/lf    w/lf    attr/                 	apps/ios/tests/fixtures/plan-v2.json
+i/lf    w/lf    attr/                 	apps/ios/tests/fixtures/pr5-c9-baseline-keys.json
+i/lf    w/lf    attr/                 	apps/ios/tests/fixtures/prescription-digests.json
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-coordinate-sdk-check.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-health-sync-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-ios-gates.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-model-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-plan-state-mutations.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-plan-watch-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-session-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-store-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-tech-presentation-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-training-plan-store-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-user-experience-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/run-visual-tests.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/typecheck-ios.sh
+i/lf    w/lf    attr/text eol=lf      	apps/ios/tests/visual-state-proxy.py
+i/lf    w/lf    attr/                 	packages/api-contracts/package.json
+i/lf    w/lf    attr/                 	packages/api-contracts/src/coach-loop.ts
+i/lf    w/lf    attr/                 	packages/api-contracts/src/handshake-registry.ts
+i/lf    w/lf    attr/                 	packages/api-contracts/src/index.ts
+i/lf    w/lf    attr/                 	packages/api-contracts/src/retired-surfaces.ts
+i/lf    w/lf    attr/                 	packages/contracts/package.json
+i/lf    w/lf    attr/                 	packages/contracts/src/analysis-input-coverage.ts
+i/lf    w/lf    attr/                 	packages/contracts/src/direct-sync.ts
+i/lf    w/lf    attr/                 	packages/contracts/src/facts-analysis-view.ts
+i/lf    w/lf    attr/                 	packages/contracts/src/index.ts
+i/lf    w/lf    attr/                 	packages/contracts/src/semantic-json.ts
+i/lf    w/lf    attr/                 	packages/contracts/src/timezone.ts
+i/lf    w/lf    attr/                 	packages/contracts/test/analysis-input-coverage.test.ts
+i/lf    w/lf    attr/                 	packages/contracts/test/contracts.test.ts
+i/lf    w/lf    attr/                 	packages/contracts/test/domain-snapshot-narrowing.test.ts
+i/lf    w/lf    attr/                 	packages/contracts/test/semantic-json.test.ts
+i/lf    w/lf    attr/                 	packages/contracts/test/timezone-convergence.test.ts
+i/lf    w/lf    attr/                 	packages/contracts/test/timezone.test.ts
+eol-exit:0

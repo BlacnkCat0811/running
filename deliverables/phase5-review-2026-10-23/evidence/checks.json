@@ -1,0 +1,91 @@
+[
+  {
+    "name": "retired-outbound",
+    "argv": [
+      "python3",
+      "-B",
+      "apps/ios/tests/check-retired-plan-outbound.py"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "single-writer",
+    "argv": [
+      "node",
+      "scripts/check-training-plan-single-writer.mjs"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "targeted-api",
+    "argv": [
+      "node",
+      "--import",
+      "tsx",
+      "--test",
+      "--test-concurrency=1",
+      "apps/api/test/training-plan-commands.test.ts",
+      "apps/api/test/training-plan-v2-route.test.ts",
+      "apps/api/test/training-plan-coordinator.test.ts",
+      "apps/api/test/legacy-surface-retirement.test.ts",
+      "apps/api/test/training-plan-error-sanitization.test.ts"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "command-route-replay-probe",
+    "argv": [
+      "node",
+      "--import",
+      "tsx",
+      "deliverables/phase5-review-2026-10-23/evidence/command-route-replay-probe.mts"
+    ],
+    "exit": 0,
+    "interpretation": "Expected current defect reproduced; not a correctness pass"
+  },
+  {
+    "name": "docs",
+    "argv": [
+      "npm",
+      "run",
+      "check:docs"
+    ],
+    "exit": 1
+  },
+  {
+    "name": "diff-check",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "artifact-validation",
+    "exit": 0,
+    "details": {
+      "localLinks": 7,
+      "utf8Lf": true,
+      "fencesPaired": true
+    }
+  },
+  {
+    "name": "docs-final",
+    "argv": [
+      "npm",
+      "run",
+      "check:docs"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "diff-check-final",
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit": 0
+  }
+]

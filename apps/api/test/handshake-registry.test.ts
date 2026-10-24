@@ -69,7 +69,9 @@ test("every registration states semantics, precondition, consumer and old-server
 test("deferred capabilities are explicit and mirrored where the contract says", () => {
   const byKey = new Map(HANDSHAKE_KEY_REGISTRY.map((entry) => [entry.key, entry]));
   assert.match(byKey.get("factsAnalysisViewContractVersion")?.consumer ?? "", /deferred/);
-  assert.match(byKey.get("trainingPlanCommandContractVersion")?.consumer ?? "", /deferred/);
+  // Phase 5: the command key is now consumed by the iOS publisher in the
+  // isolated candidate; it is no longer a deferred capability.
+  assert.match(byKey.get("trainingPlanCommandContractVersion")?.consumer ?? "", /TrainingPlanPublisher/);
   assert.match(byKey.get("trainingPlanCommandContractVersion")?.whenAbsent ?? "", /只读/);
 
   // PR-05 decision: iOS mirrors the view capability but does not consume the

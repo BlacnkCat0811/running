@@ -1,0 +1,41 @@
+TAP version 13
+# (node:14107) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+not ok 1 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 207.548324
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-commands.test.ts:1:10180'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"code":"training_revision_conflict","message":"训练状态已更新（当前 revision 2），请重新读取并重新预览。"}
+    
+    409 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 409
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-commands.test.ts:311:14)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 2 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 55.084482
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 1
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1154.180382

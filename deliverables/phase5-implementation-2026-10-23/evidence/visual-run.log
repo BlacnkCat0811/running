@@ -1,0 +1,24 @@
+Export determinism (live): 7 checks, 0 failed
+  ok   shipped: <MetadataEntry> 按键升序输出
+  ok   shipped: HKIndoorWorkout 被跳过（与修复前一致）
+  ok   shipped: HKMetadataKeySyncIdentifier 被跳过（与修复前一致）
+  ok   shipped: 输出条目数为 4（跳过 2 个保留键后）
+  ok   shipped: 同进程内两次调用字节一致
+  ok   shipped: 三次独立启动的 <MetadataEntry> 字节完全一致
+  ok   self-check: 去掉 .sorted() 后跨进程顺序确实会变（证明本门禁不是空转）
+(node:48673) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Authenticated synthetic fixture ready; v2 refresh committed; legacy 410 and unauthenticated 401 verified.
+Exported 8 attachments for: Phase5Acceptance/testPreviewCancelConfirmConflictAndRestart():
+File: 8C74D0DD-0D73-4809-91AC-A81247F36C7F.txt, suggested name: "phase5-restart-accessibility_0_71F75F3E-9F6A-4082-86E1-CB14035A2FCA.txt"
+File: 02909B65-22CA-435C-BBF4-2224C842CE48.png, suggested name: "phase5-restart_0_4B4B52E7-FAF2-4694-9853-589DCAD65C64.png"
+File: 36AC6D62-6FBF-40AB-B5C5-0BC211834068.txt, suggested name: "phase5-conflict-accessibility_0_D8F87DD4-0690-432E-8358-0E8B44C299DC.txt"
+File: A9ABCC07-54D5-4479-83FA-6975533796EE.png, suggested name: "phase5-conflict_0_274D9B85-CBEA-4AC2-86BE-C0778A7A1351.png"
+File: E478BC7F-FF58-41F6-A395-CC5111A1E7E6.txt, suggested name: "phase5-committed-accessibility_0_BC92FBA8-C838-400E-9FD2-F4FD2C094CC1.txt"
+File: 9C414782-1882-4A38-AFB6-5F3683AF70BF.png, suggested name: "phase5-committed_0_EABF2812-2B9D-4E95-AB5D-AB68B784091F.png"
+File: 9839E76D-98D3-4547-8741-13A907F7814C.txt, suggested name: "phase5-preview-accessibility_0_2F2E76AD-5077-4991-B0A2-5961D3DE856B.txt"
+File: 3605FAD9-2307-42E6-A487-E5F675D35056.png, suggested name: "phase5-preview_0_DD9B5F56-CBE1-4638-ACE0-B7D9EC1A30E1.png"
+
+Generated manifest file with attachment details: /Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance/attachments/manifest.json
+Review screenshots and test failures in: /Users/ta/running/deliverables/phase5-implementation-2026-10-23/evidence/visual-acceptance
+EXIT:0

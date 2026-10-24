@@ -164,7 +164,7 @@ final class VisualAcceptance: XCTestCase {
         XCTAssertFalse(app.images["workout.share.preview"].exists, "未授权高德地图不能生成组合分享卡片")
         XCTAssertFalse(app.buttons["workout.share.send"].exists, "未授权高德地图不能分享伪底图")
         capture("02-detail-share-map-required")
-        app.buttons["关闭"].tap()
+        app.buttons["关闭"].firstMatch.tap()
         // This path checks the offline trace; AMap gestures still need consent-bound acceptance.
         dragContent(up: true, horizontalOffset: 0.5); capture("02-detail-route")
         for (key, title) in [("pace", "配速"), ("heartRate", "心率"), ("cadence", "步频"),
@@ -768,5 +768,111 @@ final class VisualAcceptance: XCTestCase {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    }
+}
+
+/// Current v2 acceptance against the authenticated, migrated synthetic API.
+/// It uses production SwiftUI, URLSession, generation and persistence. Device
+/// WorkoutKit visibility remains a separate paired-device acceptance.
+@MainActor final class Phase5Acceptance: XCTestCase {
+    private let app = XCUIApplication(bundleIdentifier: "app.rai.running.debug")
+    private let base = "http://127.0.0.1:8792"
+    private let fixtureToken = "rai-visual-isolated-test-token"
+    private func call(_ path: String, body: [String: Any]? = nil) async throws -> [String: Any] {
+        var request = URLRequest(url: URL(string: base + path)!)
+        request.setValue("Bearer " + fixtureToken, forHTTPHeaderField: "Authorization")
+        request.setValue("2", forHTTPHeaderField: "X-RAI-Training-Contract")
+        request.setValue("2", forHTTPHeaderField: "X-RAI-Client-Training-Commands")
+        if let body {
+            request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200, String(data: data, encoding: .utf8) ?? "")
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+    private func capture(_ name: String) {
+        let image = XCTAttachment(screenshot: app.screenshot()); image.name = name; image.lifetime = .keepAlways; add(image)
+        let tree = XCTAttachment(string: app.debugDescription); tree.name = name + "-accessibility"; tree.lifetime = .keepAlways; add(tree)
+    }
+    private func waitUntilEnabled(_ element: XCUIElement, timeout: TimeInterval = 30) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.exists && element.isEnabled { return true }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        return false
+    }
+    private func openEditor() {
+        let button = app.buttons["training.commands.open"]
+        XCTAssertTrue(button.waitForExistence(timeout: 30))
+        XCTAssertTrue(waitUntilEnabled(button), "the v2 editor is enabled only after the unified read is current")
+        button.tap()
+        XCTAssertTrue(app.buttons["training.commands.preview"].waitForExistence(timeout: 10))
+    }
+    private func connectService() {
+        XCTAssertTrue(app.buttons["tab.设置"].waitForExistence(timeout: 40)); app.buttons["tab.设置"].tap()
+        let serviceLink = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "RAI 服务")).firstMatch
+        XCTAssertTrue(serviceLink.waitForExistence(timeout: 20)); serviceLink.tap()
+        let token = app.secureTextFields.firstMatch
+        XCTAssertTrue(token.waitForExistence(timeout: 15)); token.tap()
+        let count = (token.value as? String)?.count ?? 0
+        token.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count + 2) + fixtureToken)
+        let connect = app.buttons["连接服务"].firstMatch
+        if connect.exists { connect.tap() } else { app.buttons["重新检查连接"].firstMatch.tap() }
+        XCTAssertTrue(app.staticTexts["服务：phase5-validation"].waitForExistence(timeout: 30))
+        if app.navigationBars.buttons.element(boundBy: 0).exists {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+    }
+    func testPreviewCancelConfirmConflictAndRestart() async throws {
+        continueAfterFailure = false
+        app.launchArguments = ["-rai.serverURL", base, "-rai.privacy.amap.state", "declined", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        connectService()
+        XCTAssertTrue(app.buttons["tab.今日"].waitForExistence(timeout: 15)); app.buttons["tab.今日"].tap()
+        XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 15)); app.buttons["打开训练计划"].tap()
+        openEditor()
+        let field = app.textFields["training.commands.date"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("2026-12-20")
+        app.buttons["training.commands.preview"].tap()
+        XCTAssertTrue(app.buttons["training.commands.confirm"].waitForExistence(timeout: 20)); capture("phase5-preview")
+        let before = try await call("/v1/mobile/training-plan-state")
+        app.buttons["training.commands.close"].firstMatch.tap()
+        let cancelled = try await call("/v1/mobile/training-plan-state")
+        XCTAssertEqual(before["stateRevision"] as? Int, cancelled["stateRevision"] as? Int)
+        openEditor(); field.tap(); field.typeText("2026-12-20")
+        app.buttons["training.commands.preview"].tap()
+        XCTAssertTrue(app.buttons["training.commands.confirm"].waitForExistence(timeout: 20))
+        app.buttons["training.commands.confirm"].tap()
+        XCTAssertTrue(app.staticTexts["已保存并刷新。"].waitForExistence(timeout: 35)); capture("phase5-committed")
+        let committed = try await call("/v1/mobile/training-plan-state")
+        XCTAssertGreaterThan(try XCTUnwrap(committed["stateRevision"] as? Int), try XCTUnwrap(before["stateRevision"] as? Int))
+        XCTAssertEqual((committed["raceGoal"] as? [String: Any])?["date"] as? String, "2026-12-20")
+        app.buttons["training.commands.close"].firstMatch.tap(); openEditor()
+        app.buttons["training.commands.preview"].tap()
+        XCTAssertTrue(app.buttons["training.commands.confirm"].waitForExistence(timeout: 20))
+        let scope = try XCTUnwrap(committed["scope"] as? [String: Any])
+        let draft: [String: Any] = ["contractVersion":2,"operationScope":scope,"action":"pause","expectedStateRevision":committed["stateRevision"]!]
+        let preview = try await call("/v1/mobile/training-plan/commands/preview", body: draft)
+        var competing = draft; competing["candidateId"] = preview["candidateId"]; competing["operationId"] = UUID().uuidString
+        _ = try await call("/v1/mobile/training-plan/commands", body: competing)
+        app.buttons["training.commands.confirm"].tap()
+        XCTAssertTrue(app.staticTexts["当前状态或候选已变化。草稿仍保留，请重读后重新预览并确认。"].waitForExistence(timeout: 20))
+        capture("phase5-conflict")
+        app.terminate(); app.launch()
+        // The unsigned Simulator build does not guarantee Keychain persistence
+        // across a process restart; re-enter the fixture credential so the
+        // restart assertion tests state recovery, not signing entitlements.
+        connectService()
+        XCTAssertTrue(app.buttons["tab.今日"].waitForExistence(timeout: 15)); app.buttons["tab.今日"].tap()
+        XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 30)); app.buttons["打开训练计划"].tap()
+        let restartedEditor = app.buttons["training.commands.open"]
+        XCTAssertTrue(restartedEditor.waitForExistence(timeout: 30))
+        XCTAssertTrue(waitUntilEnabled(restartedEditor), "a restarted app re-reads before enabling edits")
+        capture("phase5-restart")
+        let after = try await call("/v1/mobile/training-plan-state")
+        XCTAssertEqual(after["runState"] as? String, "paused")
     }
 }

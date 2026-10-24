@@ -1,0 +1,45 @@
+{
+  "recordedAt": "2026-10-24T08:54:23.223370+08:00",
+  "timezone": "Asia/Shanghai",
+  "head": "fc793e0db4f6ecb04f800f01d625f5f50edf5c68",
+  "node": "v22.23.2",
+  "swift": "Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)\nTarget: x86_64-apple-macosx26.0",
+  "nodeTestFileConcurrency": 2,
+  "sourceSHA256": {
+    "apps/api/src/coach-loop-runtime.ts": "e0f8677bf447ece6a21ec7e4aa5b6cdcd064dee107b0a4a7951c297657c15966",
+    "apps/api/src/training-plan-generation.ts": "3a8402d1fb017fdf667baa0a7988a437476fdccf09f7e3e9692124485e9dfdf1",
+    "apps/api/src/training-plan-commands.ts": "6869a232cf870a5e006a0bdb04576cab254b66e7e0083b17f34e0b33af179aad",
+    "apps/api/src/server.ts": "25d5892b76566a965ac149dc4e5dd972bcb5df05a97166206ea2c013e9da4594",
+    "apps/api/src/data.ts": "ccfa95e02ae7cfc1ff0811f5e559b0ab2c928d7eabff0518d2dc6bfe62b5d415",
+    "apps/api/src/mobile-read.ts": "a1804c412ceedd2b36bd71f244c5fc73a55865132d2e8c9e5bc07aef2e783370",
+    "apps/api/test/training-plan-commands.test.ts": "b539e560dd4e0df69feba4597f80d913b0a6a43e5473e76ae47780c08564d103",
+    "apps/api/test/training-plan-ownership.test.ts": "f763b275e06b9761680a6d0cf3d2774c3e1b1b9b055f29560cbe753c2fd1a6a5",
+    "apps/api/test/phase5-training-plan.test.ts": "a575339fa41e6e43f0742e4da8b730f263cff3f3e1353a7e1eb95d7543bff91d",
+    "apps/ios/RAI/TrainingPlanPublisher.swift": "b4ee2daa6427e8e2c352f654e579d80ee38391017800137ba60f07bd07dbea0d",
+    "apps/ios/RAI/NativeAppModel.swift": "d93f0c92924e9e42097f66af17c3da4a2df653c8fff0ef6b93f06c129ecc0359",
+    "apps/ios/RAI/Skins/Technology/TechPlanView.swift": "7dc91213adf9c4417d6e51bfaac160065a61bec5016e0d37c73c8294f5d85f68",
+    "apps/ios/tests/TrainingPlanPublisherRegression.swift": "8473c595da9348e189523f38df362b221999e766c15a4ea442801b490a16b057",
+    "apps/ios/tests/ModelRegression.swift": "da68f70c4e11c1ad34d90a93a4c0e52d0b8bbe9455fdd53688cf4e4a8ed7e5f4"
+  },
+  "crlfFiles": [],
+  "databases": {
+    "provenance": "temporary synthetic fixtures; removed by tests; no personal or production DB",
+    "httpScope": {
+      "serverId": "phase5-validation",
+      "athleteId": "athlete_1",
+      "datasetEpoch": "phase5-synthetic"
+    },
+    "managedComponentScope": {
+      "serverId": "test-server",
+      "athleteId": "synthetic",
+      "datasetEpoch": "synthetic-v1"
+    },
+    "busyEvidence": "persisted running import continuation and full_recompute rows, not a production import/recompute task"
+  },
+  "notExecuted": [
+    "Simulator UI",
+    "paired Watch/device",
+    "old App upgrade/rollback",
+    "production deploy or migration"
+  ]
+}

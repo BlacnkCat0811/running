@@ -1,0 +1,43 @@
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview is accepted
+PASS: preview cancellation is zero writes and no journal
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview again
+PASS: intent persistence failure sends zero writes
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview after storage repair
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: unknown result preserves original intent
+PASS: authenticated transport
+PASS: restart queries committed even with write capability off, without submitting twice
+PASS: state/goals watermarks remain separate and execution awaits read
+PASS: clear failure cannot report success
+PASS: authenticated transport
+PASS: committed read recovery closes only pending row
+PASS: authenticated transport
+PASS: HTTP 404 is not business notFound and never replays
+PASS: authenticated transport
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: explicit notFound replays original UUID and exact Data bytes
+PASS: authenticated transport
+PASS: acknowledgement failure preserves recoverable intent
+PASS: authenticated transport
+PASS: unknown status never replays or clears intent
+PASS: authenticated transport
+PASS: terminal scope mismatch closes only this pending row
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: refresh has its own endpoint without candidate
+PASS: zero retired URL requests
+TrainingPlanPublisher regression passed

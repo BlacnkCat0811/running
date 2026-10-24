@@ -1,0 +1,20 @@
+import { spawn } from 'node:child_process';
+import { writeFileSync, createWriteStream, readFileSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = dirname(fileURLToPath(import.meta.url));
+const [name, command, ...args] = process.argv.slice(2);
+if (!name || !command) throw new Error('name and command required');
+const env = { ...process.env, ...(name === 'full-suite' ? { RAI_TEST_CONCURRENCY: '2' } : {}) };
+const startedAt = new Date().toISOString();
+const log = createWriteStream(join(root, name + '.log'));
+log.write(JSON.stringify({ command: [command, ...args], startedAt, concurrency: name === 'full-suite' ? 2 : null, node: process.version, platform: process.platform, arch: process.arch }) + '\n');
+const child = spawn(command, args, { env, stdio: ['ignore','pipe','pipe'], windowsHide: true });
+child.stdout.pipe(log, { end: false }); child.stderr.pipe(log, { end: false });
+child.on('error', error => log.write(String(error)));
+child.on('close', (code, signal) => {
+  const result = { name, command: [command, ...args], startedAt, completedAt: new Date().toISOString(), exitCode: code, signal, concurrency: name === 'full-suite' ? 2 : null };
+  log.end('\n' + JSON.stringify(result) + '\n');
+  writeFileSync(join(root, name + '.json'), JSON.stringify(result, null, 2) + '\n');
+  console.log(JSON.stringify(result)); process.exitCode = code ?? 1;
+});
