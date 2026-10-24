@@ -2,7 +2,7 @@
 
 ## 跨平台命令矩阵
 
-本仓库在 Windows 上开发、在 macOS 上构建 iOS，**同一条命令在三端逐字相同**：
+正式开发与 iOS 构建环境是 macOS，后端生产/CI 是 Linux。Windows 已退出正式 CI 支持范围；下表保留既有包装的兼容行为，**同一条命令在三端逐字相同**：
 
 | 命令 | Windows（cmd / PowerShell） | macOS |
 |---|---|---|
@@ -19,7 +19,7 @@
    不写 `./x.sh`（Windows 的 git 默认不记录 +x 位）。
 
 ⛔ **不要用 WSL / Git Bash 去"模拟"Mac**：`xcodebuild`、CocoaPods、模拟器只在 macOS 上真跑。
-Windows 侧的职责只是让**跨平台可验证**的部分（typecheck、纯逻辑回归、文档与脚本门禁）与 Mac 一致；
+保留的 Windows 包装只负责**跨平台可验证**的部分（typecheck、纯逻辑回归、文档与脚本门禁）；
 iOS 真编译与模拟器验收在 Windows 上拿到的是**显式跳过**，既不是失败，也不是假通过。
 
 为什么这三条要写死（2026-10-13 本机实测，改前全是红的）：`npm run test:ios` 当时是裸

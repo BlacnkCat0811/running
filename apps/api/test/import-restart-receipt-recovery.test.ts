@@ -28,6 +28,8 @@ import {
   readImportReceipt, readImportReceiptForRecovery, writeImportReceipt
 } from "../src/import-publication.js";
 
+import { posixOnlyReason } from "./posix-only.js";
+
 const project = resolve(import.meta.dirname, "../../..");
 
 /** record-only 白名单记录 + 唯一 UUID ⇒ 每批都是不同载荷，避免 no-op 早退。 */
@@ -160,7 +162,24 @@ async function runBatch(worker: ImportWorker, input: string, sourceId: string): 
   return worker.get(job.id)!;
 }
 
-test("helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）", () => {
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：本条红在"权限拒绝无法核实，不是不存在"这句断言上，
+ * 实际拿到的是 `found`、期望 `unreadable` —— 因为 `chmodSync(denied, 0o000)` 在 Windows 上
+ * **不阻止读取**：Windows 的访问控制靠 ACL，POSIX 的 mode 位只影响只读属性，进程照样能打开
+ * 那个库。这条判据要证明的正是"存在但读不到 ⇒ unreadable，绝不能被当成『没有回执』"。
+ *
+ * 四态里的另外三态（found / confirmed_absent / missing，以及损坏库 / 零字节库 / 缺表的
+ * unreadable 分支）不依赖权限位，仍然在 Windows 上运行；只有"权限拒绝"这一态在那里造不出来，
+ * 因此这一条判据没有被检查。把这一条拆成"按平台构造不可读库"是另一个工作包。
+ */
+const PERMISSION_DENIED_ONLY = posixOnlyReason(
+  "Windows 的 chmod 位不阻止读取（访问控制靠 ACL）：`chmodSync(file, 0o000)` 之后库仍可打开，"
+  + "`readImportReceiptForRecovery` 返回 found 而不是 unreadable（CI 2026-10-25：found !== unreadable）。"
+  + "四态判据里『存在但读不到 ⇒ unreadable，不得当成没有回执』这一态在 Windows 上造不出来，"
+  + "因此没有被检查；按平台构造不可读库（ACL / 独占句柄）另立工单。"
+);
+
+test("helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）", { skip: PERMISSION_DENIED_ONLY }, () => {
   const root = mkdtempSync(join(tmpdir(), "rai-recovery-helper-"));
   try {
     const readable = join(root, "readable.sqlite");

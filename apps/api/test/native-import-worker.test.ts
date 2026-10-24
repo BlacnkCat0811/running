@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { nativeBinary, nativeWorkerAvailability, NATIVE_VERSION } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 import { createImportJobId, ImportWorker } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
@@ -34,10 +35,17 @@ test("Rust jobs keep their engine across restart but the import path refuses the
   writeFileSync(join(input, "sync-manifest.json"), JSON.stringify({
     version: 2, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: []
   }));
+  // 数据集主库必须**真的存在**（2026-10-24）：`import-worker.ts:2816-2851` 的四态恢复门禁
+  // 对"主库缺失"是 fail-closed 的 —— 没有 pristine 首次空库许可时作业会停在
+  // `recovery_required`，永远到不了本用例要钉的"引擎跨重启保留 + 导入通道显式拒绝"。
+  // 这条用例要证明的不是首次空库策略（那由 import-scope-evidence.test.ts 钉），所以这里
+  // 直接把库建出来，与 import-worker-direct-sync.test.ts 同一写法。
+  const main = join(root, "main.sqlite");
+  (await RaiDatabase.open(main, { createMigrationBackup: false })).close();
   const mutations = new MutationCoordinator(), scheduler = new TaskAdmissionScheduler(mutations);
   const release = mutations.acquire("fixture");
   const create = (name: "rust" | "typescript") => new ImportWorker(
-    join(root, "main.sqlite"), resolve(import.meta.dirname, "../../.."), root, undefined, undefined, undefined, {
+    main, resolve(import.meta.dirname, "../../.."), root, undefined, undefined, undefined, {
       scope: "fixture", admission: scheduler.owner("import"), engine: { name, version: NATIVE_VERSION, fallback: "none" }
     }
   );
@@ -97,7 +105,12 @@ test("engine mismatch is refused explicitly instead of silently switching engine
   writeFileSync(join(input, "sync-manifest.json"), JSON.stringify({
     version: 2, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: []
   }));
-  const worker = new ImportWorker(join(root, "main.sqlite"), resolve(import.meta.dirname, "../../.."), root,
+  // 同上（2026-10-24）：主库缺失会让作业停在 `recovery_required`（`import-worker.ts:927-933`
+  // 的执行期门禁），本用例要钉的是"引擎版本不符必须显式拒绝、绝不静默换 TS"，与首次空库
+  // 许可策略无关，所以先把库建出来。
+  const main = join(root, "main.sqlite");
+  (await RaiDatabase.open(main, { createMigrationBackup: false })).close();
+  const worker = new ImportWorker(main, resolve(import.meta.dirname, "../../.."), root,
     undefined, undefined, undefined, {
       scope: "fixture", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import"),
       engine: { name: "rust", version: "incompatible", fallback: "none" }

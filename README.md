@@ -51,10 +51,11 @@ npm run check:package-boundaries
 现有 iOS 用 `npm run test:ios`；Python 用 `npm run ml:test`。缺 Xcode/平台导致跳过必须报告，不能当通过。
 真机 HealthKit、后台唤醒、地图与视觉验收不能由上述自动检查替代。
 
-**本仓库的远端是 gitee，GitHub Actions 不会被 gitee 的提交触发**（`.github/workflows/ci.yml` 只为将来镜像到 GitHub 准备，镜像后可手动 dispatch；`.workflow/master-ci.yml` 是未启用的 Gitee Go 草案）。所以不要把"没有 CI 红"读成"提交已验证"：
+正式开发环境为 macOS，后端生产环境为 Linux，客户端为 iOS；Windows 自 2026-10-25 起不再是正式 CI 支持平台，现有跨平台包装与通用安全测试继续保留。
+**GitHub CI 已实际启用**：[仓库 Actions](https://github.com/BlacnkCat0811/running/actions) 对 PR、`main`/`master` push 和手动 dispatch 运行 [工作流](.github/workflows/ci.yml)。Linux 执行全量后端/Python/部署脚本验证，macOS 执行原生 iOS 构建与 Swift 回归，Rust 在两端核验；审计与验证边界见 [CI 审计](deliverables/ci-audit-2026-10-25/README.md)。Gitee 的 push 不会触发 GitHub，`.workflow/master-ci.yml` 仍是未启用的 Gitee Go 草案。不能把"没有 CI 红"读成"提交已验证"：
 - 提交时 `.githooks/pre-commit` 会跑 typecheck、文档链接、**文档行号引用**、npm 脚本跨平台语法、**仓库体积闸门（1.5 MB/文件）**、**计划定向回归**（计划相关路径有改动时，约 5 s）、§16.1 验收矩阵、包边界；`apps/ios/` 或 `packages/storage-sqlite/` 有改动时各自再跑对应门禁（含迁移冻结与表分类清单一致性）。
 - 发布前必须在能跑全量的机器上把上面这段清单逐条执行一遍（`npm test` 是分钟级，不在提交钩子里），另跑 `npm run review:model-boundaries`（R1–R3 只读对抗探针）与 `npm run check:package-boundaries -- --self-test`。
-- 发布记录必须写明：**gitee 侧 CI 未启用、判据来自本机实跑**、`RAI_TEST_CONCURRENCY` 取值，以及被跳过的检查。
+- 发布记录必须写明：提交 SHA、对应 GitHub Run ID 与关键 Job 状态、本机实跑结果、`RAI_TEST_CONCURRENCY` 取值，以及被跳过的检查。只推送 Gitee 时明确标记没有对应 GitHub 验证。
 - 缺 Xcode / 缺平台导致**跳过**的检查要单独列出，不能合并进"通过"。
 
 跨平台写法是硬规则，不是风格建议：npm script 正文只用 `&&`、纯命令、`node xxx.mjs`

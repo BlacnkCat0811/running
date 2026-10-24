@@ -30,6 +30,10 @@ import {
   type ProcessProbe
 } from "../src/index.js";
 
+// 跨包引用一个 `apps/api/test` 下的三行助手：包边界判据（scripts/check-package-boundaries.mjs）
+// 的 A 类分层规则只查 `src/`，测试目录允许这种引用（同 `recovery-isolation-e2e.test.ts` 先例）。
+import { posixOnlyReason } from "../../../apps/api/test/posix-only.js";
+
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 const STORAGE_ENTRY = pathToFileURL(resolve(import.meta.dirname, "../src/index.ts")).href;
 
@@ -664,7 +668,28 @@ test("publication lock: a directory is not a database identity", () => {
   }
 });
 
-test("publication lock: identity stays on the same lock path across database file replacement", () => {
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：本条红在
+ * `assert.equal(resolveDatabasePathIdentity(databasePath), realpathSync(databasePath))` 上，
+ * 两侧对**同一个文件**给出不同拼写：
+ *   actual   `C:\Users\runneradmin\AppData\Local\Temp\…\rai.sqlite`（`realpathSync.native`）
+ *   expected `C:\Users\RUNNER~1\AppData\Local\Temp\…\rai.sqlite`（JS 版 `realpathSync`）
+ * 机制是 Windows 的路径写法：`realpathSync.native` 返回长名（设备路径解析），JS 版实现返回
+ * 8.3 短名（`RUNNER~1` 这种），两者是同一个文件、不同字符串。
+ *
+ * 这条判据要钉的是"换库之后锁仍落在同一路径、owner 记录不变"（锁身份不随 inode 漂移）。
+ * 在 Windows 上"同一路径"必须按文件身份而不是字符串比较，所以这条判据原样做不出来，
+ * 在那里没有被检查。真正的 Windows 身份判据另立工单。
+ */
+const NATIVE_REALPATH_ONLY = posixOnlyReason(
+  "Windows 上 `realpathSync.native` 与 JS 版 `realpathSync` 对同一文件给出不同拼写（长名 "
+  + "`C:\\Users\\runneradmin\\…` vs 8.3 短名 `C:\\Users\\RUNNER~1\\…`），"
+  + "而本条判据要求这两个字符串相等（CI 2026-10-25：RUNNER~1 !== runneradmin）。"
+  + "『换库后锁身份仍落在同一路径』这条判据在 Windows 上必须按文件身份而不是路径字符串比较，"
+  + "因此原样没有被检查；Windows 路径身份判据另立工单。"
+);
+
+test("publication lock: identity stays on the same lock path across database file replacement", { skip: NATIVE_REALPATH_ONLY }, () => {
   const root = mkdtempSync(join(tmpdir(), "rai-lock-file-replacement-"));
   const databasePath = join(root, "rai.sqlite");
   const replacementPath = join(root, "replacement.sqlite");

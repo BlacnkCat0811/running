@@ -22,11 +22,38 @@ import {
 
 const tempRoot = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 
+/**
+ * 只能在 POSIX 上执行的判据在 Windows 上必须**显式跳过**并说清什么没有被检查
+ * （仓库规则见 `scripts/run-ios.mjs` 头注释与 `apps/ios/tests/run-ios-gates.sh`）。
+ *
+ * 本文件是 `.mjs`，不能 import `apps/api/test/posix-only.ts`，所以内联同样三行语义；
+ * 每条判据的平台机制写在该用例自己那一处（不要为了 DRY 另建加载路径）。
+ */
+const POSIX_ONLY = (why) => (process.platform === "win32" ? why : false);
+
+/** 路径深度判据用 `path.sep` 与盘符，见对应用例的理由。 */
+const SHALLOW_ROOT_ONLY = POSIX_ONLY(
+  "『试验根不能浅到 /tmp 这种层级』这条判据用 path.sep 切路径段数：Windows 上 "
+  + "`resolve(\"/tmp\")` 变成 `C:\\tmp`（盘符算一段、且被解析到当前盘），段数=2，"
+  + "`root_too_shallow` 永不触发（CI 2026-10-25：Missing expected exception）。"
+  + "因此仓库/祖先/仓库内/浅根这一组拒绝判据在 Windows 上没有完整检查过；"
+  + "Windows 的『浅根』定义需要一次产品决策，另立工单。"
+);
+
+/** 子进程环境白名单里 join() 的分隔符，见对应用例的理由。 */
+const POSIX_JOIN_ONLY = POSIX_ONLY(
+  "`buildServerEnvironment` 用 node:path 的 join() 拼 TMPDIR/TMP/TEMP/HOME，Windows 上分隔符是反斜杠，"
+  + "于是 TMPDIR 得到 `\\Users\\ta\\…\\tmp` 而不是用例写死的 `/Users/ta/…/tmp`"
+  + "（CI 2026-10-25：`\\Users\\ta\\rai-phase6-lab\\run-001\\tmp` !== `/Users/ta/rai-phase6-lab/run-001/tmp`）。"
+  + "因此『子进程环境是白名单、绝不继承生产 RAI_* 与代理』这条判据在 Windows 上没有按原样检查过；"
+  + "按平台分隔符重写断言是另一个工作包。"
+);
+
 const rejects = (code, run) => {
   assert.throws(run, (error) => error instanceof SafetyError && error.code === code);
 };
 
-test("rejects the repository, its ancestors, its var/ and shallow roots", () => {
+test("rejects the repository, its ancestors, its var/ and shallow roots", { skip: SHALLOW_ROOT_ONLY }, () => {
   rejects("root_is_repo", () => assertSafeExperimentRoot(REPO_ROOT));
   rejects("root_inside_repo", () => assertSafeExperimentRoot(join(REPO_ROOT, "var", "phase6")));
   rejects("root_contains_repo", () => assertSafeExperimentRoot(dirname(REPO_ROOT)));
@@ -117,7 +144,7 @@ test("main and control databases must be distinct regular files, not hard links"
   }
 });
 
-test("child environment is a whitelist and never inherits production RAI_* or proxies", () => {
+test("child environment is a whitelist and never inherits production RAI_* or proxies", { skip: POSIX_JOIN_ONLY }, () => {
   const saved = {
     RAI_DATABASE: process.env.RAI_DATABASE,
     RAI_TRAINING_PLAN_COMMAND_MODE: process.env.RAI_TRAINING_PLAN_COMMAND_MODE,

@@ -232,7 +232,7 @@ V3 兼容路径对照 training metric config 中的 overrideSnapshotIds，不能
 
 #### R4 · P2（已修复）：根 npm test 使用 POSIX 语法，与声明的 Windows CI 入口不兼容
 
-**位置**：`package.json` 的 `scripts.test`；`.github/workflows/ci.yml` 的 `windows-runtime` job。
+**位置（历史）**：`package.json` 的 `scripts.test`；当时 `.github/workflows/ci.yml` 的 `windows-runtime` job。
 
 - 脚本用 `;`、`node_status=$?`、`test ... -eq ...` 组合 Node 和 Web 测试；这是 POSIX shell 语法。
 - Windows job 直接运行 `npm test`，仓库未配置 Windows npm script-shell。
@@ -240,6 +240,7 @@ V3 兼容路径对照 training metric config 中的 overrideSnapshotIds，不能
 
 **已完成修复**：`scripts/run-tests.mjs` 直接用 `process.execPath` 与 `shell:false` 运行 Node；
 显式枚举 TS 测试文件，不依赖 shell glob、分号、`$?` 或 `npm.cmd`。实机 Windows 未在本机执行。
+2026-10-25：Windows 已退出正式 CI 支持范围，专属 Job 移除；包装与通用测试仍保留，现状见 [CI 审计](../deliverables/ci-audit-2026-10-25/README.md)。
 
 #### 可复现探针
 

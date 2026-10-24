@@ -12,9 +12,15 @@ test("npm test keeps the shell-free runner as the actual cross-platform entry po
   const manifest = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
   assert.equal(manifest.scripts.test, "node scripts/run-tests.mjs");
   const workflow = readFileSync(resolve(".github/workflows/ci.yml"), "utf8");
-  const windows = workflow.slice(workflow.indexOf("  windows-runtime:"), workflow.indexOf("  verify:"));
-  assert.match(windows, /runs-on: windows-latest/);
-  assert.match(windows, /run: npm test/);
+  const linux = workflow.slice(workflow.indexOf("  verify:"));
+  assert.match(linux, /runs-on: ubuntu-24\.04/);
+  assert.match(linux, /RAI_TEST_CONCURRENCY: "2"/);
+  assert.match(linux, /run: npm test\n/,
+    "Linux 必须保留全量发现，不能用定向测试代替 SQLite/Worker/POSIX 验收");
+  for (const gate of ["check:training-plan-single-writer", "check:ios-gates", "review:model-boundaries", "ml:test", "smoke:api"]) {
+    assert.ok(linux.includes(`npm run ${gate}`), `Linux CI 未执行 ${gate}`);
+  }
+  assert.match(linux, /run: \|\n          npm ci --omit=dev/);
 });
 
 test("test runner discovers explicit filenames including spaces without shell expansion", () => {

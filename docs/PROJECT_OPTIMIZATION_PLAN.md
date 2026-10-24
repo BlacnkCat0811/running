@@ -144,7 +144,7 @@ PR-10 CLI 校验；PR-11 门禁与远端执行；PR-12 iOS 行为可测面
 | E-12 | `typecheck-ios.sh`、`run-ios-gates.sh`、`run-model-tests.sh` | `typecheck-ios.sh` 覆盖 `apps/ios/RAI/*.swift`（排除 3 个高德文件），HealthKitSync/Export 已在总类型检查内；不足的是 SDK 副作用行为回归，不是“从未编译” |
 | E-13 | TS `HandshakeResponse`（`packages/api-contracts/src/index.ts`）、Swift `RaiHandshake`（`APIModels.swift`）；`schemas.ts` 仅在 OpenAPI 表登记 `/v1/handshake` | 能力/响应多面手写；Swift 尚无 `factsAnalysisViewContractVersion` 镜像；`trainingPlanContractVersion` / `trainingPlanCommandContractVersion` 尚未在任何一端定义（§4.2 提案），不是 Swift 单侧缺镜像；iOS **生产代码**对 `currentFacts` / `publishedAnalysis` 的消费为 0（测试/门禁另有引用） |
 | E-14 | `training-plan-coordinator.ts`：`refreshDecision` | 合成窗口只剩一天时仍返回 `current`；是否应滚动补齐需先明确窗口合同 |
-| E-15 | `.github/workflows/ci.yml`、`.githooks/pre-commit`、Git remote | 远端 gitee；仓库自己明确 GitHub workflow 不会被该远端提交触发 |
+| E-15 | `.github/workflows/ci.yml`、`.githooks/pre-commit`、Git remote | 原审查时只确认 Gitee push 不触发 GitHub；2026-10-25 已读取真实 GitHub 运行，现状及待验证修订见 [CI 审计](../deliverables/ci-audit-2026-10-25/README.md) |
 
 ### 2.4 两个不能忽略的探针结果
 
@@ -533,10 +533,10 @@ Swift 解码通过与 TS 编译通过各自不能代替运行时校验。
 7. 行号基线必须在一个已审过的基准修订生成，之后比候选修订。
    在发布候选上同时 `--write-baseline` 再 `--require-baseline` 只证明自相等，
    **不能证明相对上次评审没有漂移**；长期优先用函数/符号和章节链接。
-8. 从现有 Gitee Go 草案或受控 runner 选择一个所有者批准的远端执行渠道；
-   先启用 Linux，再 Windows 和 macOS。本文不虚构平台已启用，也不改写远端配置。
+8. 远端执行渠道已使用 GitHub Actions，正式平台收敛为 Linux 后端与 macOS/iOS；
+   Windows 不再是待启用项。按准确修订核对 Job 实跑结果，不以配置文件存在作为通过证据。
    发布清单可作为启用前的人工约束，但不等价于服务端强制保护。
-9. Linux/Windows 使用合成数据，macOS 正式构建不上传个人健康库；平台跳过记录为 skip，
+9. Linux 使用合成数据，macOS 正式构建不上传个人健康库；平台跳过记录为 skip，
    发布需要的平台缺失时阻断对应发布，而不是改用 `--no-verify`。
 
 验收：真实远端提交/人工 dispatch 产生带准确 SHA 的结果，故意坏一次能阻断约定发布流程；

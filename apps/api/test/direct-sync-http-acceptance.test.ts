@@ -39,7 +39,32 @@ import { RaiDatabase } from "@rai/storage-sqlite";
 
 import type { ImportInspection } from "../src/import-sources.js";
 
+import { posixOnlyReason } from "./posix-only.js";
+
 const projectRoot = resolve(import.meta.dirname, "../../..");
+
+/**
+ * A05/F01 这条判据在 Windows 上做不出来，理由有两层，两层都是平台机制而不是计时抖动：
+ *
+ * 1. 判据本身要求「COMMIT 前的确定性屏障以 SIGKILL 结束进程」，然后逐表比对全回滚。
+ *    Windows 没有 POSIX 信号：`child.kill("SIGKILL")` 由 libuv 映射成 `TerminateProcess`，
+ *    `signalCode` 恒为 `null`、`exitCode` 变成 1（同文件 :397 的注释已写明这一点），
+ *    所以「进程真的被 SIGKILL 掉了」这件事在 Windows 上没有读数。
+ * 2. 更靠前：这条用例给子进程传了 `--import <绝对路径>`（见 `startServer` 里的
+ *    `join(projectRoot, "apps/api/test/fixtures/pre-commit-barrier.mjs")`），
+ *    ESM 加载器只接受 `file://` URL，Windows 盘符路径被当成协议 `d:` —— 子进程在屏障
+ *    加载之前就以 `ERR_UNSUPPORTED_ESM_URL_SCHEME` 退出（CI 2026-10-25 实测栈就是
+ *    `throwIfUnsupportedESM_URLScheme` ← `apps/api/test/direct-sync-http-acceptance.test.ts`）。
+ *    这一层是**测试夹具**的 Windows 不兼容（应改用 `pathToFileURL`），值得单独一张票；
+ *    修好它之后仍会撞上第 1 层。
+ */
+const PRECOMMIT_SIGKILL_ONLY = posixOnlyReason(
+  "Windows 上这条判据没有前提：COMMIT 前屏障要求以 SIGKILL 结束子进程（signalCode 恒为 null、"
+  + "exitCode=1），且夹具的 `--import <盘符绝对路径>` 在 ESM 加载器里被当成协议 `d:`，"
+  + "子进程在屏障加载前就以 ERR_UNSUPPORTED_ESM_URL_SCHEME 退出（CI 2026-10-25）。"
+  + "因此『COMMIT 前强杀 ⇒ 删除与 GPX 同事务全回滚』没有被检查；SIGKILL 语义与夹具的 "
+  + "file:// 拼写是另一个工作包。"
+);
 
 /** 轮询上界。真机上"同步"是长任务，但**验收**不该靠等：超时就是失败，且要说清等到哪一步。 */
 const POLL_BUDGET_MS = 120_000;
@@ -1178,7 +1203,7 @@ test("A05：COMMIT 前强杀含 GPX 的批次 ⇒ 路线点/删除/回执均无�
   }
 });
 
-test("A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次", { timeout: 180_000 }, async () => {
+test("A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次", { timeout: 180_000, skip: PRECOMMIT_SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-direct-sync-http-p2-delete-gpx-");
   await prepareDatabase(harness);
   const markerPath = join(harness.root, "precommit-marker.json");

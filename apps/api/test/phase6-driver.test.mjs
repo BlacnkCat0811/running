@@ -11,6 +11,20 @@ import { REPO_ROOT } from "../../../scripts/phase6/safety.mjs";
 
 const TOKEN = "phase6-test-token-0123456789";
 
+/**
+ * 只能在 POSIX 上执行的判据在 Windows 上必须**显式跳过**并说清什么没有被检查
+ * （仓库规则见 `scripts/run-ios.mjs` 头注释与 `apps/ios/tests/run-ios-gates.sh`）。
+ *
+ * 本文件是 `.mjs`，不能 import `apps/api/test/posix-only.ts`，所以内联同样三行语义；
+ * 判据的理由写在 `SIGTERM` 用例那一处（不要为了 DRY 另建加载路径）。
+ */
+const POSIX_ONLY = process.platform === "win32"
+  ? "Windows 没有 POSIX 信号：child.kill(\"SIGTERM\") 由 libuv 映射成 TerminateProcess，"
+    + "驱动器进程拿不到 SIGTERM、没有机会把已投放请求收口，incomplete 结果文件与守恒账本都写不出来，"
+    + "实测 exit 为 null 而不是 3（CI 2026-10-25）。因此『已投放请求有终态、输出标记 incomplete』"
+    + "这条判据在 Windows 上没有被检查；Windows 上的停止语义（TerminateProcess + 无收尾）另立工单。"
+  : false;
+
 async function fakeApi(delayMs = 0, { persistWrites = true, invalidReads = false } = {}) {
   const entries = [];
   const server = createServer((request, response) => {
@@ -297,7 +311,7 @@ test("慢 API 超过 64 在途：只在真实在途达到上限后丢弃，无�
   assert.ok(correctness.outcomes.runner_dropped >= 1);
 });
 
-test("SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过", async (t) => {
+test("SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过", { skip: POSIX_ONLY }, async (t) => {
   const api = await fakeApi(100);
   const dir = workspace();
   t.after(() => { api.server.close(); rmSync(dir.dir, { recursive: true, force: true }); });

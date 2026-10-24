@@ -6,11 +6,30 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiReadStore } from "../src/data.js";
+import { posixOnlyReason } from "./posix-only.js";
 import {
   DatabaseNotReadyError,
   DatabaseReplaceTimeoutError,
   ReadStoreManager
 } from "../src/read-store-manager.js";
+
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：这两条用例红在 `renameSync(replacement, path)`
+ * —— `EPERM: operation not permitted, rename '…\replacement.sqlite' -> '…\rai.sqlite'`。
+ * 机制是 Windows 的文件共享语义：**不允许 rename/unlink 一个仍被打开的文件**（本进程的
+ * 缓存读连接还钉着 old inode），POSIX 却允许（rename 只是换目录项，旧 inode 照旧可读）。
+ * 于是"换库"这个动作在 Windows 上做不出来，而这两条判据要证明的正是换库之后的结论
+ * （缓存读连接必须重开、`dataVersionFingerprint` 必须变化）。
+ *
+ * 同文件其余用例（utimes-only、WAL checkpoint 同 inode 路径、冷启动延迟诊断）不做换库，
+ * 在 Windows 上照常通过，不要一起跳过。
+ */
+const FILE_REPLACEMENT_ONLY = posixOnlyReason(
+  "Windows 不允许 rename/unlink 仍被打开的文件：缓存读连接还钉着 rai.sqlite，"
+  + "`renameSync(replacement, path)` 直接 EPERM（CI 2026-10-25：「EPERM: operation not permitted, rename」）。"
+  + "本条判据要证明的是换库（inode 变化）之后读连接必须重开 / 指纹必须变化，而换库动作在 Windows 上"
+  + "做不出来，因此这条判据没有被检查；真正的 Windows 换库路径另立工单。"
+);
 
 const percentile = (samples: number[], p: number): number => {
   const sorted = [...samples].sort((left, right) => left - right);
@@ -135,7 +154,7 @@ test("beginReplace times out when read leases do not drain", async () => {
   }
 });
 
-test("P3-4: the cached read store reopens when the database file is replaced", () => {
+test("P3-4: the cached read store reopens when the database file is replaced", { skip: FILE_REPLACEMENT_ONLY }, () => {
   const root = mkdtempSync(join(tmpdir(), "rai-read-inode-"));
   const path = join(root, "rai.sqlite");
   const replacement = join(root, "replacement.sqlite");
@@ -253,7 +272,7 @@ test("latency: cold open vs same-inode mtime path (p50/p95, diagnostic)", t => {
   }
 });
 
-test("dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it", () => {
+test("dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it", { skip: FILE_REPLACEMENT_ONLY }, () => {
   const root = mkdtempSync(join(tmpdir(), "rai-read-fingerprint-"));
   const path = join(root, "rai.sqlite");
   const replacement = join(root, "replacement.sqlite");

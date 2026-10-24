@@ -4,134 +4,108 @@ on:
   push:
     branches: [main, master]
   pull_request:
-  # 2026-10-18（训练计划审查 P3-20）：本仓库的远端是 **gitee**，GitHub Actions
-  # 在本仓库**不会**被 gitee 的 push 触发（两个平台不互相调用）。保留本 workflow 是
-  # 为"将来把仓库镜像到 GitHub"准备；镜像后由 mirror 的 push 触发，或者在这里手动
-  # dispatch。**不要**把它当成"提交已被 CI 覆盖"的证据 —— 当前真正的执行入口是
-  # `.githooks/pre-commit`（本地：typecheck / 文档 / 行号引用 / npm 脚本 / 计划定向回归
-  # / 验收矩阵 / 包边界 / iOS 门禁），发布前另需按 README §检查 逐条在本机跑一遍。
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust-data-worker:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        os: [ubuntu-24.04, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      # CPU inference is bundled; the optional 1.22.0 CUDA downloader is broken.
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22.x
+          node-version-file: .nvmrc
           cache: npm
-      - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
       - name: Install Node dependencies
         run: npm ci
       - name: Verify native engine, contract parity, cancellation, and real import
         run: npm run rust:verify
 
   ios:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 30
+    env:
+      # This Xcode/SDK passed run 40130489750; do not follow the image default.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Run iOS gates (typecheck + pure-logic regressions)
-        # 本仓库远端是 gitee，本 workflow 目前**不会**对远端触发；真正的执行入口是
-        # `.githooks/pre-commit`（`apps/ios/` 有改动时跑 `npm run test:ios`）。
-        # 这一步是给"将来把仓库镜像到 GitHub"准备的，判据本身与本机完全同一条命令。
-        #
-        # 走 `npm run test:ios`（= `node scripts/run-ios.mjs gates`）而不是裸 `bash …`：
-        # 解释器怎么挑、非 macOS 怎么办，只写在 scripts/run-ios.mjs 一处，
-        # 这里是三端同一入口。run-ios-gates.sh 仍然自带 macOS / Xcode 检测：
-        # 不满足时**显式跳过并退出 0**（打印「本次没有检查任何 iOS 源码」），
-        # 所以这步不会因为 runner 差异静默变绿。
-        # runner 上的 Xcode 路径不一定在 /Applications/Xcode.app，按 `xcode-select -p` 传进去。
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Verify Xcode and iOS SDK availability
         run: |
-          export DEVELOPER_DIR="$(xcode-select -p)"
-          npm run test:ios
+          xcodebuild -version
+          xcrun swiftc --version
+          xcrun --sdk iphonesimulator --show-sdk-path
+          python3 --version
+          pod --version
+      - name: Run iOS gates (typecheck + pure-logic regressions)
+        shell: bash
+        run: |
+          npm run test:ios 2>&1 | tee "$RUNNER_TEMP/ios-gates.log"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { NO_IOS_SOURCE_CHECKED } from './scripts/run-ios.mjs';
+          const log = readFileSync(join(process.env.RUNNER_TEMP, 'ios-gates.log'), 'utf8');
+          if (log.includes(NO_IOS_SOURCE_CHECKED) || !log.includes('iOS 门禁通过（类型检查 + 纯逻辑回归）')) {
+            throw new Error('Required iOS CI gates did not execute');
+          }
+          NODE
       - name: Run cross-platform source gates
-        # 结构门禁（python，10 支）的跨平台入口。macOS 上 `npm run test:ios` 的聚合链
-        # （`run-model-tests.sh`）已经跑过同一批；这里显式再跑一次，是为了让 CI 与
-        # "Windows/Linux 开发者手跑"走**同一条命令**，而不是依赖 macOS 聚合链的间接覆盖。
-        # `check-pr5-facts-analysis.py` 曾因只挂在这个入口、而入口不在 CI/pre-commit，
-        # 连续 6 天没有执行者（见 `.githooks/pre-commit` 同名注释）。
         run: npm run check:ios-gates
       - name: Cache CocoaPods
-        # The AMap pod is a large binary download; the cache key follows Podfile.lock.
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/Library/Caches/CocoaPods
-          key: ${{ runner.os }}-pods-${{ hashFiles('apps/ios/Podfile.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-pods-
-      - name: Install CocoaPods dependencies
-        run: cd apps/ios && pod install
+          key: ${{ runner.os }}-${{ runner.arch }}-pods-${{ hashFiles('apps/ios/Podfile.lock') }}
+      - name: Install locked CocoaPods dependencies
+        working-directory: apps/ios
+        run: pod install --deployment
       - name: Build iOS simulator target
-        # The workspace remains the recommended build entry point because it
-        # includes the generated Pods project. The Podfile also removes the
-        # empty aggregate link so the bare RAI.xcodeproj remains buildable.
         run: |
           xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/rai-build" \
             CODE_SIGNING_ALLOWED=NO build
-      - name: Run iOS model regression tests
-        run: bash apps/ios/tests/run-model-tests.sh
+      # test:ios already runs run-model-tests.sh and all its nested Swift suites.
+      # Compile only: running UI acceptance needs a simulator and private data.
       - name: Compile visual acceptance UI tests
-        # 只编译、不运行。截图回归跑不了：它依赖 `var/rai.sqlite` 这份真实健康库
-        # （`.gitignore` 掉 `var/`，且含个人健康数据，不该入库），
-        # `run-visual-tests.sh` 的第一步就是 `sqlite3 .backup` 它。所以 UI 用例只能在本机跑。
-        # 但"用例编译不过"——写错 API、签名对不上、语法错——CI 必须能发现：此前这一步
-        # 完全缺失，`VisualAcceptance.swift` 写错语法时 CI 一路全绿，只有本机跑 UI 回归才暴露。
-        # `generic/platform=iOS Simulator` 不解析具体机型，避免 runner 上没有某个 iPhone 型号。
         run: |
           xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/visual-acceptance" \
             CODE_SIGNING_ALLOWED=NO build-for-testing
 
-  windows-runtime:
-    runs-on: windows-latest
-    timeout-minutes: 12
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22.x
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: iOS gates on Windows (must skip loudly, never fail or pass quietly)
-        # `npm run test:ios` 在 Windows 上必须**显式跳过并退出 0**：它不等于"通过"，
-        # 而是"本次没有检查任何 iOS 源码"。这一步钉的就是这个退出码 —— 只要包装脚本
-        # 退回裸 `bash`（本机 PATH 上的 bash 是 WSL 启动器，实测 exit 1），这里立刻变红。
-        # 「跳过时必须打印哪句话」由 packages/application/test/cross-platform-scripts.test.ts 钉。
-        run: npm run test:ios
-
-      - name: Run Windows unit and integration tests
-        run: npm test
-
-      - name: Smoke test production API startup and shutdown
-        run: npm run smoke:api
-
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     strategy:
       matrix:
         node-version: [22.x]
+    env:
+      # CPU inference is bundled; the optional 1.22.0 CUDA downloader is broken.
+      ONNXRUNTIME_NODE_INSTALL: skip
+      RAI_TEST_CONCURRENCY: "2"
 
     steps:
       - name: Check out repository
@@ -150,6 +124,23 @@ jobs:
           cache: pip
           cache-dependency-path: research/requirements.lock
 
+      - name: Validate GitHub Actions workflows
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.11/actionlint_1.7.11_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/actionlint.tar.gz"
+          echo "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      - name: Check deployment shell syntax
+        # Static parsing only; deployment tests use systemctl doubles. Neither
+        # constitutes real systemd integration or starts a production service.
+        shell: bash
+        run: |
+          while IFS= read -r -d '' script; do
+            bash -n "$script"
+          done < <(git ls-files -z -- 'deploy/*.sh')
       - name: Install dependencies
         run: npm ci
 
@@ -157,38 +148,22 @@ jobs:
         run: npm run typecheck
 
       - name: Validate maintained documentation and acceptance references
-        # `check:doc-refs` 自 2026-10-18 起也在默认范围内核对三份现行计划文档的
-        # `文件:行号` 引用（此前它与 pre-commit 都漏了这一步，实测漏掉过一处指向
-        # 已删除 `docs/WEB.md` 的死引用）。同日 P3-40 又把 `deploy/README-UBUNTU.md`、
-        # `docs/DECISIONS.md` 等 4 份现行文档补进默认范围。
-        # 内容漂移判据需要 `.linerefs.json` 基线；仓库日常不提交基线（P2-07 决定），
-        # 所以此处**不开** `--require-baseline`：发布前若要内容级核对，见 docs/OPERATIONS.md
-        # 发布清单里的 `--write-baseline` 用法。
         run: npm run check:docs && npm run check:doc-refs && npm run check:acceptance-matrix
 
       - name: Verify gate scripts, blob ceiling, and package boundaries
-        # 门禁自己也要有回归：`--self-test` 在 os.tmpdir() 现建夹具，验证
-        # 单引号 / 动态 import / require / `.mts` / 跨层 import 都会变红（2026-10-18 P2-08）。
-        # 仓库体积闸门 1.5 MB/文件；包边界四类判据（分层/具名禁线/声明↔实际/边白名单）。
         run: |
           npm run check:scripts
           node scripts/check-blob-size.mjs
           npm run check:package-boundaries
           npm run check:package-boundaries -- --self-test
+          npm run check:training-plan-single-writer
+          npm run check:ios-gates
 
       - name: Model boundary review (R1-R3)
-        # 只读对抗探针（合成库，finally 清理），violationCount>0 时 exit 1。
-        # ⚠️ `scripts/review-model-boundaries.mts` 是 TypeScript（.mts）：必须经 `npm run`/tsx；
-        # 裸 `node scripts/review-model-boundaries.mts` 会 ERR_MODULE_NOT_FOUND
-        # （node 只按扩展名选加载器，不识别 .mts 里的类型语法）。
         run: npm run review:model-boundaries
 
       - name: Run tests
-        # 高负载/多核 runner 上默认并发可能把 5s/30s 墙钟预算压红（假红，见
-        # scripts/run-tests.mjs 头注释）。CI 用固定并发换取可比较结果；不进 npm script，
-        # 那样会违反"脚本正文不得写 VAR=x cmd"的跨平台规则（这里是 shell step 的 env）。
-        env:
-          RAI_TEST_CONCURRENCY: "2"
+        # Full discovery: SQLite, import lanes, atomic publication and POSIX recovery.
         run: npm test
 
       - name: Bootstrap Python training environment
@@ -203,6 +178,7 @@ jobs:
       - name: Verify production-only startup contract
         run: |
           npm ci --omit=dev
+          test ! -e node_modules/typescript
           test ! -e node_modules/.bin/vite
           test ! -e node_modules/react
           test ! -e node_modules/vitest

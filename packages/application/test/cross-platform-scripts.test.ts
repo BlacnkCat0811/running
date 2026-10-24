@@ -290,12 +290,29 @@ test(".gitattributes 把四种扩展名钉成 LF，并真的对已入库文件�
   }
 });
 
-test("Windows CI 会真的执行 test:ios：判据是「显式跳过 + 退出 0」，不是失败也不是静默通过", () => {
+test("CI 在 macOS 真跑 iOS 门禁，并将未执行源码检查判成失败", () => {
   const workflow = readFileSync(resolve(".github/workflows/ci.yml"), "utf8");
-  const start = workflow.indexOf("  windows-runtime:");
+  const start = workflow.indexOf("  ios:");
   const end = workflow.indexOf("  verify:");
-  assert.ok(start >= 0 && end > start, "ci.yml 里找不到 windows-runtime 作业");
-  const windows = workflow.slice(start, end);
-  assert.match(windows, /runs-on: windows-latest/);
-  assert.match(windows, /run: npm run test:ios/);
+  assert.ok(start >= 0 && end > start, "ci.yml 里找不到 ios 作业");
+  const ios = workflow.slice(start, end);
+  assert.match(ios, /runs-on: macos-26/);
+  assert.match(ios, /DEVELOPER_DIR: \/Applications\/Xcode_26\.[\d.]+\.app\/Contents\/Developer/);
+  assert.match(ios, /xcrun --sdk iphonesimulator --show-sdk-path/);
+  assert.match(ios, /shell: bash/); // Actions bash uses -eo pipefail: tee cannot hide a failed gate.
+  assert.match(ios, /npm run test:ios 2>&1 \| tee/);
+  assert.match(ios, /import \{ NO_IOS_SOURCE_CHECKED \} from '\.\/scripts\/run-ios\.mjs'/);
+  assert.match(ios, /\.includes\(NO_IOS_SOURCE_CHECKED\)/);
+  assert.ok(ios.includes("!log.includes('iOS 门禁通过（类型检查 + 纯逻辑回归）')"),
+    "静默退出 0 也不能冒充完整门禁执行完成");
+  assert.match(ios, /throw new Error\('Required iOS CI gates did not execute'\)/);
+  assert.match(ios, /run: pod install --deployment/);
+  assert.match(ios, /xcodebuild -workspace apps\/ios\/RAI\.xcworkspace -scheme RAI/);
+  assert.match(ios, /CODE_SIGNING_ALLOWED=NO build\n/);
+  assert.match(ios, /CODE_SIGNING_ALLOWED=NO build-for-testing/);
+  assert.doesNotMatch(ios, /run: bash apps\/ios\/tests\/run-model-tests\.sh/,
+    "test:ios 聚合链已经执行整套模型回归，避免重复编译运行");
+  assert.doesNotMatch(workflow, /runs-on: windows-|windows-runtime:/,
+    "Windows 已退出正式 CI 支持范围；通用测试仍在 Linux 全量执行");
+  assert.doesNotMatch(workflow, /continue-on-error:|\|\| true/);
 });

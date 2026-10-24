@@ -35,20 +35,20 @@
 
 ### 2.1 worker 启动、退休与关闭
 
-[import-worker.ts (line 252)](/Users/ta/running/apps/api/src/import-worker.ts)
+[import-worker.ts (line 252)](../apps/api/src/import-worker.ts)
 
 - 新增 `IngestWorkerStartup`：`settled` + 单次 `resolve/reject`；`ready` 从一开始就是
   可失败的 Promise，不再先塞一个 `Promise.resolve()` 再替换。
-- [ensureIngestWorker (line 1079)](/Users/ta/running/apps/api/src/import-worker.ts)
+- [ensureIngestWorker (line 1079)](../apps/api/src/import-worker.ts)
   在关闭期间拒绝创建线程；有效 `ready` 只结算一次；`error` 与 `exit`（不区分退出码）
   都会进入退休路径。
-- [retireIngestWorker (line 1183)](/Users/ta/running/apps/api/src/import-worker.ts)
+- [retireIngestWorker (line 1183)](../apps/api/src/import-worker.ts)
   先拒绝未结算的 `ready`，再按 taskId 拒绝在飞任务；终止 Promise 只创建一次，
   所有调用方共享。`termination` 的 rejection 被显式消费，不会变成进程级
   `unhandledRejection`。
-- [close (line 499)](/Users/ta/running/apps/api/src/import-worker.ts) 等待所有已退休
+- [close (line 499)](../apps/api/src/import-worker.ts) 等待所有已退休
   ingest 线程退出后再等 `runPromise`；不会提前释放许可或忽略 pending。
-- [databaseTask (line 1265)](/Users/ta/running/apps/api/src/import-worker.ts) 在进入
+- [databaseTask (line 1265)](../apps/api/src/import-worker.ts) 在进入
   派发前、`await ready` 返回后、以及重试前检查 `closing`；关闭引发的启动 rejection
   不会被当成“再起一条线程”的重试信号。
 - 旧线程的迟到 `ready` 被 `resident.retired` 拦住；迟到回复按 taskId 找不到等待者，
@@ -56,8 +56,8 @@
 
 ### 2.2 严格回执裁决
 
-[import-publication.ts (line 49)](/Users/ta/running/apps/api/src/import-publication.ts)
-新增 `parseStrictImportReceipt`；[line 82](/Users/ta/running/apps/api/src/import-publication.ts)
+[import-publication.ts (line 49)](../apps/api/src/import-publication.ts)
+新增 `parseStrictImportReceipt`；[line 82](../apps/api/src/import-publication.ts)
 的 `readImportReceiptStrict` 直接以 `readOnly` 打开数据库：
 
 - 数据库缺失 ⇒ 打开失败上抛，且不会创建空数据库；
@@ -69,31 +69,31 @@
 
 ### 2.3 恢复阻断与终态边界
 
-[import-worker.ts (line 808)](/Users/ta/running/apps/api/src/import-worker.ts)
+[import-worker.ts (line 808)](../apps/api/src/import-worker.ts)
 在 `writeMayHaveCommitted` 的 catch 路径：
 
 - 先退休仍存活的 ingest 线程并等待真实 termination；
 - 用严格读取裁决；查不到回执才走既有失败流程；
 - 读取抛错或线程终止无法确认时设置 `terminalDecisionWithheld`、`recoveryBlocked`，
   作业保持 `running + recovery_required`，不发布 summary/status；
-- [line 923](/Users/ta/running/apps/api/src/import-worker.ts) 的 finally 在 withheld
+- [line 923](../apps/api/src/import-worker.ts) 的 finally 在 withheld
   分支跳过 `onTerminal` 和来源清理，只落诊断性能账本。
 
-[server.ts (line 597)](/Users/ta/running/apps/api/src/server.ts) 的
+[server.ts (line 597)](../apps/api/src/server.ts) 的
 `onRecoveryRequired` 同时设置 `databaseRecoveryRequired`、使 readiness 失效，并调用
 `taskAdmission.blockUntilRestart("import_publication_recovery_required")`。测试
 `import-worker-reuse.test.ts:590` 直接验证该回调会让 `admission.acquire()` 返回 `null`。
 
 ### 2.4 基准与证据
 
-- [noop-lock-bench.ts](/Users/ta/running/deliverables/phase1-main-thread-blocking/bench/noop-lock-bench.ts)
+- [noop-lock-bench.ts](../deliverables/phase1-main-thread-blocking/bench/noop-lock-bench.ts)
   按 `RAI_PHASE1_MODE` 从 `snapshots/<mode>/apps/api/src` 物化独立 API 子进程；
   不导入当前源码，不调用私有 `run()`。
-- [noop-resource-bench.ts](/Users/ta/running/deliverables/phase1-main-thread-blocking/bench/noop-resource-bench.ts)
+- [noop-resource-bench.ts](../deliverables/phase1-main-thread-blocking/bench/noop-resource-bench.ts)
   同样通过真实 HTTP 入口测量冷启动与连续 100 批。
 - 三个快照分别对应：阶段 1 之前、阶段 1 原实现、补修后实现。快照哈希、差异和复现方式见
-  [snapshots/manifest.json](/Users/ta/running/deliverables/phase1-main-thread-blocking/snapshots/manifest.json)
-  与 [bench/README.md](/Users/ta/running/deliverables/phase1-main-thread-blocking/bench/README.md)。
+  [snapshots/manifest.json](../deliverables/phase1-main-thread-blocking/snapshots/manifest.json)
+  与 [bench/README.md](../deliverables/phase1-main-thread-blocking/bench/README.md)。
 
 ---
 
@@ -275,9 +275,9 @@ git diff --check
 
 ## 9. 证据索引
 
-- [snapshots/manifest.json](/Users/ta/running/deliverables/phase1-main-thread-blocking/snapshots/manifest.json)
-- [bench/README.md](/Users/ta/running/deliverables/phase1-main-thread-blocking/bench/README.md)
-- [evidence/README.md](/Users/ta/running/deliverables/phase1-main-thread-blocking/evidence/README.md)
+- [snapshots/manifest.json](../deliverables/phase1-main-thread-blocking/snapshots/manifest.json)
+- [bench/README.md](../deliverables/phase1-main-thread-blocking/bench/README.md)
+- [evidence/README.md](../deliverables/phase1-main-thread-blocking/evidence/README.md)
 - `evidence/http-lock-{baseline,phase1-prefix,repaired}.json`
 - `evidence/http-resource-{baseline,phase1-prefix,repaired}.json`
 - `evidence/superseded/README.md`：旧标签式 baseline 与非 HTTP 资源的不可复现限制

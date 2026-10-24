@@ -1,0 +1,230 @@
+{
+  "recordedAtUtc": "2026-10-24T21:24:38.681813+00:00",
+  "clientDate": "2026-10-25",
+  "timezone": "Asia/Shanghai",
+  "baseCommit": "ce787baa8b9b3c89f5c1f2332f01ae9fe2453b93",
+  "branch": "ci/fix-github-actions-2026-10-24",
+  "scope": "CI/test infrastructure and corresponding documentation; no product source or lockfile changes",
+  "environment": {
+    "os": "macOS 26.6.2",
+    "arch": "x86_64",
+    "node": "22.23.2",
+    "npm": "10.9.8",
+    "xcode": "26.5 (17F42)",
+    "swift": "6.3.2",
+    "pythonVenv": "3.12.14",
+    "rust": "1.98.1",
+    "testConcurrency": 2,
+    "xcodeJobs": 2,
+    "compilerNice": 10
+  },
+  "githubBaseline": {
+    "commit": "ce787baa8b9b3c89f5c1f2332f01ae9fe2453b93",
+    "runId": 40130489750,
+    "jobsSuccessful": 5
+  },
+  "checks": [
+    {
+      "command": "ONNXRUNTIME_NODE_INSTALL=skip npm ci",
+      "status": "PASS",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run typecheck",
+      "status": "PASS",
+      "exitCode": 0
+    },
+    {
+      "command": "RAI_TEST_CONCURRENCY=2 npm test",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": {
+        "tests": 2626,
+        "pass": 2623,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 3,
+        "todo": 0,
+        "duration_ms": 1247655.479614
+      },
+      "skippedCases": [
+        "ok 481 - rejects Windows path aliases before extraction # SKIP needs Windows path-alias semantics",
+        "ok 587 - keeps a genuinely locked rollback as a visible backup after commit # SKIP Windows-only: POSIX can rename an open database, so the locked-rollback path cannot be reproduced here",
+        "ok 1303 - cancelling prediction training terminates the Windows process tree # SKIP needs Windows process-tree semantics"
+      ],
+      "logSha256": "9736e3f6bebbf7e189e97ebd267895329b3092edaedff801fdddc9232ecc0a67"
+    },
+    {
+      "command": "node --import tsx --test packages/application/test/cross-platform-scripts.test.ts packages/application/test/test-runner.test.ts",
+      "status": "PASS",
+      "exitCode": 0,
+      "summary": {
+        "tests": 23,
+        "pass": 23,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "duration_ms": 3167.08887
+      },
+      "skippedCases": [],
+      "logSha256": "4cf38c6f8c9fd69ae31f4cc68042c92a48b1caff69410751ba7aef59ab76c923"
+    },
+    {
+      "command": "npm run test:ios",
+      "status": "PASS",
+      "exitCode": 0,
+      "typecheckedFiles": 99,
+      "amapFilesExcludedFromStandaloneTypecheck": 3,
+      "allSourceFilesCoveredByXcodeBuild": true,
+      "printedPassLabels": 1661,
+      "logSha256": "bdeb2e85d45ba5f64f7295562fb145f891a061141c63443926c8a9d921a9b188"
+    },
+    {
+      "command": "xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -sdk iphonesimulator -destination generic/platform=iOS Simulator -derivedDataPath /tmp/rai-ci-ios-build-20261025 -jobs 2 CODE_SIGNING_ALLOWED=NO RAI_AMAP_API_KEY= build",
+      "status": "PASS",
+      "exitCode": 0,
+      "marker": "BUILD SUCCEEDED"
+    },
+    {
+      "command": "xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -sdk iphonesimulator -destination generic/platform=iOS Simulator -derivedDataPath /tmp/rai-ci-visual-build-20261025 -jobs 2 CODE_SIGNING_ALLOWED=NO build-for-testing",
+      "status": "PASS",
+      "exitCode": 0,
+      "marker": "TEST BUILD SUCCEEDED",
+      "testsExecuted": false
+    },
+    {
+      "command": "pod install --deployment",
+      "status": "PASS",
+      "exitCode": 0,
+      "version": "1.17.0",
+      "lockUnchanged": true
+    },
+    {
+      "command": "npm run rust:verify",
+      "status": "PASS",
+      "exitCode": 0,
+      "rustUnitTests": 2,
+      "summary": {
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "duration_ms": 16258.018975
+      },
+      "skippedCases": [],
+      "logSha256": "d8f41b1d38653447e78266ed2633431053a61fd08c51d79ca96b723d0dc68d32",
+      "recordSyncV2Case": "ok 23 - Rust XML parsing uses the same v2 UUID mapping/deletion contract"
+    },
+    {
+      "command": "npm run ml:test",
+      "status": "PASS",
+      "exitCode": 0,
+      "passed": 32
+    },
+    {
+      "command": "npm run review:model-boundaries",
+      "status": "PASS",
+      "exitCode": 0,
+      "violationCount": 0
+    },
+    {
+      "command": "npm run smoke:api",
+      "status": "PASS",
+      "exitCode": 0,
+      "isolatedTemporaryRuntime": true
+    },
+    {
+      "command": "npm ci --omit=dev && npm run smoke:api (isolated tracked-source copy)",
+      "status": "PASS",
+      "exitCode": 0,
+      "developmentCompilerAndRetiredWebDependenciesAbsent": true,
+      "developmentWorkspaceDependenciesUntouched": true
+    },
+    {
+      "command": "actionlint 1.7.11",
+      "status": "PASS",
+      "exitCode": 0,
+      "validFixtureExit": 0,
+      "invalidJobKeyFixtureExit": 1,
+      "archiveSha256Verified": true
+    },
+    {
+      "command": "actual iOS workflow shell step with temporary npm fixtures",
+      "status": "PASS",
+      "cases": {
+        "complete": 0,
+        "explicitSkip": 1,
+        "silentZero": 1,
+        "compilerFailure": 17
+      }
+    },
+    {
+      "command": "bash -n deploy/*.sh (git-tracked explicit paths)",
+      "status": "PASS",
+      "exitCode": 0,
+      "scripts": 4,
+      "startsServices": false
+    },
+    {
+      "command": "npm run check:ios-gates",
+      "status": "PASS",
+      "exitCode": 0,
+      "executed": 11,
+      "excludedManualChecks": 2
+    },
+    {
+      "command": "npm run check:docs; npm run check:doc-refs; npm run check:scripts; npm run check:acceptance-matrix; npm run check:package-boundaries; npm run check:package-boundaries -- --self-test; npm run check:training-plan-single-writer; node scripts/check-blob-size.mjs",
+      "status": "PASS",
+      "exitCode": 0,
+      "note": "Commands actually executed individually or with fail-fast &&; semicolons here are a report separator, not an npm script.",
+      "docRefs": {
+        "boundsErrors": 0,
+        "contentDrift": "NOT RUN (no archived baseline)",
+        "blankLineWarnings": 9
+      },
+      "acceptanceMatrix": {
+        "total": 80,
+        "cited": 80,
+        "missing": 0
+      }
+    },
+    {
+      "command": "new commit GitHub Actions",
+      "status": "BLOCKED",
+      "runId": null,
+      "reason": "User requires explicit authorization before push. No remote mutation or deployment performed."
+    },
+    {
+      "command": "Simulator UI execution / AMap coordinate cross-check / HealthKit device authorization and reads / background scheduling / WorkoutKit scheduling",
+      "status": "NOT RUN"
+    },
+    {
+      "command": "real systemd / nginx runtime integration / 2C2G capacity acceptance",
+      "status": "NOT RUN"
+    },
+    {
+      "command": "iOS mutation and live cross-process export checks",
+      "status": "SKIPPED",
+      "reason": "Excluded manual entrypoints; not counted among the 11 executed source gates."
+    }
+  ],
+  "inputFileSha256": {
+    ".github/workflows/ci.yml": "d726cf371fcb9a1ffad385dfbd54720b95b3d203d56e1269be848a2582c83d73",
+    ".workflow/master-ci.yml": "17338c33ff2e8cfb0741783c59f17311a4b718cd469a27e5757a13a8c2eb0a72",
+    "AGENTS.md": "6112c526fd54995fda35635a4a0ef30877b49597f31e31d1ae2842c472089a28",
+    "README.md": "b0f062dde9e7d77de9046c60d6af728197ae91dbe28c7f1f4dae018530abf158",
+    "deliverables/README.md": "74531f30414df80db3c0191fabaf06d24f1d6badcfc31f21ceabb44f8abe00e6",
+    "deliverables/ci-audit-2026-10-25/README.md": "93f8d5b1519df301034d3552de187943eebf8a21b674539283cb0be9e3f793e6",
+    "deliverables/ci-audit-2026-10-25/github-baseline.json": "8ac3bc64742c9dc77d64814d7fa3c6ca6fae39f701a4c4596aecce9a77d1255a",
+    "docs/IOS_NATIVE_RUNBOOK.md": "00c19fb97e0600062262e1b8cccbc44a147190914032f0d327c0877404d17236",
+    "docs/OPERATIONS.md": "dcb188fdb53f610a1e23b1b46dff885745529621aac9ff10c35a2182c03aa93c",
+    "docs/PROJECT_OPTIMIZATION_PLAN.md": "83978229d5e98b8626e860a3a5402cd1d67668196ca90ddd40662f3aeac7e679",
+    "docs/PROJECT_REVIEW.md": "38f2045db3542a9900b6ab8a20df55dd24ec093a315b325ca9862c2e61583830",
+    "packages/application/test/cross-platform-scripts.test.ts": "485954065c1a1c57b704a508c2508c54e9a20b63e2242bb150a399dee4ccda23",
+    "packages/application/test/test-runner.test.ts": "d96bb6185dc08c552af15529899a7d06efeacce6aa80b92f8073dbfc290b9442",
+    "scripts/rust-worker.mjs": "20ddb1afddf40d778599a4d6ae5d7edddb069c7166a0e267463310b3a4d5bb65"
+  }
+}

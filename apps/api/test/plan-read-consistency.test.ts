@@ -18,10 +18,32 @@ import {
 } from "../src/plan-read-consistency.js";
 import { PUBLICATION_GUARD_STALE_MS } from "../src/publication-guard.js";
 
+import { posixOnlyReason } from "./posix-only.js";
+
 type Control = { revision: number; settings: string | null };
 
 const changedError = () => new PlanOperationError(
   "coach_snapshot_changed", "教练计划状态在读取期间变化，请重新读取。", 503);
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：本条红在
+ * "Missing expected exception: a non-transient fs error is a programming/deployment fault
+ * and must still fail loudly" —— 即 `readSnapshotFileIdentity(<文件>/child.sqlite)` 没有抛错。
+ *
+ * 机制是 errno 语义不同：把**文件**当成目录用的路径，POSIX 报 `ENOTDIR`，Windows 报
+ * `ENOENT`。`readSnapshotFileIdentity` 把 `ENOENT` 归为"瞬时"（换库窗口里文件暂时不在），
+ * 于是返回 `null` 而不是把非瞬时错误响亮上抛。判据要钉的正是这条分类。
+ *
+ * 这不是"判据不成立"：Windows 上要不要把 `ENOENT` 继续算作瞬时、以及"文件当目录用"该不该
+ * 用另一种方式识别，是**产品决策**，属于另一个工作包。在此之前，这条判据在 Windows 上
+ * 没有被检查。同文件其余用例（稳定快照、inode 判定、guard、微基准）在 Windows 上照常通过。
+ */
+const ENOTDIR_ONLY = posixOnlyReason(
+  "Windows 对『把文件当目录用』的路径返回 ENOENT，POSIX 返回 ENOTDIR："
+  + "`readSnapshotFileIdentity(<文件>/child.sqlite)` 于是在 Windows 上被归为瞬时错误、返回 null，"
+  + "而判据要求非瞬时的 fs 错误必须响亮上抛（CI 2026-10-25：Missing expected exception）。"
+  + "这条 errno 分类判据在 Windows 上没有被检查；Windows 上 ENOENT/ENOTDIR 的归类需要一次产品决策，另立工单。"
+);
+
 const snapshot = (revision: number): Control => ({ revision, settings: revision > 0 ? "active" : null });
 
 test("a stable control snapshot is read twice and built once", () => {
@@ -230,7 +252,7 @@ test("read amplification: one successful attempt reads control twice and digests
 // P2-5：文件身份统计的分类（transient → null 重试；其他错误照常上抛）
 // ---------------------------------------------------------------------------
 
-test("P2-5: a transient file identity read returns null instead of throwing into the 500 handler", () => {
+test("P2-5: a transient file identity read returns null instead of throwing into the 500 handler", { skip: ENOTDIR_ONLY }, () => {
   assert.equal(readSnapshotFileIdentity(join(tmpdir(), `rai-missing-${randomUUID()}.sqlite`)), null);
   const root = mkdtempSync(join(tmpdir(), "rai-file-identity-"));
   try {

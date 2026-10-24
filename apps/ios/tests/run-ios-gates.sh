@@ -48,6 +48,25 @@ fi
 # 会拿到没有 iOS SDK 的工具链。显式固定 DEVELOPER_DIR，与两条子脚本保持一致。
 export DEVELOPER_DIR="$developer_dir"
 
+# Swift 前端能力预检（2026-10-24，GitHub Actions 首次真实运行 CI #1 实测）：
+# 两条子脚本都以 `-swift-version 5 -default-isolation MainActor` 编译。`-default-isolation`
+# 是 Swift 6.2（Xcode 26）才有的前端参数；macos-14 runner 上最新只到 Xcode 16.2
+# （Swift 6.0），实测输出是一行 `error: unknown argument: '-default-isolation'` 之后退出 1。
+# 结论没错（判据确实没跑成），但那行字看起来像源码写错了，排查方向会被带偏。
+# 所以把"工具链太旧"和"源码有错"分开说：**缺能力是失败，不是跳过** ——
+# 这台机器有 Xcode，只是它跑不了本判据，绝不能因此静默变绿。
+swiftc_help="$(xcrun swiftc -help-hidden 2>&1 || true)"
+if ! grep -q -- "-default-isolation" <<<"$swiftc_help"; then
+  {
+    echo "❌ iOS 门禁无法执行：当前 Swift 工具链不支持 -default-isolation（需要 Swift 6.2+ / Xcode 26+）。"
+    echo "    DEVELOPER_DIR=$DEVELOPER_DIR"
+    xcrun swiftc --version 2>&1 | head -2 | sed 's/^/    /'
+    echo "    这不是「跳过」：本机有 Xcode，但跑不了本判据，所以本次没有检查任何 iOS 源码。"
+    echo "    修复：xcode-select 到 Xcode 26+（详见 docs/IOS_NATIVE_RUNBOOK.md）。"
+  } >&2
+  exit 1
+fi
+
 # Python 解释器预检（D2，2026-10-15）：三支 direct-sync 门禁需要 Python ≥ 3.9
 # （模块级 PEP 604 注解在 3.9 下会 TypeError；更低版本更不行）。macOS 默认的
 # /usr/bin/python3 恰是 3.9 —— "默认机即绿"就是这条阈值的来源。

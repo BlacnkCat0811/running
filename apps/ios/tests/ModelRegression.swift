@@ -145,9 +145,19 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var extraHeaders: [String: String]? = nil
     private let lock = NSLock()
     private var stopped = false
+    /// `startLoading` 次数（2026-10-25，CI #5 实测）：取消用例需要确认"旧请求确实已经在
+    /// URLSession 里飞"，而 30ms 的固定 sleep 在 3 核 runner 上并不够 —— 旧请求还没发出去，
+    /// 新请求就没有东西可取消，`CancellationLog` 永远为 0，判据冤枉地红。
+    nonisolated(unsafe) private static var startedRequests = 0
+    private static let startLock = NSLock()
+    static func resetStarted() { startLock.lock(); startedRequests = 0; startLock.unlock() }
+    static var startedCount: Int { startLock.lock(); defer { startLock.unlock() }; return startedRequests }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        Self.startLock.lock()
+        Self.startedRequests += 1
+        Self.startLock.unlock()
         let (status, body, delay) = Self.handler(request)
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [self] in
             lock.lock()
@@ -355,15 +365,28 @@ final class RequestLog: @unchecked Sendable {
         }
         model.workoutSessionType = "easy"
         CancellationLog.shared.reset()
+        StubProtocol.resetStarted()
         let old = Task { await model.refreshWorkouts() }
-        try await Task.sleep(for: .milliseconds(30))
+        // 等旧请求真的进到 URLSession 再切过滤器（不再用 30ms 猜：CI #5 的 macos-26
+        // runner 上那次 sleep 不够，旧请求根本还没发出，于是"取消"无从谈起）。
+        var waitedSeconds = 0.0
+        while StubProtocol.startedCount == 0 && waitedSeconds < 5 {
+            try await Task.sleep(for: .milliseconds(5))
+            waitedSeconds += 0.005
+        }
         model.workoutSessionType = "tempo"
         await model.refreshWorkouts()
         _ = await old.value
         check(model.workouts.first?.id == "new", "late filter response cannot replace current list")
         // 2026-10-18（事故复盘 P0-3）：只换 requestID 挡得住结果，挡不住旧网络请求还在
         // 服务端排队；新请求必须真正取消它（URLSession 随 Task 取消断开连接）。
-        try await Task.sleep(for: .milliseconds(30))
+        // 取消信号经 URLSession 传到 `stopLoading` 是异步的：这里等它到（有界），
+        // 不再用固定 sleep 赌调度（2026-10-25，CI #5 实测过固定 30ms 不够）。
+        waitedSeconds = 0
+        while CancellationLog.shared.count < 1 && waitedSeconds < 5 {
+            try await Task.sleep(for: .milliseconds(5))
+            waitedSeconds += 0.005
+        }
         check(CancellationLog.shared.count >= 1,
               "a new workouts request cancels the old URLSession request, not merely discards its result")
         model.workoutSessionType = "interval"
