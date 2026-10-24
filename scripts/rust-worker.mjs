@@ -22,6 +22,8 @@ run(cargo, ["build", "--release", "--locked", "--workspace"]);
 if (mode === "verify") {
   run(cargo, ["test", "--release", "--locked", "--workspace"]);
   run(process.execPath, ["--import", "tsx", "--test",
-    "packages/health-export-parser/test/native-worker.test.ts", "apps/api/test/native-import-worker.test.ts"
+    "packages/health-export-parser/test/native-worker.test.ts",
+    "packages/health-export-parser/test/healthkit-record-sync.test.ts",
+    "apps/api/test/native-import-worker.test.ts"
   ], { RAI_REQUIRE_RUST_TESTS: "1" });
 }

@@ -22,7 +22,7 @@ npm run check:package-boundaries
 `npm test` 的默认并发 = 本机可用并行度；多核/高负载机器上重文件会互相挤占，测试内 5 s / 30 s 墙钟预算可能被压红（**假红**，原理见脚本头注释）。要一份可复现的独占结果用 `RAI_TEST_CONCURRENCY=2 npm test`（非法值会响亮报错，不会静默回落）；发布记录必须写明所用并发。
 `.githooks/pre-commit` 每次都跑 typecheck、**仓库体积闸门**（单文件 1.5 MB 上限）、文档/包边界检查与文档引用检查；`packages/storage-sqlite/` 有改动时跑迁移冻结门禁，触发面含表分类清单一致性（见钩子注释）。
 
-本地hooks在[pre-commit](../.githooks/pre-commit)；[CI配置](../.github/workflows/ci.yml)存在不证明当前远端已触发它。`.workflow/master-ci.yml` 是**未启用的 Gitee Go 草案**。
+本地hooks在[pre-commit](../.githooks/pre-commit)；[GitHub CI](../.github/workflows/ci.yml)已启用，按准确提交 SHA 核对 [Actions](https://github.com/BlacnkCat0811/running/actions) 的结果（[审计记录](../deliverables/ci-audit-2026-10-25/README.md)）。Gitee push 不会触发 GitHub；`.workflow/master-ci.yml` 仍是**未启用的 Gitee Go 草案**。
 完整审查另跑`npm run ml:test`、`npm run test:ios`、按需要`npm run rust:verify`；缺工具/SDK应报跳过或阻塞，不自动安装大型依赖。
 本仓库**没有** Web/responsive/390px 门禁或测试套件；不要按退役前的说法去找它们，也不要把它们加回 `package.json`。不要在排障时删除真实健康库、凭证或旧可用工件。
 
@@ -73,7 +73,7 @@ npm run review:model-boundaries
 npm run smoke:api
 ```
 
-- **CI 现实**：本仓库远端是 gitee，GitHub Actions **不会**被 gitee 的 push 触发；`.workflow/master-ci.yml` 是**未启用的草案**。因此发布记录必须写明「gitee 侧 CI 未启用、判据来自本机实跑」，以及 `RAI_TEST_CONCURRENCY` 取值与被跳过的检查（缺 Xcode / 缺平台 / 缺 Rust 工具链导致的跳过不得合并进“通过”）。
+- **CI 现实**：正式门禁为 Linux 后端、macOS/iOS 和两端 Rust；Windows 已退出正式 CI 支持范围。发布记录必须写明提交 SHA、GitHub Run ID、各关键 Job 状态，以及本机 `RAI_TEST_CONCURRENCY` 取值与被跳过的检查。Gitee push 不会触发 GitHub；没有对应运行时标为未验证。缺 Xcode / 缺平台 / 缺 Rust 的跳过不得合并进“通过”；iOS CI 遇到未检查源码哨兵会失败。部署 Shell 语法与 systemctl 替身测试不等于真实 systemd 集成验收。
 - **文档行号引用的内容漂移**：`npm run check:doc-refs` 默认只做“越界/无法解析”硬校验；**内容漂移**需要 `.linerefs.json` 基线，日常提交**不要求**基线（缺基线时输出写“未核对（无基线）”）。要对本次发布快照做内容级核对时：先 `node scripts/check-doc-line-refs.mjs --write-baseline` 生成基线并随快照归档，再用 `node scripts/check-doc-line-refs.mjs --require-baseline`（或 `RAI_DOC_REFS_REQUIRE_BASELINE=1`）判定；基线文件不要无条件提交（无关源码行移动会把它变成噪音）。现行文档尽量写符号/文件引用而不是绝对行号。
 - **`.mts` 脚本**（如 `review:model-boundaries`、`verify-v2-release`）是 TypeScript：必须走 `npm run` / `tsx`，裸 `node scripts/xxx.mts` 会 `ERR_MODULE_NOT_FOUND`。
 - **模型边界对抗探针**（`npm run review:model-boundaries`，R1–R3）只读、用合成库并在 finally 清理；`violationCount > 0` 时 exit 1，不得用“这次没改”跳过它。

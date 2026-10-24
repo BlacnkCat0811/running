@@ -1,0 +1,3585 @@
+{
+  "repository": "BlacnkCat0811/running",
+  "baselineSha": "ce787baa8b9b3c89f5c1f2332f01ae9fe2453b93",
+  "source": "GitHub REST Actions runs plus connected GitHub job metadata and decoded job logs; evidence excerpts bounded, full logs linked by job ID",
+  "runs": [
+    {
+      "runId": 40130489750,
+      "workflow": "CI",
+      "jobs": [
+        {
+          "id": 120980964679,
+          "name": "rust-data-worker (macos-26)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40130489750,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120980964870,
+          "name": "ios",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40130489750,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run iOS gates (typecheck + pure-logic regressions)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run cross-platform source gates",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Install CocoaPods dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Build iOS simulator target",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Run iOS model regression tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Compile visual acceptance UI tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Post Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T20:35:52.8235180Z ##[group]Operating System",
+            "2026-10-24T20:35:52.8235720Z macOS",
+            "2026-10-24T20:35:52.8237410Z 26.6.2",
+            "2026-10-24T20:35:52.8239690Z ##[group]Runner Image",
+            "2026-10-24T20:35:52.8240320Z Image: macos-26-arm64",
+            "2026-10-24T20:35:52.8240790Z Version: 20261021.0445.8",
+            "2026-10-24T20:35:52.8241970Z Included Software: https://github.com/actions/runner-images/blob/macos-26-arm64/20261021.0445/images/macos/macos-26-arm64-Readme.md",
+            "2026-10-24T20:35:59.6701430Z Xcode 26.6",
+            "2026-10-24T20:35:59.6803540Z Build version 17F113",
+            "2026-10-24T20:36:04.0645620Z Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+            "2026-10-24T20:36:04.0646670Z Target: arm64-apple-macosx26.0"
+          ],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120980964948,
+          "name": "rust-data-worker (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40130489750,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120980964982,
+          "name": "verify (22.x)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40130489750,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Type check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Validate maintained documentation and acceptance references",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Verify gate scripts, blob ceiling, and package boundaries",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Model boundary review (R1-R3)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Bootstrap Python training environment",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Run Python training tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            },
+            {
+              "name": "Verify production-only startup contract",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Post Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T20:35:53.4434903Z ##[group]Operating System",
+            "2026-10-24T20:35:53.4435685Z Ubuntu",
+            "2026-10-24T20:35:53.4436252Z 24.04.5",
+            "2026-10-24T20:35:53.4438368Z ##[group]Runner Image",
+            "2026-10-24T20:35:53.4438967Z Image: ubuntu-24.04",
+            "2026-10-24T20:35:53.4439692Z Version: 20261012.334.1",
+            "2026-10-24T20:35:53.4441006Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md"
+          ],
+          "classification": "success",
+          "evidence": [
+            "2026-10-24T20:44:55.0073558Z # tests 2626",
+            "2026-10-24T20:44:55.0073941Z # pass 2613",
+            "2026-10-24T20:44:55.0074129Z # fail 0",
+            "2026-10-24T20:44:55.0074318Z # cancelled 0",
+            "2026-10-24T20:44:55.0074520Z # skipped 13",
+            "2026-10-24T20:45:49.4003820Z 32 passed in 4.75s"
+          ],
+          "failingCases": [],
+          "testSummary": [
+            "2026-10-24T20:44:55.0073558Z # tests 2626",
+            "2026-10-24T20:44:55.0073941Z # pass 2613",
+            "2026-10-24T20:44:55.0074129Z # fail 0",
+            "2026-10-24T20:44:55.0074318Z # cancelled 0",
+            "2026-10-24T20:44:55.0074520Z # skipped 13",
+            "2026-10-24T20:45:49.4003820Z 32 passed in 4.75s"
+          ]
+        },
+        {
+          "id": 120980964999,
+          "name": "windows-runtime",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40130489750,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "iOS gates on Windows (must skip loudly, never fail or pass quietly)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run Windows unit and integration tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        }
+      ],
+      "commitSha": "ce787baa8b9b3c89f5c1f2332f01ae9fe2453b93",
+      "branch": "ci/fix-github-actions-2026-10-24",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/BlacnkCat0811/running/actions/runs/40130489750",
+      "createdAt": "2026-10-24T20:35:49Z"
+    },
+    {
+      "runId": 40111905608,
+      "workflow": "CI",
+      "jobs": [
+        {
+          "id": 120925194692,
+          "name": "windows-runtime",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40111905608,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "iOS gates on Windows (must skip loudly, never fail or pass quietly)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run Windows unit and integration tests",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 6
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T16:30:54.8370069Z ##[group]Operating System\r",
+            "2026-10-24T16:30:54.8370541Z Microsoft Windows Server 2025\r",
+            "2026-10-24T16:30:54.8370995Z 10.0.26100\r",
+            "2026-10-24T16:30:54.8372663Z Image: windows-2025-vs2026\r",
+            "2026-10-24T16:30:54.8373118Z Version: 20261021.278.1\r",
+            "2026-10-24T16:30:54.8374413Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md\r"
+          ],
+          "classification": "OS mismatch: POSIX signal/filesystem/systemctl-double assumptions on Windows (52 failed, 1 cancelled)",
+          "evidence": [
+            "2026-10-24T16:33:58.7644616Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T16:33:58.7645130Z   ---\r",
+            "2026-10-24T16:33:58.7645435Z   duration_ms: 43674.9264\r",
+            "2026-10-24T16:33:58.7645787Z   type: 'test'\r",
+            "2026-10-24T16:33:58.7646864Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:6762'\r",
+            "2026-10-24T16:33:58.7647602Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:33:58.7648013Z   error: |-\r",
+            "2026-10-24T16:33:58.7648612Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:33:58.7649045Z     \r",
+            "2026-10-24T16:33:58.7649346Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:33:58.7649655Z     \r",
+            "2026-10-24T16:33:58.7649947Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:33:58.7650356Z   name: 'AssertionError'\r",
+            "2026-10-24T16:33:58.7650802Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:33:58.7651091Z   actual: ~\r",
+            "2026-10-24T16:33:58.7651364Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:33:58.7651638Z   stack: |-\r",
+            "2026-10-24T16:33:58.7652200Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:33:58.7653172Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:464:7)\r",
+            "2026-10-24T16:33:58.7653911Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T16:34:09.1964160Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T16:34:09.1964585Z   ---\r",
+            "2026-10-24T16:34:09.1964805Z   duration_ms: 3642.4284\r",
+            "2026-10-24T16:34:09.1965056Z   type: 'test'\r",
+            "2026-10-24T16:34:09.1965556Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:10964'\r",
+            "2026-10-24T16:34:09.1966134Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:34:09.1966431Z   error: |-\r",
+            "2026-10-24T16:34:09.1967514Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:34:09.1967849Z     \r",
+            "2026-10-24T16:34:09.1968064Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:34:09.1968293Z     \r",
+            "2026-10-24T16:34:09.1968524Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:34:09.1968778Z   name: 'AssertionError'\r",
+            "2026-10-24T16:34:09.1969057Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:34:09.1969288Z   actual: ~\r",
+            "2026-10-24T16:34:09.1969505Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:34:09.1969765Z   stack: |-\r",
+            "2026-10-24T16:34:09.1970910Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:34:09.1971847Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:546:5)\r",
+            "2026-10-24T16:34:09.1973013Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T16:34:11.9090167Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T16:34:11.9090602Z   ---\r",
+            "2026-10-24T16:34:11.9090833Z   duration_ms: 2832.7112\r",
+            "2026-10-24T16:34:11.9091093Z   type: 'test'\r",
+            "2026-10-24T16:34:11.9091670Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:13976'\r",
+            "2026-10-24T16:34:11.9092262Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:34:11.9092538Z   error: |-\r",
+            "2026-10-24T16:34:11.9092915Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:34:11.9093199Z     \r",
+            "2026-10-24T16:34:11.9093373Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:34:11.9093570Z     \r",
+            "2026-10-24T16:34:11.9093739Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:34:11.9093987Z   name: 'AssertionError'\r",
+            "2026-10-24T16:34:11.9094240Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:34:11.9094457Z   actual: ~\r",
+            "2026-10-24T16:34:11.9094663Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:34:11.9094912Z   stack: |-\r",
+            "2026-10-24T16:34:11.9095394Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:34:11.9096252Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:606:5)\r",
+            "2026-10-24T16:34:11.9097256Z     async Test.run (node:internal/test_runner/test:1054:7)\r"
+          ],
+          "failingCases": [
+            "2026-10-24T16:33:58.7644616Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T16:34:09.1964160Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T16:34:11.9090167Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T16:34:14.4993676Z not ok 188 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活\r",
+            "2026-10-24T16:34:17.4068886Z not ok 189 - P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复\r",
+            "2026-10-24T16:34:30.4304231Z not ok 191 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库\r",
+            "2026-10-24T16:34:41.9398018Z not ok 193 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用\r",
+            "2026-10-24T16:34:45.7288870Z not ok 194 - P2-9b main_removed + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T16:34:49.5062938Z not ok 195 - P2-9b permit_issued + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T16:35:02.2029555Z not ok 198 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可\r",
+            "2026-10-24T16:35:04.8235152Z not ok 199 - P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次\r",
+            "2026-10-24T16:35:15.2599365Z not ok 201 - P2-5 不可读主库只能通过显式隔离继续原 deletionId\r",
+            "2026-10-24T16:35:19.8360039Z not ok 203 - P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409\r",
+            "2026-10-24T16:35:36.9878116Z not ok 207 - P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch\r",
+            "2026-10-24T16:35:36.9904164Z not ok 208 - P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车\r",
+            "2026-10-24T16:35:36.9914741Z not ok 210 - P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行\r",
+            "2026-10-24T16:36:20.2067271Z not ok 246 - whole-runtime backup includes control/artifacts and restores active service state\r",
+            "2026-10-24T16:36:20.2078821Z not ok 247 - whole-runtime backup includes control/artifacts and restores inactive service state\r",
+            "2026-10-24T16:36:20.2090565Z not ok 248 - active service without a MainPID is refused before stopping or publishing\r",
+            "2026-10-24T16:36:20.2102145Z not ok 249 - active service live environment failure is refused before stopping\r",
+            "2026-10-24T16:36:20.2166640Z not ok 250 - external authoritative database path is refused before stopping the service\r",
+            "2026-10-24T16:36:20.2178597Z not ok 251 - backup records a five-store path manifest and refuses unverifiable apply\r",
+            "2026-10-24T16:36:20.2191986Z not ok 253 - active CLI publication lock is refused after stopping the service\r",
+            "2026-10-24T16:36:20.2204462Z not ok 255 - backup reports service restart failure even when the archive was created\r",
+            "2026-10-24T16:36:20.2217966Z not ok 257 - runtime-only env without explicit database paths is refused\r",
+            "2026-10-24T16:36:20.2248852Z not ok 264 - service env different from the backup env is refused before stopping\r",
+            "2026-10-24T16:36:20.2265469Z not ok 267 - multiple and optional EnvironmentFiles are rejected before stop\r",
+            "2026-10-24T16:36:20.2276808Z not ok 268 - UnsetEnvironment and quoted path syntax are rejected before stop\r",
+            "2026-10-24T16:36:20.2291610Z not ok 270 - direct Environment configuration matching three paths produces a verified archive\r",
+            "2026-10-24T16:36:20.2301744Z not ok 271 - source change during the archive window refuses to publish the archive\r",
+            "2026-10-24T16:36:20.2321544Z not ok 275 - archive window rejects absent tree becomes directory\r",
+            "2026-10-24T16:36:20.2332986Z not ok 276 - archive window rejects absent tree becomes file\r",
+            "2026-10-24T16:36:20.2343488Z not ok 277 - archive window rejects present tree gains file\r",
+            "2026-10-24T16:36:20.2351583Z not ok 278 - archive window rejects present tree loses file\r",
+            "2026-10-24T16:36:20.2358458Z not ok 279 - archive window rejects present tree rewrites same-size file\r",
+            "2026-10-24T16:36:20.2376685Z not ok 288 - explicit upgrade migration runs between service stop and restart\r",
+            "2026-10-24T16:36:20.2384085Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T16:36:20.2384085Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T16:36:20.2391892Z not ok 290 - failed migration leaves the service stopped\r",
+            "2026-10-24T16:36:20.2399145Z not ok 291 - upgrade rejects HTTP 200 maintenance state\r",
+            "2026-10-24T16:36:20.2448829Z not ok 313 - A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次\r",
+            "2026-10-24T16:37:06.1361336Z not ok 426 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）\r",
+            "2026-10-24T16:40:27.3911215Z not ok 770 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available\r",
+            "2026-10-24T16:42:00.0422657Z not ok 784 - SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过\r",
+            "2026-10-24T16:42:00.0486321Z not ok 797 - rejects the repository, its ancestors, its var/ and shallow roots\r",
+            "2026-10-24T16:42:00.0503855Z not ok 802 - child environment is a whitelist and never inherits production RAI_* or proxies\r",
+            "2026-10-24T16:42:00.0978413Z not ok 889 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler\r",
+            "2026-10-24T16:42:00.1398893Z not ok 974 - P3-4: the cached read store reopens when the database file is replaced\r",
+            "2026-10-24T16:42:00.1405050Z not ok 978 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it\r",
+            "2026-10-24T16:42:00.1416540Z not ok 990 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）\r",
+            "2026-10-24T16:42:00.1455039Z not ok 1040 - series read worker serves a snapshot, restarts on file replacement, and closes cleanly\r",
+            "2026-10-24T16:45:03.8395424Z not ok 1074 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe\r",
+            "2026-10-24T16:45:03.8910434Z not ok 1173 - P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503\r",
+            "2026-10-24T16:50:23.2185939Z not ok 2474 - publication lock: identity stays on the same lock path across database file replacement\r"
+          ],
+          "testSummary": [
+            "2026-10-24T16:50:23.2342376Z # tests 2626\r",
+            "2026-10-24T16:50:23.2342492Z # pass 2539\r",
+            "2026-10-24T16:50:23.2342544Z # fail 52\r",
+            "2026-10-24T16:50:23.2342607Z # cancelled 1\r",
+            "2026-10-24T16:50:23.2342672Z # skipped 34\r"
+          ]
+        },
+        {
+          "id": 120925194874,
+          "name": "ios",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40111905608,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run iOS gates (typecheck + pure-logic regressions)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run cross-platform source gates",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Install CocoaPods dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Build iOS simulator target",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Run iOS model regression tests",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 9
+            },
+            {
+              "name": "Compile visual acceptance UI tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 10
+            },
+            {
+              "name": "Post Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 18
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 19
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T16:30:55.8712620Z ##[group]Operating System",
+            "2026-10-24T16:30:55.8713060Z macOS",
+            "2026-10-24T16:30:55.8713490Z 26.6.2",
+            "2026-10-24T16:30:55.8714720Z ##[group]Runner Image",
+            "2026-10-24T16:30:55.8715360Z Image: macos-26-arm64",
+            "2026-10-24T16:30:55.8715870Z Version: 20261013.0424.1",
+            "2026-10-24T16:30:55.8716910Z Included Software: https://github.com/actions/runner-images/blob/macos-26-arm64/20261013.0424/images/macos/macos-26-arm64-Readme.md",
+            "2026-10-24T16:31:02.2948080Z Xcode 26.6",
+            "2026-10-24T16:31:02.2959790Z Build version 17F113",
+            "2026-10-24T16:31:05.8778870Z Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+            "2026-10-24T16:31:05.8786410Z Target: arm64-apple-macosx26.0"
+          ],
+          "classification": "flaky test: workouts cancellation proceeded before URLProtocol request actually started",
+          "evidence": [
+            "2026-10-24T16:41:14.1420860Z main/ModelRegression.swift:241: Precondition failed: a new workouts request cancels the old URLSession request, not merely discards its result",
+            "2026-10-24T16:41:14.1630370Z ##[error]Process completed with exit code 133."
+          ],
+          "failingCases": [
+            "2026-10-24T16:41:14.1420860Z main/ModelRegression.swift:241: Precondition failed: a new workouts request cancels the old URLSession request, not merely discards its result"
+          ],
+          "testSummary": []
+        },
+        {
+          "id": 120925194934,
+          "name": "rust-data-worker (macos-26)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40111905608,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120925194963,
+          "name": "verify (22.x)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40111905608,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Type check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Validate maintained documentation and acceptance references",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Verify gate scripts, blob ceiling, and package boundaries",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Model boundary review (R1-R3)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Bootstrap Python training environment",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Run Python training tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            },
+            {
+              "name": "Verify production-only startup contract",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Post Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120925195052,
+          "name": "rust-data-worker (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40111905608,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        }
+      ],
+      "commitSha": "80c93cd7fe717ec40304264d717b78827cb1cad7",
+      "branch": "ci/fix-github-actions-2026-10-24",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/BlacnkCat0811/running/actions/runs/40111905608",
+      "createdAt": "2026-10-24T16:30:50Z"
+    },
+    {
+      "runId": 40110796362,
+      "workflow": "CI",
+      "jobs": [
+        {
+          "id": 120921904988,
+          "name": "ios",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40110796362,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run iOS gates (typecheck + pure-logic regressions)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run cross-platform source gates",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Install CocoaPods dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Build iOS simulator target",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Run iOS model regression tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Compile visual acceptance UI tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Post Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120921905211,
+          "name": "verify (22.x)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40110796362,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Type check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Validate maintained documentation and acceptance references",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Verify gate scripts, blob ceiling, and package boundaries",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Model boundary review (R1-R3)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Bootstrap Python training environment",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Run Python training tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            },
+            {
+              "name": "Verify production-only startup contract",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Post Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120921905212,
+          "name": "rust-data-worker (macos-26)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40110796362,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120921905222,
+          "name": "windows-runtime",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "run_id": 40110796362,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "iOS gates on Windows (must skip loudly, never fail or pass quietly)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run Windows unit and integration tests",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 6
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T16:16:36.0731522Z ##[group]Operating System\r",
+            "2026-10-24T16:16:36.0731933Z Microsoft Windows Server 2025\r",
+            "2026-10-24T16:16:36.0732289Z 10.0.26100\r",
+            "2026-10-24T16:16:36.0733584Z Image: windows-2025-vs2026\r",
+            "2026-10-24T16:16:36.0733936Z Version: 20261021.278.1\r",
+            "2026-10-24T16:16:36.0734884Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md\r"
+          ],
+          "classification": "cancelled: Windows full suite; 12-minute budget, POSIX failures already present",
+          "evidence": [
+            "2026-10-24T16:18:18.9896040Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T16:18:18.9896383Z   ---\r",
+            "2026-10-24T16:18:18.9896585Z   duration_ms: 3087.8575\r",
+            "2026-10-24T16:18:18.9896775Z   type: 'test'\r",
+            "2026-10-24T16:18:18.9897155Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:6762'\r",
+            "2026-10-24T16:18:18.9897579Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:18:18.9897808Z   error: |-\r",
+            "2026-10-24T16:18:18.9898118Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:18:18.9898342Z     \r",
+            "2026-10-24T16:18:18.9898494Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:18:18.9898657Z     \r",
+            "2026-10-24T16:18:18.9898810Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:18:18.9898994Z   name: 'AssertionError'\r",
+            "2026-10-24T16:18:18.9899187Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:18:18.9899358Z   actual: ~\r",
+            "2026-10-24T16:18:18.9899512Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:18:18.9899688Z   stack: |-\r",
+            "2026-10-24T16:18:18.9900077Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:18:18.9900707Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:464:7)\r",
+            "2026-10-24T16:18:18.9901214Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T16:18:25.4724269Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T16:18:25.4724540Z   ---\r",
+            "2026-10-24T16:18:25.4724698Z   duration_ms: 1931.9314\r",
+            "2026-10-24T16:18:25.4724879Z   type: 'test'\r",
+            "2026-10-24T16:18:25.4725403Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:10964'\r",
+            "2026-10-24T16:18:25.4725809Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:18:25.4726013Z   error: |-\r",
+            "2026-10-24T16:18:25.4726321Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:18:25.4726543Z     \r",
+            "2026-10-24T16:18:25.4726650Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:18:25.4726759Z     \r",
+            "2026-10-24T16:18:25.4726855Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:18:25.4726978Z   name: 'AssertionError'\r",
+            "2026-10-24T16:18:25.4727101Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:18:25.4727218Z   actual: ~\r",
+            "2026-10-24T16:18:25.4727323Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:18:25.4727441Z   stack: |-\r",
+            "2026-10-24T16:18:25.4727712Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:18:25.4728116Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:546:5)\r",
+            "2026-10-24T16:18:25.4728429Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T16:18:28.4642873Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T16:18:28.4643786Z   ---\r",
+            "2026-10-24T16:18:28.4643964Z   duration_ms: 2869.0305\r",
+            "2026-10-24T16:18:28.4644554Z   type: 'test'\r",
+            "2026-10-24T16:18:28.4644942Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:13976'\r",
+            "2026-10-24T16:18:28.4645213Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:18:28.4645356Z   error: |-\r",
+            "2026-10-24T16:18:28.4645637Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:18:28.4645839Z     \r",
+            "2026-10-24T16:18:28.4645941Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:18:28.4646046Z     \r",
+            "2026-10-24T16:18:28.4646141Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:18:28.4646284Z   name: 'AssertionError'\r",
+            "2026-10-24T16:18:28.4646404Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:18:28.4646521Z   actual: ~\r",
+            "2026-10-24T16:18:28.4646625Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:18:28.4646739Z   stack: |-\r",
+            "2026-10-24T16:18:28.4646972Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:18:28.4647369Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:606:5)\r",
+            "2026-10-24T16:18:28.4647687Z     async Test.run (node:internal/test_runner/test:1054:7)\r"
+          ],
+          "failingCases": [
+            "2026-10-24T16:18:18.9896040Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T16:18:25.4724269Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T16:18:28.4642873Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T16:18:31.7207433Z not ok 188 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活\r",
+            "2026-10-24T16:18:35.2359511Z not ok 189 - P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复\r",
+            "2026-10-24T16:18:50.7277992Z not ok 191 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库\r",
+            "2026-10-24T16:18:58.8055531Z not ok 193 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用\r",
+            "2026-10-24T16:19:01.9927206Z not ok 194 - P2-9b main_removed + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T16:19:05.2089253Z not ok 195 - P2-9b permit_issued + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T16:19:22.7795676Z not ok 198 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可\r",
+            "2026-10-24T16:19:25.8733548Z not ok 199 - P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次\r",
+            "2026-10-24T16:19:38.6530309Z not ok 201 - P2-5 不可读主库只能通过显式隔离继续原 deletionId\r",
+            "2026-10-24T16:19:44.1064725Z not ok 203 - P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409\r",
+            "2026-10-24T16:20:07.9822734Z not ok 207 - P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch\r",
+            "2026-10-24T16:20:07.9829841Z not ok 208 - P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车\r",
+            "2026-10-24T16:20:07.9839587Z not ok 210 - P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行\r",
+            "2026-10-24T16:20:59.6918551Z not ok 246 - whole-runtime backup includes control/artifacts and restores active service state\r",
+            "2026-10-24T16:20:59.6926925Z not ok 247 - whole-runtime backup includes control/artifacts and restores inactive service state\r",
+            "2026-10-24T16:20:59.6937273Z not ok 248 - active service without a MainPID is refused before stopping or publishing\r",
+            "2026-10-24T16:20:59.6945919Z not ok 249 - active service live environment failure is refused before stopping\r",
+            "2026-10-24T16:20:59.7014276Z not ok 250 - external authoritative database path is refused before stopping the service\r",
+            "2026-10-24T16:20:59.7035918Z not ok 251 - backup records a five-store path manifest and refuses unverifiable apply\r",
+            "2026-10-24T16:20:59.7046952Z not ok 253 - active CLI publication lock is refused after stopping the service\r",
+            "2026-10-24T16:20:59.7056949Z not ok 255 - backup reports service restart failure even when the archive was created\r",
+            "2026-10-24T16:20:59.7067167Z not ok 257 - runtime-only env without explicit database paths is refused\r",
+            "2026-10-24T16:20:59.7098333Z not ok 264 - service env different from the backup env is refused before stopping\r",
+            "2026-10-24T16:20:59.7110613Z not ok 267 - multiple and optional EnvironmentFiles are rejected before stop\r",
+            "2026-10-24T16:20:59.7146755Z not ok 268 - UnsetEnvironment and quoted path syntax are rejected before stop\r",
+            "2026-10-24T16:20:59.7159459Z not ok 270 - direct Environment configuration matching three paths produces a verified archive\r",
+            "2026-10-24T16:20:59.7167281Z not ok 271 - source change during the archive window refuses to publish the archive\r",
+            "2026-10-24T16:20:59.7182267Z not ok 275 - archive window rejects absent tree becomes directory\r",
+            "2026-10-24T16:20:59.7190468Z not ok 276 - archive window rejects absent tree becomes file\r",
+            "2026-10-24T16:20:59.7205096Z not ok 277 - archive window rejects present tree gains file\r",
+            "2026-10-24T16:20:59.7225747Z not ok 278 - archive window rejects present tree loses file\r",
+            "2026-10-24T16:20:59.7236853Z not ok 279 - archive window rejects present tree rewrites same-size file\r",
+            "2026-10-24T16:20:59.7258958Z not ok 288 - explicit upgrade migration runs between service stop and restart\r",
+            "2026-10-24T16:20:59.7267974Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T16:20:59.7267974Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T16:20:59.7365454Z not ok 290 - failed migration leaves the service stopped\r",
+            "2026-10-24T16:20:59.7374993Z not ok 291 - upgrade rejects HTTP 200 maintenance state\r",
+            "2026-10-24T16:20:59.7484879Z not ok 313 - A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次\r",
+            "2026-10-24T16:20:59.7645631Z not ok 426 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）\r",
+            "2026-10-24T16:23:47.6697241Z not ok 770 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available\r",
+            "2026-10-24T16:23:52.3528872Z not ok 784 - SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过\r",
+            "2026-10-24T16:23:52.3552907Z not ok 797 - rejects the repository, its ancestors, its var/ and shallow roots\r",
+            "2026-10-24T16:23:52.3564810Z not ok 802 - child environment is a whitelist and never inherits production RAI_* or proxies\r",
+            "2026-10-24T16:23:52.3765554Z not ok 889 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler\r",
+            "2026-10-24T16:23:52.3855256Z not ok 974 - P3-4: the cached read store reopens when the database file is replaced\r",
+            "2026-10-24T16:23:52.3859479Z not ok 978 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it\r",
+            "2026-10-24T16:23:52.3867307Z not ok 990 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）\r",
+            "2026-10-24T16:23:52.3901496Z not ok 1040 - series read worker serves a snapshot, restarts on file replacement, and closes cleanly\r",
+            "2026-10-24T16:27:00.7211003Z not ok 1074 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe\r",
+            "2026-10-24T16:27:00.7732123Z not ok 1173 - P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503\r",
+            "2026-10-24T16:27:00.8011854Z not ok 1377 - releases import worker state and calls terminal cleanup when staging cleanup fails\r"
+          ],
+          "testSummary": []
+        },
+        {
+          "id": 120921905279,
+          "name": "rust-data-worker (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40110796362,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        }
+      ],
+      "commitSha": "0ad5696d95d0c12b1e7d798adaff45540226355e",
+      "branch": "ci/fix-github-actions-2026-10-24",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "url": "https://github.com/BlacnkCat0811/running/actions/runs/40110796362",
+      "createdAt": "2026-10-24T16:16:31Z"
+    },
+    {
+      "runId": 40109692198,
+      "workflow": "CI",
+      "jobs": [
+        {
+          "id": 120918626250,
+          "name": "windows-runtime",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "run_id": 40109692198,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "iOS gates on Windows (must skip loudly, never fail or pass quietly)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run Windows unit and integration tests",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 6
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T16:02:17.6055626Z ##[group]Operating System\r",
+            "2026-10-24T16:02:17.6056104Z Microsoft Windows Server 2025\r",
+            "2026-10-24T16:02:17.6056548Z 10.0.26100\r",
+            "2026-10-24T16:02:17.6058220Z Image: windows-2025-vs2026\r",
+            "2026-10-24T16:02:17.6058652Z Version: 20261021.278.1\r",
+            "2026-10-24T16:02:17.6060088Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md\r"
+          ],
+          "classification": "cancelled: Windows full suite; 12-minute budget, POSIX failures already present",
+          "evidence": [
+            "2026-10-24T16:04:32.0590464Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T16:04:32.0591069Z   ---\r",
+            "2026-10-24T16:04:32.0591423Z   duration_ms: 2888.993\r",
+            "2026-10-24T16:04:32.0594297Z   type: 'test'\r",
+            "2026-10-24T16:04:32.0594959Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:6762'\r",
+            "2026-10-24T16:04:32.0595661Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:04:32.0596119Z   error: |-\r",
+            "2026-10-24T16:04:32.0596729Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:04:32.0597616Z     \r",
+            "2026-10-24T16:04:32.0597942Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:04:32.0598286Z     \r",
+            "2026-10-24T16:04:32.0598608Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:04:32.0598984Z   name: 'AssertionError'\r",
+            "2026-10-24T16:04:32.0599388Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:04:32.0599618Z   actual: ~\r",
+            "2026-10-24T16:04:32.0599835Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:04:32.0600070Z   stack: |-\r",
+            "2026-10-24T16:04:32.0600608Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:04:32.0601332Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:464:7)\r",
+            "2026-10-24T16:04:32.0601786Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T16:04:41.1799636Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T16:04:41.1800017Z   ---\r",
+            "2026-10-24T16:04:41.1800182Z   duration_ms: 3517.123\r",
+            "2026-10-24T16:04:41.1800350Z   type: 'test'\r",
+            "2026-10-24T16:04:41.1800691Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:10964'\r",
+            "2026-10-24T16:04:41.1801055Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:04:41.1801244Z   error: |-\r",
+            "2026-10-24T16:04:41.1801540Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:04:41.1801785Z     \r",
+            "2026-10-24T16:04:41.1801918Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:04:41.1802060Z     \r",
+            "2026-10-24T16:04:41.1802194Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:04:41.1802357Z   name: 'AssertionError'\r",
+            "2026-10-24T16:04:41.1802521Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:04:41.1802669Z   actual: ~\r",
+            "2026-10-24T16:04:41.1802824Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:04:41.1802982Z   stack: |-\r",
+            "2026-10-24T16:04:41.1803306Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:04:41.1803848Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:546:5)\r",
+            "2026-10-24T16:04:41.1804425Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T16:04:43.7341266Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T16:04:43.7341533Z   ---\r",
+            "2026-10-24T16:04:43.7341687Z   duration_ms: 2507.406\r",
+            "2026-10-24T16:04:43.7341860Z   type: 'test'\r",
+            "2026-10-24T16:04:43.7342194Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:13976'\r",
+            "2026-10-24T16:04:43.7342567Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T16:04:43.7342750Z   error: |-\r",
+            "2026-10-24T16:04:43.7343023Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T16:04:43.7343230Z     \r",
+            "2026-10-24T16:04:43.7343364Z     null !== 'SIGKILL'\r",
+            "2026-10-24T16:04:43.7343512Z     \r",
+            "2026-10-24T16:04:43.7343643Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T16:04:43.7343809Z   name: 'AssertionError'\r",
+            "2026-10-24T16:04:43.7343971Z   expected: 'SIGKILL'\r",
+            "2026-10-24T16:04:43.7344125Z   actual: ~\r",
+            "2026-10-24T16:04:43.7344263Z   operator: 'strictEqual'\r",
+            "2026-10-24T16:04:43.7344419Z   stack: |-\r",
+            "2026-10-24T16:04:43.7344740Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T16:04:43.7346674Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:606:5)\r",
+            "2026-10-24T16:04:43.7347296Z     async Test.run (node:internal/test_runner/test:1054:7)\r"
+          ],
+          "failingCases": [
+            "2026-10-24T16:04:32.0590464Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T16:04:41.1799636Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T16:04:43.7341266Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T16:04:48.2009602Z not ok 188 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活\r",
+            "2026-10-24T16:04:53.3562186Z not ok 189 - P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复\r",
+            "2026-10-24T16:05:12.1881576Z not ok 191 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库\r",
+            "2026-10-24T16:05:20.7682052Z not ok 193 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用\r",
+            "2026-10-24T16:05:26.7668461Z not ok 194 - P2-9b main_removed + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T16:05:34.0596892Z not ok 195 - P2-9b permit_issued + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T16:05:55.5686561Z not ok 198 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可\r",
+            "2026-10-24T16:05:59.7090534Z not ok 199 - P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次\r",
+            "2026-10-24T16:06:30.5552452Z not ok 201 - P2-5 不可读主库只能通过显式隔离继续原 deletionId\r",
+            "2026-10-24T16:06:37.5533698Z not ok 203 - P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409\r",
+            "2026-10-24T16:07:06.5735720Z not ok 207 - P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch\r",
+            "2026-10-24T16:07:06.5746783Z not ok 208 - P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车\r",
+            "2026-10-24T16:07:06.5757946Z not ok 210 - P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行\r",
+            "2026-10-24T16:08:10.4148627Z not ok 246 - whole-runtime backup includes control/artifacts and restores active service state\r",
+            "2026-10-24T16:08:10.4161128Z not ok 247 - whole-runtime backup includes control/artifacts and restores inactive service state\r",
+            "2026-10-24T16:08:10.4209093Z not ok 248 - active service without a MainPID is refused before stopping or publishing\r",
+            "2026-10-24T16:08:10.4239159Z not ok 249 - active service live environment failure is refused before stopping\r",
+            "2026-10-24T16:08:10.4250970Z not ok 250 - external authoritative database path is refused before stopping the service\r",
+            "2026-10-24T16:08:10.4263601Z not ok 251 - backup records a five-store path manifest and refuses unverifiable apply\r",
+            "2026-10-24T16:08:10.4278389Z not ok 253 - active CLI publication lock is refused after stopping the service\r",
+            "2026-10-24T16:08:10.4292160Z not ok 255 - backup reports service restart failure even when the archive was created\r",
+            "2026-10-24T16:08:10.4309827Z not ok 257 - runtime-only env without explicit database paths is refused\r",
+            "2026-10-24T16:08:10.4365319Z not ok 264 - service env different from the backup env is refused before stopping\r",
+            "2026-10-24T16:08:10.4389030Z not ok 267 - multiple and optional EnvironmentFiles are rejected before stop\r",
+            "2026-10-24T16:08:10.4454394Z not ok 268 - UnsetEnvironment and quoted path syntax are rejected before stop\r",
+            "2026-10-24T16:08:10.4489452Z not ok 270 - direct Environment configuration matching three paths produces a verified archive\r",
+            "2026-10-24T16:08:10.4501586Z not ok 271 - source change during the archive window refuses to publish the archive\r",
+            "2026-10-24T16:08:10.4536705Z not ok 275 - archive window rejects absent tree becomes directory\r",
+            "2026-10-24T16:08:10.4551525Z not ok 276 - archive window rejects absent tree becomes file\r",
+            "2026-10-24T16:08:10.4589744Z not ok 277 - archive window rejects present tree gains file\r",
+            "2026-10-24T16:08:10.4607201Z not ok 278 - archive window rejects present tree loses file\r",
+            "2026-10-24T16:08:10.4622873Z not ok 279 - archive window rejects present tree rewrites same-size file\r",
+            "2026-10-24T16:08:10.4655100Z not ok 288 - explicit upgrade migration runs between service stop and restart\r",
+            "2026-10-24T16:08:10.4668421Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T16:08:10.4668421Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T16:08:10.4691514Z not ok 290 - failed migration leaves the service stopped\r",
+            "2026-10-24T16:08:10.4701735Z not ok 291 - upgrade rejects HTTP 200 maintenance state\r",
+            "2026-10-24T16:08:10.4748863Z not ok 313 - A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次\r",
+            "2026-10-24T16:08:10.5062792Z not ok 426 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）\r",
+            "2026-10-24T16:12:40.0851615Z not ok 770 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available\r",
+            "2026-10-24T16:12:40.0870329Z not ok 784 - SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过\r",
+            "2026-10-24T16:12:40.0886352Z not ok 797 - rejects the repository, its ancestors, its var/ and shallow roots\r",
+            "2026-10-24T16:12:40.0895004Z not ok 802 - child environment is a whitelist and never inherits production RAI_* or proxies\r",
+            "2026-10-24T16:12:40.1005195Z not ok 874 - guard protocol: two real processes never observe a consistent mixed snapshot\r",
+            "2026-10-24T16:12:40.1030907Z not ok 889 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler\r",
+            "2026-10-24T16:12:47.6987889Z not ok 974 - P3-4: the cached read store reopens when the database file is replaced\r",
+            "2026-10-24T16:12:47.7011420Z not ok 978 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it\r",
+            "2026-10-24T16:12:47.7055977Z not ok 990 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）\r",
+            "2026-10-24T16:12:55.1562302Z not ok 1040 - series read worker serves a snapshot, restarts on file replacement, and closes cleanly\r"
+          ],
+          "testSummary": []
+        },
+        {
+          "id": 120918626401,
+          "name": "rust-data-worker (macos-26)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40109692198,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120918626428,
+          "name": "rust-data-worker (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40109692198,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120918626450,
+          "name": "ios",
+          "status": "completed",
+          "conclusion": "success",
+          "run_id": 40109692198,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run iOS gates (typecheck + pure-logic regressions)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run cross-platform source gates",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Install CocoaPods dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Build iOS simulator target",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Run iOS model regression tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Compile visual acceptance UI tests",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Post Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21
+            }
+          ],
+          "runnerEvidence": [],
+          "classification": "success",
+          "evidence": [],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120918626477,
+          "name": "verify (22.x)",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40109692198,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Type check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Validate maintained documentation and acceptance references",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Verify gate scripts, blob ceiling, and package boundaries",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Model boundary review (R1-R3)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 10
+            },
+            {
+              "name": "Bootstrap Python training environment",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Run Python training tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 12
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Verify production-only startup contract",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 14
+            },
+            {
+              "name": "Post Set up Python",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 26
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 27
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T16:02:17.0074572Z ##[group]Operating System",
+            "2026-10-24T16:02:17.0075401Z Ubuntu",
+            "2026-10-24T16:02:17.0076065Z 24.04.5",
+            "2026-10-24T16:02:17.0078071Z ##[group]Runner Image",
+            "2026-10-24T16:02:17.0078933Z Image: ubuntu-24.04",
+            "2026-10-24T16:02:17.0079672Z Version: 20261012.334.1",
+            "2026-10-24T16:02:17.0081344Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md"
+          ],
+          "classification": "OS/test fixture: unlink+copy may reuse inode on Linux; replacement not guaranteed",
+          "evidence": [
+            "2026-10-24T16:05:44.6505683Z not ok 523 - 每个任务的数据库调查：同路径换文件（恢复/换库）必须被看见",
+            "2026-10-24T16:05:44.6505943Z   ---",
+            "2026-10-24T16:05:44.6506165Z   duration_ms: 119.762193",
+            "2026-10-24T16:05:44.6506442Z   type: 'test'",
+            "2026-10-24T16:05:44.6506873Z   location: '/home/runner/work/running/running/apps/api/test/import-worker-reuse.test.ts:55:1511'",
+            "2026-10-24T16:05:44.6507299Z   failureType: 'testCodeFailure'",
+            "2026-10-24T16:05:44.6507524Z   error: |-",
+            "2026-10-24T16:05:44.6507797Z     同路径换了文件必须被看见 —— 旧连接与旧调查结论都不许带进新库",
+            "2026-10-24T16:05:44.6508009Z     ",
+            "2026-10-24T16:05:44.6508161Z     false !== true",
+            "2026-10-24T16:05:44.6508351Z     ",
+            "2026-10-24T16:05:44.6508726Z   code: 'ERR_ASSERTION'",
+            "2026-10-24T16:05:44.6508931Z   name: 'AssertionError'",
+            "2026-10-24T16:05:44.6509121Z   expected: true",
+            "2026-10-24T16:05:44.6509289Z   actual: false",
+            "2026-10-24T16:05:44.6509466Z   operator: 'strictEqual'",
+            "2026-10-24T16:05:44.6509648Z   stack: |-",
+            "2026-10-24T16:05:44.6510017Z     <anonymous> (/home/runner/work/running/running/apps/api/test/import-worker-reuse.test.ts:862:12)",
+            "2026-10-24T16:05:44.6510553Z     process.processTicksAndRejections (node:internal/process/task_queues:103:5)",
+            "2026-10-24T16:05:44.6511083Z     async fixture (/home/runner/work/running/running/apps/api/test/import-worker-reuse.test.ts:99:9)",
+            "2026-10-24T16:10:15.2453473Z # tests 2626",
+            "2026-10-24T16:10:15.2453952Z # pass 2612",
+            "2026-10-24T16:10:15.2454180Z # fail 1",
+            "2026-10-24T16:10:15.2454400Z # cancelled 0",
+            "2026-10-24T16:10:15.2454616Z # skipped 13",
+            "2026-10-24T16:10:15.2571771Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [
+            "2026-10-24T16:05:44.6505683Z not ok 523 - 每个任务的数据库调查：同路径换文件（恢复/换库）必须被看见"
+          ],
+          "testSummary": [
+            "2026-10-24T16:10:15.2453473Z # tests 2626",
+            "2026-10-24T16:10:15.2453952Z # pass 2612",
+            "2026-10-24T16:10:15.2454180Z # fail 1",
+            "2026-10-24T16:10:15.2454400Z # cancelled 0",
+            "2026-10-24T16:10:15.2454616Z # skipped 13"
+          ]
+        }
+      ],
+      "commitSha": "25b413bba1e72aaaab213784a69578fa6ab9813f",
+      "branch": "ci/fix-github-actions-2026-10-24",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/BlacnkCat0811/running/actions/runs/40109692198",
+      "createdAt": "2026-10-24T16:02:13Z"
+    },
+    {
+      "runId": 40105141027,
+      "workflow": "CI",
+      "jobs": [
+        {
+          "id": 120905164444,
+          "name": "windows-runtime",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "run_id": 40105141027,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "iOS gates on Windows (must skip loudly, never fail or pass quietly)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run Windows unit and integration tests",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 6
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T15:02:16.7957544Z ##[group]Operating System\r",
+            "2026-10-24T15:02:16.7958464Z Microsoft Windows Server 2025\r",
+            "2026-10-24T15:02:16.7959043Z 10.0.26100\r",
+            "2026-10-24T15:02:16.7961176Z Image: windows-2025-vs2026\r",
+            "2026-10-24T15:02:16.7961741Z Version: 20261021.278.1\r",
+            "2026-10-24T15:02:16.7963177Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md\r"
+          ],
+          "classification": "cancelled: Windows full suite; 12-minute budget, POSIX failures already present",
+          "evidence": [
+            "2026-10-24T15:04:11.4443926Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T15:04:11.4459996Z   ---\r",
+            "2026-10-24T15:04:11.4494621Z   duration_ms: 3283.2886\r",
+            "2026-10-24T15:04:11.4529391Z   type: 'test'\r",
+            "2026-10-24T15:04:11.4543320Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:6762'\r",
+            "2026-10-24T15:04:11.4573584Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T15:04:11.4640269Z   error: |-\r",
+            "2026-10-24T15:04:11.4777588Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T15:04:11.4790933Z     \r",
+            "2026-10-24T15:04:11.4791623Z     null !== 'SIGKILL'\r",
+            "2026-10-24T15:04:11.4791972Z     \r",
+            "2026-10-24T15:04:11.4792275Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T15:04:11.4792645Z   name: 'AssertionError'\r",
+            "2026-10-24T15:04:11.4793050Z   expected: 'SIGKILL'\r",
+            "2026-10-24T15:04:11.4793413Z   actual: ~\r",
+            "2026-10-24T15:04:11.4793738Z   operator: 'strictEqual'\r",
+            "2026-10-24T15:04:11.4794108Z   stack: |-\r",
+            "2026-10-24T15:04:11.4794861Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T15:04:11.4797924Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:464:7)\r",
+            "2026-10-24T15:04:11.4799023Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T15:04:21.0742634Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T15:04:21.0743267Z   ---\r",
+            "2026-10-24T15:04:21.0743569Z   duration_ms: 3854.7699\r",
+            "2026-10-24T15:04:21.0743931Z   type: 'test'\r",
+            "2026-10-24T15:04:21.0744678Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:10964'\r",
+            "2026-10-24T15:04:21.0745531Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T15:04:21.0745929Z   error: |-\r",
+            "2026-10-24T15:04:21.0746505Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T15:04:21.0746955Z     \r",
+            "2026-10-24T15:04:21.0747225Z     null !== 'SIGKILL'\r",
+            "2026-10-24T15:04:21.0747988Z     \r",
+            "2026-10-24T15:04:21.0748295Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T15:04:21.0748658Z   name: 'AssertionError'\r",
+            "2026-10-24T15:04:21.0749022Z   expected: 'SIGKILL'\r",
+            "2026-10-24T15:04:21.0749349Z   actual: ~\r",
+            "2026-10-24T15:04:21.0749670Z   operator: 'strictEqual'\r",
+            "2026-10-24T15:04:21.0750026Z   stack: |-\r",
+            "2026-10-24T15:04:21.0750794Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T15:04:21.0752167Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:546:5)\r",
+            "2026-10-24T15:04:21.0753234Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T15:04:23.9491362Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T15:04:23.9491931Z   ---\r",
+            "2026-10-24T15:04:23.9492216Z   duration_ms: 2819.8849\r",
+            "2026-10-24T15:04:23.9492596Z   type: 'test'\r",
+            "2026-10-24T15:04:23.9493025Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:13976'\r",
+            "2026-10-24T15:04:23.9493512Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T15:04:23.9493737Z   error: |-\r",
+            "2026-10-24T15:04:23.9494085Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T15:04:23.9494345Z     \r",
+            "2026-10-24T15:04:23.9494504Z     null !== 'SIGKILL'\r",
+            "2026-10-24T15:04:23.9494678Z     \r",
+            "2026-10-24T15:04:23.9494836Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T15:04:23.9495040Z   name: 'AssertionError'\r",
+            "2026-10-24T15:04:23.9495401Z   expected: 'SIGKILL'\r",
+            "2026-10-24T15:04:23.9495690Z   actual: ~\r",
+            "2026-10-24T15:04:23.9495869Z   operator: 'strictEqual'\r",
+            "2026-10-24T15:04:23.9496066Z   stack: |-\r",
+            "2026-10-24T15:04:23.9496487Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T15:04:23.9497227Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:606:5)\r",
+            "2026-10-24T15:04:23.9498165Z     async Test.run (node:internal/test_runner/test:1054:7)\r"
+          ],
+          "failingCases": [
+            "2026-10-24T15:04:11.4443926Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T15:04:21.0742634Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T15:04:23.9491362Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T15:04:28.0003027Z not ok 188 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活\r",
+            "2026-10-24T15:04:32.0384769Z not ok 189 - P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复\r",
+            "2026-10-24T15:04:51.2863176Z not ok 191 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库\r",
+            "2026-10-24T15:05:01.3063650Z not ok 193 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用\r",
+            "2026-10-24T15:05:04.9834528Z not ok 194 - P2-9b main_removed + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T15:05:11.4534689Z not ok 195 - P2-9b permit_issued + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T15:05:33.4309040Z not ok 198 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可\r",
+            "2026-10-24T15:05:39.2386140Z not ok 199 - P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次\r",
+            "2026-10-24T15:05:53.5006273Z not ok 201 - P2-5 不可读主库只能通过显式隔离继续原 deletionId\r",
+            "2026-10-24T15:06:00.3352978Z not ok 203 - P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409\r",
+            "2026-10-24T15:06:27.3181301Z not ok 207 - P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch\r",
+            "2026-10-24T15:06:27.3200185Z not ok 208 - P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车\r",
+            "2026-10-24T15:06:27.3215668Z not ok 210 - P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行\r",
+            "2026-10-24T15:07:31.2056378Z not ok 246 - whole-runtime backup includes control/artifacts and restores active service state\r",
+            "2026-10-24T15:07:31.2072272Z not ok 247 - whole-runtime backup includes control/artifacts and restores inactive service state\r",
+            "2026-10-24T15:07:31.2087946Z not ok 248 - active service without a MainPID is refused before stopping or publishing\r",
+            "2026-10-24T15:07:31.2102339Z not ok 249 - active service live environment failure is refused before stopping\r",
+            "2026-10-24T15:07:31.2130657Z not ok 250 - external authoritative database path is refused before stopping the service\r",
+            "2026-10-24T15:07:31.2147399Z not ok 251 - backup records a five-store path manifest and refuses unverifiable apply\r",
+            "2026-10-24T15:07:31.2163916Z not ok 253 - active CLI publication lock is refused after stopping the service\r",
+            "2026-10-24T15:07:31.2247220Z not ok 255 - backup reports service restart failure even when the archive was created\r",
+            "2026-10-24T15:07:31.2269830Z not ok 257 - runtime-only env without explicit database paths is refused\r",
+            "2026-10-24T15:07:31.2320028Z not ok 264 - service env different from the backup env is refused before stopping\r",
+            "2026-10-24T15:07:31.2345325Z not ok 267 - multiple and optional EnvironmentFiles are rejected before stop\r",
+            "2026-10-24T15:07:31.2363521Z not ok 268 - UnsetEnvironment and quoted path syntax are rejected before stop\r",
+            "2026-10-24T15:07:31.2385859Z not ok 270 - direct Environment configuration matching three paths produces a verified archive\r",
+            "2026-10-24T15:07:31.2401250Z not ok 271 - source change during the archive window refuses to publish the archive\r",
+            "2026-10-24T15:07:31.2438181Z not ok 275 - archive window rejects absent tree becomes directory\r",
+            "2026-10-24T15:07:31.2454174Z not ok 276 - archive window rejects absent tree becomes file\r",
+            "2026-10-24T15:07:31.2471879Z not ok 277 - archive window rejects present tree gains file\r",
+            "2026-10-24T15:07:31.2520792Z not ok 278 - archive window rejects present tree loses file\r",
+            "2026-10-24T15:07:31.2538320Z not ok 279 - archive window rejects present tree rewrites same-size file\r",
+            "2026-10-24T15:07:31.2583877Z not ok 288 - explicit upgrade migration runs between service stop and restart\r",
+            "2026-10-24T15:07:31.2602128Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T15:07:31.2602128Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T15:07:31.2620811Z not ok 290 - failed migration leaves the service stopped\r",
+            "2026-10-24T15:07:31.2640798Z not ok 291 - upgrade rejects HTTP 200 maintenance state\r",
+            "2026-10-24T15:07:31.2752001Z not ok 313 - A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次\r",
+            "2026-10-24T15:07:31.3137097Z not ok 426 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）\r",
+            "2026-10-24T15:11:22.9514285Z not ok 770 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available\r",
+            "2026-10-24T15:11:29.9914037Z not ok 784 - SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过\r",
+            "2026-10-24T15:11:30.0032586Z not ok 797 - rejects the repository, its ancestors, its var/ and shallow roots\r",
+            "2026-10-24T15:11:30.0065745Z not ok 802 - child environment is a whitelist and never inherits production RAI_* or proxies\r",
+            "2026-10-24T15:11:30.0574589Z not ok 889 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler\r",
+            "2026-10-24T15:11:30.0840832Z not ok 974 - P3-4: the cached read store reopens when the database file is replaced\r",
+            "2026-10-24T15:11:30.0849359Z not ok 978 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it\r",
+            "2026-10-24T15:11:30.0863432Z not ok 990 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）\r",
+            "2026-10-24T15:11:30.0913239Z not ok 1040 - series read worker serves a snapshot, restarts on file replacement, and closes cleanly\r",
+            "2026-10-24T15:14:32.8742866Z not ok 1074 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe\r",
+            "2026-10-24T15:14:33.0061965Z not ok 1173 - P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503\r"
+          ],
+          "testSummary": []
+        },
+        {
+          "id": 120905164565,
+          "name": "verify (22.x)",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40105141027,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Type check",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Validate maintained documentation and acceptance references",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 7
+            },
+            {
+              "name": "Verify gate scripts, blob ceiling, and package boundaries",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8
+            },
+            {
+              "name": "Model boundary review (R1-R3)",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 10
+            },
+            {
+              "name": "Bootstrap Python training environment",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Run Python training tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 12
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Verify production-only startup contract",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 14
+            },
+            {
+              "name": "Post Set up Python",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 26
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 27
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T15:02:16.5394436Z ##[group]Operating System",
+            "2026-10-24T15:02:16.5394976Z Ubuntu",
+            "2026-10-24T15:02:16.5395541Z 24.04.5",
+            "2026-10-24T15:02:16.5397342Z ##[group]Runner Image",
+            "2026-10-24T15:02:16.5398091Z Image: ubuntu-24.04",
+            "2026-10-24T15:02:16.5398897Z Version: 20261012.334.1",
+            "2026-10-24T15:02:16.5400402Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md"
+          ],
+          "classification": "test infrastructure: documentation links use machine-absolute paths; orphan graph failure",
+          "evidence": [
+            "2026-10-24T15:02:35.7404476Z deliverables/phase1-main-thread-blocking/bench/README.md: not reachable from README.md",
+            "2026-10-24T15:02:35.7405060Z deliverables/phase1-main-thread-blocking/evidence/README.md: not reachable from README.md",
+            "2026-10-24T15:02:35.7405720Z deliverables/phase1-main-thread-blocking/evidence/superseded/README.md: not reachable from README.md",
+            "2026-10-24T15:02:35.7496330Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120905164566,
+          "name": "ios",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40105141027,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Run iOS gates (typecheck + pure-logic regressions)",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 4
+            },
+            {
+              "name": "Run cross-platform source gates",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 5
+            },
+            {
+              "name": "Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6
+            },
+            {
+              "name": "Install CocoaPods dependencies",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Build iOS simulator target",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8
+            },
+            {
+              "name": "Run iOS model regression tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9
+            },
+            {
+              "name": "Compile visual acceptance UI tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 10
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 19
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 20
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 21
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T15:02:16.8803300Z ##[group]Operating System",
+            "2026-10-24T15:02:16.8806650Z macOS",
+            "2026-10-24T15:02:16.8807560Z 26.6.2",
+            "2026-10-24T15:02:16.8810600Z ##[group]Runner Image",
+            "2026-10-24T15:02:16.8811840Z Image: macos-26-arm64",
+            "2026-10-24T15:02:16.8813010Z Version: 20261013.0424.1",
+            "2026-10-24T15:02:16.8815400Z Included Software: https://github.com/actions/runner-images/blob/macos-26-arm64/20261013.0424/images/macos/macos-26-arm64-Readme.md",
+            "2026-10-24T15:02:23.5665630Z Xcode 26.6",
+            "2026-10-24T15:02:23.5666950Z Build version 17F113",
+            "2026-10-24T15:02:26.9891370Z Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+            "2026-10-24T15:02:26.9892490Z Target: arm64-apple-macosx26.0"
+          ],
+          "classification": "flaky test: cancellation ordering depended on fixed wall-clock delays",
+          "evidence": [
+            "2026-10-24T15:08:11.6413930Z FAIL: late success cannot publish after probe cancellation",
+            "2026-10-24T15:08:11.6414440Z FAIL: late success after cancellation cannot trigger reload",
+            "2026-10-24T15:08:11.7346220Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [
+            "2026-10-24T15:08:11.6413930Z FAIL: late success cannot publish after probe cancellation",
+            "2026-10-24T15:08:11.6414440Z FAIL: late success after cancellation cannot trigger reload"
+          ],
+          "testSummary": []
+        },
+        {
+          "id": 120905164610,
+          "name": "rust-data-worker (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "run_id": 40105141027,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T15:02:16.6379304Z ##[group]Operating System",
+            "2026-10-24T15:02:16.6379894Z Ubuntu",
+            "2026-10-24T15:02:16.6380408Z 24.04.5",
+            "2026-10-24T15:02:16.6382006Z ##[group]Runner Image",
+            "2026-10-24T15:02:16.6382569Z Image: ubuntu-24.04",
+            "2026-10-24T15:02:16.6383104Z Version: 20261012.334.1",
+            "2026-10-24T15:02:16.6384336Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md"
+          ],
+          "classification": "test fixture: missing initialized dataset DB; recovery_required blocks engine assertions; matrix cancelled after peer failure",
+          "evidence": [
+            "2026-10-24T15:04:33.7381031Z not ok 1 - Rust jobs keep their engine across restart but the import path refuses them explicitly (engine_rust)",
+            "2026-10-24T15:04:33.7383106Z   ---",
+            "2026-10-24T15:04:33.7383555Z   duration_ms: 60076.088987",
+            "2026-10-24T15:04:33.7384017Z   type: 'test'",
+            "2026-10-24T15:04:33.7384950Z   location: '/home/runner/work/running/running/apps/api/test/native-import-worker.test.ts:1:860'",
+            "2026-10-24T15:04:33.7385749Z   failureType: 'testCodeFailure'",
+            "2026-10-24T15:04:33.7389070Z   error: '{\"id\":\"web_import_mvmj3wvd_50169112-770d-49b2-b8d1-b97ff9fe15ee\",\"executionEngine\":{\"name\":\"rust\",\"version\":\"0.1.0\",\"fallback\":\"none\"},\"sourceId\":\"source\",\"status\":\"queued\",\"phase\":\"recovery_required\",\"message\":\"导入主库暂时缺失，无法核实回执，恢复已阻断；请恢复原库后重启服务\",\"createdAt\":\"2026-10-24T15:03:33.674Z\",\"completedAt\":null,\"error\":null,\"queuePosition\":1,\"waitingReason\":\"writer_busy\"}'",
+            "2026-10-24T15:04:33.7390748Z   code: 'ERR_ASSERTION'",
+            "2026-10-24T15:04:33.7391197Z   name: 'AssertionError'",
+            "2026-10-24T15:04:33.7391566Z   expected: true",
+            "2026-10-24T15:04:33.7392063Z   actual: false",
+            "2026-10-24T15:04:33.7392503Z   operator: '=='",
+            "2026-10-24T15:04:33.7392939Z   stack: |-",
+            "2026-10-24T15:04:33.7393859Z     TestContext.<anonymous> (/home/runner/work/running/running/apps/api/test/native-import-worker.test.ts:54:14)",
+            "2026-10-24T15:04:33.7395038Z     async Test.run (node:internal/test_runner/test:1054:7)",
+            "2026-10-24T15:04:33.7395790Z     async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)",
+            "2026-10-24T15:04:33.7396524Z   ...",
+            "2026-10-24T15:04:33.7573043Z # Subtest: abandoned native spool cleanup preserves pending attempts and unrelated directories",
+            "2026-10-24T15:04:33.7574272Z ok 2 - abandoned native spool cleanup preserves pending attempts and unrelated directories",
+            "2026-10-24T15:04:33.7575228Z   ---",
+            "2026-10-24T15:05:33.7646250Z not ok 3 - engine mismatch is refused explicitly instead of silently switching engines",
+            "2026-10-24T15:05:33.7647310Z   ---",
+            "2026-10-24T15:05:33.7647769Z   duration_ms: 60024.446975",
+            "2026-10-24T15:05:33.7648397Z   type: 'test'",
+            "2026-10-24T15:05:33.7649365Z   location: '/home/runner/work/running/running/apps/api/test/native-import-worker.test.ts:11:2550'",
+            "2026-10-24T15:05:33.7650302Z   failureType: 'testCodeFailure'",
+            "2026-10-24T15:05:33.7654130Z   error: '{\"id\":\"web_import_mvmj5789_3fdeae66-6451-448c-8bcf-d327adb809f9\",\"executionEngine\":{\"name\":\"rust\",\"version\":\"incompatible\",\"fallback\":\"none\"},\"sourceId\":\"version-source\",\"status\":\"running\",\"phase\":\"recovery_required\",\"message\":\"导入主库暂时缺失，无法核实回执，恢复已阻断；请恢复原库后重启服务\",\"createdAt\":\"2026-10-24T15:04:33.753Z\",\"completedAt\":null,\"error\":null,\"performance\":{\"validationMode\":\"not-run\",\"totalMs\":6.733939999998256,\"stagesMs\":{\"cleanup\":0.605651999998372},\"computeStagesMs\":{\"import_admission_wait\":23}}}'",
+            "2026-10-24T15:05:33.7657344Z   code: 'ERR_ASSERTION'",
+            "2026-10-24T15:05:33.7657837Z   name: 'AssertionError'",
+            "2026-10-24T15:05:33.7658383Z   expected: true",
+            "2026-10-24T15:05:33.7658759Z   actual: false",
+            "2026-10-24T15:05:33.7659243Z   operator: '=='",
+            "2026-10-24T15:05:33.7659639Z   stack: |-",
+            "2026-10-24T15:05:33.7660546Z     TestContext.<anonymous> (/home/runner/work/running/running/apps/api/test/native-import-worker.test.ts:109:14)",
+            "2026-10-24T15:05:33.7661629Z     async Test.run (node:internal/test_runner/test:1054:7)",
+            "2026-10-24T15:05:33.7662466Z     async Test.processPendingSubtests (node:internal/test_runner/test:744:7)",
+            "2026-10-24T15:05:33.7663148Z   ...",
+            "2026-10-24T15:05:33.7760354Z # (node:3234) ExperimentalWarning: SQLite is an experimental feature and might change at any time",
+            "2026-10-24T15:05:33.7761755Z # (Use `node --trace-warnings ...` to show where the warning was created)",
+            "2026-10-24T15:05:33.7763172Z # Subtest: Rust decoded data preserves TS stable IDs, metadata, routes, updates, and tombstones",
+            "2026-10-24T15:05:33.7799657Z # tests 11",
+            "2026-10-24T15:05:33.7800584Z # pass 9",
+            "2026-10-24T15:05:33.7801052Z # fail 2",
+            "2026-10-24T15:05:33.7801505Z # cancelled 0",
+            "2026-10-24T15:05:33.7801962Z # skipped 0",
+            "2026-10-24T15:05:33.7923055Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [
+            "2026-10-24T15:04:33.7381031Z not ok 1 - Rust jobs keep their engine across restart but the import path refuses them explicitly (engine_rust)",
+            "2026-10-24T15:05:33.7646250Z not ok 3 - engine mismatch is refused explicitly instead of silently switching engines"
+          ],
+          "testSummary": [
+            "2026-10-24T15:05:33.7799657Z # tests 11",
+            "2026-10-24T15:05:33.7800584Z # pass 9",
+            "2026-10-24T15:05:33.7801052Z # fail 2",
+            "2026-10-24T15:05:33.7801505Z # cancelled 0",
+            "2026-10-24T15:05:33.7801962Z # skipped 0"
+          ]
+        },
+        {
+          "id": 120905164776,
+          "name": "rust-data-worker (macos-26)",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40105141027,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T15:02:16.5443470Z ##[group]Operating System",
+            "2026-10-24T15:02:16.5443960Z macOS",
+            "2026-10-24T15:02:16.5444290Z 26.6.2",
+            "2026-10-24T15:02:16.5445350Z ##[group]Runner Image",
+            "2026-10-24T15:02:16.5445740Z Image: macos-26-arm64",
+            "2026-10-24T15:02:16.5446230Z Version: 20261013.0424.1",
+            "2026-10-24T15:02:16.5447350Z Included Software: https://github.com/actions/runner-images/blob/macos-26-arm64/20261013.0424/images/macos/macos-26-arm64-Readme.md"
+          ],
+          "classification": "test fixture: missing initialized dataset DB; recovery_required blocks engine assertions",
+          "evidence": [
+            "2026-10-24T15:04:28.0105560Z not ok 1 - Rust jobs keep their engine across restart but the import path refuses them explicitly (engine_rust)",
+            "2026-10-24T15:04:28.0107410Z   ---",
+            "2026-10-24T15:04:28.0108150Z   duration_ms: 60086.717",
+            "2026-10-24T15:04:28.0108860Z   type: 'test'",
+            "2026-10-24T15:04:28.0110260Z   location: '/Users/runner/work/running/running/apps/api/test/native-import-worker.test.ts:1:860'",
+            "2026-10-24T15:04:28.0111860Z   failureType: 'testCodeFailure'",
+            "2026-10-24T15:04:28.0460000Z   error: '{\"id\":\"web_import_mvmj3sax_5990e5b5-7647-43a6-8abb-9936d67a4513\",\"executionEngine\":{\"name\":\"rust\",\"version\":\"0.1.0\",\"fallback\":\"none\"},\"sourceId\":\"source\",\"status\":\"queued\",\"phase\":\"recovery_required\",\"message\":\"导入主库暂时缺失，无法核实回执，恢复已阻断；请恢复原库后重启服务\",\"createdAt\":\"2026-10-24T15:03:27.754Z\",\"completedAt\":null,\"error\":null,\"queuePosition\":1,\"waitingReason\":\"writer_busy\"}'",
+            "2026-10-24T15:04:28.0464630Z   code: 'ERR_ASSERTION'",
+            "2026-10-24T15:04:28.0465390Z   name: 'AssertionError'",
+            "2026-10-24T15:04:28.0466870Z   expected: true",
+            "2026-10-24T15:04:28.0468730Z   actual: false",
+            "2026-10-24T15:04:28.0470250Z   operator: '=='",
+            "2026-10-24T15:04:28.0472000Z   stack: |-",
+            "2026-10-24T15:04:28.0473420Z     TestContext.<anonymous> (/Users/runner/work/running/running/apps/api/test/native-import-worker.test.ts:54:14)",
+            "2026-10-24T15:04:28.0475030Z     async Test.run (node:internal/test_runner/test:1054:7)",
+            "2026-10-24T15:04:28.0476170Z     async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)",
+            "2026-10-24T15:04:28.0477560Z   ...",
+            "2026-10-24T15:04:28.1226770Z # Subtest: abandoned native spool cleanup preserves pending attempts and unrelated directories",
+            "2026-10-24T15:04:28.1228590Z ok 2 - abandoned native spool cleanup preserves pending attempts and unrelated directories",
+            "2026-10-24T15:04:28.1229080Z   ---",
+            "2026-10-24T15:05:28.1513680Z not ok 3 - engine mismatch is refused explicitly instead of silently switching engines",
+            "2026-10-24T15:05:28.1582310Z   ---",
+            "2026-10-24T15:05:28.1583050Z   duration_ms: 60129.593875",
+            "2026-10-24T15:05:28.1586970Z   type: 'test'",
+            "2026-10-24T15:05:28.1588920Z   location: '/Users/runner/work/running/running/apps/api/test/native-import-worker.test.ts:11:2550'",
+            "2026-10-24T15:05:28.1590490Z   failureType: 'testCodeFailure'",
+            "2026-10-24T15:05:28.1600200Z   error: '{\"id\":\"web_import_mvmj52vr_d9363d72-b9f0-49f7-beeb-7564690a7580\",\"executionEngine\":{\"name\":\"rust\",\"version\":\"incompatible\",\"fallback\":\"none\"},\"sourceId\":\"version-source\",\"status\":\"running\",\"phase\":\"recovery_required\",\"message\":\"导入主库暂时缺失，无法核实回执，恢复已阻断；请恢复原库后重启服务\",\"createdAt\":\"2026-10-24T15:04:28.120Z\",\"completedAt\":null,\"error\":null,\"performance\":{\"validationMode\":\"not-run\",\"totalMs\":4.752042000000074,\"stagesMs\":{\"cleanup\":0.9740830000009737},\"computeStagesMs\":{\"import_admission_wait\":25}}}'",
+            "2026-10-24T15:05:28.1605670Z   code: 'ERR_ASSERTION'",
+            "2026-10-24T15:05:28.1606680Z   name: 'AssertionError'",
+            "2026-10-24T15:05:28.1607480Z   expected: true",
+            "2026-10-24T15:05:28.1608510Z   actual: false",
+            "2026-10-24T15:05:28.1610440Z   operator: '=='",
+            "2026-10-24T15:05:28.1611030Z   stack: |-",
+            "2026-10-24T15:05:28.1611860Z     TestContext.<anonymous> (/Users/runner/work/running/running/apps/api/test/native-import-worker.test.ts:109:14)",
+            "2026-10-24T15:05:28.1612560Z     async Test.run (node:internal/test_runner/test:1054:7)",
+            "2026-10-24T15:05:28.1613220Z     async Test.processPendingSubtests (node:internal/test_runner/test:744:7)",
+            "2026-10-24T15:05:28.1613740Z   ...",
+            "2026-10-24T15:05:28.1827160Z # (node:3635) ExperimentalWarning: SQLite is an experimental feature and might change at any time",
+            "2026-10-24T15:05:28.1828740Z # (Use `node --trace-warnings ...` to show where the warning was created)",
+            "2026-10-24T15:05:28.1829570Z # Subtest: Rust decoded data preserves TS stable IDs, metadata, routes, updates, and tombstones",
+            "2026-10-24T15:05:28.1910890Z # tests 11",
+            "2026-10-24T15:05:28.1911390Z # pass 9",
+            "2026-10-24T15:05:28.1911640Z # fail 2",
+            "2026-10-24T15:05:28.1911910Z # cancelled 0",
+            "2026-10-24T15:05:28.1912120Z # skipped 0",
+            "2026-10-24T15:05:28.2446570Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [
+            "2026-10-24T15:04:28.0105560Z not ok 1 - Rust jobs keep their engine across restart but the import path refuses them explicitly (engine_rust)",
+            "2026-10-24T15:05:28.1513680Z not ok 3 - engine mismatch is refused explicitly instead of silently switching engines"
+          ],
+          "testSummary": [
+            "2026-10-24T15:05:28.1910890Z # tests 11",
+            "2026-10-24T15:05:28.1911390Z # pass 9",
+            "2026-10-24T15:05:28.1911640Z # fail 2",
+            "2026-10-24T15:05:28.1911910Z # cancelled 0",
+            "2026-10-24T15:05:28.1912120Z # skipped 0"
+          ]
+        }
+      ],
+      "commitSha": "93cc7d2a7646669937ba9f981707a33c09ffd84f",
+      "branch": "ci/fix-github-actions-2026-10-24",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/BlacnkCat0811/running/actions/runs/40105141027",
+      "createdAt": "2026-10-24T15:02:12Z"
+    },
+    {
+      "runId": 40100650964,
+      "workflow": "CI",
+      "jobs": [
+        {
+          "id": 120891926729,
+          "name": "ios",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40100650964,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run iOS gates (typecheck + pure-logic regressions)",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 3
+            },
+            {
+              "name": "Run cross-platform source gates",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 4
+            },
+            {
+              "name": "Cache CocoaPods",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 5
+            },
+            {
+              "name": "Install CocoaPods dependencies",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6
+            },
+            {
+              "name": "Build iOS simulator target",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Run iOS model regression tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8
+            },
+            {
+              "name": "Compile visual acceptance UI tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T14:01:29.7118880Z ##[group]Operating System",
+            "2026-10-24T14:01:29.7119260Z macOS",
+            "2026-10-24T14:01:29.7119610Z 14.8.9",
+            "2026-10-24T14:01:29.7120670Z ##[group]Runner Image",
+            "2026-10-24T14:01:29.7121060Z Image: macos-14-arm64",
+            "2026-10-24T14:01:29.7121420Z Version: 20260831.0302.1",
+            "2026-10-24T14:01:29.7122280Z Included Software: https://github.com/actions/runner-images/blob/macos-14-arm64/20260831.0302/images/macos/macos-14-arm64-Readme.md"
+          ],
+          "classification": "environment: Swift frontend lacks -default-isolation (old Swift frontend on macos-14)",
+          "evidence": [
+            "2026-10-24T14:01:37.7680930Z error: unknown argument: '-default-isolation'",
+            "2026-10-24T14:01:37.8023820Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120891926931,
+          "name": "windows-runtime",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "run_id": 40100650964,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "iOS gates on Windows (must skip loudly, never fail or pass quietly)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run Windows unit and integration tests",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 6
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T14:01:29.7885946Z ##[group]Operating System\r",
+            "2026-10-24T14:01:29.7886967Z Microsoft Windows Server 2025\r",
+            "2026-10-24T14:01:29.7887899Z 10.0.26100\r",
+            "2026-10-24T14:01:29.7891086Z Image: windows-2025-vs2026\r",
+            "2026-10-24T14:01:29.7891978Z Version: 20261021.278.1\r",
+            "2026-10-24T14:01:29.7894357Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20261021.278/images/windows/Windows2025-VS2026-Readme.md\r"
+          ],
+          "classification": "cancelled: Windows full suite; 12-minute job budget, POSIX failures already present",
+          "evidence": [
+            "2026-10-24T14:03:16.6564554Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T14:03:16.6565334Z   ---\r",
+            "2026-10-24T14:03:16.6566226Z   duration_ms: 3642.0589\r",
+            "2026-10-24T14:03:16.6566801Z   type: 'test'\r",
+            "2026-10-24T14:03:16.6567700Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:6762'\r",
+            "2026-10-24T14:03:16.6568939Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T14:03:16.6569513Z   error: |-\r",
+            "2026-10-24T14:03:16.6570273Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T14:03:16.6571484Z     \r",
+            "2026-10-24T14:03:16.6571968Z     null !== 'SIGKILL'\r",
+            "2026-10-24T14:03:16.6572458Z     \r",
+            "2026-10-24T14:03:16.6573743Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T14:03:16.6574356Z   name: 'AssertionError'\r",
+            "2026-10-24T14:03:16.6574981Z   expected: 'SIGKILL'\r",
+            "2026-10-24T14:03:16.6576014Z   actual: ~\r",
+            "2026-10-24T14:03:16.6576555Z   operator: 'strictEqual'\r",
+            "2026-10-24T14:03:16.6577082Z   stack: |-\r",
+            "2026-10-24T14:03:16.6578379Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T14:03:16.6580655Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:464:7)\r",
+            "2026-10-24T14:03:16.6582121Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T14:03:26.6267291Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T14:03:26.6267876Z   ---\r",
+            "2026-10-24T14:03:26.6268183Z   duration_ms: 2885.9595\r",
+            "2026-10-24T14:03:26.6268576Z   type: 'test'\r",
+            "2026-10-24T14:03:26.6269307Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:10964'\r",
+            "2026-10-24T14:03:26.6270220Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T14:03:26.6270609Z   error: |-\r",
+            "2026-10-24T14:03:26.6271209Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T14:03:26.6271663Z     \r",
+            "2026-10-24T14:03:26.6271947Z     null !== 'SIGKILL'\r",
+            "2026-10-24T14:03:26.6272264Z     \r",
+            "2026-10-24T14:03:26.6272571Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T14:03:26.6272968Z   name: 'AssertionError'\r",
+            "2026-10-24T14:03:26.6273359Z   expected: 'SIGKILL'\r",
+            "2026-10-24T14:03:26.6273698Z   actual: ~\r",
+            "2026-10-24T14:03:26.6273990Z   operator: 'strictEqual'\r",
+            "2026-10-24T14:03:26.6274427Z   stack: |-\r",
+            "2026-10-24T14:03:26.6275189Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T14:03:26.6276678Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:546:5)\r",
+            "2026-10-24T14:03:26.6278469Z     async Test.run (node:internal/test_runner/test:1054:7)\r",
+            "2026-10-24T14:03:30.2946236Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T14:03:30.2946905Z   ---\r",
+            "2026-10-24T14:03:30.2947233Z   duration_ms: 3569.9811\r",
+            "2026-10-24T14:03:30.2947530Z   type: 'test'\r",
+            "2026-10-24T14:03:30.2948131Z   location: 'D:\\\\a\\\\running\\\\running\\\\apps\\\\api\\\\test\\\\dataset-deletion-recovery.test.ts:11:13976'\r",
+            "2026-10-24T14:03:30.2948855Z   failureType: 'testCodeFailure'\r",
+            "2026-10-24T14:03:30.2949186Z   error: |-\r",
+            "2026-10-24T14:03:30.2949618Z     故障点必须产生 SIGKILL，而不是正常退出：exit=1 signal=null\r",
+            "2026-10-24T14:03:30.2949979Z     \r",
+            "2026-10-24T14:03:30.2950203Z     null !== 'SIGKILL'\r",
+            "2026-10-24T14:03:30.2950484Z     \r",
+            "2026-10-24T14:03:30.2950708Z   code: 'ERR_ASSERTION'\r",
+            "2026-10-24T14:03:30.2950995Z   name: 'AssertionError'\r",
+            "2026-10-24T14:03:30.2951289Z   expected: 'SIGKILL'\r",
+            "2026-10-24T14:03:30.2951548Z   actual: ~\r",
+            "2026-10-24T14:03:30.2951789Z   operator: 'strictEqual'\r",
+            "2026-10-24T14:03:30.2952071Z   stack: |-\r",
+            "2026-10-24T14:03:30.2952671Z     waitForHardKill (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:134:10)\r",
+            "2026-10-24T14:03:30.2953984Z     async TestContext.<anonymous> (D:\\a\\running\\running\\apps\\api\\test\\dataset-deletion-recovery.test.ts:606:5)\r",
+            "2026-10-24T14:03:30.2955012Z     async Test.run (node:internal/test_runner/test:1054:7)\r"
+          ],
+          "failingCases": [
+            "2026-10-24T14:03:16.6564554Z not ok 184 - P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch\r",
+            "2026-10-24T14:03:26.6267291Z not ok 186 - P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包\r",
+            "2026-10-24T14:03:30.2946236Z not ok 187 - P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次\r",
+            "2026-10-24T14:03:33.8349449Z not ok 188 - P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活\r",
+            "2026-10-24T14:03:37.5945557Z not ok 189 - P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复\r",
+            "2026-10-24T14:03:55.6854826Z not ok 191 - P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库\r",
+            "2026-10-24T14:04:04.5257678Z not ok 193 - P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用\r",
+            "2026-10-24T14:04:10.3059178Z not ok 194 - P2-9b main_removed + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T14:04:13.9917317Z not ok 195 - P2-9b permit_issued + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志\r",
+            "2026-10-24T14:04:35.7529751Z not ok 198 - P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可\r",
+            "2026-10-24T14:04:40.0917904Z not ok 199 - P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次\r",
+            "2026-10-24T14:04:53.0258349Z not ok 201 - P2-5 不可读主库只能通过显式隔离继续原 deletionId\r",
+            "2026-10-24T14:05:00.2167631Z not ok 203 - P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409\r",
+            "2026-10-24T14:05:26.8896670Z not ok 207 - P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch\r",
+            "2026-10-24T14:05:26.8919852Z not ok 208 - P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车\r",
+            "2026-10-24T14:05:26.8935791Z not ok 210 - P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行\r",
+            "2026-10-24T14:06:29.2446618Z not ok 246 - whole-runtime backup includes control/artifacts and restores active service state\r",
+            "2026-10-24T14:06:29.2464151Z not ok 247 - whole-runtime backup includes control/artifacts and restores inactive service state\r",
+            "2026-10-24T14:06:29.2483704Z not ok 248 - active service without a MainPID is refused before stopping or publishing\r",
+            "2026-10-24T14:06:29.2520300Z not ok 249 - active service live environment failure is refused before stopping\r",
+            "2026-10-24T14:06:29.2595767Z not ok 250 - external authoritative database path is refused before stopping the service\r",
+            "2026-10-24T14:06:29.2642564Z not ok 251 - backup records a five-store path manifest and refuses unverifiable apply\r",
+            "2026-10-24T14:06:29.2664371Z not ok 253 - active CLI publication lock is refused after stopping the service\r",
+            "2026-10-24T14:06:29.2683295Z not ok 255 - backup reports service restart failure even when the archive was created\r",
+            "2026-10-24T14:06:29.2703606Z not ok 257 - runtime-only env without explicit database paths is refused\r",
+            "2026-10-24T14:06:29.2745582Z not ok 264 - service env different from the backup env is refused before stopping\r",
+            "2026-10-24T14:06:29.2776339Z not ok 267 - multiple and optional EnvironmentFiles are rejected before stop\r",
+            "2026-10-24T14:06:29.2792465Z not ok 268 - UnsetEnvironment and quoted path syntax are rejected before stop\r",
+            "2026-10-24T14:06:29.2808481Z not ok 270 - direct Environment configuration matching three paths produces a verified archive\r",
+            "2026-10-24T14:06:29.2821497Z not ok 271 - source change during the archive window refuses to publish the archive\r",
+            "2026-10-24T14:06:29.2854917Z not ok 275 - archive window rejects absent tree becomes directory\r",
+            "2026-10-24T14:06:29.2876018Z not ok 276 - archive window rejects absent tree becomes file\r",
+            "2026-10-24T14:06:29.2891233Z not ok 277 - archive window rejects present tree gains file\r",
+            "2026-10-24T14:06:29.2903371Z not ok 278 - archive window rejects present tree loses file\r",
+            "2026-10-24T14:06:29.2918246Z not ok 279 - archive window rejects present tree rewrites same-size file\r",
+            "2026-10-24T14:06:29.2967575Z not ok 288 - explicit upgrade migration runs between service stop and restart\r",
+            "2026-10-24T14:06:29.2995016Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T14:06:29.2995016Z not ok 289 - upgrade publishes an external-backup notice and never POSTs a backup\r",
+            "2026-10-24T14:06:29.3019755Z not ok 290 - failed migration leaves the service stopped\r",
+            "2026-10-24T14:06:29.3038152Z not ok 291 - upgrade rejects HTTP 200 maintenance state\r",
+            "2026-10-24T14:06:29.3164990Z not ok 313 - A05/F01：COMMIT 前确定性屏障证明删除与 GPX 同事务写入 ⇒ SIGKILL 全回滚，同 job 恰好重试一次\r",
+            "2026-10-24T14:06:29.3425458Z not ok 426 - helper 四态：found / confirmed_absent / missing / unreadable（缺失库不得自行确认不存在）\r",
+            "2026-10-24T14:09:30.9346990Z not ok 770 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available\r",
+            "2026-10-24T14:09:38.2742591Z not ok 784 - SIGTERM：已投放请求有终态，输出 incomplete，不伪装稳态通过\r",
+            "2026-10-24T14:09:38.2822350Z not ok 797 - rejects the repository, its ancestors, its var/ and shallow roots\r",
+            "2026-10-24T14:09:38.2894249Z not ok 802 - child environment is a whitelist and never inherits production RAI_* or proxies\r",
+            "2026-10-24T14:09:38.4018831Z not ok 889 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler\r",
+            "2026-10-24T14:09:38.4481416Z not ok 974 - P3-4: the cached read store reopens when the database file is replaced\r",
+            "2026-10-24T14:09:38.4497513Z not ok 978 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it\r",
+            "2026-10-24T14:09:38.4539143Z not ok 990 - 组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）\r",
+            "2026-10-24T14:09:38.4672740Z not ok 1040 - series read worker serves a snapshot, restarts on file replacement, and closes cleanly\r",
+            "2026-10-24T14:12:37.9251582Z not ok 1074 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe\r",
+            "2026-10-24T14:12:38.0309002Z not ok 1173 - P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503\r"
+          ],
+          "testSummary": []
+        },
+        {
+          "id": 120891926950,
+          "name": "verify (22.x)",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40100650964,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Set up Node.js",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Set up Python",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install dependencies",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 5
+            },
+            {
+              "name": "Type check",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6
+            },
+            {
+              "name": "Validate maintained documentation and acceptance references",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 7
+            },
+            {
+              "name": "Verify gate scripts, blob ceiling, and package boundaries",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 8
+            },
+            {
+              "name": "Model boundary review (R1-R3)",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 9
+            },
+            {
+              "name": "Run tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 10
+            },
+            {
+              "name": "Bootstrap Python training environment",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Run Python training tests",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 12
+            },
+            {
+              "name": "Smoke test production API startup and shutdown",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Verify production-only startup contract",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 14
+            },
+            {
+              "name": "Post Set up Python",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 26
+            },
+            {
+              "name": "Post Set up Node.js",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 27
+            },
+            {
+              "name": "Post Check out repository",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T14:01:30.0892915Z ##[group]Operating System",
+            "2026-10-24T14:01:30.0893768Z Ubuntu",
+            "2026-10-24T14:01:30.0894329Z 24.04.5",
+            "2026-10-24T14:01:30.0896766Z ##[group]Runner Image",
+            "2026-10-24T14:01:30.0897643Z Image: ubuntu-24.04",
+            "2026-10-24T14:01:30.0898311Z Version: 20261012.334.1",
+            "2026-10-24T14:01:30.0899773Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md"
+          ],
+          "classification": "dependency: onnxruntime-node 1.22.0 optional Linux CUDA NuGet path is wrong",
+          "evidence": [
+            "2026-10-24T14:01:41.4348641Z npm error Error: Failed to find runtimes/win-x64/native/libonnxruntime_providers_cuda.so in NuGet package",
+            "2026-10-24T14:01:41.4857408Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120891927000,
+          "name": "rust-data-worker (macos-14)",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "run_id": 40100650964,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T14:01:30.0654170Z ##[group]Operating System",
+            "2026-10-24T14:01:30.0654630Z macOS",
+            "2026-10-24T14:01:30.0655040Z 14.8.9",
+            "2026-10-24T14:01:30.0656300Z ##[group]Runner Image",
+            "2026-10-24T14:01:30.0656760Z Image: macos-14-arm64",
+            "2026-10-24T14:01:30.0657220Z Version: 20260831.0302.1",
+            "2026-10-24T14:01:30.0658100Z Included Software: https://github.com/actions/runner-images/blob/macos-14-arm64/20260831.0302/images/macos/macos-14-arm64-Readme.md"
+          ],
+          "classification": "cancelled: Rust matrix peer failed installation (fail-fast cancellation inferred)",
+          "evidence": [
+            "2026-10-24T14:02:00.4470460Z ##[error]The operation was canceled."
+          ],
+          "failingCases": [],
+          "testSummary": []
+        },
+        {
+          "id": 120891927023,
+          "name": "rust-data-worker (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "failure",
+          "run_id": 40100650964,
+          "logs_url": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Install pinned Rust toolchain",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Install Node dependencies",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 5
+            },
+            {
+              "name": "Verify native engine, contract parity, cancellation, and real import",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 6
+            },
+            {
+              "name": "Post Run actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 11
+            },
+            {
+              "name": "Post Run actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            }
+          ],
+          "runnerEvidence": [
+            "2026-10-24T14:01:29.9180964Z ##[group]Operating System",
+            "2026-10-24T14:01:29.9182049Z Ubuntu",
+            "2026-10-24T14:01:29.9182999Z 24.04.5",
+            "2026-10-24T14:01:29.9186159Z ##[group]Runner Image",
+            "2026-10-24T14:01:29.9187121Z Image: ubuntu-24.04",
+            "2026-10-24T14:01:29.9188199Z Version: 20261012.334.1",
+            "2026-10-24T14:01:29.9190295Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md"
+          ],
+          "classification": "dependency: onnxruntime-node 1.22.0 optional Linux CUDA NuGet path is wrong",
+          "evidence": [
+            "2026-10-24T14:01:46.5211360Z npm error Error: Failed to find runtimes/win-x64/native/libonnxruntime_providers_cuda.so in NuGet package",
+            "2026-10-24T14:01:46.5730464Z ##[error]Process completed with exit code 1."
+          ],
+          "failingCases": [],
+          "testSummary": []
+        }
+      ],
+      "commitSha": "04ca32feaa793d51717ec5bcfbff2f105e2d20aa",
+      "branch": "main",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/BlacnkCat0811/running/actions/runs/40100650964",
+      "createdAt": "2026-10-24T14:01:25Z"
+    }
+  ]
+}

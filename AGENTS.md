@@ -102,8 +102,10 @@ Do not reintroduce any of the following without a new explicit product decision:
 
 ## Cross-Platform Command Rules
 
-This repository is developed on Windows and built on macOS, so every npm script
-must behave identically under cmd, PowerShell and bash. Three hard rules, checked
+Official environments are macOS development/iOS builds and Linux production/backend CI.
+Windows is no longer a supported CI platform (2026-10-25); existing portable
+wrappers and platform-specific regression cases remain. Every npm script must
+still behave identically under cmd, PowerShell and bash. Three hard rules, checked
 by `npm run check:scripts` (also wired into `.githooks/pre-commit`):
 
 - npm script bodies may only use `&&`, a plain command, or `node xxx.mjs`.

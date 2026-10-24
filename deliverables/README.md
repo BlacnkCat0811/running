@@ -4,7 +4,9 @@
 现行说明统一从 [项目 README](../README.md) 进入；现行状态、未决问题与已收尾批次指针只维护
 [项目审查](../docs/PROJECT_REVIEW.md)。
 
-## 1. 当前证据（2026-10-24）
+## 1. 当前证据（2026-10-25）
+
+- [GitHub CI 审计与修复](ci-audit-2026-10-25/README.md)：真实运行失败基线、Linux/macOS/iOS 覆盖、Windows Job 退役与本机验证；新修订未推送时不宣称远端通过。
 
 - [阶段 6 性能基线与容量模型](phase6-performance-2026-10-24/PHASE6_REPORT.md)：
   实施 6A 工具链（隔离 runner、安全门禁、D0–D3/DX 夹具、HTTP 驱动、资源采样、离线统计/裁决）并执行 DEV 基线；
