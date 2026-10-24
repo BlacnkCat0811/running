@@ -19,9 +19,24 @@ jobs:
   rust-data-worker:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-14]
+        # macos-14 的 GitHub 镜像自 2026-11-02 起停止支持（runner-images#13518），
+        # 且它最新的 Xcode 只到 16.2 / Swift 6.0，跟不上 iOS 门禁的 `-default-isolation`
+        # 口径。macOS 侧统一到 macos-26（arm64，与 macos-14 同架构，Rust 构建口径不变）。
+        os: [ubuntu-latest, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    # 2026-10-24（CI #1 实测）：`npm ci` 在 Linux/x64 上必红，与源码无关 ——
+    # onnxruntime-node@1.22.0 的 postinstall（`node ./script/install`）按
+    # `install-metadata.js` 的 `requirements['linux/x64'] = ['cuda12']` 去 nuget 下
+    # CUDA EP，而 1.22.0 那份 manifest 里写的是 Windows 路径
+    # （`runtimes/win-x64/native/libonnxruntime_providers_cuda.so`），在 Linux GPU 包里
+    # 必然找不到 ⇒ exit 1。CPU 推理所需的 `bin/napi-v6/linux/x64/{libonnxruntime.so.1,
+    # onnxruntime_binding.node}` 是随包发布的，跳过这次下载不影响任何测试。
+    # 这与服务器口径一致：deploy/README-UBUNTU.md 与 deploy/upgrade.sh 早已用
+    # `ONNXRUNTIME_NODE_INSTALL=skip npm ci`。上游 1.30.0 已把该路径改成
+    # `runtimes/linux-x64/…`；升级 onnxruntime-node 之后这两处可以删掉。
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -36,11 +51,25 @@ jobs:
         run: npm run rust:verify
 
   ios:
-    runs-on: macos-14
+    # macos-14 上最新的 Xcode 只到 16.2（Swift 6.0），而 typecheck-ios.sh /
+    # run-model-tests.sh 用 `-swift-version 5 -default-isolation MainActor` ——
+    # `-default-isolation` 是 Swift 6.2（Xcode 26）才有的前端参数，在 macos-14 上
+    # 直接 `error: unknown argument: '-default-isolation'` 退出 1（CI #1 实测）。
+    # 门禁口径不能降级（去掉该参数会漏掉 actor 隔离诊断，见 typecheck-ios.sh 注释），
+    # 所以换到带 Xcode 26 的镜像，与本机 Xcode 26.x 对齐。
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Node.js
+        # iOS 门禁本身是 bash + swiftc + python（`apps/ios/tests/*.sh` 不 import 任何
+        # node_modules），所以这里**不跑 `npm ci`**：多花几分钟装一棵与判据无关的依赖树，
+        # 只会把 onnxruntime / CocoaPods 那类与门禁无关的失败混进来。钉 node 22.x 是为了
+        # 让 `npm run test:ios` 的解释器与其它 job、与本机一致。
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
       - name: Run iOS gates (typecheck + pure-logic regressions)
         # 本仓库远端是 gitee，本 workflow 目前**不会**对远端触发；真正的执行入口是
         # `.githooks/pre-commit`（`apps/ios/` 有改动时跑 `npm run test:ios`）。
@@ -49,11 +78,14 @@ jobs:
         # 走 `npm run test:ios`（= `node scripts/run-ios.mjs gates`）而不是裸 `bash …`：
         # 解释器怎么挑、非 macOS 怎么办，只写在 scripts/run-ios.mjs 一处，
         # 这里是三端同一入口。run-ios-gates.sh 仍然自带 macOS / Xcode 检测：
-        # 不满足时**显式跳过并退出 0**（打印「本次没有检查任何 iOS 源码」），
-        # 所以这步不会因为 runner 差异静默变绿。
+        # 平台不对时**显式跳过并退出 0**（打印「本次没有检查任何 iOS 源码」）；
+        # 但"有 Xcode 却跑不了本判据"（工具链缺 `-default-isolation`、缺 python3、
+        # 宏插件起不来）一律**退出 1** —— 跳过与失败是两件事，后者必须响。
         # runner 上的 Xcode 路径不一定在 /Applications/Xcode.app，按 `xcode-select -p` 传进去。
         run: |
           export DEVELOPER_DIR="$(xcode-select -p)"
+          xcodebuild -version
+          xcrun swiftc --version
           npm run test:ios
       - name: Run cross-platform source gates
         # 结构门禁（python，10 支）的跨平台入口。macOS 上 `npm run test:ios` 的聚合链
@@ -76,10 +108,16 @@ jobs:
         # The workspace remains the recommended build entry point because it
         # includes the generated Pods project. The Podfile also removes the
         # empty aggregate link so the bare RAI.xcodeproj remains buildable.
+        #
+        # `generic/platform=iOS Simulator` instead of `name=iPhone 15`: this step
+        # only builds (nothing is booted or run), while a concrete device name
+        # pins the job to whatever simulator device list the runner's Xcode ships
+        # — the same reason the visual-acceptance step below uses a generic
+        # destination. `-sdk iphonesimulator` alone still selects the SDK.
         run: |
           xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO build
       - name: Run iOS model regression tests
         run: bash apps/ios/tests/run-model-tests.sh
@@ -132,6 +170,10 @@ jobs:
     strategy:
       matrix:
         node-version: [22.x]
+    # 与 rust-data-worker 同一处理由（onnxruntime-node@1.22.0 的 Linux CUDA 下载路径
+    # 是 Windows 路径，`npm ci` 必红）。本 job 有两处 `npm ci`，放 job 级 env 一次覆盖。
+    env:
+      ONNXRUNTIME_NODE_INSTALL: skip
 
     steps:
       - name: Check out repository
