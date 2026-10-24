@@ -76,6 +76,7 @@ final class ProbeURLProtocol: URLProtocol, @unchecked Sendable {
         _ in .http(500)
     }
     nonisolated(unsafe) private static var deliveredReplies = 0
+    nonisolated(unsafe) private static var startedRequests = 0
     private static let handlerLock = NSLock()
 
     private let stateLock = NSLock()
@@ -85,6 +86,7 @@ final class ProbeURLProtocol: URLProtocol, @unchecked Sendable {
         handlerLock.lock()
         handler = newHandler
         deliveredReplies = 0
+        startedRequests = 0
         handlerLock.unlock()
     }
 
@@ -92,6 +94,14 @@ final class ProbeURLProtocol: URLProtocol, @unchecked Sendable {
         handlerLock.lock()
         defer { handlerLock.unlock() }
         return deliveredReplies
+    }
+
+    /// 请求已经**开始加载**的次数。取消竞态用例靠它确认"请求确实在飞"，
+    /// 而不是靠 `Task.sleep(10ms)` 猜任务是否已经跑起来（2026-10-24 CI #2）。
+    static var requestCount: Int {
+        handlerLock.lock()
+        defer { handlerLock.unlock() }
+        return startedRequests
     }
 
     private static func reply(for request: URLRequest) -> Reply {
@@ -106,6 +116,9 @@ final class ProbeURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         let reply = Self.reply(for: request)
+        Self.handlerLock.lock()
+        Self.startedRequests += 1
+        Self.handlerLock.unlock()
         DispatchQueue.global().asyncAfter(deadline: .now() + reply.delay) { [self] in
             stateLock.lock()
             let shouldDeliver = !stopped
@@ -245,15 +258,33 @@ struct ServerSessionRegression {
         // Cancellation can race after URLSession has received a successful
         // response but before the main actor publishes it. Block this actor long
         // enough for that ordering instead of only exercising URLError.cancelled.
+        //
+        // 2026-10-24（CI #2 实测，macos-26 / 3 核 runner）：旧写法拿两个定时器抢窗口 ——
+        // 响应 +0.03s 投递、`asyncAfter(+0.05s)` 取消、主线程阻塞 0.12s，只留 70ms 余量。
+        // runner 上全局队列把那次 `cancel()` 拖过了 120ms，于是顺序变成"先发布成功、
+        // 后取消"，两条判据一起红；换到本机（同一份代码、Intel、机器空闲）又恒绿 ——
+        // 判据不该由机器快慢决定。现在改成按事实推进：
+        //   1. 等请求真的开始（`requestCount`），不再猜 10ms 睡够没有；
+        //   2. 从这一刻起本线程（= 主 actor）一直被占住，响应到达后没有任何 continuation 能跑；
+        //   3. 确认响应已投递后才 `cancel()`，再放开主线程。
+        // 于是"响应已到 → 已取消 → 才允许发布"由主线程自己保证，与定时器运气无关。
         do {
             ProbeURLProtocol.setHandler { _ in .http(200, delay: 0.03) }
             let (session, _, _) = makeSession()
             let probe = Task { await session.probe() }
-            try await Task.sleep(for: .milliseconds(10))
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) {
-                probe.cancel()
+            var waited = 0.0
+            while ProbeURLProtocol.requestCount == 0 && waited < 5 {
+                try await Task.sleep(for: .milliseconds(5))
+                waited += 0.005
             }
-            blockCurrentThread(for: 0.12)
+            // 下面开始阻塞本线程：响应投递发生在别的队列上，但"发布"只能排在主 actor 上，
+            // 所以它不可能抢在下面那次 `cancel()` 之前。
+            let deadline = Date().addingTimeInterval(5)
+            while ProbeURLProtocol.deliveryCount == 0 && Date() < deadline {
+                blockCurrentThread(for: 0.005)
+            }
+            probe.cancel()
+            blockCurrentThread(for: 0.05)
             await probe.value
             check(ProbeURLProtocol.deliveryCount == 1,
                   "cancellation race receives a successful URLProtocol response")
