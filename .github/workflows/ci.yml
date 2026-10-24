@@ -136,7 +136,11 @@ jobs:
 
   windows-runtime:
     runs-on: windows-latest
-    timeout-minutes: 12
+    # 2026-10-24（CI #4 实测）：12 分钟不够。`Run Windows unit and integration tests`
+    # 从 16:16:57 跑到 16:29:06 被 job 超时掐断，结论显示为 cancelled 而不是 failure ——
+    # 看起来像"被谁取消了"，实际是 `timeout-minutes: 12` 到点。整套 Node 套件在本机
+    # （RAI_TEST_CONCURRENCY=2）约 20 分钟，Windows runner 不应指望更快。
+    timeout-minutes: 40
 
     steps:
       - name: Check out repository
@@ -159,6 +163,10 @@ jobs:
         run: npm run test:ios
 
       - name: Run Windows unit and integration tests
+        # 与 `verify` 同一理由固定并发：默认并发=机器并行度，重型套件的 5s/30s 墙钟预算
+        # 在 Windows runner 上更容易假红（见 scripts/run-tests.mjs 头注释）。
+        env:
+          RAI_TEST_CONCURRENCY: "2"
         run: npm test
 
       - name: Smoke test production API startup and shutdown
