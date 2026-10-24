@@ -1,0 +1,18 @@
+{
+  "exitCode": 0,
+  "output": {
+    "id": "recompute_job_e8c8d45d-ebf0-4a17-9561-643a3f406d3a",
+    "type": "full_recompute",
+    "status": "succeeded",
+    "error": null,
+    "featureRunId": "feature_run_a687de52-2f2a-4fcf-9275-8144d9df8770",
+    "modelRunId": "model_run_c408aad4-1937-451f-a99f-abae864bcbef",
+    "progress": {
+      "phase": "completed",
+      "current": 99,
+      "total": 99
+    }
+  },
+  "log": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/logs/recompute.log",
+  "timedOut": false
+}

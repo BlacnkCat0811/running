@@ -1,0 +1,18 @@
+{
+  "runId": "phase6-fix-dev-d1-s08-20261024-04",
+  "profile": "dev",
+  "dataset": "D1",
+  "status": "complete",
+  "finishedAt": "2026-10-24T08:02:42.158Z",
+  "scenarios": [
+    {
+      "scenario": "S08",
+      "exitCode": 0,
+      "requests": 179,
+      "oracleFailures": 0,
+      "fatal": null,
+      "incomplete": false
+    }
+  ],
+  "errors": []
+}

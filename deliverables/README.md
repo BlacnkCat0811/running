@@ -6,6 +6,13 @@
 
 ## 1. 当前证据（2026-10-24）
 
+- [阶段 6 性能基线与容量模型](phase6-performance-2026-10-24/PHASE6_REPORT.md)：
+  实施 6A 工具链（隔离 runner、安全门禁、D0–D3/DX 夹具、HTTP 驱动、资源采样、离线统计/裁决）并执行 DEV 基线；
+  [审查修复记录](phase6-performance-2026-10-24/REVIEW_FIXES_2026-10-24.md)和[当前机器状态](phase6-performance-2026-10-24/CURRENT_STATUS.json)说明原 DEV PASS 属历史代码身份，当前代码待全量重跑；
+  无隔离 Linux 目标，CLOUD 容量按文档标 **BLOCKED**。先读 [基线](phase6-performance-2026-10-24/BASELINE.md)、
+  [协议](phase6-performance-2026-10-24/protocol.json)、[未关闭项](phase6-performance-2026-10-24/open-items.md) 与
+  [源代码身份](phase6-performance-2026-10-24/source-manifest.json)。
+
 - [阶段 5 训练计划 v2 实施与验收](phase5-implementation-2026-10-23/PHASE5_REPORT.md)：
   5A 主要修复与 5B R1–R4 审计修复已落地；当轮回归与边界见 [2026-10-24 修复记录](phase5-implementation-2026-10-23/PHASE5_AUDIT_FIXES_2026-10-24.md)。
   T26 Simulator 部分通过、T27 配对设备未执行、T30 交错升级/回滚部分；生产能力仍关闭。分册：[入口矩阵](phase5-implementation-2026-10-23/ENTRY_MATRIX.md)、

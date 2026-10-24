@@ -1,0 +1,1341 @@
+{
+  "inputRoot": "/Users/ta/rai-phase6-lab/phase6-dev-d3",
+  "generatedAt": "2026-10-24T05:38:42.510Z",
+  "scenarios": {
+    "S01": {
+      "requests": 3,
+      "scenarios": {
+        "S01": {
+          "n": 3,
+          "success": 3,
+          "successRate": 1,
+          "min": 6.722,
+          "p50": 21.29,
+          "p95": 91.723,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 3,
+          "max": 91.723,
+          "mean": 39.91166666666667,
+          "sendLagP95Ms": 0.002,
+          "sendLagMaxMs": 0.002,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "routes": {
+        "/v1/health": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 91.723,
+          "p50": 91.723,
+          "p95": 91.723,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 91.723,
+          "mean": 91.723,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/handshake": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 6.722,
+          "p50": 6.722,
+          "p95": 6.722,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 6.722,
+          "mean": 6.722,
+          "sendLagP95Ms": 0.002,
+          "sendLagMaxMs": 0.002,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/runtime-status": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 21.29,
+          "p50": 21.29,
+          "p95": 21.29,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 21.29,
+          "mean": 21.29,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "phases": {
+        "startup": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 91.723,
+          "p50": 91.723,
+          "p95": 91.723,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 91.723,
+          "mean": 91.723,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "steady": {
+          "n": 2,
+          "success": 2,
+          "successRate": 1,
+          "min": 6.722,
+          "p50": 6.722,
+          "p95": 21.29,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 2,
+          "max": 21.29,
+          "mean": 14.006,
+          "sendLagP95Ms": 0.002,
+          "sendLagMaxMs": 0.002,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "outcomes": {
+        "success": 3
+      },
+      "taskEvents": [],
+      "correctnessFile": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S01/correctness/S01.json",
+      "rawFiles": {
+        "requests": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S01/raw/requests.jsonl",
+        "taskEvents": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S01/raw/task-events.jsonl"
+      }
+    },
+    "S02": {
+      "requests": 8,
+      "scenarios": {
+        "S02": {
+          "n": 8,
+          "success": 8,
+          "successRate": 1,
+          "min": 6.862,
+          "p50": 64.573,
+          "p95": 15700.3,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 8,
+          "max": 15700.3,
+          "mean": 2138.2974999999997,
+          "sendLagP95Ms": 0.002,
+          "sendLagMaxMs": 0.002,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "routes": {
+        "/v1/dashboard": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 400.197,
+          "p50": 400.197,
+          "p95": 400.197,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 400.197,
+          "mean": 400.197,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/workouts": {
+          "n": 3,
+          "success": 3,
+          "successRate": 1,
+          "min": 60.603,
+          "p50": 64.573,
+          "p95": 64.863,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 3,
+          "max": 64.863,
+          "mean": 63.34633333333333,
+          "sendLagP95Ms": 0.002,
+          "sendLagMaxMs": 0.002,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/workouts/:id": {
+          "n": 2,
+          "success": 2,
+          "successRate": 1,
+          "min": 6.862,
+          "p50": 6.862,
+          "p95": 45.066,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 2,
+          "max": 45.066,
+          "mean": 25.964000000000002,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/mobile/today": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 15700.3,
+          "p50": 15700.3,
+          "p95": 15700.3,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 15700.3,
+          "mean": 15700.3,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/mobile/training-plan-state": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 763.916,
+          "p50": 763.916,
+          "p95": 763.916,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 763.916,
+          "mean": 763.916,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "phases": {
+        "steady": {
+          "n": 4,
+          "success": 4,
+          "successRate": 1,
+          "min": 45.066,
+          "p50": 400.197,
+          "p95": 15700.3,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 15700.3,
+          "mean": 4227.36975,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "page:first": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 64.573,
+          "p50": 64.573,
+          "p95": 64.573,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 64.573,
+          "mean": 64.573,
+          "sendLagP95Ms": 0.002,
+          "sendLagMaxMs": 0.002,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "page:middle": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 60.603,
+          "p50": 60.603,
+          "p95": 60.603,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 60.603,
+          "mean": 60.603,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "page:last": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 64.863,
+          "p50": 64.863,
+          "p95": 64.863,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 64.863,
+          "mean": 64.863,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "deleted:404": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 6.862,
+          "p50": 6.862,
+          "p95": 6.862,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 6.862,
+          "mean": 6.862,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "outcomes": {
+        "success": 8
+      },
+      "taskEvents": [],
+      "correctnessFile": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S02/correctness/S02.json",
+      "rawFiles": {
+        "requests": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S02/raw/requests.jsonl",
+        "taskEvents": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S02/raw/task-events.jsonl"
+      }
+    },
+    "S03": {
+      "requests": 24,
+      "scenarios": {
+        "S03": {
+          "n": 24,
+          "success": 24,
+          "successRate": 1,
+          "min": 2.955,
+          "p50": 93.603,
+          "p95": 532.031,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 24,
+          "max": 1471.356,
+          "mean": 174.341125,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "routes": {
+        "/v1/health": {
+          "n": 12,
+          "success": 12,
+          "successRate": 1,
+          "min": 2.955,
+          "p50": 6.271,
+          "p95": 132.285,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 12,
+          "max": 132.285,
+          "mean": 16.745583333333332,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/workouts/:id/series": {
+          "n": 12,
+          "success": 12,
+          "successRate": 1,
+          "min": 93.603,
+          "p50": 176.596,
+          "p95": 1471.356,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 12,
+          "max": 1471.356,
+          "mean": 331.93666666666667,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "phases": {
+        "series:small:health-before": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 132.285,
+          "p50": 132.285,
+          "p95": 132.285,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 132.285,
+          "mean": 132.285,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:cold": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 1471.356,
+          "p50": 1471.356,
+          "p95": 1471.356,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 1471.356,
+          "mean": 1471.356,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:hot-1": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 98.506,
+          "p50": 98.506,
+          "p95": 98.506,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 98.506,
+          "mean": 98.506,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:health-after-1": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 5.084,
+          "p50": 5.084,
+          "p95": 5.084,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 5.084,
+          "mean": 5.084,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:hot-2": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 120.191,
+          "p50": 120.191,
+          "p95": 120.191,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 120.191,
+          "mean": 120.191,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:health-after-2": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 6.384,
+          "p50": 6.384,
+          "p95": 6.384,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 6.384,
+          "mean": 6.384,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:hot-3": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 93.603,
+          "p50": 93.603,
+          "p95": 93.603,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 93.603,
+          "mean": 93.603,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:small:health-after-3": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 8.838,
+          "p50": 8.838,
+          "p95": 8.838,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 8.838,
+          "mean": 8.838,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:health-before": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 9.381,
+          "p50": 9.381,
+          "p95": 9.381,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 9.381,
+          "mean": 9.381,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:cold": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 146.586,
+          "p50": 146.586,
+          "p95": 146.586,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 146.586,
+          "mean": 146.586,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:hot-1": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 176.596,
+          "p50": 176.596,
+          "p95": 176.596,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 176.596,
+          "mean": 176.596,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:health-after-1": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 8.879,
+          "p50": 8.879,
+          "p95": 8.879,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 8.879,
+          "mean": 8.879,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:hot-2": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 152.161,
+          "p50": 152.161,
+          "p95": 152.161,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 152.161,
+          "mean": 152.161,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:health-after-2": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 6.271,
+          "p50": 6.271,
+          "p95": 6.271,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 6.271,
+          "mean": 6.271,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:hot-3": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 263.653,
+          "p50": 263.653,
+          "p95": 263.653,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 263.653,
+          "mean": 263.653,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:medium:health-after-3": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 3.012,
+          "p50": 3.012,
+          "p95": 3.012,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 3.012,
+          "mean": 3.012,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:health-before": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 4.565,
+          "p50": 4.565,
+          "p95": 4.565,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 4.565,
+          "mean": 4.565,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:cold": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 532.031,
+          "p50": 532.031,
+          "p95": 532.031,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 532.031,
+          "mean": 532.031,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:hot-1": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 229.987,
+          "p50": 229.987,
+          "p95": 229.987,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 229.987,
+          "mean": 229.987,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:health-after-1": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 4.98,
+          "p50": 4.98,
+          "p95": 4.98,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 4.98,
+          "mean": 4.98,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:hot-2": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 240.361,
+          "p50": 240.361,
+          "p95": 240.361,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 240.361,
+          "mean": 240.361,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:health-after-2": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 2.955,
+          "p50": 2.955,
+          "p95": 2.955,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 2.955,
+          "mean": 2.955,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:hot-3": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 458.209,
+          "p50": 458.209,
+          "p95": 458.209,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 458.209,
+          "mean": 458.209,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "series:large:health-after-3": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 8.313,
+          "p50": 8.313,
+          "p95": 8.313,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 8.313,
+          "mean": 8.313,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "outcomes": {
+        "success": 24
+      },
+      "taskEvents": [],
+      "correctnessFile": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S03/correctness/S03.json",
+      "rawFiles": {
+        "requests": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S03/raw/requests.jsonl",
+        "taskEvents": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S03/raw/task-events.jsonl"
+      }
+    },
+    "S04": {
+      "requests": 4,
+      "scenarios": {
+        "S04": {
+          "n": 4,
+          "success": 4,
+          "successRate": 1,
+          "min": 12.362,
+          "p50": 33.738,
+          "p95": 34669.235,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 34669.235,
+          "mean": 10642.2855,
+          "sendLagP95Ms": 0.004,
+          "sendLagMaxMs": 0.004,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "routes": {
+        "/v1/data-summary": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 7853.807,
+          "p50": 7853.807,
+          "p95": 7853.807,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 7853.807,
+          "mean": 7853.807,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/data-audit": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 34669.235,
+          "p50": 34669.235,
+          "p95": 34669.235,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 34669.235,
+          "mean": 34669.235,
+          "sendLagP95Ms": 0.004,
+          "sendLagMaxMs": 0.004,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/diagnostics": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 12.362,
+          "p50": 12.362,
+          "p95": 12.362,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 12.362,
+          "mean": 12.362,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/performance": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 33.738,
+          "p50": 33.738,
+          "p95": 33.738,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 33.738,
+          "mean": 33.738,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "phases": {
+        "steady": {
+          "n": 4,
+          "success": 4,
+          "successRate": 1,
+          "min": 12.362,
+          "p50": 33.738,
+          "p95": 34669.235,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 34669.235,
+          "mean": 10642.2855,
+          "sendLagP95Ms": 0.004,
+          "sendLagMaxMs": 0.004,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "outcomes": {
+        "success": 4
+      },
+      "taskEvents": [],
+      "correctnessFile": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S04/correctness/S04.json",
+      "rawFiles": {
+        "requests": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S04/raw/requests.jsonl",
+        "taskEvents": "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S04/raw/task-events.jsonl"
+      }
+    }
+  },
+  "resources": [
+    {
+      "file": "resources-S01.jsonl",
+      "capability": {
+        "kind": "capability",
+        "platform": "darwin",
+        "cgroup": false,
+        "cgroupPath": null,
+        "processTree": true,
+        "memoryPrimary": "per-pid RSS sum (sampled)",
+        "notes": [
+          "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+          "采样分辨率默认 1s；短峰值可能漏采"
+        ],
+        "intervalMs": 1000,
+        "startedAt": "2026-10-24T05:23:56.462Z"
+      },
+      "sampleCount": 1,
+      "intervalMs": 1000,
+      "window": {
+        "first": "2026-10-24T05:23:56.749Z",
+        "last": "2026-10-24T05:23:56.749Z"
+      },
+      "rssPeakBytes": 169103360,
+      "rssSource": "per-pid RSS sum (sampled)",
+      "cpuPercentPeak": 83,
+      "processCountPeak": 1,
+      "cgroupMemoryCurrentPeakBytes": null,
+      "cgroupMemoryKernelPeakBytes": null,
+      "cgroupAvailable": false,
+      "notes": [
+        "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+        "采样分辨率默认 1s；短峰值可能漏采"
+      ]
+    },
+    {
+      "file": "resources-S02.jsonl",
+      "capability": {
+        "kind": "capability",
+        "platform": "darwin",
+        "cgroup": false,
+        "cgroupPath": null,
+        "processTree": true,
+        "memoryPrimary": "per-pid RSS sum (sampled)",
+        "notes": [
+          "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+          "采样分辨率默认 1s；短峰值可能漏采"
+        ],
+        "intervalMs": 1000,
+        "startedAt": "2026-10-24T05:24:17.683Z"
+      },
+      "sampleCount": 11,
+      "intervalMs": 1000,
+      "window": {
+        "first": "2026-10-24T05:24:18.083Z",
+        "last": "2026-10-24T05:24:35.009Z"
+      },
+      "rssPeakBytes": 193982464,
+      "rssSource": "per-pid RSS sum (sampled)",
+      "cpuPercentPeak": 122.5,
+      "processCountPeak": 1,
+      "cgroupMemoryCurrentPeakBytes": null,
+      "cgroupMemoryKernelPeakBytes": null,
+      "cgroupAvailable": false,
+      "notes": [
+        "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+        "采样分辨率默认 1s；短峰值可能漏采"
+      ]
+    },
+    {
+      "file": "resources-S03.jsonl",
+      "capability": {
+        "kind": "capability",
+        "platform": "darwin",
+        "cgroup": false,
+        "cgroupPath": null,
+        "processTree": true,
+        "memoryPrimary": "per-pid RSS sum (sampled)",
+        "notes": [
+          "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+          "采样分辨率默认 1s；短峰值可能漏采"
+        ],
+        "intervalMs": 1000,
+        "startedAt": "2026-10-24T05:25:20.440Z"
+      },
+      "sampleCount": 5,
+      "intervalMs": 1000,
+      "window": {
+        "first": "2026-10-24T05:25:21.536Z",
+        "last": "2026-10-24T05:25:28.495Z"
+      },
+      "rssPeakBytes": 276148224,
+      "rssSource": "per-pid RSS sum (sampled)",
+      "cpuPercentPeak": 120.8,
+      "processCountPeak": 1,
+      "cgroupMemoryCurrentPeakBytes": null,
+      "cgroupMemoryKernelPeakBytes": null,
+      "cgroupAvailable": false,
+      "notes": [
+        "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+        "采样分辨率默认 1s；短峰值可能漏采"
+      ]
+    },
+    {
+      "file": "resources-S04.jsonl",
+      "capability": {
+        "kind": "capability",
+        "platform": "darwin",
+        "cgroup": false,
+        "cgroupPath": null,
+        "processTree": true,
+        "memoryPrimary": "per-pid RSS sum (sampled)",
+        "notes": [
+          "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+          "采样分辨率默认 1s；短峰值可能漏采"
+        ],
+        "intervalMs": 1000,
+        "startedAt": "2026-10-24T05:27:02.168Z"
+      },
+      "sampleCount": 24,
+      "intervalMs": 1000,
+      "window": {
+        "first": "2026-10-24T05:27:03.281Z",
+        "last": "2026-10-24T05:27:44.322Z"
+      },
+      "rssPeakBytes": 167821312,
+      "rssSource": "per-pid RSS sum (sampled)",
+      "cpuPercentPeak": 52.7,
+      "processCountPeak": 1,
+      "cgroupMemoryCurrentPeakBytes": null,
+      "cgroupMemoryKernelPeakBytes": null,
+      "cgroupAvailable": false,
+      "notes": [
+        "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+        "采样分辨率默认 1s；短峰值可能漏采"
+      ]
+    }
+  ],
+  "correctness": [
+    {
+      "scenario": "S01",
+      "runId": "dev-d3-20261024",
+      "profile": "dev",
+      "dataset": "D3",
+      "startedAt": "2026-10-24T05:23:56.498Z",
+      "finishedAt": "2026-10-24T05:23:56.623Z",
+      "requests": 3,
+      "outcomes": {
+        "success": 3
+      },
+      "oracleFailures": [],
+      "checks": [
+        {
+          "routeTemplate": "/v1/health",
+          "phase": "startup",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/handshake",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/runtime-status",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "scenario": "S02",
+      "runId": "dev-d3-20261024",
+      "profile": "dev",
+      "dataset": "D3",
+      "startedAt": "2026-10-24T05:24:17.703Z",
+      "finishedAt": "2026-10-24T05:24:34.824Z",
+      "requests": 8,
+      "outcomes": {
+        "success": 8
+      },
+      "oracleFailures": [],
+      "checks": [
+        {
+          "routeTemplate": "/v1/dashboard",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts",
+          "phase": "page:first",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts",
+          "phase": "page:middle",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts",
+          "phase": "page:last",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id",
+          "phase": "deleted:404",
+          "status": 404,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/mobile/today",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/mobile/training-plan-state",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "scenario": "S03",
+      "runId": "dev-d3-20261024",
+      "profile": "dev",
+      "dataset": "D3",
+      "startedAt": "2026-10-24T05:25:20.454Z",
+      "finishedAt": "2026-10-24T05:25:24.694Z",
+      "requests": 24,
+      "outcomes": {
+        "success": 24
+      },
+      "oracleFailures": [],
+      "checks": [
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:small:cold",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:small:hot-1",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:small:hot-2",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:small:hot-3",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:medium:cold",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:medium:hot-1",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:medium:hot-2",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:medium:hot-3",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:large:cold",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:large:hot-1",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:large:hot-2",
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts/:id/series",
+          "phase": "series:large:hot-3",
+          "status": 200,
+          "ok": true
+        }
+      ]
+    },
+    {
+      "scenario": "S04",
+      "runId": "dev-d3-20261024",
+      "profile": "dev",
+      "dataset": "D3",
+      "startedAt": "2026-10-24T05:27:02.162Z",
+      "finishedAt": "2026-10-24T05:27:44.737Z",
+      "requests": 4,
+      "outcomes": {
+        "success": 4
+      },
+      "oracleFailures": [],
+      "checks": [
+        {
+          "routeTemplate": "/v1/data-summary",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/data-audit",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/diagnostics",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/performance",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "scenarioCount": 4
+}

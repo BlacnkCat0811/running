@@ -1,0 +1,33 @@
+{
+  "scenario": "S01",
+  "runId": "dev-d2-20261024",
+  "profile": "dev",
+  "dataset": "D2",
+  "startedAt": "2026-10-24T05:21:58.717Z",
+  "finishedAt": "2026-10-24T05:21:58.903Z",
+  "requests": 3,
+  "outcomes": {
+    "success": 3
+  },
+  "oracleFailures": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/health",
+      "phase": "startup",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/handshake",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/runtime-status",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

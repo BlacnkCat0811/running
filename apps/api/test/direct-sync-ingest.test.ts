@@ -538,6 +538,27 @@ test("边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4�
  * 分别要求一个真欠迁移的库与一个能触发守卫的写路径，前者另有用例（写守卫测试），
  * 后者需要注入分析表写入 —— 两者都不在本用例里伪造。
  */
+test("P6-F05：非法 manifest 版本在 preflight 返回稳定拒绝码，不抛成 500", async () => {
+  await fixture(async ({ root }) => {
+    const inputPath = join(root, "manifest-invalid");
+    mkdirSync(inputPath);
+    writeFileSync(join(inputPath, "export.xml"), xml(record(a)));
+    writeFileSync(join(inputPath, "sync-manifest.json"), JSON.stringify({
+      version: 99, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: []
+    }));
+    const result = preflightDirectSyncPayload(inputPath);
+    assert.equal(result.ok, false);
+    assert.equal(result.ok === false ? result.rejection.reason : null, "manifest_invalid");
+    assert.equal(result.ok === false ? result.rejection.stage : null, "prepare");
+
+    // 非 JSON/结构错误同样必须走稳定拒绝，而不是异常冒泡。
+    writeFileSync(join(inputPath, "sync-manifest.json"), "{not json");
+    const malformed = preflightDirectSyncPayload(inputPath);
+    assert.equal(malformed.ok, false);
+    assert.equal(malformed.ok === false ? malformed.rejection.reason : null, "manifest_invalid");
+  });
+});
+
 test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason", async () => {
   await fixture(async ({ main, input, root }) => {
     // ① 缺 sync-manifest.json ⇒ missing_required_files（必须文件缺失）。

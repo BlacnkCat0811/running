@@ -1,0 +1,49 @@
+{
+  "scenario": "S01",
+  "exitCode": 0,
+  "signal": null,
+  "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1/logs/driver-S01.log",
+  "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1/logs/api-S01.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 35844096,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S01",
+    "runId": "dev-d1-20261024",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T05:33:23.809Z",
+    "finishedAt": "2026-10-24T05:33:24.151Z",
+    "requests": 3,
+    "outcomes": {
+      "success": 3
+    },
+    "oracleFailures": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/health",
+        "phase": "startup",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/handshake",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/runtime-status",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 3,
+  "oracleFailures": 0,
+  "fatal": null
+}

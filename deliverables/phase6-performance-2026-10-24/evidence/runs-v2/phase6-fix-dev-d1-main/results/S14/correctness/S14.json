@@ -1,0 +1,498 @@
+{
+  "scenario": "S14",
+  "runId": "phase6-fix-dev-d1-main-20261024-04",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T08:01:42.614Z",
+  "finishedAt": "2026-10-24T08:02:00.955Z",
+  "incomplete": false,
+  "interruptedBy": null,
+  "requests": 254,
+  "outcomes": {
+    "success": 254
+  },
+  "oracleFailures": [],
+  "cases": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:64",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:65",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:66",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:67",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:68",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:69",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:70",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:71",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:72",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:73",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:74",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:75",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:76",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:77",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:78",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:79",
+      "status": 503,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:3",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:4",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:5",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:6",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:7",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:8",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:9",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:10",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:11",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:12",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:13",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:14",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:15",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:16",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:17",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:18",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:19",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:20",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:21",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:22",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:23",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:24",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:25",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:26",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:27",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:28",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:29",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:30",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:31",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:32",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:33",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:34",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:35",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:36",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:37",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:38",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:39",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:40",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:41",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:42",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:43",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:44",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:45",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:46",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:47",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:48",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:49",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:50",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:51",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:52",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:53",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:54",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:55",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:56",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:57",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:58",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:59",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:60",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:61",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:62",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:63",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "overload:0",
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

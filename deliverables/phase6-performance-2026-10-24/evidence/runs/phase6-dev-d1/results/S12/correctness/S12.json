@@ -1,0 +1,39 @@
+{
+  "scenario": "S12",
+  "runId": "dev-d1-20261024",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T05:35:12.306Z",
+  "finishedAt": "2026-10-24T05:35:12.659Z",
+  "requests": 4,
+  "outcomes": {
+    "success": 4
+  },
+  "oracleFailures": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/handshake",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/mobile/workout-plan",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/mobile/training-plan-state",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/mobile/todaysession",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

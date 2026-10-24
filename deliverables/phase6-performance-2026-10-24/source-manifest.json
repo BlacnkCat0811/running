@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-24T08:10:13.160Z",
+  "repository": "/Users/ta/running",
+  "git": {
+    "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+    "branch": "main",
+    "status": "M apps/api/src/direct-sync-ingest.ts\n M apps/api/src/import-worker.ts\n M apps/api/test/direct-sync-ingest.test.ts\n M deliverables/README.md\n M package.json\n?? apps/api/test/phase6-cgroup.test.mjs\n?? apps/api/test/phase6-driver.test.mjs\n?? apps/api/test/phase6-fixtures.test.mjs\n?? apps/api/test/phase6-runner.test.mjs\n?? apps/api/test/phase6-s08-contract.test.mjs\n?? apps/api/test/phase6-safety.test.mjs\n?? apps/api/test/phase6-verify.test.mjs\n?? deliverables/phase6-performance-2026-10-24/\n?? scripts/phase6/",
+    "diffStat": "apps/api/src/direct-sync-ingest.ts       | 11 ++++++++++-\n apps/api/src/import-worker.ts            |  2 ++\n apps/api/test/direct-sync-ingest.test.ts | 21 +++++++++++++++++++++\n deliverables/README.md                   |  6 ++++++\n package.json                             | 11 ++++++++++-\n 5 files changed, 49 insertions(+), 2 deletions(-)",
+    "stagedDiffStat": ""
+  },
+  "platform": {
+    "node": "v22.23.2",
+    "platform": "darwin",
+    "release": "25.6.0",
+    "arch": "x64"
+  },
+  "protocol": {
+    "path": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+    "sha256": "c5adfb966dc7302b46010e1aa35781e984daa7bb11fda2888d9b99ecea5eda5a"
+  },
+  "inputs": {
+    "reviewPlan": "/Users/ta/Downloads/RAI_Phase6_Review_and_Implementation_Plan_2026-10-24.md",
+    "reviewPlanSha256": "1d5449b730b759a7094cac376b8c31b0c9c2d12b6a4eb4008efd7a2dc4fa302a",
+    "fixPlan": "/Users/ta/Downloads/RAI_Phase6_Uncommitted_Review_Fix_Plan_2026-10-24.md",
+    "fixPlanSha256": "cf85ea6e3688a12ad7790f03782370af5c888ea2d1b9b0e2add5604cd7ce537f"
+  },
+  "files": {
+    "scripts/phase6/safety.mjs": "e8c0a0deb0cc219730c571c4494b5468d62646941c923620c0dedf5d93ab14f5",
+    "scripts/phase6/fixtures.mjs": "4e4fe0071c890ce437a3cffaef03696c7fcda371bfa9659decd8349f694e9af8",
+    "scripts/phase6/runner.mjs": "137b8a0f6fe95b861ebe71921effccf8cbb371030057672ae55d0ba29800f875",
+    "scripts/phase6/driver.mjs": "b1bd30ae457a84013df0d81b0e79107cded65e59c1ad0b3871ccebcd3d3e4842",
+    "scripts/phase6/collect-resources.mjs": "56b00ef8e95e942fe86c2474c91bb9599a9918cca7687ea4c32a82625056eada",
+    "scripts/phase6/summarize.mjs": "499406978195690428f5b23032fa095bdd268972014fbc7a1e5c3c77105604f5",
+    "scripts/phase6/verify.mjs": "a2db04cad4c4fdadb9deda25b8b84ace3f6defcb9b99b21cda01e1a6f82168d0",
+    "scripts/phase6/freeze.mjs": "a84358509971e780f25a0fa6be1a039ab113610b2c3235d13f73bff3547c2ff9",
+    "scripts/phase6/freeze-evidence.mjs": "54c84132dd0772e43caf41983b53708ddbe62eb3bc0515b96b02ca7bf7ed8462",
+    "scripts/phase6/cgroup.mjs": "7990e102871ec800ad672a709a036fb92430f3d783ae4b14d564d192b59b6889",
+    "scripts/phase6/s08-contract.mjs": "9991d35c2b06e54c8e1de2e744343fe83e0942b0248bd873cc534433eee2f682",
+    "scripts/phase6/write-sha256sums.mjs": "856cfcfee02f79afb47fb184cd4bd12d7470ef7ec44344d1444f167f0cd9a9ad",
+    "apps/api/test/phase6-safety.test.mjs": "0062d6f0f90c20b14ce940759476c6fc0f1c3e40e3a223eeada4b493431f7a73",
+    "apps/api/test/phase6-fixtures.test.mjs": "62e3418c5b5394e42501af1512fd7c988d4ca95171b92bd5252c7cb94894dcc7",
+    "apps/api/test/phase6-verify.test.mjs": "1c099b2ee0f822afc9ebd7a2fbe417efd565043293a288d1603e59779691b077",
+    "apps/api/test/phase6-cgroup.test.mjs": "57884e3cd02528c475030f61ea01cb5d3602d7768098201f770adcf741aaeb3f",
+    "apps/api/test/phase6-s08-contract.test.mjs": "1c4bad4ffd25b7c5f8694ebff1b269ca2f42a5095b3da3a34c91fa35be151e6b",
+    "apps/api/test/phase6-driver.test.mjs": "608803d353ea3ed7de4d8714c167ebb0f3a6e5822b7d9733e846829e9d62745a",
+    "package.json": "8f5a40629252fcc1c1c4f59da1dcc5cfc13e028b11faef15fade4e0e5afee3fa",
+    "package-lock.json": "0642057ed8b3b0a08f18dede2621172245c6de2bf4d29155c944be3511397d2a",
+    "AGENTS.md": "8cae9ecd6878e613ba3b62d15c7404eefa6cb810fa3f4ad456bbf586463b74b0"
+  },
+  "fixtureManifests": [
+    {
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-d1/datasets/D1/manifest.json",
+      "sha256": "657a1d78bbdeb25ddfb4b95ec3a2840b153b73868910e2bebf5fc50b6d33c550",
+      "digest": "e529d2a361cdec54af00cdb685bd15b358de9ea8c4bc18dcdf11d4630cb98b9d",
+      "declaredSha256": "9a88b067705d84f91a1c456f0caa09c671430b01c65a09303d5f97f7fc11921d"
+    },
+    {
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-d1/datasets/D1/manifest.json",
+      "sha256": "657a1d78bbdeb25ddfb4b95ec3a2840b153b73868910e2bebf5fc50b6d33c550",
+      "digest": "e529d2a361cdec54af00cdb685bd15b358de9ea8c4bc18dcdf11d4630cb98b9d",
+      "declaredSha256": "9a88b067705d84f91a1c456f0caa09c671430b01c65a09303d5f97f7fc11921d"
+    },
+    {
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-d1/datasets/D1/manifest.json",
+      "sha256": "657a1d78bbdeb25ddfb4b95ec3a2840b153b73868910e2bebf5fc50b6d33c550",
+      "digest": "e529d2a361cdec54af00cdb685bd15b358de9ea8c4bc18dcdf11d4630cb98b9d",
+      "declaredSha256": "9a88b067705d84f91a1c456f0caa09c671430b01c65a09303d5f97f7fc11921d"
+    },
+    {
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-d1/datasets/D1/manifest.json",
+      "sha256": "657a1d78bbdeb25ddfb4b95ec3a2840b153b73868910e2bebf5fc50b6d33c550",
+      "digest": "e529d2a361cdec54af00cdb685bd15b358de9ea8c4bc18dcdf11d4630cb98b9d",
+      "declaredSha256": "9a88b067705d84f91a1c456f0caa09c671430b01c65a09303d5f97f7fc11921d"
+    }
+  ],
+  "runs": [
+    {
+      "runRoot": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001",
+      "manifest": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/manifest.json",
+        "sha256": "4db1d0445f082d04f87cca6269d3dbc80f10de4840198b6bfa39c205e533afdb"
+      },
+      "acceptance": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/acceptance.json",
+        "sha256": "c1c6088bdd96156a7d3a57afe37e726a0f582cc0d264cce3bc00e831dc4baacf"
+      }
+    },
+    {
+      "runRoot": "/Users/ta/rai-phase6-lab-fix/run-final3-s13-001",
+      "manifest": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-s13-001/manifest.json",
+        "sha256": "700656c844be8f52f973b4288e0011a204bce53f1c3594e19b0c57e554518907"
+      },
+      "acceptance": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-s13-001/acceptance.json",
+        "sha256": "215da38f2f8519be89101a1f269dc7a9f8d899bf9d4c0a1014f3b291d2b45be0"
+      }
+    },
+    {
+      "runRoot": "/Users/ta/rai-phase6-lab-fix/run-final3-s08-001",
+      "manifest": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-s08-001/manifest.json",
+        "sha256": "8580f0893d33cac74564550fcdf62d47bbc9b3553f7b4b3d4719cec36aedf3cc"
+      },
+      "acceptance": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-s08-001/acceptance.json",
+        "sha256": "0f8cc82c1666b871a47676ce3ae86613ab974841d77fa4a8425b9be2f46f4fb4"
+      }
+    },
+    {
+      "runRoot": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001",
+      "manifest": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/manifest.json",
+        "sha256": "56f28397caaf6f42d9951f7763b4484dc93129c3c8e4ca20b05b42e135aa4013"
+      },
+      "acceptance": {
+        "path": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/acceptance.json",
+        "sha256": "efead4603abe28177be31e774e64d5482e8b27326090f825ec2a9e3892f0a36f"
+      }
+    }
+  ]
+}

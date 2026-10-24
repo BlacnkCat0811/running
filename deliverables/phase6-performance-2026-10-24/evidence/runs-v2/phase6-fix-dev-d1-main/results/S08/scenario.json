@@ -1,0 +1,1503 @@
+{
+  "scenario": "S08",
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "incomplete": false,
+  "driverLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/driver-S08.log",
+  "apiLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/api-S08.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 71057408,
+    "walBytes": 22272752,
+    "shmBytes": 65536
+  },
+  "summary": {
+    "scenario": "S08",
+    "runId": "phase6-fix-dev-d1-main-20261024-04",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T08:01:01.384Z",
+    "finishedAt": "2026-10-24T08:01:22.713Z",
+    "incomplete": false,
+    "interruptedBy": null,
+    "requests": 160,
+    "outcomes": {
+      "success": 160
+    },
+    "oracleFailures": [],
+    "cases": [
+      {
+        "at": "2026-10-24T08:01:08.407Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-01",
+        "label": "超记录上限 5001 条",
+        "expectation": "accepted",
+        "expectedLane": "direct-sync",
+        "ok": true,
+        "checks": [
+          {
+            "name": "upload accepted",
+            "ok": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "name": "expected lane",
+            "ok": true,
+            "expected": "direct-sync",
+            "actual": "direct-sync"
+          },
+          {
+            "name": "job succeeded",
+            "ok": true,
+            "expected": "succeeded",
+            "actual": "succeeded"
+          },
+          {
+            "name": "facts healthRecords",
+            "ok": true,
+            "expected": 5001,
+            "actual": 5001
+          },
+          {
+            "name": "facts workouts",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts routePoints",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          }
+        ],
+        "observed": {
+          "uploadStatus": 200,
+          "uploadCode": null,
+          "inspectStatus": 200,
+          "inspectCode": null,
+          "inspectBodyStatus": "ready",
+          "jobCreated": true,
+          "jobId": "web_import_mvm40j3p_36028e53-e2aa-4ac9-8383-e2ce09e8dce0",
+          "jobStatus": "succeeded",
+          "jobFailureCode": null,
+          "lane": "direct-sync",
+          "laneOutcome": "direct",
+          "factsDelta": {
+            "healthRecords": 5001,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": null
+        },
+        "contract": {
+          "expectation": "accepted",
+          "expectedLane": "direct-sync",
+          "allowJob": true,
+          "allowedRejectionStages": [],
+          "expectedHttpStatus": [
+            200
+          ],
+          "expectedCode": null,
+          "expectedFacts": {
+            "healthRecords": 5001,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "required": true,
+          "note": "data-only 上限 5000；direct-sync 的 maxRecords 只限删除配额"
+        }
+      },
+      {
+        "at": "2026-10-24T08:01:15.550Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-02",
+        "label": "XML 字节超 2 MiB（合法 5000 条，仍 < 8 MiB）",
+        "expectation": "accepted",
+        "expectedLane": "direct-sync",
+        "ok": true,
+        "checks": [
+          {
+            "name": "upload accepted",
+            "ok": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "name": "expected lane",
+            "ok": true,
+            "expected": "direct-sync",
+            "actual": "direct-sync"
+          },
+          {
+            "name": "job succeeded",
+            "ok": true,
+            "expected": "succeeded",
+            "actual": "succeeded"
+          },
+          {
+            "name": "facts healthRecords",
+            "ok": true,
+            "expected": 5000,
+            "actual": 5000
+          },
+          {
+            "name": "facts workouts",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts routePoints",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          }
+        ],
+        "observed": {
+          "uploadStatus": 200,
+          "uploadCode": null,
+          "inspectStatus": 200,
+          "inspectCode": null,
+          "inspectBodyStatus": "ready",
+          "jobCreated": true,
+          "jobId": "web_import_mvm40oje_60c6932d-634c-4785-8934-b4723f7ff59b",
+          "jobStatus": "succeeded",
+          "jobFailureCode": null,
+          "lane": "direct-sync",
+          "laneOutcome": "direct",
+          "factsDelta": {
+            "healthRecords": 5000,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": null
+        },
+        "contract": {
+          "expectation": "accepted",
+          "expectedLane": "direct-sync",
+          "allowJob": true,
+          "allowedRejectionStages": [],
+          "expectedHttpStatus": [
+            200
+          ],
+          "expectedCode": null,
+          "expectedFacts": {
+            "healthRecords": 5000,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "required": true
+        }
+      },
+      {
+        "at": "2026-10-24T08:01:15.621Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-03",
+        "label": "非法 manifest 版本",
+        "expectation": "refused",
+        "expectedLane": null,
+        "ok": true,
+        "checks": [
+          {
+            "name": "no succeeded job",
+            "ok": true,
+            "expected": "not succeeded",
+            "actual": null
+          },
+          {
+            "name": "stable rejection observed",
+            "ok": true,
+            "expected": "4xx/refusal",
+            "actual": "inspect"
+          },
+          {
+            "name": "rejection stage allowed",
+            "ok": true,
+            "expected": "inspect",
+            "actual": "inspect"
+          },
+          {
+            "name": "rejection status allowed",
+            "ok": true,
+            "expected": "400",
+            "actual": 400
+          },
+          {
+            "name": "stable rejection code",
+            "ok": true,
+            "expected": "import_manifest_invalid",
+            "actual": "import_manifest_invalid"
+          },
+          {
+            "name": "facts healthRecords",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts workouts",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts routePoints",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          }
+        ],
+        "observed": {
+          "uploadStatus": 200,
+          "uploadCode": null,
+          "inspectStatus": 400,
+          "inspectCode": "import_manifest_invalid",
+          "inspectBodyStatus": null,
+          "jobCreated": false,
+          "jobId": null,
+          "jobStatus": null,
+          "jobFailureCode": null,
+          "lane": null,
+          "laneOutcome": null,
+          "factsDelta": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": {
+            "stage": "inspect",
+            "status": 400,
+            "code": "import_manifest_invalid"
+          }
+        },
+        "contract": {
+          "expectation": "refused",
+          "expectedLane": null,
+          "allowJob": false,
+          "allowedRejectionStages": [
+            "inspect"
+          ],
+          "expectedHttpStatus": [
+            400
+          ],
+          "expectedCode": "import_manifest_invalid",
+          "expectedFacts": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "required": true
+        }
+      },
+      {
+        "at": "2026-10-24T08:01:15.677Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-04",
+        "label": "损坏 ZIP",
+        "expectation": "refused",
+        "expectedLane": null,
+        "ok": true,
+        "checks": [
+          {
+            "name": "no succeeded job",
+            "ok": true,
+            "expected": "not succeeded",
+            "actual": null
+          },
+          {
+            "name": "stable rejection observed",
+            "ok": true,
+            "expected": "4xx/refusal",
+            "actual": "upload"
+          },
+          {
+            "name": "rejection stage allowed",
+            "ok": true,
+            "expected": "upload",
+            "actual": "upload"
+          },
+          {
+            "name": "rejection status allowed",
+            "ok": true,
+            "expected": "400",
+            "actual": 400
+          },
+          {
+            "name": "stable rejection code",
+            "ok": true,
+            "expected": "invalid_import_archive",
+            "actual": "invalid_import_archive"
+          },
+          {
+            "name": "facts healthRecords",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts workouts",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts routePoints",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          }
+        ],
+        "observed": {
+          "uploadStatus": 400,
+          "uploadCode": "invalid_import_archive",
+          "inspectStatus": null,
+          "inspectCode": null,
+          "inspectBodyStatus": null,
+          "jobCreated": false,
+          "jobId": null,
+          "jobStatus": null,
+          "jobFailureCode": null,
+          "lane": null,
+          "laneOutcome": null,
+          "factsDelta": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": {
+            "stage": "upload",
+            "status": 400,
+            "code": "invalid_import_archive"
+          }
+        },
+        "contract": {
+          "expectation": "refused",
+          "expectedLane": null,
+          "allowJob": false,
+          "allowedRejectionStages": [
+            "upload"
+          ],
+          "expectedHttpStatus": [
+            400
+          ],
+          "expectedCode": "invalid_import_archive",
+          "expectedFacts": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "required": true
+        }
+      },
+      {
+        "at": "2026-10-24T08:01:17.170Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-05",
+        "label": "非法记录类型",
+        "expectation": "observational",
+        "expectedLane": null,
+        "ok": true,
+        "checks": [
+          {
+            "name": "observational case recorded",
+            "ok": true,
+            "expected": "recorded",
+            "actual": "succeeded"
+          }
+        ],
+        "observed": {
+          "uploadStatus": 200,
+          "uploadCode": null,
+          "inspectStatus": 200,
+          "inspectCode": null,
+          "inspectBodyStatus": "ready",
+          "jobCreated": true,
+          "jobId": "web_import_mvm40u05_ee3d8c71-90f7-42b7-8fb2-3900881a2504",
+          "jobStatus": "succeeded",
+          "jobFailureCode": null,
+          "lane": "direct-sync",
+          "laneOutcome": "direct",
+          "factsDelta": {
+            "healthRecords": 1,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": null
+        },
+        "contract": {
+          "expectation": "observational",
+          "expectedLane": null,
+          "allowJob": true,
+          "allowedRejectionStages": [
+            "upload",
+            "inspect",
+            "job"
+          ],
+          "expectedHttpStatus": [
+            200,
+            400
+          ],
+          "expectedCode": null,
+          "expectedFacts": {
+            "healthRecords": null,
+            "workouts": null,
+            "routePoints": null
+          },
+          "required": true,
+          "note": "未知 HealthKit 类型保持观测，不自动要求拒绝，也不从必需测试列表消失"
+        }
+      },
+      {
+        "at": "2026-10-24T08:01:21.206Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-06",
+        "label": "GPX 201 文件（超 200）",
+        "expectation": "refused",
+        "expectedLane": null,
+        "ok": true,
+        "checks": [
+          {
+            "name": "no succeeded job",
+            "ok": true,
+            "expected": "not succeeded",
+            "actual": null
+          },
+          {
+            "name": "stable rejection observed",
+            "ok": true,
+            "expected": "4xx/refusal",
+            "actual": "inspect"
+          },
+          {
+            "name": "rejection stage allowed",
+            "ok": true,
+            "expected": "inspect",
+            "actual": "inspect"
+          },
+          {
+            "name": "rejection status allowed",
+            "ok": true,
+            "expected": "400",
+            "actual": 400
+          },
+          {
+            "name": "stable rejection code",
+            "ok": true,
+            "expected": "direct_sync_payload_exceeds_bounds",
+            "actual": "direct_sync_payload_exceeds_bounds"
+          },
+          {
+            "name": "facts healthRecords",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts workouts",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts routePoints",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          }
+        ],
+        "observed": {
+          "uploadStatus": 200,
+          "uploadCode": null,
+          "inspectStatus": 400,
+          "inspectCode": "direct_sync_payload_exceeds_bounds",
+          "inspectBodyStatus": null,
+          "jobCreated": false,
+          "jobId": null,
+          "jobStatus": null,
+          "jobFailureCode": null,
+          "lane": null,
+          "laneOutcome": null,
+          "factsDelta": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": {
+            "stage": "inspect",
+            "status": 400,
+            "code": "direct_sync_payload_exceeds_bounds"
+          }
+        },
+        "contract": {
+          "expectation": "refused",
+          "expectedLane": null,
+          "allowJob": false,
+          "allowedRejectionStages": [
+            "inspect"
+          ],
+          "expectedHttpStatus": [
+            400
+          ],
+          "expectedCode": "direct_sync_payload_exceeds_bounds",
+          "expectedFacts": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "required": true
+        }
+      },
+      {
+        "at": "2026-10-24T08:01:22.710Z",
+        "runId": "phase6-fix-dev-d1-main-20261024-04",
+        "profile": "dev",
+        "dataset": "D1",
+        "scenario": "S08",
+        "caseId": "S08-07",
+        "label": "direct-sync XML 超 8 MiB（合法 5000 条）",
+        "expectation": "refused",
+        "expectedLane": null,
+        "ok": true,
+        "checks": [
+          {
+            "name": "no succeeded job",
+            "ok": true,
+            "expected": "not succeeded",
+            "actual": null
+          },
+          {
+            "name": "stable rejection observed",
+            "ok": true,
+            "expected": "4xx/refusal",
+            "actual": "inspect"
+          },
+          {
+            "name": "rejection stage allowed",
+            "ok": true,
+            "expected": "inspect",
+            "actual": "inspect"
+          },
+          {
+            "name": "rejection status allowed",
+            "ok": true,
+            "expected": "400",
+            "actual": 400
+          },
+          {
+            "name": "stable rejection code",
+            "ok": true,
+            "expected": "direct_sync_payload_exceeds_bounds",
+            "actual": "direct_sync_payload_exceeds_bounds"
+          },
+          {
+            "name": "facts healthRecords",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts workouts",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "name": "facts routePoints",
+            "ok": true,
+            "expected": 0,
+            "actual": 0
+          }
+        ],
+        "observed": {
+          "uploadStatus": 200,
+          "uploadCode": null,
+          "inspectStatus": 400,
+          "inspectCode": "direct_sync_payload_exceeds_bounds",
+          "inspectBodyStatus": null,
+          "jobCreated": false,
+          "jobId": null,
+          "jobStatus": null,
+          "jobFailureCode": null,
+          "lane": null,
+          "laneOutcome": null,
+          "factsDelta": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "rejection": {
+            "stage": "inspect",
+            "status": 400,
+            "code": "direct_sync_payload_exceeds_bounds"
+          }
+        },
+        "contract": {
+          "expectation": "refused",
+          "expectedLane": null,
+          "allowJob": false,
+          "allowedRejectionStages": [
+            "inspect"
+          ],
+          "expectedHttpStatus": [
+            400
+          ],
+          "expectedCode": "direct_sync_payload_exceeds_bounds",
+          "expectedFacts": {
+            "healthRecords": 0,
+            "workouts": 0,
+            "routePoints": 0
+          },
+          "required": true
+        }
+      }
+    ],
+    "checks": [
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 400,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 160,
+  "oracleFailures": 0,
+  "fatal": null
+}

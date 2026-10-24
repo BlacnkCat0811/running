@@ -1,0 +1,210 @@
+{
+  "inputRoot": "/Users/ta/rai-phase6-lab/phase6-dev-s10",
+  "generatedAt": "2026-10-24T05:38:42.633Z",
+  "scenarios": {
+    "S10": {
+      "requests": 4,
+      "scenarios": {
+        "S10": {
+          "n": 4,
+          "success": 4,
+          "successRate": 1,
+          "min": 7.506,
+          "p50": 31.005,
+          "p95": 126.73,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 126.73,
+          "mean": 51.715999999999994,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "routes": {
+        "/v1/dashboard": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 126.73,
+          "p50": 126.73,
+          "p95": 126.73,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 126.73,
+          "mean": 126.73,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/model-runs": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 7.506,
+          "p50": 7.506,
+          "p95": 7.506,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 7.506,
+          "mean": 7.506,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/workouts": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 41.623,
+          "p50": 41.623,
+          "p95": 41.623,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 41.623,
+          "mean": 41.623,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/data-summary": {
+          "n": 1,
+          "success": 1,
+          "successRate": 1,
+          "min": 31.005,
+          "p50": 31.005,
+          "p95": 31.005,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 31.005,
+          "mean": 31.005,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "phases": {
+        "steady": {
+          "n": 4,
+          "success": 4,
+          "successRate": 1,
+          "min": 7.506,
+          "p50": 31.005,
+          "p95": 126.73,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 126.73,
+          "mean": 51.715999999999994,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "serverErrors": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "outcomes": {
+        "success": 4
+      },
+      "taskEvents": [],
+      "correctnessFile": "/Users/ta/rai-phase6-lab/phase6-dev-s10/results/S10/correctness/S10.json",
+      "rawFiles": {
+        "requests": "/Users/ta/rai-phase6-lab/phase6-dev-s10/results/S10/raw/requests.jsonl",
+        "taskEvents": "/Users/ta/rai-phase6-lab/phase6-dev-s10/results/S10/raw/task-events.jsonl"
+      }
+    }
+  },
+  "resources": [
+    {
+      "file": "resources-S10.jsonl",
+      "capability": {
+        "kind": "capability",
+        "platform": "darwin",
+        "cgroup": false,
+        "cgroupPath": null,
+        "processTree": true,
+        "memoryPrimary": "per-pid RSS sum (sampled)",
+        "notes": [
+          "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+          "采样分辨率默认 1s；短峰值可能漏采"
+        ],
+        "intervalMs": 1000,
+        "startedAt": "2026-10-24T05:28:27.527Z"
+      },
+      "sampleCount": 1,
+      "intervalMs": 1000,
+      "window": {
+        "first": "2026-10-24T05:28:28.116Z",
+        "last": "2026-10-24T05:28:28.116Z"
+      },
+      "rssPeakBytes": 167796736,
+      "rssSource": "per-pid RSS sum (sampled)",
+      "cpuPercentPeak": 86.7,
+      "processCountPeak": 1,
+      "cgroupMemoryCurrentPeakBytes": null,
+      "cgroupMemoryKernelPeakBytes": null,
+      "cgroupAvailable": false,
+      "notes": [
+        "cgroup v2 不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+        "采样分辨率默认 1s；短峰值可能漏采"
+      ]
+    }
+  ],
+  "correctness": [
+    {
+      "scenario": "S10",
+      "runId": "dev-s10-20261024",
+      "profile": "dev",
+      "dataset": "D1",
+      "startedAt": "2026-10-24T05:28:27.543Z",
+      "finishedAt": "2026-10-24T05:28:27.786Z",
+      "requests": 4,
+      "outcomes": {
+        "success": 4
+      },
+      "oracleFailures": [],
+      "checks": [
+        {
+          "routeTemplate": "/v1/dashboard",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/model-runs",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/data-summary",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "scenarioCount": 1
+}

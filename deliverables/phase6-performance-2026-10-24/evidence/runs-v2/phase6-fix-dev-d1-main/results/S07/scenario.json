@@ -1,0 +1,126 @@
+{
+  "scenario": "S07",
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "incomplete": false,
+  "driverLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/driver-S07.log",
+  "apiLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/api-S07.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 35844096,
+    "walBytes": 263712,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S07",
+    "runId": "phase6-fix-dev-d1-main-20261024-04",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T08:00:41.993Z",
+    "finishedAt": "2026-10-24T08:00:43.572Z",
+    "incomplete": false,
+    "interruptedBy": null,
+    "requests": 17,
+    "outcomes": {
+      "success": 17
+    },
+    "oracleFailures": [],
+    "cases": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/inspect",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs",
+        "phase": null,
+        "status": 202,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 17,
+  "oracleFailures": 0,
+  "fatal": null
+}

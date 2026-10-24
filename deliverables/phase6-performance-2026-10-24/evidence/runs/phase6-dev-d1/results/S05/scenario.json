@@ -1,0 +1,1141 @@
+{
+  "scenario": "S05",
+  "exitCode": 0,
+  "signal": null,
+  "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1/logs/driver-S05.log",
+  "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1/logs/api-S05.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 58646528,
+    "walBytes": 16253432,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S05",
+    "runId": "dev-d1-20261024",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T05:33:53.523Z",
+    "finishedAt": "2026-10-24T05:34:14.145Z",
+    "requests": 190,
+    "outcomes": {
+      "success": 190
+    },
+    "oracleFailures": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/inspect",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs",
+        "phase": null,
+        "status": 202,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/inspect",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs",
+        "phase": null,
+        "status": 202,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/inspect",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs",
+        "phase": null,
+        "status": 202,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 190,
+  "oracleFailures": 0,
+  "fatal": null
+}

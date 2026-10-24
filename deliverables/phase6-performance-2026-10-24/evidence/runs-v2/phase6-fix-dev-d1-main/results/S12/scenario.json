@@ -1,0 +1,60 @@
+{
+  "scenario": "S12",
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "incomplete": false,
+  "driverLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/driver-S12.log",
+  "apiLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/api-S12.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 35844096,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S12",
+    "runId": "phase6-fix-dev-d1-main-20261024-04",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T08:01:38.722Z",
+    "finishedAt": "2026-10-24T08:01:38.982Z",
+    "incomplete": false,
+    "interruptedBy": null,
+    "requests": 4,
+    "outcomes": {
+      "success": 4
+    },
+    "oracleFailures": [],
+    "cases": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/handshake",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/mobile/workout-plan",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/mobile/training-plan-state",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/mobile/todaysession",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 4,
+  "oracleFailures": 0,
+  "fatal": null
+}

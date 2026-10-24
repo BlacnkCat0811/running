@@ -1,0 +1,2401 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-10-24T08:30:27.978Z",
+  "purpose": "F0 历史证据冻结：旧 raw 不可改写；新实验使用全新根和 run-id",
+  "git": {
+    "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+    "status": "M apps/api/src/direct-sync-ingest.ts\n M apps/api/src/import-worker.ts\n M apps/api/test/direct-sync-ingest.test.ts\n M deliverables/README.md\n M package.json\n?? apps/api/test/phase6-cgroup.test.mjs\n?? apps/api/test/phase6-driver.test.mjs\n?? apps/api/test/phase6-fixtures.test.mjs\n?? apps/api/test/phase6-runner.test.mjs\n?? apps/api/test/phase6-s08-contract.test.mjs\n?? apps/api/test/phase6-safety.test.mjs\n?? apps/api/test/phase6-verify.test.mjs\n?? deliverables/phase6-performance-2026-10-24/\n?? scripts/phase6/",
+    "diffStat": "apps/api/src/direct-sync-ingest.ts       | 11 ++++++++++-\n apps/api/src/import-worker.ts            |  2 ++\n apps/api/test/direct-sync-ingest.test.ts | 21 +++++++++++++++++++++\n deliverables/README.md                   |  6 ++++++\n package.json                             | 11 ++++++++++-\n 5 files changed, 49 insertions(+), 2 deletions(-)",
+    "stagedDiffStat": ""
+  },
+  "protocol": {
+    "path": "protocol.json",
+    "sha256": "c5adfb966dc7302b46010e1aa35781e984daa7bb11fda2888d9b99ecea5eda5a"
+  },
+  "inputs": {
+    "reviewPlan": "/Users/ta/Downloads/RAI_Phase6_Review_and_Implementation_Plan_2026-10-24.md",
+    "reviewPlanSha256": "1d5449b730b759a7094cac376b8c31b0c9c2d12b6a4eb4008efd7a2dc4fa302a",
+    "fixPlan": "/Users/ta/Downloads/RAI_Phase6_Uncommitted_Review_Fix_Plan_2026-10-24.md",
+    "fixPlanSha256": "cf85ea6e3688a12ad7790f03782370af5c888ea2d1b9b0e2add5604cd7ce537f"
+  },
+  "toolFiles": {
+    "scripts/phase6/cgroup.mjs": "7990e102871ec800ad672a709a036fb92430f3d783ae4b14d564d192b59b6889",
+    "scripts/phase6/collect-resources.mjs": "56b00ef8e95e942fe86c2474c91bb9599a9918cca7687ea4c32a82625056eada",
+    "scripts/phase6/driver.mjs": "b1bd30ae457a84013df0d81b0e79107cded65e59c1ad0b3871ccebcd3d3e4842",
+    "scripts/phase6/fixtures.mjs": "4e4fe0071c890ce437a3cffaef03696c7fcda371bfa9659decd8349f694e9af8",
+    "scripts/phase6/freeze-evidence.mjs": "54c84132dd0772e43caf41983b53708ddbe62eb3bc0515b96b02ca7bf7ed8462",
+    "scripts/phase6/freeze.mjs": "a84358509971e780f25a0fa6be1a039ab113610b2c3235d13f73bff3547c2ff9",
+    "scripts/phase6/runner.mjs": "137b8a0f6fe95b861ebe71921effccf8cbb371030057672ae55d0ba29800f875",
+    "scripts/phase6/s08-contract.mjs": "9991d35c2b06e54c8e1de2e744343fe83e0942b0248bd873cc534433eee2f682",
+    "scripts/phase6/safety.mjs": "e8c0a0deb0cc219730c571c4494b5468d62646941c923620c0dedf5d93ab14f5",
+    "scripts/phase6/summarize.mjs": "499406978195690428f5b23032fa095bdd268972014fbc7a1e5c3c77105604f5",
+    "scripts/phase6/verify.mjs": "a2db04cad4c4fdadb9deda25b8b84ace3f6defcb9b99b21cda01e1a6f82168d0",
+    "scripts/phase6/write-sha256sums.mjs": "856cfcfee02f79afb47fb184cd4bd12d7470ef7ec44344d1444f167f0cd9a9ad",
+    "package-lock.json": "0642057ed8b3b0a08f18dede2621172245c6de2bf4d29155c944be3511397d2a",
+    "package.json": "8f5a40629252fcc1c1c4f59da1dcc5cfc13e028b11faef15fade4e0e5afee3fa"
+  },
+  "evidence": {
+    "fileCount": 296,
+    "totalBytes": 4909639,
+    "files": [
+      {
+        "path": "evidence/acceptance-main.json",
+        "bytes": 4762,
+        "sha256": "cdbbec4218f75cf95cc62bb7286f2c4443dbc5a4fa1135ab0079a88005e46920",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/fixtures/D1-manifest.json",
+        "bytes": 13790,
+        "sha256": "657a1d78bbdeb25ddfb4b95ec3a2840b153b73868910e2bebf5fc50b6d33c550",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/fixtures/D2-manifest.json",
+        "bytes": 32584,
+        "sha256": "b4e160beb781488ec4afdf5be6c6dd9a5d3612b887a0661a7515a9e5271bbed8",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/fixtures/D3-manifest.json",
+        "bytes": 116611,
+        "sha256": "3b5a9835dbf2b73087361a47ab47ddb1989d5261dc8eb3da7727ee65ce2bab84",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/fixtures/DX-manifest.json",
+        "bytes": 10070,
+        "sha256": "2cb078d22c561561fda990e4493926f3ded63db5e45a7bca50b2e0fdd334d262",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/regressions.json",
+        "bytes": 3654,
+        "sha256": "212c6fdf513b069994660d22c6dbc4cb95004d775091e91c32634dbbf31ad027",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/run-index.json",
+        "bytes": 21249,
+        "sha256": "5438562d66c12846452918627c5acf94266c58f38bd738c6d620ff2718ed0533",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/acceptance.json",
+        "bytes": 3986,
+        "sha256": "03251b4ef577f33d94694598a78f7f4a1eb415ec81ee81ba54929ef1811d9f2b",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/environment.json",
+        "bytes": 433,
+        "sha256": "213afa8b6e2d4265dda27ac34468a5ba3faa95d46e6059f6ca023e8cc2894448",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/manifest.json",
+        "bytes": 116121,
+        "sha256": "fdd44ec6b2f625c2038d475ac612325c8fd00d0da8fbeaa1bc94e237042715dc",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S01.jsonl",
+        "bytes": 710,
+        "sha256": "3c81a9568d9e99be374b4326422d9ca7c84ce180f43f044a83eff5b371112856",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S02.jsonl",
+        "bytes": 710,
+        "sha256": "db0be3b328f3b5298acb60990cf238bad78e8f95fbb39cb53e2e76329f9315af",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S03.jsonl",
+        "bytes": 2212,
+        "sha256": "d6a03697087ef2e15881b35858dce0f85dc09b16cae72b481a043a1975cfb908",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S04.jsonl",
+        "bytes": 712,
+        "sha256": "5c6973f05a59785fa6fc10b5c3762945614a02d82548f8326d81b547465e90c9",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S05.jsonl",
+        "bytes": 5966,
+        "sha256": "f60b6c368266a261f18338b834f10e8f076a404d32a80aea38f0e1a5b990bccd",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S06.jsonl",
+        "bytes": 1087,
+        "sha256": "2e07d4785df7722aadda9cd8ffea5a929842386263c6796c0efae499d6244770",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S07.jsonl",
+        "bytes": 1083,
+        "sha256": "6c7bd65f88a4d76319ced9bc18cbcb30de87189485db181fd3c1921585cecdd2",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S08.jsonl",
+        "bytes": 6345,
+        "sha256": "0f9d20d288a9485defa3bf5e728a0d272aebb6477d6c431dfe8ac58fd26da14e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S09.jsonl",
+        "bytes": 3332,
+        "sha256": "63d19a8b7ee3eea0517898f10e4b44dcec9149f94596f4b0f57a7e7a4ea777c7",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S12.jsonl",
+        "bytes": 710,
+        "sha256": "2cecffa942d718217b30dac0b7969007f4e2e6ce6b220971c85a051249456bb6",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S13.jsonl",
+        "bytes": 16043,
+        "sha256": "44dc223d3e22b61ea464d4f5a716b2ea7e8cb047131533a6306485924a3ae175",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/raw/resources-S14.jsonl",
+        "bytes": 6334,
+        "sha256": "5105443e02013a93f382531a3e0a8240eb45e798dfd8b37230eb3d85e1e9b575",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/report/summary.json",
+        "bytes": 227903,
+        "sha256": "b4e534709acd76e347b306db73f6f4c028ffae4d9c805abd9c02a8f2012dacfb",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/report/summary.md",
+        "bytes": 1482,
+        "sha256": "5814fd414e76742c3dd32b8759cb06234c181b3cdbbf06ea65419ab123c38724",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S01/correctness/S01.json",
+        "bytes": 620,
+        "sha256": "bc98eb94be7b1a6077bafc9e8a5c17fc0d96421dc2bd6be47c7e2c99a80ba6f8",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S01/driver-summary.json",
+        "bytes": 620,
+        "sha256": "bc98eb94be7b1a6077bafc9e8a5c17fc0d96421dc2bd6be47c7e2c99a80ba6f8",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S01/raw/requests.jsonl",
+        "bytes": 2363,
+        "sha256": "a46df2874fc2dc74ca9b67a31931463ba15c1a5cf1839061e0c5b230bbc22b25",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S01/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S01/scenario.json",
+        "bytes": 1075,
+        "sha256": "3d2f89d6e7b67e0192f84b827447f9761f41571383c7829de4cdf3806a230fdf",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S02/correctness/S02.json",
+        "bytes": 1229,
+        "sha256": "c162c7a5749bb3afea31ea2c10b772738a1ff31c16ec7495b9518498ea7f25ad",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S02/driver-summary.json",
+        "bytes": 1229,
+        "sha256": "c162c7a5749bb3afea31ea2c10b772738a1ff31c16ec7495b9518498ea7f25ad",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S02/raw/requests.jsonl",
+        "bytes": 5646,
+        "sha256": "561b6984d32ac074694e52ba46a78f46784815f0301e49aeaf893893e21b4f77",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S02/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S02/scenario.json",
+        "bytes": 1744,
+        "sha256": "cef53181ba90b470036069cb2a35dd0704ff7169a2e538f82c4b621159cca732",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S03/correctness/S03.json",
+        "bytes": 1936,
+        "sha256": "f66e3badf3933e3dc7b9671cffb2c5d9b9e6b2b79d746112fa22f4337eed51c9",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S03/driver-summary.json",
+        "bytes": 1936,
+        "sha256": "f66e3badf3933e3dc7b9671cffb2c5d9b9e6b2b79d746112fa22f4337eed51c9",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S03/raw/requests.jsonl",
+        "bytes": 16318,
+        "sha256": "bcdb18788dc3fc7c393ed93c8714edf274ee7b4accd510b737bb62e1738e18b2",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S03/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S03/scenario.json",
+        "bytes": 2500,
+        "sha256": "b4c847333f862c1e7831f36951780165fad3cd6ae4cc68c7b31225929e509fb3",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S04/correctness/S04.json",
+        "bytes": 733,
+        "sha256": "75c4507de2ef895095ca0fa02e80f557e97ff040eeda2289fac5da7036a8e698",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S04/driver-summary.json",
+        "bytes": 733,
+        "sha256": "75c4507de2ef895095ca0fa02e80f557e97ff040eeda2289fac5da7036a8e698",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S04/raw/requests.jsonl",
+        "bytes": 2770,
+        "sha256": "de352f26d92d3f83c883debd0f0d9549246e929b4562d5339f58f9b298a29128",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S04/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S04/scenario.json",
+        "bytes": 1200,
+        "sha256": "8626c2386335e701ca9d7838a5c4b69ee9031ca0d148523b142598e7f0de13a4",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S05/correctness/S05.json",
+        "bytes": 22451,
+        "sha256": "478e423e8afa04b11519e1fb32f9fc2bc1edf1a413279e225b626cffa9ee263d",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S05/driver-summary.json",
+        "bytes": 22451,
+        "sha256": "478e423e8afa04b11519e1fb32f9fc2bc1edf1a413279e225b626cffa9ee263d",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S05/raw/requests.jsonl",
+        "bytes": 143023,
+        "sha256": "a34925872f7e308de335205d28c1fe7606a306c37f5cbc5373ae2c56d48aede8",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S05/raw/task-events.jsonl",
+        "bytes": 4025,
+        "sha256": "ccac59cd9a7a5fd211a4843ca65ea70fa7006790bb3febf383cabd461f0b0f2c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S05/scenario.json",
+        "bytes": 25099,
+        "sha256": "b5445a1d6ad5e8a5cbfb439dd75feb8ad4093c262d497f7d97acdcc57f2d0316",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S06/correctness/S06.json",
+        "bytes": 2661,
+        "sha256": "8f24ce5894c23054a18eb5a57ccf0075c8c4907a4f0123ad244d01d328fbad65",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S06/driver-summary.json",
+        "bytes": 2661,
+        "sha256": "8f24ce5894c23054a18eb5a57ccf0075c8c4907a4f0123ad244d01d328fbad65",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S06/raw/requests.jsonl",
+        "bytes": 17104,
+        "sha256": "fddbe5f29ff3793d4ec1234ed6cc8ce576cb77ec4cde9fec5065fff9ed40958a",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S06/raw/task-events.jsonl",
+        "bytes": 1857,
+        "sha256": "ab6c50be5416a43f3c344a634a5ac4e8d5e86d674067e9d11c1c58ac0cd6a18c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S06/scenario.json",
+        "bytes": 3326,
+        "sha256": "f358855ccd40605874390614e1f4bffe6becd2b7918e60e030b820adc32491e3",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S07/correctness/S07.json",
+        "bytes": 2429,
+        "sha256": "4eb8ebb4c52d30a60d20f2df515b9db3a3e5b1df307268a48bd1a670d5019344",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S07/driver-summary.json",
+        "bytes": 2429,
+        "sha256": "4eb8ebb4c52d30a60d20f2df515b9db3a3e5b1df307268a48bd1a670d5019344",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S07/raw/requests.jsonl",
+        "bytes": 14806,
+        "sha256": "d5494cb66841d60f0dfc7119b56933c3536edc4f4c3a6e8f9bb7c70110c3dec4",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S07/raw/task-events.jsonl",
+        "bytes": 1720,
+        "sha256": "cd12c2c00c3f990e51fedef5ba6610bf4054ba702ceec0c493ea78cabda9b656",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S07/scenario.json",
+        "bytes": 3070,
+        "sha256": "ac62deb72c34eec646f4e8d6de4ee8aad9e803cfc119052d8933aee959c5c96b",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S08/correctness/S08.json",
+        "bytes": 20257,
+        "sha256": "0b6281d77e84878bbcf4c242c41dc9b7b888c16788c4635e0c71cd55472ae84c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S08/driver-summary.json",
+        "bytes": 20257,
+        "sha256": "0b6281d77e84878bbcf4c242c41dc9b7b888c16788c4635e0c71cd55472ae84c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S08/raw/requests.jsonl",
+        "bytes": 134200,
+        "sha256": "6f60b5f0a39958e6d026f08fa5d054cd2083d35c5767100081c8ac6110a22e90",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S08/raw/task-events.jsonl",
+        "bytes": 7901,
+        "sha256": "88b0eca666b0ce82df7bf1bd1d0e1a553743405d591766e8f8fb02573b427943",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S08/scenario.json",
+        "bytes": 22685,
+        "sha256": "484dc553a4132bf9ddffe6f2c10cd8f5e09bf3873f588bbc5661399d0f118293",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S09/correctness/S09.json",
+        "bytes": 5975,
+        "sha256": "b60c322861816a5df71d5d68fcbead478437308ec7d527d728790c77947addae",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S09/driver-summary.json",
+        "bytes": 5975,
+        "sha256": "b60c322861816a5df71d5d68fcbead478437308ec7d527d728790c77947addae",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S09/raw/requests.jsonl",
+        "bytes": 48182,
+        "sha256": "b9f4e807b95e10d696d420d60662ef780d48bc8a9814ceafd8f9827b54b6b40a",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S09/raw/task-events.jsonl",
+        "bytes": 1932,
+        "sha256": "791ebad3eadf5632c2554334216df79b6ca9b53a74eeaa7984d0c5eb23bee1a0",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S09/scenario.json",
+        "bytes": 6953,
+        "sha256": "d8f24e7c8fcba5ed51ad623b4c3602ba5a010f6f59221186982dbdf07e0651b1",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S12/correctness/S12.json",
+        "bytes": 762,
+        "sha256": "38cee6c949a4c66dd14057b6b1522e90f74022c68e4b8994c79862b664da92d7",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S12/driver-summary.json",
+        "bytes": 762,
+        "sha256": "38cee6c949a4c66dd14057b6b1522e90f74022c68e4b8994c79862b664da92d7",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S12/raw/requests.jsonl",
+        "bytes": 2612,
+        "sha256": "17fa988079774a5be2ecf6ef7b70b046a7f756ad3af496cfba6067510fd30a75",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S12/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S12/scenario.json",
+        "bytes": 1229,
+        "sha256": "7474d36c77ea3440ba37f84ad1f04e397df647a2fe1d4003dfcff8e36a639c9e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S13/correctness/S13.json",
+        "bytes": 277,
+        "sha256": "b127205b58b690f3fc33d7ac8b73d04cdfb72e2d1778efc5f919ebcc2ba8199a",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S13/driver-summary.json",
+        "bytes": 277,
+        "sha256": "b127205b58b690f3fc33d7ac8b73d04cdfb72e2d1778efc5f919ebcc2ba8199a",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S13/raw/requests.jsonl",
+        "bytes": 33298,
+        "sha256": "4e8791e9239c6f7f57d2884855792cae977c44eefb5cf49c34cb75da75749fdf",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S13/raw/task-events.jsonl",
+        "bytes": 232,
+        "sha256": "72be9676c5c959541b7845c1ef21b74306dad928b4f5c100454430e9f806e5ac",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S13/scenario.json",
+        "bytes": 695,
+        "sha256": "eb98e8408a1bd800a0756b38b901ff678c31ac166d0c9e08ae2c8122825c3441",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S14/correctness/S14.json",
+        "bytes": 10751,
+        "sha256": "9a385d660ffee110fd4aa2f6d826c7d467aff1633aea8c1e6dad1f41eff4c5c5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S14/driver-summary.json",
+        "bytes": 10751,
+        "sha256": "9a385d660ffee110fd4aa2f6d826c7d467aff1633aea8c1e6dad1f41eff4c5c5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S14/raw/requests.jsonl",
+        "bytes": 186370,
+        "sha256": "1a9bc5d74a6a20437c10be7fec19fed1206d219ec4c040eb910372ac1e6367e2",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S14/raw/task-events.jsonl",
+        "bytes": 204,
+        "sha256": "55309dad22adf3bfb8b0bb815ed7939a3a7114593c5a9fe2994a06e6a937dcbf",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/results/S14/scenario.json",
+        "bytes": 12132,
+        "sha256": "45813bc0cab750d935d724daa6759b0b889c937b369c4260186ac0dc4a8186db",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1/summary.json",
+        "bytes": 1716,
+        "sha256": "bcf389ea338ab4e604a0adda2422f2f76fe313f0255530924669b0b95bfc017d",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/acceptance.json",
+        "bytes": 3642,
+        "sha256": "7508c378dcec0a23596104afa8337f1e24e805848aa7f200a8fdbd202727f248",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/environment.json",
+        "bytes": 433,
+        "sha256": "50d2a96b3a8c562cf5e24fe13c0eab00fd2620033033f2275f1cd16dc0fa7964",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/manifest.json",
+        "bytes": 4245,
+        "sha256": "0ecb4714d7b5abb88709ebc0b9e983e1884bba6d49ab4cd416e8d7ea0402ddd2",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/raw/resources-S13.jsonl",
+        "bytes": 5202,
+        "sha256": "ebc1234d078d87f8e6c3c2c1899ddc87302e6e531326a5c083b9f9ab21a092d1",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/report/summary.json",
+        "bytes": 8571,
+        "sha256": "b6b1dc46f9217c84a03af18f11501b70b74ef111167a03cd63319b096b9f38de",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/report/summary.md",
+        "bytes": 640,
+        "sha256": "cdb6ede20aff9f965bc0071f19b3b8b3d5e336f68494a098aa3b779792fa36cd",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/results/S13/correctness/S13.json",
+        "bytes": 281,
+        "sha256": "e59c90ae174843b7d8c4fe4819fccedd9b0a98d82dc4a719d99cb8a65ec0a14e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/results/S13/driver-summary.json",
+        "bytes": 281,
+        "sha256": "e59c90ae174843b7d8c4fe4819fccedd9b0a98d82dc4a719d99cb8a65ec0a14e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/results/S13/raw/requests.jsonl",
+        "bytes": 35082,
+        "sha256": "a2f79b3bf76b8f14ffea2dbef7d6e6e7fc73670fc18ae86af609b199946509f5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/results/S13/raw/task-events.jsonl",
+        "bytes": 238,
+        "sha256": "f1775d083887a8cb9fc24ecb50f673b0830c325d26b362503dc6209a597df2d8",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/results/S13/scenario.json",
+        "bytes": 707,
+        "sha256": "d380f21523b28f0e26415b031ceee2e810f4228aa6b0c9d7e55516beafe1a848",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d1-s13/summary.json",
+        "bytes": 285,
+        "sha256": "f98fae3018fe7a088906df32b5a7eae5e245d61a72f3651f6beab0f3d5ffef25",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/acceptance.json",
+        "bytes": 3766,
+        "sha256": "69f15db1fddf622fd80610edbaee8aaaa67f1daa60a7c502202414dabd77a931",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/environment.json",
+        "bytes": 433,
+        "sha256": "05dae8a6cd33060685e149d695b2922755ce9d5b9d62c8448c035a2c1f8debea",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/manifest.json",
+        "bytes": 17764,
+        "sha256": "706096322f10de7859fd2e7559bb3880bb4e18a2202645358e623ac6bc5a722a",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/raw/resources-S01.jsonl",
+        "bytes": 710,
+        "sha256": "8c1594f02ec4a48cecbf44750ab05a6dcf35aeb4506cf4db2cd98936695427c1",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/raw/resources-S02.jsonl",
+        "bytes": 708,
+        "sha256": "4ee54d2532efc6c0196ae219e349ffe05cf87a7bf56fe174b29ab48ff47c0408",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/raw/resources-S03.jsonl",
+        "bytes": 1462,
+        "sha256": "29dd598409aad2b7be489bef88b7801206ece5cecc17574bebecb33020ef5c80",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/raw/resources-S04.jsonl",
+        "bytes": 710,
+        "sha256": "3ab6d3e197de0b6a1e53c615a1efd69384740d6c1b567c5b9543cd095328f6a5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/raw/resources-S13.jsonl",
+        "bytes": 4827,
+        "sha256": "b92655a0d1077285e3c120a46d7055d2c63a32e84e3e6ef27fde18a98ecc2150",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/report/summary.json",
+        "bytes": 44217,
+        "sha256": "cd374088ee19e957ce14ee264e9fa02342831ce500cd21f3a578a8d6318efddd",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/report/summary.md",
+        "bytes": 942,
+        "sha256": "d405fa21073a1bcb0818f7b92f9a1cdcd2052141d5677af78132acbf16630798",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S01/correctness/S01.json",
+        "bytes": 620,
+        "sha256": "a86b1652b992c1f83c97a1b52ebb99ffef185ce954f38d0bc958c4302c7f72ef",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S01/driver-summary.json",
+        "bytes": 620,
+        "sha256": "a86b1652b992c1f83c97a1b52ebb99ffef185ce954f38d0bc958c4302c7f72ef",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S01/raw/requests.jsonl",
+        "bytes": 2294,
+        "sha256": "7f300e667f6599625359ea7facc1961c746d29d94fd3f8a2869dfba12018ce77",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S01/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S01/scenario.json",
+        "bytes": 1077,
+        "sha256": "dd04c7f70b2293d4eb04ef9f10e77c58a6e52896de75d30394e5b84335eabab9",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S02/correctness/S02.json",
+        "bytes": 1229,
+        "sha256": "2c75dc16831bd051e8340d5102263c0fd05e5f62003624c3089f52773ad4d234",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S02/driver-summary.json",
+        "bytes": 1229,
+        "sha256": "2c75dc16831bd051e8340d5102263c0fd05e5f62003624c3089f52773ad4d234",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S02/raw/requests.jsonl",
+        "bytes": 5464,
+        "sha256": "ad56b9b491c4b0325ae77368931d334e69aaa44f6c9f7680f03d4e6126cdd4d1",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S02/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S02/scenario.json",
+        "bytes": 1746,
+        "sha256": "3b1080d344c6f239f3fef7d842e85070f8bca3093b24f7ec07b515ed86ff98a2",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S03/correctness/S03.json",
+        "bytes": 1936,
+        "sha256": "ec47fe267a0b6c2faa3a67c6912b0a7cad0afd122c54b77cd595d06f4bfd5d5b",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S03/driver-summary.json",
+        "bytes": 1936,
+        "sha256": "ec47fe267a0b6c2faa3a67c6912b0a7cad0afd122c54b77cd595d06f4bfd5d5b",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S03/raw/requests.jsonl",
+        "bytes": 15749,
+        "sha256": "ff31727ccaff627f80c422cf084af57e44dad00776f023228ae54923cc5cc509",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S03/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S03/scenario.json",
+        "bytes": 2502,
+        "sha256": "db942f0131aea534d0fd491e9e1c2465e113aeddd2af5de87f5423d80d9a57c0",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S04/correctness/S04.json",
+        "bytes": 733,
+        "sha256": "179ecc56f2e365633f92c21aac798503c0cedf781099925c5341041086a8fbfe",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S04/driver-summary.json",
+        "bytes": 733,
+        "sha256": "179ecc56f2e365633f92c21aac798503c0cedf781099925c5341041086a8fbfe",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S04/raw/requests.jsonl",
+        "bytes": 2690,
+        "sha256": "704bf04df7bc5b95d098c4bd70cf8dd39a3b144c15907b6e94178e8e6a8da57f",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S04/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S04/scenario.json",
+        "bytes": 1202,
+        "sha256": "0c162fbd2215f5023ffd96635a1db78b0fed0d3d7fabfbc282b69fc9a4aa5004",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S13/correctness/S13.json",
+        "bytes": 277,
+        "sha256": "15a12ed85af7460c7d66185d409ccafa14060434ab5223f459256751321b06e6",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S13/driver-summary.json",
+        "bytes": 277,
+        "sha256": "15a12ed85af7460c7d66185d409ccafa14060434ab5223f459256751321b06e6",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S13/raw/requests.jsonl",
+        "bytes": 35056,
+        "sha256": "531cf0a80bb7b31428e776bc83bc8fa4f9144a19233641df6a024f1265e2393e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S13/raw/task-events.jsonl",
+        "bytes": 233,
+        "sha256": "fed8bbf224b4158639c19202e4624467a759d15ca509360200dd7a46ec2c6f80",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/results/S13/scenario.json",
+        "bytes": 697,
+        "sha256": "4f2d61cf9b9608a565bbcb96ec2a44fdbbae57513962f8e1db2e12b87bde8a8f",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d2/summary.json",
+        "bytes": 790,
+        "sha256": "9033c73c154b6c71ce701b7ff227e9ce1ae0ee179889a1cf759e5382e60c61ab",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/acceptance.json",
+        "bytes": 3740,
+        "sha256": "402116ec191a70f4c14e89b69a1ae4e5328391a82eead28cf0145963e8d602cb",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/environment.json",
+        "bytes": 433,
+        "sha256": "d2523ad6174082b5265bed88d79216172d8390d3bd4e357f15dc1eadbd83e1cd",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/manifest.json",
+        "bytes": 15483,
+        "sha256": "df9d71bc27bfe985fb1b48274d4b19d1c7894a8175ade9bc39dc6cd921dae2cb",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/raw/resources-S01.jsonl",
+        "bytes": 706,
+        "sha256": "e1d55efc3c92f1984aca12f693d2bdc2b2e51551a4cd45670face5f6f9eacdae",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/raw/resources-S02.jsonl",
+        "bytes": 4459,
+        "sha256": "d1d175dddd6b422cf16febc480e2fd7fa7e55f42f05d5521fceccd469d8da9ab",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/raw/resources-S03.jsonl",
+        "bytes": 2215,
+        "sha256": "23ba43996ad91bef693b5154c4b0e2456e15594bb13ba2f8c016c007931034df",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/raw/resources-S04.jsonl",
+        "bytes": 9351,
+        "sha256": "c48f503f7b6b3b4a0ef4d690135bc8c2e9bafd163f24a5da51576d4b00bc526c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/report/summary.json",
+        "bytes": 36738,
+        "sha256": "bf2c0b2b7777f4cedede61bbf7dcd736670754e52088462dfb6ea002cbafd8f9",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/report/summary.md",
+        "bytes": 865,
+        "sha256": "b3d5e85db91c5e3f7e74d0f04d954b9459df1e3cd8c01c3973a287c9d61e13e8",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S01/correctness/S01.json",
+        "bytes": 620,
+        "sha256": "7848fa65e9ebbca5fe429c8e528d366d4bcb501dcdafdcdc431783f22d8ed5a5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S01/driver-summary.json",
+        "bytes": 620,
+        "sha256": "7848fa65e9ebbca5fe429c8e528d366d4bcb501dcdafdcdc431783f22d8ed5a5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S01/raw/requests.jsonl",
+        "bytes": 2288,
+        "sha256": "3388d7e6e5ff96f8e6879a78743699f69f5a89b031a6b5a2ca96d0319a277df9",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S01/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S01/scenario.json",
+        "bytes": 1079,
+        "sha256": "fee33be243b9c0240cb351e8c851acf4336af6c9d5869ef3f7f144331d135d3e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S02/correctness/S02.json",
+        "bytes": 1229,
+        "sha256": "19e4d1083d76813b333ff5bec7b6778f7cfbbdfd5279b39b82ce38eb73e93224",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S02/driver-summary.json",
+        "bytes": 1229,
+        "sha256": "19e4d1083d76813b333ff5bec7b6778f7cfbbdfd5279b39b82ce38eb73e93224",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S02/raw/requests.jsonl",
+        "bytes": 5461,
+        "sha256": "e71c5a597930d1a9d804b407f3980bc5ff07ed52e465027d9213fb52592f7544",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S02/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S02/scenario.json",
+        "bytes": 1748,
+        "sha256": "febf07242f1666b35d4f20188f83911ad7ab7cd4c94b72a747d28ba845d90f4a",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S03/correctness/S03.json",
+        "bytes": 1936,
+        "sha256": "865ed73dc5c19aaa12a0af1f3b7d6736b1abef4e87f13615ba1b5ab46096021c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S03/driver-summary.json",
+        "bytes": 1936,
+        "sha256": "865ed73dc5c19aaa12a0af1f3b7d6736b1abef4e87f13615ba1b5ab46096021c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S03/raw/requests.jsonl",
+        "bytes": 15739,
+        "sha256": "c35e9992a507a2905d16856f66536796ab8495dc0e83da16a305e8b317158860",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S03/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S03/scenario.json",
+        "bytes": 2504,
+        "sha256": "ed15ec518e2c9a7944cef24a5bd08cbccee2e443eaa2da4b157c5617e9db8035",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S04/correctness/S04.json",
+        "bytes": 733,
+        "sha256": "7dfc5c5a25625ddadacbc3edaaa8b46104e6c3eecba6f2ed45cc759f77a22224",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S04/driver-summary.json",
+        "bytes": 733,
+        "sha256": "7dfc5c5a25625ddadacbc3edaaa8b46104e6c3eecba6f2ed45cc759f77a22224",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S04/raw/requests.jsonl",
+        "bytes": 2710,
+        "sha256": "ba51ae756a9028e433673c6247539a39b5a1b103026b46381dface2df29419aa",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S04/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/results/S04/scenario.json",
+        "bytes": 1204,
+        "sha256": "b6d7f1153c5ad7dd5cc964d3c1cc992594badc65f8a12ccdb0e3a5c1b96e0f68",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-d3/summary.json",
+        "bytes": 662,
+        "sha256": "0a2364bdac35ea49befeaeb8371972f126654b593e91d32d00c5d662a290f9a8",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/environment.json",
+        "bytes": 433,
+        "sha256": "5c8b4dec84976be5e774f1b63f175333c9295dc06f3739fb13df1ee0139776ec",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/manifest.json",
+        "bytes": 44092,
+        "sha256": "5523aceee540b87f27ed12dae16b758fd2abc0ae62aee6c6d14cf51de39f395e",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/raw/resources-S08.jsonl",
+        "bytes": 8217,
+        "sha256": "1d7f93759c0d86f1fd8b7244ad6670335b3285609d30957fbc0d23be61d7b98b",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/report/summary.json",
+        "bytes": 55764,
+        "sha256": "1b0f7244ac53bf2d3c1f42725406ad49b899c874a089849d8f78ecf1775f6300",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/report/summary.md",
+        "bytes": 645,
+        "sha256": "1f25c95b47b3269449353a3716181f2b35bd4ecf9e26857ec79ee960283fee7c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/results/S08/correctness/S08.json",
+        "bytes": 30703,
+        "sha256": "3de908ca70513ba62029ff7f29c4ca94216d96b4fae5e708b09da3c543691108",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/results/S08/driver-summary.json",
+        "bytes": 30703,
+        "sha256": "3de908ca70513ba62029ff7f29c4ca94216d96b4fae5e708b09da3c543691108",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/results/S08/raw/requests.jsonl",
+        "bytes": 207488,
+        "sha256": "eb649d7cf795d56088ba916177e89f64826e904322c0924246023fb0b8a74978",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/results/S08/raw/task-events.jsonl",
+        "bytes": 7989,
+        "sha256": "9ed5b29766298a92b7cd6923bd524eeca451a38d315ac7db9450e9925cd56629",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/results/S08/scenario.json",
+        "bytes": 34199,
+        "sha256": "e8989e980b54749b8199b94922039720a356474d6178616d5e13c2f8be9a82a5",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s08-diagnostic/summary.json",
+        "bytes": 316,
+        "sha256": "2516506b489514756caa3a6f73088f3ff6f4d26e2377930efcd0dc74ceb1da04",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/acceptance.json",
+        "bytes": 3638,
+        "sha256": "26cb28a017286e1d557a00d97df12c2688463fa1e41d1f86dd15b93f0f02ccb0",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/environment.json",
+        "bytes": 433,
+        "sha256": "17c979e477512aefe9a8ba392c351bb9ebfc281d6fbcb6f832e4077c557f4db6",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/manifest.json",
+        "bytes": 5022,
+        "sha256": "f062633e1241db7a9a94936830b8c60dacd06e9f884c07eb4200abccfcd9e704",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/raw/resources-S10.jsonl",
+        "bytes": 710,
+        "sha256": "d54eefefe0fa5d66ae1c7d32bfc89099398c554812286b66fdb642661b36b277",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/report/summary.json",
+        "bytes": 5653,
+        "sha256": "0e3f6bc231e3d0dc20be547d9b1fb3650c659db88b92d48298e0f2a4005b9c4b",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/report/summary.md",
+        "bytes": 633,
+        "sha256": "ddac44c4ccfc3b458e081006da943ff3b4a0d26e28982332a263f886a7faa249",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/results/recompute.json",
+        "bytes": 109,
+        "sha256": "472462ff4b44322a96be77e62a23c5ea91e52e5babd70a710ed28647c8543f3c",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/results/S10/correctness/S10.json",
+        "bytes": 729,
+        "sha256": "4b3e4410e2a72c2d2abecf231b3167df176ebb3744ed1025e9aa932dd9afdc2d",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/results/S10/driver-summary.json",
+        "bytes": 729,
+        "sha256": "4b3e4410e2a72c2d2abecf231b3167df176ebb3744ed1025e9aa932dd9afdc2d",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/results/S10/raw/requests.jsonl",
+        "bytes": 2536,
+        "sha256": "f5b273f9d98142f07a71b1ca09c407b476ce86a703d0c2cb3ba4ec59bcc9d437",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/results/S10/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/results/S10/scenario.json",
+        "bytes": 1198,
+        "sha256": "7d110bdb2e8bcd39399146543172f4585117d6587df039f9be8c2335cec6d546",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs/phase6-dev-s10/summary.json",
+        "bytes": 281,
+        "sha256": "c54c0f856b5209f59ae923caa5007585e478275599315ebd7d9064cf3ac08e32",
+        "mode": "0444"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/acceptance.json",
+        "bytes": 4762,
+        "sha256": "cdbbec4218f75cf95cc62bb7286f2c4443dbc5a4fa1135ab0079a88005e46920",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/environment.json",
+        "bytes": 433,
+        "sha256": "281bd3ebb36a0b7a6b6b8778fc36f4bc5ae150b088cbbaebf7fd1dd29052d7f8",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/manifest.json",
+        "bytes": 143820,
+        "sha256": "4db1d0445f082d04f87cca6269d3dbc80f10de4840198b6bfa39c205e533afdb",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S01.jsonl",
+        "bytes": 1389,
+        "sha256": "1caef4b765bc3ef956074686e561375695723f0bbdc039e237cb80152c2f84e8",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S02.jsonl",
+        "bytes": 1331,
+        "sha256": "84d2f0ef89bfc676257045fe5ae69ebab7c816ed072ef22641cb1d0f30997098",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S03.jsonl",
+        "bytes": 2649,
+        "sha256": "67ff297653e5923878906173be9418f278bbd701fa826a3fd0ae0486d745e53f",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S04.jsonl",
+        "bytes": 1333,
+        "sha256": "7b918fd0ff384261de2ca53e737600d5853afad841886d55de6092b451a42317",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S05.jsonl",
+        "bytes": 7658,
+        "sha256": "379f7d886e3e25d3006b3bb1fab59a4e9ec5d79bc7609a7f9282a1572378234c",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S06.jsonl",
+        "bytes": 1792,
+        "sha256": "2983fdf6b1c56e53876d5f68e9893dc8a8eeef7cad8e1ee4b207f46ccf16a060",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S07.jsonl",
+        "bytes": 6413,
+        "sha256": "064f667ce93e5f9aa3e67624996459688f71f2484e3da6edc6469a26cd1fd588",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S08.jsonl",
+        "bytes": 8016,
+        "sha256": "17ca3c58043033fa4f73576f97494c7888a6955663f3183aa3b0dcc60a4f4886",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S09.jsonl",
+        "bytes": 4119,
+        "sha256": "832f070fe676c0fe0919e6fe4013e7e577f04393b451b39b99586e088ef0a0e0",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S12.jsonl",
+        "bytes": 1333,
+        "sha256": "85172e181c4d6bba8cc196fe51798c78951019b5f4f8e096eedfc8622ee915b6",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S14.jsonl",
+        "bytes": 7357,
+        "sha256": "f90cdd74dfb3cfd176992885422c6e2a22d4249c0c18a9a91703b48664c3c8ee",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/report/summary.json",
+        "bytes": 346988,
+        "sha256": "f2dd87f859047948a9d1933fea9361a896c419b256ea20961f84988a23eb6c23",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/report/summary.md",
+        "bytes": 1410,
+        "sha256": "ebfe1aff1ce6124d42bdd9268527d41b36ae37d605f15c4967f77527da816412",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S01/correctness/S01.json",
+        "bytes": 702,
+        "sha256": "4267818393ebe38c69d5e3b01272e84fa1a35e04e72364100673a56a3f286ac6",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S01/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S01/raw/requests.jsonl",
+        "bytes": 2773,
+        "sha256": "69fc81f7ab20f9025d201945145dc7b42c5ac65ded251b4d6ed31f9d8bd8adb1",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S01/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S01/scenario.json",
+        "bytes": 1227,
+        "sha256": "9eef9d983e03fceeb324277ce766474e02b8aee33cd577c13dc2b7d46af77ec8",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S02/correctness/S02.json",
+        "bytes": 1311,
+        "sha256": "f27597a763f6ce49942d752689280ca9ad05be96e85563cc7f9f68eafd8d3c75",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S02/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S02/raw/requests.jsonl",
+        "bytes": 6735,
+        "sha256": "8ce395245100c0fe67f742db0ac4d428e39c7d705bffc69e437226b17e90632f",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S02/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S02/scenario.json",
+        "bytes": 1896,
+        "sha256": "285f8819b082d58a58ad8cf71f28ba2e1a002d3fa5e0a90ceb3f46ef89aa2ae6",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S03/correctness/S03.json",
+        "bytes": 2018,
+        "sha256": "2fe2f433799d79296e02b14f046e52482e82c18e118ebda8fd7ff033283cd4df",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S03/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S03/raw/requests.jsonl",
+        "bytes": 19610,
+        "sha256": "c777c1ccae706785cb3063a6bd7fc1b1ecaf4d05577eaeb22e5ecd00ac060812",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S03/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S03/scenario.json",
+        "bytes": 2652,
+        "sha256": "94a2a9ba3d46af46194cb9a5aa05c204ce63c5b9b129a959eeb930b16d3c73a9",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S04/correctness/S04.json",
+        "bytes": 815,
+        "sha256": "890a736c8f6fa7107d2ab81e3435b7e1faa4a7b863270894040ca6ed093c3aab",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S04/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S04/raw/requests.jsonl",
+        "bytes": 3326,
+        "sha256": "31b6642601c2b02ba9ee0f734cedf654a057c3cc3ab814c6a9e20e9f6cf2b3cd",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S04/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S04/scenario.json",
+        "bytes": 1352,
+        "sha256": "a0dece41b1b0270dc0f191e11489e0f38722d61641079c717cbc930684a8f940",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S05/correctness/S05.json",
+        "bytes": 20733,
+        "sha256": "a79ce3dd1f823a0f51212172ae9973d713af739144c0c8af916e458cb3ab32c9",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S05/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S05/raw/requests.jsonl",
+        "bytes": 156068,
+        "sha256": "70e1849d2de1273c7be08feaeef54e7f3c000f31edfb96e011ed2d257c837846",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S05/raw/task-events.jsonl",
+        "bytes": 4157,
+        "sha256": "cb4a81ed8bf7a749e71c8ebd7d319b990297894d0e1fc2a12ad2a5ef39bee526",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S05/scenario.json",
+        "bytes": 23271,
+        "sha256": "4015b6e10039ef2272404c06557b6b980dddbbcbe463588cf662b6457f49df75",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S06/correctness/S06.json",
+        "bytes": 2623,
+        "sha256": "b44726e1b2b13e59cbc8de3225b6262e52c1d937f741f1a507f198cbb0434cc0",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S06/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S06/raw/requests.jsonl",
+        "bytes": 19604,
+        "sha256": "3b7eb8fcfb9f4d33d8f6841ad5ae34bc3bc38d1ebc20c2ae311619f437982d77",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S06/raw/task-events.jsonl",
+        "bytes": 1914,
+        "sha256": "13e2dbd493fa741aaba432b15f79fb5e588ef21c3023c729a2261380bb9d8fb6",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S06/scenario.json",
+        "bytes": 3346,
+        "sha256": "b0521536ecc4d9cc6e31ed7132967f61cc92a4705310ba06ce044fc19f3558df",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S07/correctness/S07.json",
+        "bytes": 2151,
+        "sha256": "c19c94d918f97540f5f19356a265aa7c50e7dcbfdd05b9064e313e3d020e0e01",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S07/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S07/raw/requests.jsonl",
+        "bytes": 14934,
+        "sha256": "9d37eaa9f4afb1068ad641227ae9d9c49d4a9ec6eb3622d128422501e9953768",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S07/raw/task-events.jsonl",
+        "bytes": 1777,
+        "sha256": "0c253a137d892e20af68199ae7c4e247ce73b1952430c10d24e74bc58295e89c",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S07/scenario.json",
+        "bytes": 2826,
+        "sha256": "2071abc03f4678c6f8cf5bcfa8a441222cde58f5842890b31f4d361fb57d0980",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S08/correctness/S08.json",
+        "bytes": 33231,
+        "sha256": "d379a57ac78f58db1022f516174bde68e1930c468a4ffba70ceeb4dc708e282e",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S08/raw/cases.jsonl",
+        "bytes": 9952,
+        "sha256": "9b8ef400a6c6fe9de119eae1a14ceec416a9b6544269630d104cd6ba00fad109",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S08/raw/requests.jsonl",
+        "bytes": 140715,
+        "sha256": "e77d04605517daa6f18ede3b69913635aa8a14c16aa37aeaa45e201effa847f0",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S08/raw/task-events.jsonl",
+        "bytes": 20207,
+        "sha256": "067f579f1fd954b08566aad592758a8eb55b38a035ef4fc1bcd9fef19b98b01e",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S08/scenario.json",
+        "bytes": 36663,
+        "sha256": "041b0422d3c8ec41f0308b547d6d873e6d561914db87df7983b90992ef034b09",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S09/correctness/S09.json",
+        "bytes": 5301,
+        "sha256": "8ed6894bd24b1a79d6a8428f5d096747a1e85088aa8b1acc7f097fad7ed6fd20",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S09/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S09/raw/requests.jsonl",
+        "bytes": 50061,
+        "sha256": "ba2420d8b87d783f6c005687cc84da99ae2fd9c6622611ccd058c8687b728e62",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S09/raw/task-events.jsonl",
+        "bytes": 2008,
+        "sha256": "7053bed626f18f14185440b27ee7eca8bd5e31ca39062f43d7bf0b62417f9bc6",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S09/scenario.json",
+        "bytes": 6277,
+        "sha256": "4284f835f1ff8c209b32903ef5ecac369d03b11464a11d9d924a773f4293c9f7",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S12/correctness/S12.json",
+        "bytes": 844,
+        "sha256": "ec9417f29563a65df842bcbdafbf70fd653a7406382ebc9b6c5a2facaaedf718",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S12/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S12/raw/requests.jsonl",
+        "bytes": 3160,
+        "sha256": "e96229f6a7316d4f0bf91be5cdb3f2e8f7338b06fbd874b63f882e153a76c8be",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S12/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S12/scenario.json",
+        "bytes": 1381,
+        "sha256": "84cb57abe52f7b238c19da040ca51b0bf517b095c5a1a90d107f5611a84dc660",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S14/correctness/S14.json",
+        "bytes": 10833,
+        "sha256": "687894b73b873db76daebc131f1f8b33666af833832a56dc681313218f352990",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S14/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S14/raw/requests.jsonl",
+        "bytes": 190330,
+        "sha256": "ec55b41ea9401f2e4080f35cc5c100473528caefb3b9572c04d5230d3b59466f",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S14/raw/task-events.jsonl",
+        "bytes": 223,
+        "sha256": "1d29fbd4df00f0a7274d9613a2465639f9235bf4148bc83f847c950343ed8d72",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/results/S14/scenario.json",
+        "bytes": 12284,
+        "sha256": "c1e332c522e19e3dfb3a25c822c4ab6f2a41271493b3c80d9a7881653fc6438d",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-main/summary.json",
+        "bytes": 1900,
+        "sha256": "ac97e7b0a79d48dde3053505a785f4920a00fa940f2b2467042e9332e202099f",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/acceptance.json",
+        "bytes": 4456,
+        "sha256": "497dcea0a6d16b4c8baa8d7ef1c87c58103979a02a311dbcc9c1be62d24e3fc0",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/environment.json",
+        "bytes": 433,
+        "sha256": "c9d8053b7dc685ff3223575a9d7f6df889d371247d0cf6b15b4472241ef04241",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/manifest.json",
+        "bytes": 52694,
+        "sha256": "8580f0893d33cac74564550fcdf62d47bbc9b3553f7b4b3d4719cec36aedf3cc",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/raw/resources-S08.jsonl",
+        "bytes": 10478,
+        "sha256": "d275dadba45d0a06d27be8b4090ce2a6eb2208f3a29a16042f71f8d113889cad",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/report/summary.json",
+        "bytes": 111930,
+        "sha256": "f59273166efe8569d09ff75092a2d33e4c6dfc0fbd669084810b0568451a6e51",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/report/summary.md",
+        "bytes": 642,
+        "sha256": "7b0d7726035bcd9d351453891eec868856dfb705394375656232ed9a7f8c6b98",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/results/S08/correctness/S08.json",
+        "bytes": 35503,
+        "sha256": "ee629d2d9a78b29baedc5ce191f759bf0cc3642a9876198442632f059e616c3e",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/results/S08/raw/cases.jsonl",
+        "bytes": 9945,
+        "sha256": "9276ff3e21e711a4fffc813e1d48a80c5c789e27919576df6dcac1e60667553a",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/results/S08/raw/requests.jsonl",
+        "bytes": 157651,
+        "sha256": "08c191d8cf2cd3b611a6ac925ef160e40939044501f3a397dd13e2d2e1b7bb3b",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/results/S08/raw/task-events.jsonl",
+        "bytes": 20192,
+        "sha256": "43c855a4d38910c6b5f78c27035abe58dc70d148da34241eb1e071cf5dcaaebf",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/results/S08/scenario.json",
+        "bytes": 39161,
+        "sha256": "8cd3698b816e0e87c2b5f41a2418706dde5ea55b14d58ac079c71da98fd5e31c",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s08/summary.json",
+        "bytes": 351,
+        "sha256": "510ae59ba8a46ffd7c31830d549f0cc78d7ba0fd4c8a7d8b91075b184411f026",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/acceptance.json",
+        "bytes": 4454,
+        "sha256": "208f99ab157740a4bca55372995314fcfb76008503c9e52615d2fd49720149a8",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/environment.json",
+        "bytes": 433,
+        "sha256": "40aad245b6d446bacfae78eb923d94b875734dca7db47b1a82917408497277f7",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/manifest.json",
+        "bytes": 8859,
+        "sha256": "56f28397caaf6f42d9951f7763b4484dc93129c3c8e4ca20b05b42e135aa4013",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/raw/resources-S10.jsonl",
+        "bytes": 1392,
+        "sha256": "ce6864b0e6979d77aab19d1196f2ce48ac38f25989b71e04b44e3ef5a394f38c",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/report/summary.json",
+        "bytes": 9157,
+        "sha256": "951333491660f993440ef1e1dbf605232444858933ed12c0819a9a942ba6862c",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/report/summary.md",
+        "bytes": 641,
+        "sha256": "c2fa650546c662b6c51a14d33eb54a6291163fa3bb46ec533a45706502273d1f",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/results/recompute.json",
+        "bytes": 510,
+        "sha256": "e98c3aa17024ee5809c590ff1b7aeb806752329bb2c6d39172effcfe86e3fbf8",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/results/S10/correctness/S10.json",
+        "bytes": 806,
+        "sha256": "a13a2d9fac2c5ee445867253efa41d3785458fecfd2211e762349e0f4dd0c765",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/results/S10/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/results/S10/raw/requests.jsonl",
+        "bytes": 3158,
+        "sha256": "dafff9267b4742c85001415a5e72493018b29166c2bc651f04a11fc4aa713713",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/results/S10/raw/task-events.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/results/S10/scenario.json",
+        "bytes": 1341,
+        "sha256": "ea25319e9a63481f61e22634838c0e6ed4dfdc63aa3aa4d110700c3261c5dab9",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s10/summary.json",
+        "bytes": 346,
+        "sha256": "916b187918259deadc4609c69cff13762998d6593d760710a7c0722bd01a7f7a",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/acceptance.json",
+        "bytes": 4456,
+        "sha256": "5f5f40ad6e93d802ae98e219451f5ee989e3b0441b4953321cac37ccadfd020f",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/environment.json",
+        "bytes": 433,
+        "sha256": "d9f3f50041577cf1ce2a2ddcc8f1cb1a74eb799ad26a68f5edb4e69989283263",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/manifest.json",
+        "bytes": 7876,
+        "sha256": "700656c844be8f52f973b4288e0011a204bce53f1c3594e19b0c57e554518907",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/raw/resources-S13.jsonl",
+        "bytes": 130486,
+        "sha256": "8dfa4ec3cd2acb9294a2542749f46e4f9201c37a8cd22a4d33a0fcbbd99d538d",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/report/summary.json",
+        "bytes": 18133,
+        "sha256": "93d119039b4581555a1b043d3b10d3cef210836ee26f585bdc3c4aad7a980db1",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/report/summary.md",
+        "bytes": 643,
+        "sha256": "4b34300057e437b0d473471ac37d28b7a4fc49c251d869042f8fd5098cb03cd6",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/correctness/S13.json",
+        "bytes": 360,
+        "sha256": "87fe40640a70be4e8dbabcfd1c055a8398515e19e1d32a1968446830d0cf14f9",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/raw/cases.jsonl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/raw/requests.jsonl",
+        "bytes": 687417,
+        "sha256": "18684b4f5223cd63f9cd51f63ad0e298716db2c987c82c4cb2ea98064b2ff6a3",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/raw/task-events.jsonl",
+        "bytes": 1195,
+        "sha256": "2461260d6e8a8cedac7ee643062e3cf653d5930785d602e75b93fd0b00ec4330",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/scenario.json",
+        "bytes": 847,
+        "sha256": "481f021955f410f337852aad1a3c3c93ac56dd4a3c7380a072ea28d1fb9d445c",
+        "mode": "0644"
+      },
+      {
+        "path": "evidence/runs-v2/phase6-fix-dev-d1-s13/summary.json",
+        "bytes": 351,
+        "sha256": "5f03dc88db9bde95d608dce38c03c12e59287a161264427a787110814b9d8357",
+        "mode": "0644"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "runId": "phase6-fix-dev-d1-main-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-main",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S12",
+        "S14"
+      ],
+      "requests": 737,
+      "success": 737,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-main/manifest.json",
+      "treeSha256": "d231b33a76b870af961cc4b767687d039f744610e856af5c3b0f6e9a2b5a732c",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S01.jsonl",
+          "bytes": 1389,
+          "sha256": "1caef4b765bc3ef956074686e561375695723f0bbdc039e237cb80152c2f84e8",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S02.jsonl",
+          "bytes": 1331,
+          "sha256": "84d2f0ef89bfc676257045fe5ae69ebab7c816ed072ef22641cb1d0f30997098",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S03.jsonl",
+          "bytes": 2649,
+          "sha256": "67ff297653e5923878906173be9418f278bbd701fa826a3fd0ae0486d745e53f",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S04.jsonl",
+          "bytes": 1333,
+          "sha256": "7b918fd0ff384261de2ca53e737600d5853afad841886d55de6092b451a42317",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S05.jsonl",
+          "bytes": 7658,
+          "sha256": "379f7d886e3e25d3006b3bb1fab59a4e9ec5d79bc7609a7f9282a1572378234c",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S06.jsonl",
+          "bytes": 1792,
+          "sha256": "2983fdf6b1c56e53876d5f68e9893dc8a8eeef7cad8e1ee4b207f46ccf16a060",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S07.jsonl",
+          "bytes": 6413,
+          "sha256": "064f667ce93e5f9aa3e67624996459688f71f2484e3da6edc6469a26cd1fd588",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S08.jsonl",
+          "bytes": 8016,
+          "sha256": "17ca3c58043033fa4f73576f97494c7888a6955663f3183aa3b0dcc60a4f4886",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S09.jsonl",
+          "bytes": 4119,
+          "sha256": "832f070fe676c0fe0919e6fe4013e7e577f04393b451b39b99586e088ef0a0e0",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S12.jsonl",
+          "bytes": 1333,
+          "sha256": "85172e181c4d6bba8cc196fe51798c78951019b5f4f8e096eedfc8622ee915b6",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S14.jsonl",
+          "bytes": 7357,
+          "sha256": "f90cdd74dfb3cfd176992885422c6e2a22d4249c0c18a9a91703b48664c3c8ee",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "phase6-fix-dev-d1-s08-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-s08",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S08"
+      ],
+      "requests": 179,
+      "success": 179,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-s08/manifest.json",
+      "treeSha256": "184bdcf3b9cf3ef410a76b971e37d9c07995877ff2900e810dd5324b4922b9ad",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-s08/raw/resources-S08.jsonl",
+          "bytes": 10478,
+          "sha256": "d275dadba45d0a06d27be8b4090ce2a6eb2208f3a29a16042f71f8d113889cad",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "phase6-fix-dev-s10-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-s10",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S10"
+      ],
+      "requests": 4,
+      "success": 4,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-s10/manifest.json",
+      "treeSha256": "f3d49c1e90823d9c05fa6777959d16281f2662e5978509eda38ac0e3527c8c9c",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-s10/raw/resources-S10.jsonl",
+          "bytes": 1392,
+          "sha256": "ce6864b0e6979d77aab19d1196f2ce48ac38f25989b71e04b44e3ef5a394f38c",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "phase6-fix-dev-d1-s13-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-s13",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S13"
+      ],
+      "requests": 990,
+      "success": 990,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 300000,
+        "warmupMs": 30000,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/raw/task-events.jsonl",
+        "rate": 2,
+        "durationMs": 300000,
+        "warmupMs": 30000,
+        "offered": 990,
+        "completed": 990,
+        "dropped": 0,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": true,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-s13/manifest.json",
+      "treeSha256": "4ac3517fc451851a18e31194b4d717fa171501d64922cb19eef2826c4d1b9adb",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-s13/raw/resources-S13.jsonl",
+          "bytes": 130486,
+          "sha256": "8dfa4ec3cd2acb9294a2542749f46e4f9201c37a8cd22a4d33a0fcbbd99d538d",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d1-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d1",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S12",
+        "S13",
+        "S14"
+      ],
+      "requests": 904,
+      "success": 903,
+      "loadParameters": {
+        "rate": 0.5,
+        "durationMs": 60000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs/phase6-dev-d1/results/S13/raw/task-events.jsonl",
+        "rate": 0.5,
+        "durationMs": 60000,
+        "warmupMs": 0,
+        "offered": 30,
+        "completed": 60,
+        "dropped": 0,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d1/manifest.json",
+      "treeSha256": "7afd00c2ab82548c000628f18a0acb6480ea4cc26e4602fae90f00fb35e80df7",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S01.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S01.jsonl",
+          "bytes": 710,
+          "sha256": "3c81a9568d9e99be374b4326422d9ca7c84ce180f43f044a83eff5b371112856",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S02.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S02.jsonl",
+          "bytes": 710,
+          "sha256": "db0be3b328f3b5298acb60990cf238bad78e8f95fbb39cb53e2e76329f9315af",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S03.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S03.jsonl",
+          "bytes": 2212,
+          "sha256": "d6a03697087ef2e15881b35858dce0f85dc09b16cae72b481a043a1975cfb908",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S04.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S04.jsonl",
+          "bytes": 712,
+          "sha256": "5c6973f05a59785fa6fc10b5c3762945614a02d82548f8326d81b547465e90c9",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S05.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S05.jsonl",
+          "bytes": 5966,
+          "sha256": "f60b6c368266a261f18338b834f10e8f076a404d32a80aea38f0e1a5b990bccd",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S06.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S06.jsonl",
+          "bytes": 1087,
+          "sha256": "2e07d4785df7722aadda9cd8ffea5a929842386263c6796c0efae499d6244770",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S07.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S07.jsonl",
+          "bytes": 1083,
+          "sha256": "6c7bd65f88a4d76319ced9bc18cbcb30de87189485db181fd3c1921585cecdd2",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S08.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S08.jsonl",
+          "bytes": 6345,
+          "sha256": "0f9d20d288a9485defa3bf5e728a0d272aebb6477d6c431dfe8ac58fd26da14e",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S09.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S09.jsonl",
+          "bytes": 3332,
+          "sha256": "63d19a8b7ee3eea0517898f10e4b44dcec9149f94596f4b0f57a7e7a4ea777c7",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S12.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S12.jsonl",
+          "bytes": 710,
+          "sha256": "2cecffa942d718217b30dac0b7969007f4e2e6ce6b220971c85a051249456bb6",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S13.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S13.jsonl",
+          "bytes": 16043,
+          "sha256": "44dc223d3e22b61ea464d4f5a716b2ea7e8cb047131533a6306485924a3ae175",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S14.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S14.jsonl",
+          "bytes": 6334,
+          "sha256": "5105443e02013a93f382531a3e0a8240eb45e798dfd8b37230eb3d85e1e9b575",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d1-s13-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d1-s13",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S13"
+      ],
+      "requests": 65,
+      "success": 65,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 30000,
+        "warmupMs": 5000,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs/phase6-dev-d1-s13/results/S13/raw/task-events.jsonl",
+        "rate": 2,
+        "durationMs": 30000,
+        "warmupMs": 5000,
+        "offered": 70,
+        "completed": 65,
+        "dropped": 27,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "diagnostic-invalid-load-shape",
+      "statusReason": "任务事件记录 2 rps × 30 s、offered 70、completed 65、dropped 27；旧报告写成 0.5 rps × 60 s、0 dropped；该 run 是旧负载器诊断数据，不能用于稳态容量判断",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d1-s13/manifest.json",
+      "treeSha256": "3ba0162b9f13704219e9134e50c2f35c5aa659e3c92b6aa4545e09b12b477fa3",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d1-s13/raw/resources-S13.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/raw/resources-S13.jsonl",
+          "bytes": 5202,
+          "sha256": "ebc1234d078d87f8e6c3c2c1899ddc87302e6e531326a5c083b9f9ab21a092d1",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d2-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d2",
+      "profile": "dev",
+      "dataset": "D2",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S13"
+      ],
+      "requests": 103,
+      "success": 103,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 15000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs/phase6-dev-d2/results/S13/raw/task-events.jsonl",
+        "rate": 2,
+        "durationMs": 15000,
+        "warmupMs": 0,
+        "offered": 291,
+        "completed": 64,
+        "dropped": 231,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d2/manifest.json",
+      "treeSha256": "9d63303fa51d7b90619a89c1f28e0cd26ae2e2837698d7c80d651fa8bc010725",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S01.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S01.jsonl",
+          "bytes": 710,
+          "sha256": "8c1594f02ec4a48cecbf44750ab05a6dcf35aeb4506cf4db2cd98936695427c1",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S02.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S02.jsonl",
+          "bytes": 708,
+          "sha256": "4ee54d2532efc6c0196ae219e349ffe05cf87a7bf56fe174b29ab48ff47c0408",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S03.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S03.jsonl",
+          "bytes": 1462,
+          "sha256": "29dd598409aad2b7be489bef88b7801206ece5cecc17574bebecb33020ef5c80",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S04.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S04.jsonl",
+          "bytes": 710,
+          "sha256": "3ab6d3e197de0b6a1e53c615a1efd69384740d6c1b567c5b9543cd095328f6a5",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S13.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S13.jsonl",
+          "bytes": 4827,
+          "sha256": "b92655a0d1077285e3c120a46d7055d2c63a32e84e3e6ef27fde18a98ecc2150",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d3-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d3",
+      "profile": "dev",
+      "dataset": "D3",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04"
+      ],
+      "requests": 39,
+      "success": 39,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 10000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d3/manifest.json",
+      "treeSha256": "9e88c509e4c4d71e9849f253f717f67d7e0d24be1ee2ec141237b98d43e652f6",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S01.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S01.jsonl",
+          "bytes": 706,
+          "sha256": "e1d55efc3c92f1984aca12f693d2bdc2b2e51551a4cd45670face5f6f9eacdae",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S02.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S02.jsonl",
+          "bytes": 4459,
+          "sha256": "d1d175dddd6b422cf16febc480e2fd7fa7e55f42f05d5521fceccd469d8da9ab",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S03.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S03.jsonl",
+          "bytes": 2215,
+          "sha256": "23ba43996ad91bef693b5154c4b0e2456e15594bb13ba2f8c016c007931034df",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S04.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S04.jsonl",
+          "bytes": 9351,
+          "sha256": "c48f503f7b6b3b4a0ef4d690135bc8c2e9bafd163f24a5da51576d4b00bc526c",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-s08-diag-20261024",
+      "evidenceDirectory": "runs/phase6-dev-s08-diagnostic",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S08"
+      ],
+      "requests": 267,
+      "success": 266,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-s08-diagnostic/manifest.json",
+      "treeSha256": "a10b766f677f9191a315243bf0a3e76088eb51d3373f510ec7587f40f3866c28",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-s08-diagnostic/raw/resources-S08.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-s08-diagnostic/raw/resources-S08.jsonl",
+          "bytes": 8217,
+          "sha256": "1d7f93759c0d86f1fd8b7244ad6670335b3285609d30957fbc0d23be61d7b98b",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-s10-20261024",
+      "evidenceDirectory": "runs/phase6-dev-s10",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S10"
+      ],
+      "requests": 4,
+      "success": 4,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-s10/manifest.json",
+      "treeSha256": "6b466ba34057018a63651f43db73636ace14f7152bbfcfede9bcc3fa8b957db3",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-s10/raw/resources-S10.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-s10/raw/resources-S10.jsonl",
+          "bytes": 710,
+          "sha256": "d54eefefe0fa5d66ae1c7d32bfc89099398c554812286b66fdb642661b36b277",
+          "immutable": true
+        }
+      ]
+    }
+  ]
+}

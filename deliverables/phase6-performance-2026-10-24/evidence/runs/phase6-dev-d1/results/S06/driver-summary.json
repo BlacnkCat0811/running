@@ -1,0 +1,135 @@
+{
+  "scenario": "S06",
+  "runId": "dev-d1-20261024",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T05:34:18.362Z",
+  "finishedAt": "2026-10-24T05:34:20.252Z",
+  "requests": 24,
+  "outcomes": {
+    "success": 24
+  },
+  "oracleFailures": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/imports/uploads",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/imports/inspect",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs",
+      "phase": null,
+      "status": 202,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/import-jobs/:id",
+      "phase": "poll",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/imports/uploads",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/imports/inspect",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/imports/uploads",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/imports/inspect",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

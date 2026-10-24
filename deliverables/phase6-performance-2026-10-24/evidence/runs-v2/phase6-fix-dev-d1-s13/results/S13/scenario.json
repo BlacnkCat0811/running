@@ -1,0 +1,35 @@
+{
+  "scenario": "S13",
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "incomplete": false,
+  "driverLog": "/Users/ta/rai-phase6-lab-fix/run-final3-s13-001/logs/driver-S13.log",
+  "apiLog": "/Users/ta/rai-phase6-lab-fix/run-final3-s13-001/logs/api-S13.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 35844096,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S13",
+    "runId": "phase6-fix-dev-d1-s13-20261024-04",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T08:03:21.438Z",
+    "finishedAt": "2026-10-24T08:08:47.072Z",
+    "incomplete": false,
+    "interruptedBy": null,
+    "requests": 990,
+    "outcomes": {
+      "success": 990
+    },
+    "oracleFailures": [],
+    "cases": [],
+    "checks": []
+  },
+  "requests": 990,
+  "oracleFailures": 0,
+  "fatal": null
+}

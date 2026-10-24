@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "runId": "dev-d1-s13-20261024",
+  "mode": "execute",
+  "profile": "dev",
+  "dataset": "D1",
+  "scenarios": [
+    "S13"
+  ],
+  "startedAt": "2026-10-24T05:29:40.156Z",
+  "finishedAt": "2026-10-24T05:30:42.159Z",
+  "root": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13",
+  "realRoot": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13",
+  "protocol": {
+    "path": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+    "sha256": "48e7aaa4d52fb7fc66cbe0948948c3e12558c29269c96ef027a84cc3a84062e5"
+  },
+  "code": {
+    "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+    "status": "M package.json\n?? apps/api/test/phase6-fixtures.test.mjs\n?? apps/api/test/phase6-safety.test.mjs\n?? apps/api/test/phase6-verify.test.mjs\n?? deliverables/phase6-performance-2026-10-24/\n?? scripts/phase6/",
+    "protocolSha256": "48e7aaa4d52fb7fc66cbe0948948c3e12558c29269c96ef027a84cc3a84062e5",
+    "packageLockSha256": "0642057ed8b3b0a08f18dede2621172245c6de2bf4d29155c944be3511397d2a",
+    "packageJsonSha256": "43285f9d7fbec751b09a79ef099adc03fb35457774bc6020f30b7e72fcc11637",
+    "node": "v22.23.2",
+    "platform": "darwin 25.6.0 x64"
+  },
+  "fixture": {
+    "path": "/Users/ta/rai-phase6-lab/fixture-d1/datasets/D1/rai.sqlite",
+    "sha256": "98c8aa830997e22e865c5973ed6a5babf7a05d42fbfaa10aba99f1e53ef4cc2c",
+    "bytes": 35844096
+  },
+  "fixtureManifest": {
+    "path": "/Users/ta/rai-phase6-lab/fixture-d1/datasets/D1/manifest.json",
+    "sha256": "9d4fdf2809a902c73c8d0b90a596dea1442e8ad9afd57be3f6816641731300ae"
+  },
+  "payloadManifest": null,
+  "safety": {
+    "rootOutsideRepo": true,
+    "mainAndControlDistinct": true,
+    "loopbackOnly": true,
+    "envWhitelist": true,
+    "tokenScan": "pending-final-scan"
+  },
+  "commands": [
+    {
+      "scenario": "S13",
+      "command": "node --import tsx apps/api/src/server.ts",
+      "cwd": "/Users/ta/running",
+      "envKeys": [
+        "RAI_RUNTIME_ROOT",
+        "RAI_DATABASE",
+        "RAI_CONTROL_DATABASE",
+        "RAI_API_PORT",
+        "RAI_API_HOST",
+        "RAI_API_TOKEN",
+        "RAI_SERVER_ID",
+        "RAI_ATHLETE_ID",
+        "RAI_DATASET_EPOCH",
+        "RAI_LOG_LEVEL",
+        "NO_PROXY",
+        "no_proxy"
+      ],
+      "envInheritedKeys": [
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR"
+      ],
+      "port": "0 (ephemeral)",
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/logs/api-S13.log"
+    },
+    {
+      "scenario": "S13",
+      "command": "node scripts/phase6/driver.mjs",
+      "args": [
+        "scripts/phase6/driver.mjs",
+        "--base-url",
+        "http://127.0.0.1:60242",
+        "--scenario",
+        "S13",
+        "--dataset",
+        "D1",
+        "--profile",
+        "dev",
+        "--run-id",
+        "dev-d1-s13-20261024",
+        "--out",
+        "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/results/S13",
+        "--rate",
+        "2",
+        "--duration-ms",
+        "30000",
+        "--warmup-ms",
+        "5000",
+        "--timeout-ms",
+        "90000",
+        "--manifest",
+        "/Users/ta/rai-phase6-lab/fixture-d1/datasets/D1/manifest.json"
+      ],
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/logs/driver-S13.log"
+    }
+  ],
+  "scenariosResults": [
+    {
+      "scenario": "S13",
+      "exitCode": 0,
+      "signal": null,
+      "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/logs/driver-S13.log",
+      "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/logs/api-S13.log",
+      "fixtureBytes": 35844096,
+      "database": {
+        "bytes": 35844096,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "summary": {
+        "scenario": "S13",
+        "runId": "dev-d1-s13-20261024",
+        "profile": "dev",
+        "dataset": "D1",
+        "startedAt": "2026-10-24T05:30:04.197Z",
+        "finishedAt": "2026-10-24T05:30:39.256Z",
+        "requests": 65,
+        "outcomes": {
+          "success": 65
+        },
+        "oracleFailures": [],
+        "checks": []
+      },
+      "requests": 65,
+      "oracleFailures": 0,
+      "fatal": null
+    }
+  ],
+  "errors": [],
+  "environment": "environment.json",
+  "cleanup": [
+    "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-10-24",
+  "currentCode": {
+    "devBaseline": "NOT_RUN",
+    "cloudCapacity": "BLOCKED",
+    "phase6Overall": "BLOCKED"
+  },
+  "historicalAcceptance": "acceptance.json",
+  "reviewFixes": "REVIEW_FIXES_2026-10-24.md",
+  "reason": "The historical DEV runs predate runtime source hashing and the S13 write workload; a full run and same-identity regressions are required for current-code acceptance."
+}

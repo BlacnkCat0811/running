@@ -1,0 +1,333 @@
+{
+  "schemaVersion": 1,
+  "dataset": "DX",
+  "seed": 20261024,
+  "asOf": "2026-10-24",
+  "generatedAt": "2026-10-24T06:56:15.192Z",
+  "note": "DX 只生成输入文件，不建立业务库",
+  "payloadRoot": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads",
+  "payloads": [
+    {
+      "kind": "record-only",
+      "label": "小批 100 条",
+      "expected": "accepted; data_only or direct lane",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "data-only",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 100,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "01-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/01-record-only.zip",
+      "bytes": 1427,
+      "sha256": "6d3dcf287584b3c2fc4660502ec5694bc338388a917bbf5e8046207016e30cdc"
+    },
+    {
+      "kind": "record-only",
+      "label": "中批 2500 条",
+      "expected": "accepted",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "data-only",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 2500,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "02-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/02-record-only.zip",
+      "bytes": 23173,
+      "sha256": "9782fc2e59a1e95a0fca3266188dce6d8566ba953e41be12f3bcf528cd00e4e8"
+    },
+    {
+      "kind": "record-only",
+      "label": "近记录上限 4990 条",
+      "expected": "accepted at boundary",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "data-only",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 4990,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "03-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/03-record-only.zip",
+      "bytes": 45644,
+      "sha256": "c8020c3028f8873146b942f149229cae0686d0141c96ad104288da795fa2babe"
+    },
+    {
+      "kind": "record-only",
+      "s08": true,
+      "label": "超记录上限 5001 条",
+      "expected": "data-only refused; direct-sync accepts 5001 per contract",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "direct-sync",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 5001,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true,
+        "note": "data-only 上限 5000；direct-sync 的 maxRecords 只限删除配额"
+      },
+      "name": "04-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/04-record-only.zip",
+      "bytes": 45790,
+      "sha256": "aec56f359610fc2f0b884938a45f99d232485f5ee11a8543a363130e5b066775"
+    },
+    {
+      "kind": "record-only",
+      "s08": true,
+      "label": "XML 字节超 2 MiB（合法 5000 条，仍 < 8 MiB）",
+      "expected": "data-only lane refused; direct-sync accepts within 8 MiB",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "direct-sync",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 5000,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "05-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/05-record-only.zip",
+      "bytes": 58983,
+      "sha256": "269c55d522c926f304fe2058a29f5ea45357f5b09e9eb6f2583826aae9a77073"
+    },
+    {
+      "kind": "record-only",
+      "s08": true,
+      "label": "非法 manifest 版本",
+      "expected": "refused: manifest contract",
+      "contract": {
+        "expectation": "refused",
+        "expectedLane": null,
+        "allowJob": false,
+        "allowedRejectionStages": [
+          "inspect"
+        ],
+        "expectedHttpStatus": [
+          400
+        ],
+        "expectedCode": "import_manifest_invalid",
+        "expectedFacts": {
+          "healthRecords": 0,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "06-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/06-record-only.zip",
+      "bytes": 470,
+      "sha256": "7af397262b2e78f0636360391b56a72c9841e38a314ba6142bdf7538552775cc"
+    },
+    {
+      "kind": "record-only",
+      "s08": true,
+      "label": "损坏 ZIP",
+      "expected": "refused: archive invalid",
+      "contract": {
+        "expectation": "refused",
+        "expectedLane": null,
+        "allowJob": false,
+        "allowedRejectionStages": [
+          "upload"
+        ],
+        "expectedHttpStatus": [
+          400
+        ],
+        "expectedCode": "invalid_import_archive",
+        "expectedFacts": {
+          "healthRecords": 0,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "07-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/07-record-only.zip",
+      "bytes": 26,
+      "sha256": "389df5d73817cc22cad725028542707add425ebb886f1834d44ee6d98bfce7aa"
+    },
+    {
+      "kind": "record-only",
+      "s08": true,
+      "label": "非法记录类型",
+      "expected": "observational until product contract",
+      "contract": {
+        "expectation": "observational",
+        "expectedLane": null,
+        "allowJob": true,
+        "allowedRejectionStages": [
+          "upload",
+          "inspect",
+          "job"
+        ],
+        "expectedHttpStatus": [
+          200,
+          400
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": null,
+          "workouts": null,
+          "routePoints": null
+        },
+        "required": true,
+        "note": "未知 HealthKit 类型保持观测，不自动要求拒绝，也不从必需测试列表消失"
+      },
+      "name": "08-record-only.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/08-record-only.zip",
+      "bytes": 502,
+      "sha256": "35cb60cfdec7464e7a5e76325faa6070b22e2a567c8a2fe3667de51de26e4965"
+    },
+    {
+      "kind": "workout",
+      "label": "单训练 + 50 记录",
+      "expected": "accepted; analysis queued -> published read-visible",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "direct-sync",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 50,
+          "workouts": 1,
+          "routePoints": null
+        },
+        "required": true
+      },
+      "name": "09-workout.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/09-workout.zip",
+      "bytes": 1077,
+      "sha256": "04afccf716e0cb4f714ab9aa4de6a5b0e36ca5269930af917387098079c1be6e"
+    },
+    {
+      "kind": "direct-sync",
+      "label": "GPX 3 文件 / 3 点",
+      "expected": "accepted; route ledger + readable points",
+      "contract": {
+        "expectation": "accepted",
+        "expectedLane": "direct-sync",
+        "allowJob": true,
+        "allowedRejectionStages": [],
+        "expectedHttpStatus": [
+          200
+        ],
+        "expectedCode": null,
+        "expectedFacts": {
+          "healthRecords": 1,
+          "workouts": 1,
+          "routePoints": 9
+        },
+        "required": true
+      },
+      "name": "10-direct-sync.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/10-direct-sync.zip",
+      "bytes": 1411,
+      "sha256": "2413d784f0e3952d4c029176f1e8933dd0c6e560000c4bc8cdd8e600da3bc704"
+    },
+    {
+      "kind": "direct-sync",
+      "s08": true,
+      "label": "GPX 201 文件（超 200）",
+      "expected": "refused: max 200 route files",
+      "contract": {
+        "expectation": "refused",
+        "expectedLane": null,
+        "allowJob": false,
+        "allowedRejectionStages": [
+          "inspect"
+        ],
+        "expectedHttpStatus": [
+          400
+        ],
+        "expectedCode": "direct_sync_payload_exceeds_bounds",
+        "expectedFacts": {
+          "healthRecords": 0,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "11-direct-sync.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/11-direct-sync.zip",
+      "bytes": 51282,
+      "sha256": "4cc775a91d51c595661cfd3a89a42008e705869d14c9b665680ef0878c88ee95"
+    },
+    {
+      "kind": "direct-sync",
+      "s08": true,
+      "label": "direct-sync XML 超 8 MiB（合法 5000 条）",
+      "expected": "refused: max 8 MiB XML",
+      "contract": {
+        "expectation": "refused",
+        "expectedLane": null,
+        "allowJob": false,
+        "allowedRejectionStages": [
+          "inspect"
+        ],
+        "expectedHttpStatus": [
+          400
+        ],
+        "expectedCode": "direct_sync_payload_exceeds_bounds",
+        "expectedFacts": {
+          "healthRecords": 0,
+          "workouts": 0,
+          "routePoints": 0
+        },
+        "required": true
+      },
+      "name": "12-direct-sync.zip",
+      "path": "/Users/ta/rai-phase6-lab-fix/fixture-dx/payloads/12-direct-sync.zip",
+      "bytes": 71434,
+      "sha256": "7d3898f8f36ec7a015a91028bcfd1845d5411ba5168e0cd4f11cfa2482cfe274"
+    }
+  ]
+}

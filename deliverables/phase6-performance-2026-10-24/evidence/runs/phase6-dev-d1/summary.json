@@ -1,0 +1,95 @@
+{
+  "runId": "dev-d1-20261024",
+  "profile": "dev",
+  "dataset": "D1",
+  "finishedAt": "2026-10-24T05:36:44.180Z",
+  "scenarios": [
+    {
+      "scenario": "S01",
+      "exitCode": 0,
+      "requests": 3,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S02",
+      "exitCode": 0,
+      "requests": 8,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S03",
+      "exitCode": 0,
+      "requests": 24,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S04",
+      "exitCode": 0,
+      "requests": 4,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S05",
+      "exitCode": 0,
+      "requests": 190,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S06",
+      "exitCode": 0,
+      "requests": 24,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S07",
+      "exitCode": 0,
+      "requests": 20,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S08",
+      "exitCode": 1,
+      "requests": 180,
+      "oracleFailures": 1,
+      "fatal": null
+    },
+    {
+      "scenario": "S09",
+      "exitCode": 0,
+      "requests": 77,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S12",
+      "exitCode": 0,
+      "requests": 4,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S13",
+      "exitCode": 0,
+      "requests": 60,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S14",
+      "exitCode": 0,
+      "requests": 310,
+      "oracleFailures": 0,
+      "fatal": null
+    }
+  ],
+  "errors": [
+    "S08: driver exit 1"
+  ]
+}

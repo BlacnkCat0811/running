@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T08:10:31.250Z",
+  "runRoot": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/evidence/runs-v2/phase6-fix-dev-d1-s10",
+  "protocolPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+  "scope": "dev",
+  "verdict": {
+    "devBaseline": "PASS",
+    "cloudCapacity": "BLOCKED",
+    "phase6Overall": "BLOCKED",
+    "knownFailures": [],
+    "blocked": [
+      "G5",
+      "G6",
+      "G7"
+    ],
+    "notRun": []
+  },
+  "exitCode": 0,
+  "requiredGates": [
+    "G0",
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "G8",
+    "G9"
+  ],
+  "failedRequired": [],
+  "gates": [
+    {
+      "id": "G0",
+      "status": "PASS",
+      "evidence": {
+        "protocol": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+        "missingDocs": [],
+        "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+        "errors": []
+      },
+      "reason": "code/profile/dataset/protocol/fixture/tool frozen"
+    },
+    {
+      "id": "G1",
+      "status": "PASS",
+      "evidence": {
+        "safety": {
+          "rootOutsideRepo": true,
+          "mainAndControlDistinct": true,
+          "loopbackOnly": true,
+          "envWhitelist": true,
+          "isolatedTemp": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/tmp",
+          "isolatedHome": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/home",
+          "tokenScan": "pending-final-scan"
+        },
+        "tokenHits": 0,
+        "rawReadErrors": []
+      },
+      "reason": "negative safety checks recorded; raw has no token"
+    },
+    {
+      "id": "G2",
+      "status": "PASS",
+      "evidence": {
+        "fixtureManifestPath": "/Users/ta/rai-phase6-lab-fix/fixture-d1/datasets/D1/manifest.json",
+        "rows": {
+          "health_records": 65666,
+          "health_records_distinct": 7,
+          "workouts": 101,
+          "workouts_visible": 100,
+          "workouts_deleted": 1,
+          "training_sessions": 100,
+          "training_sessions_active": 99,
+          "workout_routes": 5,
+          "route_points": 2780,
+          "workout_statistics": 200,
+          "ability_assessments": 0
+        },
+        "digest": "e529d2a361cdec54af00cdb685bd15b358de9ea8c4bc18dcdf11d4630cb98b9d",
+        "errors": []
+      },
+      "reason": "deterministic fixture digest + declared sha present"
+    },
+    {
+      "id": "G3",
+      "status": "PASS",
+      "evidence": {
+        "shapeErrors": [],
+        "fakeSuccess": 0,
+        "resourceFiles": 1,
+        "resourceCoverage": [],
+        "resourceErrors": [],
+        "caseEvidenceErrors": [],
+        "rawReadErrors": []
+      },
+      "reason": "raw samples attributable"
+    },
+    {
+      "id": "G4",
+      "status": "PASS",
+      "evidence": {
+        "declared": [
+          "S10"
+        ],
+        "missing": [],
+        "failedScenarios": [],
+        "correctnessErrors": []
+      },
+      "reason": "declared scenarios have consistent machine-adjudicated results"
+    },
+    {
+      "id": "G5",
+      "status": "BLOCKED",
+      "evidence": {
+        "profile": "dev",
+        "cgroupAvailable": false
+      },
+      "reason": "DEV profile does not provide CLOUD cgroup readback"
+    },
+    {
+      "id": "G6",
+      "status": "BLOCKED",
+      "evidence": {
+        "steadyStateMinutes": 0
+      },
+      "reason": "没有 CLOUD 稳定容量点；DEV 只做趋势冒烟"
+    },
+    {
+      "id": "G7",
+      "status": "BLOCKED",
+      "evidence": {
+        "faultRuns": 0,
+        "longRunHours": 0
+      },
+      "reason": "S15–S19 未执行；iOS S20 未运行"
+    },
+    {
+      "id": "G8",
+      "status": "PASS",
+      "evidence": {
+        "summaryPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/evidence/runs-v2/phase6-fix-dev-d1-s10/report/summary.json",
+        "recomputeErrors": [],
+        "correctnessErrors": [],
+        "fingerprintErrors": []
+      },
+      "reason": "raw-only recompute matches saved summary; insufficient P99 handled"
+    },
+    {
+      "id": "G9",
+      "status": "PASS",
+      "evidence": {
+        "regressionsPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/evidence/regressions.json",
+        "overall": "PASS",
+        "identityErrors": []
+      },
+      "reason": "npm/typecheck/check docs recorded with same code identity"
+    }
+  ],
+  "summary": {
+    "scenarios": [
+      "S10"
+    ],
+    "requests": 4,
+    "resources": 1
+  }
+}

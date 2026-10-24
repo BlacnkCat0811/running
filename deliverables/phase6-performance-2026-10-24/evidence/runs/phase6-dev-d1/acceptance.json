@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-24T06:10:01.541Z",
+  "runRoot": "/Users/ta/rai-phase6-lab/phase6-dev-d1",
+  "protocolPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+  "scope": "dev",
+  "verdict": {
+    "devBaseline": "FAIL",
+    "cloudCapacity": "BLOCKED",
+    "phase6Overall": "BLOCKED"
+  },
+  "exitCode": 1,
+  "requiredGates": [
+    "G0",
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "G8",
+    "G9"
+  ],
+  "failedRequired": [
+    "G4"
+  ],
+  "gates": [
+    {
+      "id": "G0",
+      "status": "PASS",
+      "evidence": {
+        "protocol": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+        "missingDocs": [],
+        "commit": "732f3cf3943b0f52915fb10192f07405b0e672de"
+      },
+      "reason": "code/profile/dataset/protocol frozen"
+    },
+    {
+      "id": "G1",
+      "status": "PASS",
+      "evidence": {
+        "safety": {
+          "rootOutsideRepo": true,
+          "mainAndControlDistinct": true,
+          "loopbackOnly": true,
+          "envWhitelist": true,
+          "tokenScan": "pending-final-scan"
+        },
+        "tokenHits": 0
+      },
+      "reason": "negative safety checks recorded; raw has no token"
+    },
+    {
+      "id": "G2",
+      "status": "PASS",
+      "evidence": {
+        "fixtureManifestPath": "/Users/ta/rai-phase6-lab/fixture-d1/datasets/D1/manifest.json",
+        "rows": {
+          "health_records": 65666,
+          "health_records_distinct": 7,
+          "workouts": 101,
+          "workouts_visible": 100,
+          "workouts_deleted": 1,
+          "training_sessions": 100,
+          "training_sessions_active": 99,
+          "workout_routes": 5,
+          "route_points": 2780,
+          "workout_statistics": 200,
+          "ability_assessments": 0
+        },
+        "digest": "e529d2a361cdec54af00cdb685bd15b358de9ea8c4bc18dcdf11d4630cb98b9d"
+      },
+      "reason": "deterministic fixture digest present"
+    },
+    {
+      "id": "G3",
+      "status": "PASS",
+      "evidence": {
+        "shapeErrors": [],
+        "fakeSuccess": 0,
+        "resourceFiles": 12
+      },
+      "reason": "raw samples attributable"
+    },
+    {
+      "id": "G4",
+      "status": "FAIL",
+      "evidence": {
+        "declared": [
+          "S01",
+          "S02",
+          "S03",
+          "S04",
+          "S05",
+          "S06",
+          "S07",
+          "S08",
+          "S09",
+          "S12",
+          "S13",
+          "S14"
+        ],
+        "missing": [],
+        "failedScenarios": [
+          "S08"
+        ]
+      },
+      "reason": "scenario failures: S08"
+    },
+    {
+      "id": "G5",
+      "status": "BLOCKED",
+      "evidence": {
+        "profile": "dev",
+        "cgroupAvailable": false
+      },
+      "reason": "需要隔离 Linux cgroup 资源读回；DEV 不能代替 CLOUD"
+    },
+    {
+      "id": "G6",
+      "status": "BLOCKED",
+      "evidence": {
+        "steadyStateMinutes": 0
+      },
+      "reason": "没有 CLOUD 稳定容量点；DEV 只做趋势冒烟"
+    },
+    {
+      "id": "G7",
+      "status": "BLOCKED",
+      "evidence": {
+        "faultRuns": 0,
+        "longRunHours": 0
+      },
+      "reason": "S15–S19 未执行；iOS S20 未运行"
+    },
+    {
+      "id": "G8",
+      "status": "PASS",
+      "evidence": {
+        "recomputeErrors": [],
+        "phaseErrors": [],
+        "resourceErrors": []
+      },
+      "reason": "raw-only recompute matches; insufficient P99 handled"
+    },
+    {
+      "id": "G9",
+      "status": "PASS",
+      "evidence": {
+        "regressionsPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/evidence/regressions.json",
+        "overall": "PASS"
+      },
+      "reason": "npm/typecheck/check docs recorded"
+    }
+  ],
+  "summary": {
+    "scenarios": [
+      "S01",
+      "S02",
+      "S03",
+      "S04",
+      "S05",
+      "S06",
+      "S07",
+      "S08",
+      "S09",
+      "S12",
+      "S13",
+      "S14"
+    ],
+    "requests": 904,
+    "resources": 12
+  }
+}

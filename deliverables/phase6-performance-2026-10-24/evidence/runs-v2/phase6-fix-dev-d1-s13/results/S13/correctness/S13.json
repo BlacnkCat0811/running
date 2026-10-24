@@ -1,0 +1,17 @@
+{
+  "scenario": "S13",
+  "runId": "phase6-fix-dev-d1-s13-20261024-04",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T08:03:21.438Z",
+  "finishedAt": "2026-10-24T08:08:47.072Z",
+  "incomplete": false,
+  "interruptedBy": null,
+  "requests": 990,
+  "outcomes": {
+    "success": 990
+  },
+  "oracleFailures": [],
+  "cases": [],
+  "checks": []
+}

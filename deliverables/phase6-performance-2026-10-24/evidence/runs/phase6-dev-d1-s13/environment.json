@@ -1,0 +1,14 @@
+{
+  "profile": "dev",
+  "platform": "darwin",
+  "release": "25.6.0",
+  "arch": "x64",
+  "cpuModel": "AMD Ryzen 5 3600X 6-Core Processor             ",
+  "cpuCount": 6,
+  "totalMemoryBytes": 17179869184,
+  "node": "v22.23.2",
+  "execPath": "/Users/ta/.nvm/versions/node/v22.23.2/bin/node",
+  "cgroup": null,
+  "cgroupNote": "DEV: cgroup/systemd 不可用，未冒充 CLOUD 资源读回",
+  "collectedAt": "2026-10-24T05:29:40.561Z"
+}

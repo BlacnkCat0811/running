@@ -92,6 +92,7 @@ export type DirectSyncRejectionReason =
   | "route_exceeds_bounds"
   | "xml_exceeds_bounds"
   | "manifest_exceeds_bounds"
+  | "manifest_invalid"
   | "missing_record_identity"
   | "deletions_exceed_bounds"
   | "database_not_found"
@@ -477,7 +478,15 @@ export function preflightDirectSyncPayload(inputPath: string):
     return { ok: false, rejection: rejectDirect("manifest_exceeds_bounds", "prepare",
       { actual: { manifestBytes: manifestTextBytes }, bounds: { maxManifestBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
   }
-  const manifest = parseHealthSyncManifest(manifestText);
+  // 🔴 P6-F05：manifest 合同错误（未知 version / 非法结构）必须在 preflight
+  // 变成稳定拒绝码，不能以异常冒泡到全局处理器变成 500 internal_error。
+  let manifest: HealthSyncManifest;
+  try {
+    manifest = parseHealthSyncManifest(manifestText);
+  } catch (error) {
+    return { ok: false, rejection: rejectDirect("manifest_invalid", "prepare",
+      { detail: error instanceof Error ? error.message : String(error) }) };
+  }
   // v2 身份是这条车道的前提：没有 UUID 映射就无法保证"同一实体"（§7 的稳定身份）。
   if (!manifest.recordIdentity) {
     return { ok: false, rejection: rejectDirect("missing_record_identity", "prepare",

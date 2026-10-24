@@ -1,0 +1,1 @@
+{"at":"2026-10-24T05:30:39.232Z","runId":"dev-d1-s13-20261024","profile":"dev","dataset":"D1","scenario":"S13","type":"s13_load_shape","rate":2,"durationMs":30000,"warmupMs":5000,"offered":70,"completed":65,"dropped":27,"maxInFlight":64}

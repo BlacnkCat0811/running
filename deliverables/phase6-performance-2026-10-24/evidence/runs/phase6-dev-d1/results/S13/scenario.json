@@ -1,0 +1,30 @@
+{
+  "scenario": "S13",
+  "exitCode": 0,
+  "signal": null,
+  "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1/logs/driver-S13.log",
+  "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d1/logs/api-S13.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 35844096,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S13",
+    "runId": "dev-d1-20261024",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T05:35:16.275Z",
+    "finishedAt": "2026-10-24T05:36:16.290Z",
+    "requests": 60,
+    "outcomes": {
+      "success": 60
+    },
+    "oracleFailures": [],
+    "checks": []
+  },
+  "requests": 60,
+  "oracleFailures": 0,
+  "fatal": null
+}

@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T16:32:00+08:00",
+  "platform": "darwin 25.6.0 x64; Node v22.23.2",
+  "concurrency": 2,
+  "overall": "PASS",
+  "codeIdentity": {
+    "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+    "packageLockSha256": "0642057ed8b3b0a08f18dede2621172245c6de2bf4d29155c944be3511397d2a",
+    "toolFiles": {
+      "scripts/phase6/cgroup.mjs": "7990e102871ec800ad672a709a036fb92430f3d783ae4b14d564d192b59b6889",
+      "scripts/phase6/collect-resources.mjs": "56b00ef8e95e942fe86c2474c91bb9599a9918cca7687ea4c32a82625056eada",
+      "scripts/phase6/driver.mjs": "b1bd30ae457a84013df0d81b0e79107cded65e59c1ad0b3871ccebcd3d3e4842",
+      "scripts/phase6/fixtures.mjs": "4e4fe0071c890ce437a3cffaef03696c7fcda371bfa9659decd8349f694e9af8",
+      "scripts/phase6/freeze-evidence.mjs": "54c84132dd0772e43caf41983b53708ddbe62eb3bc0515b96b02ca7bf7ed8462",
+      "scripts/phase6/freeze.mjs": "a84358509971e780f25a0fa6be1a039ab113610b2c3235d13f73bff3547c2ff9",
+      "scripts/phase6/runner.mjs": "137b8a0f6fe95b861ebe71921effccf8cbb371030057672ae55d0ba29800f875",
+      "scripts/phase6/s08-contract.mjs": "9991d35c2b06e54c8e1de2e744343fe83e0942b0248bd873cc534433eee2f682",
+      "scripts/phase6/safety.mjs": "e8c0a0deb0cc219730c571c4494b5468d62646941c923620c0dedf5d93ab14f5",
+      "scripts/phase6/summarize.mjs": "499406978195690428f5b23032fa095bdd268972014fbc7a1e5c3c77105604f5",
+      "scripts/phase6/verify.mjs": "a2db04cad4c4fdadb9deda25b8b84ace3f6defcb9b99b21cda01e1a6f82168d0",
+      "scripts/phase6/write-sha256sums.mjs": "856cfcfee02f79afb47fb184cd4bd12d7470ef7ec44344d1444f167f0cd9a9ad"
+    }
+  },
+  "checks": [
+    {
+      "command": "node scripts/phase6/verify.mjs --self-test",
+      "exitCode": 0,
+      "note": "all verify negative cases captured"
+    },
+    {
+      "command": "npm run phase6:test",
+      "exitCode": 0,
+      "note": "41 tests / 41 pass / 0 fail"
+    },
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "note": "pure + full typecheck"
+    },
+    {
+      "command": "RAI_TEST_CONCURRENCY=2 npm test",
+      "exitCode": 0,
+      "note": "2603 tests / 2590 pass / 13 skipped / 0 fail; durationMs=1113008; concurrency=2; run against final codeIdentity"
+    },
+    {
+      "command": "npm run check:acceptance-matrix",
+      "exitCode": 0,
+      "note": "80 cited / 0 missing"
+    },
+    {
+      "command": "npm run smoke:api",
+      "exitCode": 0,
+      "note": "Production API runtime smoke test passed"
+    },
+    {
+      "command": "npm run check:scripts",
+      "exitCode": 0,
+      "note": "18 package.json / 116 scripts"
+    },
+    {
+      "command": "npm run check:docs",
+      "exitCode": 0,
+      "note": "102 files / 720 local links / 0 problems"
+    },
+    {
+      "command": "npm run check:doc-refs",
+      "exitCode": 0,
+      "note": "153 refs / 0 out-of-range"
+    },
+    {
+      "command": "npm run check:package-boundaries",
+      "exitCode": 0,
+      "note": "16 packages / 31 edges"
+    },
+    {
+      "command": "npm run check:training-plan-single-writer",
+      "exitCode": 0,
+      "note": "0 violations"
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0,
+      "note": "no whitespace errors"
+    },
+    {
+      "command": "git diff --cached --check",
+      "exitCode": 0,
+      "note": "no staged whitespace errors"
+    }
+  ],
+  "skipped": [
+    "3 Windows-only semantics (path alias / Windows process tree / Windows lock rollback)",
+    "10 Rust worker binary cases older than source (npm run rust:build required)"
+  ],
+  "note": "全量测试使用 RAI_TEST_CONCURRENCY=2；13 skipped 全部列出，不把 skip 当 pass。"
+}

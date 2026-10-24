@@ -149,6 +149,8 @@ export function laneRefusalFailure(reason: string): { code: string; message: str
     case "missing_record_identity":
     case "payload_identity_invalid":
       return { code: "direct_sync_input_not_allowed", message: "导出内容不符合直连通道要求，请重新导出后重试" };
+    case "manifest_invalid":
+      return { code: "import_manifest_invalid", message: "同步清单格式或版本不受支持，请更新客户端后重新导出" };
     case "baseline_rebuild_required":
       return { code: "direct_sync_baseline_rebuild_required", message: "服务端数据代际与当前版本不符，需维护者重建基线后重试" };
     case "identity_not_eligible":

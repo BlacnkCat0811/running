@@ -1,0 +1,588 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T08:30:27.978Z",
+  "freezeRecord": "EVIDENCE-FREEZE.json",
+  "note": "旧 run 的 report 数字如与本索引冲突，以原始 task-events/requests 与本索引为准；旧 run 不用于新 6A 签收",
+  "runs": [
+    {
+      "runId": "phase6-fix-dev-d1-main-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-main",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S12",
+        "S14"
+      ],
+      "requests": 737,
+      "success": 737,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-main/manifest.json",
+      "treeSha256": "d231b33a76b870af961cc4b767687d039f744610e856af5c3b0f6e9a2b5a732c",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S01.jsonl",
+          "bytes": 1389,
+          "sha256": "1caef4b765bc3ef956074686e561375695723f0bbdc039e237cb80152c2f84e8",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S02.jsonl",
+          "bytes": 1331,
+          "sha256": "84d2f0ef89bfc676257045fe5ae69ebab7c816ed072ef22641cb1d0f30997098",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S03.jsonl",
+          "bytes": 2649,
+          "sha256": "67ff297653e5923878906173be9418f278bbd701fa826a3fd0ae0486d745e53f",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S04.jsonl",
+          "bytes": 1333,
+          "sha256": "7b918fd0ff384261de2ca53e737600d5853afad841886d55de6092b451a42317",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S05.jsonl",
+          "bytes": 7658,
+          "sha256": "379f7d886e3e25d3006b3bb1fab59a4e9ec5d79bc7609a7f9282a1572378234c",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S06.jsonl",
+          "bytes": 1792,
+          "sha256": "2983fdf6b1c56e53876d5f68e9893dc8a8eeef7cad8e1ee4b207f46ccf16a060",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S07.jsonl",
+          "bytes": 6413,
+          "sha256": "064f667ce93e5f9aa3e67624996459688f71f2484e3da6edc6469a26cd1fd588",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S08.jsonl",
+          "bytes": 8016,
+          "sha256": "17ca3c58043033fa4f73576f97494c7888a6955663f3183aa3b0dcc60a4f4886",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S09.jsonl",
+          "bytes": 4119,
+          "sha256": "832f070fe676c0fe0919e6fe4013e7e577f04393b451b39b99586e088ef0a0e0",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S12.jsonl",
+          "bytes": 1333,
+          "sha256": "85172e181c4d6bba8cc196fe51798c78951019b5f4f8e096eedfc8622ee915b6",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-main/raw/resources-S14.jsonl",
+          "bytes": 7357,
+          "sha256": "f90cdd74dfb3cfd176992885422c6e2a22d4249c0c18a9a91703b48664c3c8ee",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "phase6-fix-dev-d1-s08-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-s08",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S08"
+      ],
+      "requests": 179,
+      "success": 179,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-s08/manifest.json",
+      "treeSha256": "184bdcf3b9cf3ef410a76b971e37d9c07995877ff2900e810dd5324b4922b9ad",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-s08/raw/resources-S08.jsonl",
+          "bytes": 10478,
+          "sha256": "d275dadba45d0a06d27be8b4090ce2a6eb2208f3a29a16042f71f8d113889cad",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "phase6-fix-dev-s10-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-s10",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S10"
+      ],
+      "requests": 4,
+      "success": 4,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-s10/manifest.json",
+      "treeSha256": "f3d49c1e90823d9c05fa6777959d16281f2662e5978509eda38ac0e3527c8c9c",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-s10/raw/resources-S10.jsonl",
+          "bytes": 1392,
+          "sha256": "ce6864b0e6979d77aab19d1196f2ce48ac38f25989b71e04b44e3ef5a394f38c",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "phase6-fix-dev-d1-s13-20261024-04",
+      "evidenceDirectory": "runs-v2/phase6-fix-dev-d1-s13",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S13"
+      ],
+      "requests": 990,
+      "success": 990,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 300000,
+        "warmupMs": 30000,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs-v2/phase6-fix-dev-d1-s13/results/S13/raw/task-events.jsonl",
+        "rate": 2,
+        "durationMs": 300000,
+        "warmupMs": 30000,
+        "offered": 990,
+        "completed": 990,
+        "dropped": 0,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "fixed-valid-dev",
+      "statusReason": "修复后新工具/新 run-id 生成；参数、计数与原始文件见同目录 raw 与 manifest",
+      "validForSteadyState": false,
+      "validForDevHotRead": true,
+      "runManifest": "evidence/runs-v2/phase6-fix-dev-d1-s13/manifest.json",
+      "treeSha256": "4ac3517fc451851a18e31194b4d717fa171501d64922cb19eef2826c4d1b9adb",
+      "resources": [
+        {
+          "file": "evidence/runs-v2/phase6-fix-dev-d1-s13/raw/resources-S13.jsonl",
+          "bytes": 130486,
+          "sha256": "8dfa4ec3cd2acb9294a2542749f46e4f9201c37a8cd22a4d33a0fcbbd99d538d",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d1-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d1",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S12",
+        "S13",
+        "S14"
+      ],
+      "requests": 904,
+      "success": 903,
+      "loadParameters": {
+        "rate": 0.5,
+        "durationMs": 60000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs/phase6-dev-d1/results/S13/raw/task-events.jsonl",
+        "rate": 0.5,
+        "durationMs": 60000,
+        "warmupMs": 0,
+        "offered": 30,
+        "completed": 60,
+        "dropped": 0,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d1/manifest.json",
+      "treeSha256": "7afd00c2ab82548c000628f18a0acb6480ea4cc26e4602fae90f00fb35e80df7",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S01.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S01.jsonl",
+          "bytes": 710,
+          "sha256": "3c81a9568d9e99be374b4326422d9ca7c84ce180f43f044a83eff5b371112856",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S02.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S02.jsonl",
+          "bytes": 710,
+          "sha256": "db0be3b328f3b5298acb60990cf238bad78e8f95fbb39cb53e2e76329f9315af",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S03.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S03.jsonl",
+          "bytes": 2212,
+          "sha256": "d6a03697087ef2e15881b35858dce0f85dc09b16cae72b481a043a1975cfb908",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S04.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S04.jsonl",
+          "bytes": 712,
+          "sha256": "5c6973f05a59785fa6fc10b5c3762945614a02d82548f8326d81b547465e90c9",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S05.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S05.jsonl",
+          "bytes": 5966,
+          "sha256": "f60b6c368266a261f18338b834f10e8f076a404d32a80aea38f0e1a5b990bccd",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S06.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S06.jsonl",
+          "bytes": 1087,
+          "sha256": "2e07d4785df7722aadda9cd8ffea5a929842386263c6796c0efae499d6244770",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S07.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S07.jsonl",
+          "bytes": 1083,
+          "sha256": "6c7bd65f88a4d76319ced9bc18cbcb30de87189485db181fd3c1921585cecdd2",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S08.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S08.jsonl",
+          "bytes": 6345,
+          "sha256": "0f9d20d288a9485defa3bf5e728a0d272aebb6477d6c431dfe8ac58fd26da14e",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S09.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S09.jsonl",
+          "bytes": 3332,
+          "sha256": "63d19a8b7ee3eea0517898f10e4b44dcec9149f94596f4b0f57a7e7a4ea777c7",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S12.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S12.jsonl",
+          "bytes": 710,
+          "sha256": "2cecffa942d718217b30dac0b7969007f4e2e6ce6b220971c85a051249456bb6",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S13.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S13.jsonl",
+          "bytes": 16043,
+          "sha256": "44dc223d3e22b61ea464d4f5a716b2ea7e8cb047131533a6306485924a3ae175",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d1/raw/resources-S14.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1/raw/resources-S14.jsonl",
+          "bytes": 6334,
+          "sha256": "5105443e02013a93f382531a3e0a8240eb45e798dfd8b37230eb3d85e1e9b575",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d1-s13-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d1-s13",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S13"
+      ],
+      "requests": 65,
+      "success": 65,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 30000,
+        "warmupMs": 5000,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs/phase6-dev-d1-s13/results/S13/raw/task-events.jsonl",
+        "rate": 2,
+        "durationMs": 30000,
+        "warmupMs": 5000,
+        "offered": 70,
+        "completed": 65,
+        "dropped": 27,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "diagnostic-invalid-load-shape",
+      "statusReason": "任务事件记录 2 rps × 30 s、offered 70、completed 65、dropped 27；旧报告写成 0.5 rps × 60 s、0 dropped；该 run 是旧负载器诊断数据，不能用于稳态容量判断",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d1-s13/manifest.json",
+      "treeSha256": "3ba0162b9f13704219e9134e50c2f35c5aa659e3c92b6aa4545e09b12b477fa3",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d1-s13/raw/resources-S13.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d1-s13/raw/resources-S13.jsonl",
+          "bytes": 5202,
+          "sha256": "ebc1234d078d87f8e6c3c2c1899ddc87302e6e531326a5c083b9f9ab21a092d1",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d2-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d2",
+      "profile": "dev",
+      "dataset": "D2",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S13"
+      ],
+      "requests": 103,
+      "success": 103,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 15000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": {
+        "source": "evidence/runs/phase6-dev-d2/results/S13/raw/task-events.jsonl",
+        "rate": 2,
+        "durationMs": 15000,
+        "warmupMs": 0,
+        "offered": 291,
+        "completed": 64,
+        "dropped": 231,
+        "maxInFlight": 64,
+        "counters": null
+      },
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d2/manifest.json",
+      "treeSha256": "9d63303fa51d7b90619a89c1f28e0cd26ae2e2837698d7c80d651fa8bc010725",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S01.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S01.jsonl",
+          "bytes": 710,
+          "sha256": "8c1594f02ec4a48cecbf44750ab05a6dcf35aeb4506cf4db2cd98936695427c1",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S02.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S02.jsonl",
+          "bytes": 708,
+          "sha256": "4ee54d2532efc6c0196ae219e349ffe05cf87a7bf56fe174b29ab48ff47c0408",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S03.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S03.jsonl",
+          "bytes": 1462,
+          "sha256": "29dd598409aad2b7be489bef88b7801206ece5cecc17574bebecb33020ef5c80",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S04.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S04.jsonl",
+          "bytes": 710,
+          "sha256": "3ab6d3e197de0b6a1e53c615a1efd69384740d6c1b567c5b9543cd095328f6a5",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d2/raw/resources-S13.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d2/raw/resources-S13.jsonl",
+          "bytes": 4827,
+          "sha256": "b92655a0d1077285e3c120a46d7055d2c63a32e84e3e6ef27fde18a98ecc2150",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-d3-20261024",
+      "evidenceDirectory": "runs/phase6-dev-d3",
+      "profile": "dev",
+      "dataset": "D3",
+      "scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04"
+      ],
+      "requests": 39,
+      "success": 39,
+      "loadParameters": {
+        "rate": 2,
+        "durationMs": 10000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-d3/manifest.json",
+      "treeSha256": "9e88c509e4c4d71e9849f253f717f67d7e0d24be1ee2ec141237b98d43e652f6",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S01.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S01.jsonl",
+          "bytes": 706,
+          "sha256": "e1d55efc3c92f1984aca12f693d2bdc2b2e51551a4cd45670face5f6f9eacdae",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S02.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S02.jsonl",
+          "bytes": 4459,
+          "sha256": "d1d175dddd6b422cf16febc480e2fd7fa7e55f42f05d5521fceccd469d8da9ab",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S03.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S03.jsonl",
+          "bytes": 2215,
+          "sha256": "23ba43996ad91bef693b5154c4b0e2456e15594bb13ba2f8c016c007931034df",
+          "immutable": true
+        },
+        {
+          "file": "evidence/runs/phase6-dev-d3/raw/resources-S04.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-d3/raw/resources-S04.jsonl",
+          "bytes": 9351,
+          "sha256": "c48f503f7b6b3b4a0ef4d690135bc8c2e9bafd163f24a5da51576d4b00bc526c",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-s08-diag-20261024",
+      "evidenceDirectory": "runs/phase6-dev-s08-diagnostic",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S08"
+      ],
+      "requests": 267,
+      "success": 266,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-s08-diagnostic/manifest.json",
+      "treeSha256": "a10b766f677f9191a315243bf0a3e76088eb51d3373f510ec7587f40f3866c28",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-s08-diagnostic/raw/resources-S08.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-s08-diagnostic/raw/resources-S08.jsonl",
+          "bytes": 8217,
+          "sha256": "1d7f93759c0d86f1fd8b7244ad6670335b3285609d30957fbc0d23be61d7b98b",
+          "immutable": true
+        }
+      ]
+    },
+    {
+      "runId": "dev-s10-20261024",
+      "evidenceDirectory": "runs/phase6-dev-s10",
+      "profile": "dev",
+      "dataset": "D1",
+      "scenarios": [
+        "S10"
+      ],
+      "requests": 4,
+      "success": 4,
+      "loadParameters": {
+        "rate": 5,
+        "durationMs": 30000,
+        "warmupMs": 0,
+        "maxInFlight": 64
+      },
+      "loadShape": null,
+      "status": "frozen-legacy",
+      "statusReason": "旧工具生成的冻结历史证据；保留原裁决，不用于新 6A 签收",
+      "validForSteadyState": false,
+      "validForDevHotRead": false,
+      "runManifest": "evidence/runs/phase6-dev-s10/manifest.json",
+      "treeSha256": "6b466ba34057018a63651f43db73636ace14f7152bbfcfede9bcc3fa8b957db3",
+      "resources": [
+        {
+          "file": "evidence/runs/phase6-dev-s10/raw/resources-S10.jsonl",
+          "source": "/Users/ta/rai-phase6-lab/phase6-dev-s10/raw/resources-S10.jsonl",
+          "bytes": 710,
+          "sha256": "d54eefefe0fa5d66ae1c7d32bfc89099398c554812286b66fdb642661b36b277",
+          "immutable": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "scenario": "S02",
+  "exitCode": 0,
+  "signal": null,
+  "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S02.log",
+  "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S02.log",
+  "fixtureBytes": 1079635968,
+  "database": {
+    "bytes": 1079635968,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S02",
+    "runId": "dev-d3-20261024",
+    "profile": "dev",
+    "dataset": "D3",
+    "startedAt": "2026-10-24T05:24:17.703Z",
+    "finishedAt": "2026-10-24T05:24:34.824Z",
+    "requests": 8,
+    "outcomes": {
+      "success": 8
+    },
+    "oracleFailures": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/dashboard",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "page:first",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "page:middle",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "page:last",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts/:id",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts/:id",
+        "phase": "deleted:404",
+        "status": 404,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/mobile/today",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/mobile/training-plan-state",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 8,
+  "oracleFailures": 0,
+  "fatal": null
+}

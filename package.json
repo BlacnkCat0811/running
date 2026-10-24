@@ -48,6 +48,14 @@
     "open:ios": "node scripts/open-ios.mjs",
     "start": "npm run start -w @rai/api",
     "smoke:api": "node apps/api/test/production-runtime-smoke.mjs",
+    "phase6:fixtures": "node --import tsx scripts/phase6/fixtures.mjs",
+    "phase6:runner": "node scripts/phase6/runner.mjs",
+    "phase6:summarize": "node scripts/phase6/summarize.mjs",
+    "phase6:verify": "node scripts/phase6/verify.mjs",
+    "phase6:verify:self-test": "node scripts/phase6/verify.mjs --self-test",
+    "phase6:freeze": "node scripts/phase6/freeze.mjs",
+    "phase6:freeze-evidence": "node scripts/phase6/freeze-evidence.mjs",
+    "phase6:test": "node --import tsx --test apps/api/test/phase6-safety.test.mjs apps/api/test/phase6-fixtures.test.mjs apps/api/test/phase6-verify.test.mjs apps/api/test/phase6-cgroup.test.mjs apps/api/test/phase6-s08-contract.test.mjs apps/api/test/phase6-driver.test.mjs apps/api/test/phase6-runner.test.mjs apps/api/test/phase6-stop-rules.test.mjs apps/api/test/phase6-freeze-evidence.test.mjs",
     "data:import": "tsx packages/health-export-parser/src/cli.ts import",
     "data:incremental-import": "tsx packages/health-export-parser/src/cli.ts incremental-import",
     "data:audit": "tsx packages/health-export-parser/src/cli.ts audit",
@@ -111,7 +119,8 @@
     "check:coach-release": "tsx scripts/coach-release-gate.mts",
     "predata:load-replay": "npm run check:node",
     "data:verify-v2-release": "tsx scripts/verify-v2-release.mts",
-    "predata:verify-v2-release": "npm run check:node"
+    "predata:verify-v2-release": "npm run check:node",
+    "phase6:sha256sums": "node scripts/phase6/write-sha256sums.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

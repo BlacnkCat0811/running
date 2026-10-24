@@ -1,0 +1,90 @@
+{
+  "scenario": "S03",
+  "runId": "phase6-fix-dev-d1-main-20261024-04",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T08:00:02.775Z",
+  "finishedAt": "2026-10-24T08:00:06.239Z",
+  "incomplete": false,
+  "interruptedBy": null,
+  "requests": 24,
+  "outcomes": {
+    "success": 24
+  },
+  "oracleFailures": [],
+  "cases": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:cold",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:hot-1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:hot-2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:hot-3",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:cold",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:hot-1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:hot-2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:hot-3",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:cold",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:hot-1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:hot-2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:hot-3",
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

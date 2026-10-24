@@ -1,0 +1,14 @@
+{
+  "scenario": "S13",
+  "runId": "dev-d2-20261024",
+  "profile": "dev",
+  "dataset": "D2",
+  "startedAt": "2026-10-24T05:22:26.978Z",
+  "finishedAt": "2026-10-24T05:22:42.012Z",
+  "requests": 64,
+  "outcomes": {
+    "success": 64
+  },
+  "oracleFailures": [],
+  "checks": []
+}

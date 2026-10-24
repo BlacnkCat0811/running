@@ -1,0 +1,18 @@
+{
+  "runId": "dev-s08-diag-20261024",
+  "profile": "dev",
+  "dataset": "D1",
+  "finishedAt": "2026-10-24T05:47:29.212Z",
+  "scenarios": [
+    {
+      "scenario": "S08",
+      "exitCode": 1,
+      "requests": 267,
+      "oracleFailures": 1,
+      "fatal": null
+    }
+  ],
+  "errors": [
+    "S08: driver exit 1"
+  ]
+}

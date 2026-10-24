@@ -1,0 +1,276 @@
+{
+  "scenario": "S09",
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "incomplete": false,
+  "driverLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/driver-S09.log",
+  "apiLog": "/Users/ta/rai-phase6-lab-fix/run-final3-main-001/logs/api-S09.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 36007936,
+    "walBytes": 2558552,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S09",
+    "runId": "phase6-fix-dev-d1-main-20261024-04",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T08:01:26.935Z",
+    "finishedAt": "2026-10-24T08:01:35.231Z",
+    "incomplete": false,
+    "interruptedBy": null,
+    "requests": 65,
+    "outcomes": {
+      "success": 65
+    },
+    "oracleFailures": [],
+    "cases": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/imports/uploads",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/imports/inspect",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs",
+        "phase": null,
+        "status": 202,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/import-jobs/:id",
+        "phase": "poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": "read-visible:poll",
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 65,
+  "oracleFailures": 0,
+  "fatal": null
+}

@@ -1,0 +1,42 @@
+{
+  "scenario": "S12",
+  "runId": "phase6-fix-dev-d1-main-20261024-04",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T08:01:38.722Z",
+  "finishedAt": "2026-10-24T08:01:38.982Z",
+  "incomplete": false,
+  "interruptedBy": null,
+  "requests": 4,
+  "outcomes": {
+    "success": 4
+  },
+  "oracleFailures": [],
+  "cases": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/handshake",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/mobile/workout-plan",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/mobile/training-plan-state",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/mobile/todaysession",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

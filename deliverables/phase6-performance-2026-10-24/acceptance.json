@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 2,
+  "phase": 6,
+  "generatedAt": "2026-10-24T16:25:00+08:00",
+  "protocol": "protocol.json",
+  "sourceManifest": "source-manifest.json",
+  "report": "PHASE6_REPORT.md",
+  "freezeRecord": "evidence/EVIDENCE-FREEZE.json",
+  "regressions": "evidence/regressions.json",
+  "verdict": {
+    "measurementEngineering": "PASS",
+    "devCorrectness": "PASS",
+    "cloudCapacity": "BLOCKED",
+    "phase6Overall": "BLOCKED",
+    "knownFailures": [],
+    "blocked": [
+      "G5",
+      "G6",
+      "G7"
+    ],
+    "notRunScenarios": [
+      "S11",
+      "S15",
+      "S16",
+      "S17",
+      "S18",
+      "S19",
+      "S20"
+    ]
+  },
+  "gates": [
+    {
+      "id": "G0",
+      "status": "PASS",
+      "reason": "protocol/code/tool/fixture/payload fingerprints match"
+    },
+    {
+      "id": "G1",
+      "status": "PASS",
+      "reason": "rootOutsideRepo/envWhitelist/isolatedTemp; raw has no token"
+    },
+    {
+      "id": "G2",
+      "status": "PASS",
+      "reason": "new fixture manifests contain declared database sha256 + digest"
+    },
+    {
+      "id": "G3",
+      "status": "PASS",
+      "reason": "raw shape/resource coverage/no fake success/S08 case evidence"
+    },
+    {
+      "id": "G4",
+      "status": "PASS",
+      "reason": "new runs: all declared scenarios 0 oracle failures; S08 7/7"
+    },
+    {
+      "id": "G5",
+      "status": "BLOCKED",
+      "reason": "no isolated Linux cgroup readback; macOS RSS is not CLOUD memory"
+    },
+    {
+      "id": "G6",
+      "status": "BLOCKED",
+      "reason": "no 15 min x3 CLOUD steady-state evidence"
+    },
+    {
+      "id": "G7",
+      "status": "BLOCKED",
+      "reason": "S15-S20 not run"
+    },
+    {
+      "id": "G8",
+      "status": "PASS",
+      "reason": "saved summary/correctness independently recomputed from raw; P99 gate enforced"
+    },
+    {
+      "id": "G9",
+      "status": "PASS",
+      "reason": "phase6 tests, typecheck, full npm test, docs/scripts/acceptance gates with same codeIdentity"
+    }
+  ],
+  "runs": [
+    {
+      "runId": "phase6-fix-dev-d1-main-20261024-04",
+      "verdict": {
+        "devBaseline": "PASS",
+        "cloudCapacity": "BLOCKED",
+        "phase6Overall": "BLOCKED",
+        "knownFailures": [],
+        "blocked": [
+          "G5",
+          "G6",
+          "G7"
+        ],
+        "notRun": []
+      },
+      "exitCode": 0,
+      "acceptance": "evidence/runs-v2/phase6-fix-dev-d1-main/acceptance.json"
+    },
+    {
+      "runId": "phase6-fix-dev-d1-s13-20261024-04",
+      "verdict": {
+        "devBaseline": "PASS",
+        "cloudCapacity": "BLOCKED",
+        "phase6Overall": "BLOCKED",
+        "knownFailures": [],
+        "blocked": [
+          "G5",
+          "G6",
+          "G7"
+        ],
+        "notRun": []
+      },
+      "exitCode": 0,
+      "acceptance": "evidence/runs-v2/phase6-fix-dev-d1-s13/acceptance.json"
+    },
+    {
+      "runId": "phase6-fix-dev-d1-s08-20261024-04",
+      "verdict": {
+        "devBaseline": "PASS",
+        "cloudCapacity": "BLOCKED",
+        "phase6Overall": "BLOCKED",
+        "knownFailures": [],
+        "blocked": [
+          "G5",
+          "G6",
+          "G7"
+        ],
+        "notRun": []
+      },
+      "exitCode": 0,
+      "acceptance": "evidence/runs-v2/phase6-fix-dev-d1-s08/acceptance.json"
+    },
+    {
+      "runId": "phase6-fix-dev-s10-20261024-04",
+      "verdict": {
+        "devBaseline": "PASS",
+        "cloudCapacity": "BLOCKED",
+        "phase6Overall": "BLOCKED",
+        "knownFailures": [],
+        "blocked": [
+          "G5",
+          "G6",
+          "G7"
+        ],
+        "notRun": []
+      },
+      "exitCode": 0,
+      "acceptance": "evidence/runs-v2/phase6-fix-dev-d1-s10/acceptance.json"
+    }
+  ],
+  "findings": [
+    {
+      "id": "P6-F01",
+      "status": "NOT_APPLICABLE_AS_REPORTED",
+      "summary": "5001 records go to direct-sync per product contract; data-only already rejects >5000. Old finding was a lane misattribution, not a data-only defect.",
+      "evidence": "S08 case S08-01 lane=direct-sync, facts +5001; docs/IOS_NATIVE_API_CONTRACT.md:67; packages/api-contracts:223-229; T14"
+    },
+    {
+      "id": "P6-F02",
+      "status": "OBSERVATION",
+      "summary": "2 MiB data-only boundary vs 8 MiB direct-sync boundary is by design."
+    },
+    {
+      "id": "P6-F03",
+      "status": "OBSERVATION",
+      "summary": "Unknown HealthKit record type remains observational until product contract says reject."
+    },
+    {
+      "id": "P6-F04",
+      "status": "OBSERVATION",
+      "summary": "Corrupt ZIP and oversized GPX/XML return stable 4xx codes."
+    },
+    {
+      "id": "P6-F05",
+      "status": "FIXED",
+      "summary": "Invalid manifest version now returns 400 import_manifest_invalid with zero facts."
+    }
+  ],
+  "note": "DEV correctness PASS applies to executed S01-S10/S12; S11/S15-S20 remain NOT_RUN. CLOUD G5-G7 BLOCKED, so phase6Overall is BLOCKED, not PASS. Old evidence preserved with original hashes and statuses."
+}

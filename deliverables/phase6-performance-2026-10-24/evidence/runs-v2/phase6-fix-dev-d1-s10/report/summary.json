@@ -1,0 +1,328 @@
+{
+  "inputRoot": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001",
+  "generatedAt": "2026-10-24T08:08:59.331Z",
+  "scenarios": {
+    "S10": {
+      "requests": 4,
+      "cases": 0,
+      "scenarios": {
+        "S10": {
+          "n": 4,
+          "offered": 4,
+          "completed": 4,
+          "businessSuccess": 4,
+          "timedSuccess": 4,
+          "expectedRefusal": 0,
+          "success": 4,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 5.957,
+          "p50": 15.239,
+          "p95": 109.42,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 109.42,
+          "mean": 37.5645,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "routes": {
+        "/v1/dashboard": {
+          "n": 1,
+          "offered": 1,
+          "completed": 1,
+          "businessSuccess": 1,
+          "timedSuccess": 1,
+          "expectedRefusal": 0,
+          "success": 1,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 109.42,
+          "p50": 109.42,
+          "p95": 109.42,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 109.42,
+          "mean": 109.42,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/model-runs": {
+          "n": 1,
+          "offered": 1,
+          "completed": 1,
+          "businessSuccess": 1,
+          "timedSuccess": 1,
+          "expectedRefusal": 0,
+          "success": 1,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 5.957,
+          "p50": 5.957,
+          "p95": 5.957,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 5.957,
+          "mean": 5.957,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/workouts": {
+          "n": 1,
+          "offered": 1,
+          "completed": 1,
+          "businessSuccess": 1,
+          "timedSuccess": 1,
+          "expectedRefusal": 0,
+          "success": 1,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 19.642,
+          "p50": 19.642,
+          "p95": 19.642,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 19.642,
+          "mean": 19.642,
+          "sendLagP95Ms": 0.001,
+          "sendLagMaxMs": 0.001,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        },
+        "/v1/data-summary": {
+          "n": 1,
+          "offered": 1,
+          "completed": 1,
+          "businessSuccess": 1,
+          "timedSuccess": 1,
+          "expectedRefusal": 0,
+          "success": 1,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 15.239,
+          "p50": 15.239,
+          "p95": 15.239,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 1,
+          "max": 15.239,
+          "mean": 15.239,
+          "sendLagP95Ms": 0,
+          "sendLagMaxMs": 0,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "traffic": {
+        "main": {
+          "n": 4,
+          "offered": 4,
+          "completed": 4,
+          "businessSuccess": 4,
+          "timedSuccess": 4,
+          "expectedRefusal": 0,
+          "success": 4,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 5.957,
+          "p50": 15.239,
+          "p95": 109.42,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 109.42,
+          "mean": 37.5645,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "phases": {
+        "steady:main": {
+          "n": 4,
+          "offered": 4,
+          "completed": 4,
+          "businessSuccess": 4,
+          "timedSuccess": 4,
+          "expectedRefusal": 0,
+          "success": 4,
+          "successRate": 1,
+          "completionRate": 1,
+          "min": 5.957,
+          "p50": 15.239,
+          "p95": 109.42,
+          "p99": "insufficient_samples",
+          "p99SampleCount": 4,
+          "max": 109.42,
+          "mean": 37.5645,
+          "sendLagP95Ms": 0.003,
+          "sendLagMaxMs": 0.003,
+          "timeouts": 0,
+          "timeoutMaxMs": null,
+          "serverErrors": 0,
+          "runnerDropped": 0,
+          "unexpectedStatus": 0,
+          "oracleFailed": 0
+        }
+      },
+      "outcomes": {
+        "success": 4
+      },
+      "load": null,
+      "taskEvents": [],
+      "caseResults": [],
+      "correctnessFile": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/results/S10/correctness/S10.json",
+      "rawFiles": {
+        "requests": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/results/S10/raw/requests.jsonl",
+        "taskEvents": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/results/S10/raw/task-events.jsonl",
+        "cases": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/results/S10/raw/cases.jsonl"
+      }
+    }
+  },
+  "resources": [
+    {
+      "file": "resources-S10.jsonl",
+      "capability": {
+        "kind": "capability",
+        "platform": "darwin",
+        "cgroup": false,
+        "cgroupPath": null,
+        "cgroupDirectory": null,
+        "expectedCgroupPath": null,
+        "attributionMismatch": false,
+        "targetPid": 88553,
+        "targetCgroup": null,
+        "samplerCgroup": null,
+        "samplerSeparate": null,
+        "processTree": true,
+        "memoryPrimary": "per-pid RSS sum (sampled)",
+        "host": {
+          "platform": "darwin",
+          "cpuCount": 6,
+          "totalMemoryBytes": 17179869184,
+          "node": "v22.23.2",
+          "sqlite": "3.51.3",
+          "arch": "x64"
+        },
+        "limits": null,
+        "expectedLimits": {
+          "cgroup": false,
+          "systemd": false,
+          "cpuQuota": null,
+          "memoryHighBytes": null,
+          "memoryMaxBytes": null,
+          "swapMaxBytes": null,
+          "tasksMax": null
+        },
+        "limitErrors": [],
+        "notes": [
+          "cgroup v2 目标组不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+          "采样分辨率默认 1s；短峰值可能漏采"
+        ],
+        "intervalMs": 1000,
+        "runtimeRoot": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001",
+        "startedAt": "2026-10-24T08:03:03.917Z"
+      },
+      "sampleCount": 1,
+      "intervalMs": 1000,
+      "window": {
+        "first": "2026-10-24T08:03:04.184Z",
+        "last": "2026-10-24T08:03:04.184Z"
+      },
+      "rssPeakBytes": 216223744,
+      "rssSource": "per-pid RSS sum (sampled)",
+      "cpuPercentPeak": 99.7,
+      "cpuUsageCoresPeak": null,
+      "processCountPeak": 2,
+      "cgroupMemoryCurrentPeakBytes": null,
+      "cgroupMemoryKernelPeakBytes": null,
+      "cgroupTarget": null,
+      "cgroupSampler": null,
+      "cgroupLimits": null,
+      "cgroupLimitErrors": [],
+      "cgroupAttributionMismatch": false,
+      "cgroupEscapedPidsMax": 0,
+      "cgroupOomKillsMax": null,
+      "cgroupAvailable": false,
+      "notes": [
+        "cgroup v2 目标组不可用：DEV 只能给 RSS 采样，不冒充 CLOUD 内存峰值",
+        "采样分辨率默认 1s；短峰值可能漏采"
+      ]
+    }
+  ],
+  "correctness": [
+    {
+      "scenario": "S10",
+      "runId": "phase6-fix-dev-s10-20261024-04",
+      "profile": "dev",
+      "dataset": "D1",
+      "startedAt": "2026-10-24T08:03:04.244Z",
+      "finishedAt": "2026-10-24T08:03:04.401Z",
+      "incomplete": false,
+      "interruptedBy": null,
+      "requests": 4,
+      "outcomes": {
+        "success": 4
+      },
+      "oracleFailures": [],
+      "cases": [],
+      "checks": [
+        {
+          "routeTemplate": "/v1/dashboard",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/model-runs",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/workouts",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        },
+        {
+          "routeTemplate": "/v1/data-summary",
+          "phase": null,
+          "status": 200,
+          "ok": true
+        }
+      ]
+    }
+  ],
+  "scenarioCount": 1
+}

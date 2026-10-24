@@ -1,0 +1,16 @@
+{
+  "runId": "dev-s10-20261024",
+  "profile": "dev",
+  "dataset": "D1",
+  "finishedAt": "2026-10-24T05:28:29.180Z",
+  "scenarios": [
+    {
+      "scenario": "S10",
+      "exitCode": 0,
+      "requests": 4,
+      "oracleFailures": 0,
+      "fatal": null
+    }
+  ],
+  "errors": []
+}

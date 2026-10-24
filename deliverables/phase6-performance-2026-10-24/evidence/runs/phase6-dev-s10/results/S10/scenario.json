@@ -1,0 +1,55 @@
+{
+  "scenario": "S10",
+  "exitCode": 0,
+  "signal": null,
+  "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-s10/logs/driver-S10.log",
+  "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-s10/logs/api-S10.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 39161856,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S10",
+    "runId": "dev-s10-20261024",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T05:28:27.543Z",
+    "finishedAt": "2026-10-24T05:28:27.786Z",
+    "requests": 4,
+    "outcomes": {
+      "success": 4
+    },
+    "oracleFailures": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/dashboard",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/model-runs",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/data-summary",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 4,
+  "oracleFailures": 0,
+  "fatal": null
+}

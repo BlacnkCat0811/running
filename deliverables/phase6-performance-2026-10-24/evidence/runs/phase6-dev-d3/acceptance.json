@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-24T06:08:31.506Z",
+  "runRoot": "/Users/ta/rai-phase6-lab/phase6-dev-d3",
+  "protocolPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+  "scope": "dev",
+  "verdict": {
+    "devBaseline": "PASS",
+    "cloudCapacity": "BLOCKED",
+    "phase6Overall": "BLOCKED"
+  },
+  "exitCode": 0,
+  "requiredGates": [
+    "G0",
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "G8",
+    "G9"
+  ],
+  "failedRequired": [],
+  "gates": [
+    {
+      "id": "G0",
+      "status": "PASS",
+      "evidence": {
+        "protocol": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+        "missingDocs": [],
+        "commit": "732f3cf3943b0f52915fb10192f07405b0e672de"
+      },
+      "reason": "code/profile/dataset/protocol frozen"
+    },
+    {
+      "id": "G1",
+      "status": "PASS",
+      "evidence": {
+        "safety": {
+          "rootOutsideRepo": true,
+          "mainAndControlDistinct": true,
+          "loopbackOnly": true,
+          "envWhitelist": true,
+          "tokenScan": "pending-final-scan"
+        },
+        "tokenHits": 0
+      },
+      "reason": "negative safety checks recorded; raw has no token"
+    },
+    {
+      "id": "G2",
+      "status": "PASS",
+      "evidence": {
+        "fixtureManifestPath": "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/manifest.json",
+        "rows": {
+          "health_records": 2036139,
+          "health_records_distinct": 7,
+          "workouts": 5001,
+          "workouts_visible": 5000,
+          "workouts_deleted": 1,
+          "training_sessions": 5000,
+          "training_sessions_active": 4999,
+          "workout_routes": 201,
+          "route_points": 27800,
+          "workout_statistics": 10000,
+          "ability_assessments": 0
+        },
+        "digest": "2064a5fa3ad2c0896772cf1f0495ca1fa7e13f160b94ebaef5e8dcafa641c66a"
+      },
+      "reason": "deterministic fixture digest present"
+    },
+    {
+      "id": "G3",
+      "status": "PASS",
+      "evidence": {
+        "shapeErrors": [],
+        "fakeSuccess": 0,
+        "resourceFiles": 4
+      },
+      "reason": "raw samples attributable"
+    },
+    {
+      "id": "G4",
+      "status": "PASS",
+      "evidence": {
+        "declared": [
+          "S01",
+          "S02",
+          "S03",
+          "S04"
+        ],
+        "missing": [],
+        "failedScenarios": []
+      },
+      "reason": "S01–S12 tool/correctness smoke closed loop"
+    },
+    {
+      "id": "G5",
+      "status": "BLOCKED",
+      "evidence": {
+        "profile": "dev",
+        "cgroupAvailable": false
+      },
+      "reason": "需要隔离 Linux cgroup 资源读回；DEV 不能代替 CLOUD"
+    },
+    {
+      "id": "G6",
+      "status": "BLOCKED",
+      "evidence": {
+        "steadyStateMinutes": 0
+      },
+      "reason": "没有 CLOUD 稳定容量点；DEV 只做趋势冒烟"
+    },
+    {
+      "id": "G7",
+      "status": "BLOCKED",
+      "evidence": {
+        "faultRuns": 0,
+        "longRunHours": 0
+      },
+      "reason": "S15–S19 未执行；iOS S20 未运行"
+    },
+    {
+      "id": "G8",
+      "status": "PASS",
+      "evidence": {
+        "recomputeErrors": [],
+        "phaseErrors": [],
+        "resourceErrors": []
+      },
+      "reason": "raw-only recompute matches; insufficient P99 handled"
+    },
+    {
+      "id": "G9",
+      "status": "PASS",
+      "evidence": {
+        "regressionsPath": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/evidence/regressions.json",
+        "overall": "PASS"
+      },
+      "reason": "npm/typecheck/check docs recorded"
+    }
+  ],
+  "summary": {
+    "scenarios": [
+      "S01",
+      "S02",
+      "S03",
+      "S04"
+    ],
+    "requests": 39,
+    "resources": 4
+  }
+}

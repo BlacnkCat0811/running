@@ -1,0 +1,60 @@
+{
+  "scenario": "S10",
+  "exitCode": 0,
+  "signal": null,
+  "timedOut": false,
+  "incomplete": false,
+  "driverLog": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/logs/driver-S10.log",
+  "apiLog": "/Users/ta/rai-phase6-lab-fix/run-final3-s10-001/logs/api-S10.log",
+  "fixtureBytes": 35844096,
+  "database": {
+    "bytes": 39161856,
+    "walBytes": 0,
+    "shmBytes": 32768
+  },
+  "summary": {
+    "scenario": "S10",
+    "runId": "phase6-fix-dev-s10-20261024-04",
+    "profile": "dev",
+    "dataset": "D1",
+    "startedAt": "2026-10-24T08:03:04.244Z",
+    "finishedAt": "2026-10-24T08:03:04.401Z",
+    "incomplete": false,
+    "interruptedBy": null,
+    "requests": 4,
+    "outcomes": {
+      "success": 4
+    },
+    "oracleFailures": [],
+    "cases": [],
+    "checks": [
+      {
+        "routeTemplate": "/v1/dashboard",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/model-runs",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/workouts",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      },
+      {
+        "routeTemplate": "/v1/data-summary",
+        "phase": null,
+        "status": 200,
+        "ok": true
+      }
+    ]
+  },
+  "requests": 4,
+  "oracleFailures": 0,
+  "fatal": null
+}

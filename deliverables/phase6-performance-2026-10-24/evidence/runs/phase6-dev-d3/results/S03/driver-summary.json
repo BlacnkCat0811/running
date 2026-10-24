@@ -1,0 +1,87 @@
+{
+  "scenario": "S03",
+  "runId": "dev-d3-20261024",
+  "profile": "dev",
+  "dataset": "D3",
+  "startedAt": "2026-10-24T05:25:20.454Z",
+  "finishedAt": "2026-10-24T05:25:24.694Z",
+  "requests": 24,
+  "outcomes": {
+    "success": 24
+  },
+  "oracleFailures": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:cold",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:hot-1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:hot-2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:small:hot-3",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:cold",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:hot-1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:hot-2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:medium:hot-3",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:cold",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:hot-1",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:hot-2",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts/:id/series",
+      "phase": "series:large:hot-3",
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "scenario": "S04",
+  "runId": "dev-d1-20261024",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T05:33:49.414Z",
+  "finishedAt": "2026-10-24T05:33:49.599Z",
+  "requests": 4,
+  "outcomes": {
+    "success": 4
+  },
+  "oracleFailures": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/data-summary",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/data-audit",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/diagnostics",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/performance",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    }
+  ]
+}

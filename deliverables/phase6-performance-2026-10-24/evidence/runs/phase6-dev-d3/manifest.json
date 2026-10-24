@@ -1,0 +1,578 @@
+{
+  "schemaVersion": 1,
+  "runId": "dev-d3-20261024",
+  "mode": "execute",
+  "profile": "dev",
+  "dataset": "D3",
+  "scenarios": [
+    "S01",
+    "S02",
+    "S03",
+    "S04"
+  ],
+  "startedAt": "2026-10-24T05:23:16.666Z",
+  "finishedAt": "2026-10-24T05:27:45.351Z",
+  "root": "/Users/ta/rai-phase6-lab/phase6-dev-d3",
+  "realRoot": "/Users/ta/rai-phase6-lab/phase6-dev-d3",
+  "protocol": {
+    "path": "/Users/ta/running/deliverables/phase6-performance-2026-10-24/protocol.json",
+    "sha256": "48e7aaa4d52fb7fc66cbe0948948c3e12558c29269c96ef027a84cc3a84062e5"
+  },
+  "code": {
+    "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+    "status": "M package.json\n?? apps/api/test/phase6-fixtures.test.mjs\n?? apps/api/test/phase6-safety.test.mjs\n?? apps/api/test/phase6-verify.test.mjs\n?? deliverables/phase6-performance-2026-10-24/\n?? scripts/phase6/",
+    "protocolSha256": "48e7aaa4d52fb7fc66cbe0948948c3e12558c29269c96ef027a84cc3a84062e5",
+    "packageLockSha256": "0642057ed8b3b0a08f18dede2621172245c6de2bf4d29155c944be3511397d2a",
+    "packageJsonSha256": "43285f9d7fbec751b09a79ef099adc03fb35457774bc6020f30b7e72fcc11637",
+    "node": "v22.23.2",
+    "platform": "darwin 25.6.0 x64"
+  },
+  "fixture": {
+    "path": "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/rai.sqlite",
+    "sha256": "7c91790488507b6d7f2aeaa78ed81f2cc319d8ea9151b05114d97aef39418488",
+    "bytes": 1079635968
+  },
+  "fixtureManifest": {
+    "path": "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/manifest.json",
+    "sha256": "3b5a9835dbf2b73087361a47ab47ddb1989d5261dc8eb3da7727ee65ce2bab84"
+  },
+  "payloadManifest": null,
+  "safety": {
+    "rootOutsideRepo": true,
+    "mainAndControlDistinct": true,
+    "loopbackOnly": true,
+    "envWhitelist": true,
+    "tokenScan": "pending-final-scan"
+  },
+  "commands": [
+    {
+      "scenario": "S01",
+      "command": "node --import tsx apps/api/src/server.ts",
+      "cwd": "/Users/ta/running",
+      "envKeys": [
+        "RAI_RUNTIME_ROOT",
+        "RAI_DATABASE",
+        "RAI_CONTROL_DATABASE",
+        "RAI_API_PORT",
+        "RAI_API_HOST",
+        "RAI_API_TOKEN",
+        "RAI_SERVER_ID",
+        "RAI_ATHLETE_ID",
+        "RAI_DATASET_EPOCH",
+        "RAI_LOG_LEVEL",
+        "NO_PROXY",
+        "no_proxy"
+      ],
+      "envInheritedKeys": [
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR"
+      ],
+      "port": "0 (ephemeral)",
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S01.log"
+    },
+    {
+      "scenario": "S01",
+      "command": "node scripts/phase6/driver.mjs",
+      "args": [
+        "scripts/phase6/driver.mjs",
+        "--base-url",
+        "http://127.0.0.1:58961",
+        "--scenario",
+        "S01",
+        "--dataset",
+        "D3",
+        "--profile",
+        "dev",
+        "--run-id",
+        "dev-d3-20261024",
+        "--out",
+        "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S01",
+        "--rate",
+        "2",
+        "--duration-ms",
+        "10000",
+        "--warmup-ms",
+        "0",
+        "--timeout-ms",
+        "70000",
+        "--manifest",
+        "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/manifest.json"
+      ],
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S01.log"
+    },
+    {
+      "scenario": "S02",
+      "command": "node --import tsx apps/api/src/server.ts",
+      "cwd": "/Users/ta/running",
+      "envKeys": [
+        "RAI_RUNTIME_ROOT",
+        "RAI_DATABASE",
+        "RAI_CONTROL_DATABASE",
+        "RAI_API_PORT",
+        "RAI_API_HOST",
+        "RAI_API_TOKEN",
+        "RAI_SERVER_ID",
+        "RAI_ATHLETE_ID",
+        "RAI_DATASET_EPOCH",
+        "RAI_LOG_LEVEL",
+        "NO_PROXY",
+        "no_proxy"
+      ],
+      "envInheritedKeys": [
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR"
+      ],
+      "port": "0 (ephemeral)",
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S02.log"
+    },
+    {
+      "scenario": "S02",
+      "command": "node scripts/phase6/driver.mjs",
+      "args": [
+        "scripts/phase6/driver.mjs",
+        "--base-url",
+        "http://127.0.0.1:59044",
+        "--scenario",
+        "S02",
+        "--dataset",
+        "D3",
+        "--profile",
+        "dev",
+        "--run-id",
+        "dev-d3-20261024",
+        "--out",
+        "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S02",
+        "--rate",
+        "2",
+        "--duration-ms",
+        "10000",
+        "--warmup-ms",
+        "0",
+        "--timeout-ms",
+        "70000",
+        "--manifest",
+        "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/manifest.json"
+      ],
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S02.log"
+    },
+    {
+      "scenario": "S03",
+      "command": "node --import tsx apps/api/src/server.ts",
+      "cwd": "/Users/ta/running",
+      "envKeys": [
+        "RAI_RUNTIME_ROOT",
+        "RAI_DATABASE",
+        "RAI_CONTROL_DATABASE",
+        "RAI_API_PORT",
+        "RAI_API_HOST",
+        "RAI_API_TOKEN",
+        "RAI_SERVER_ID",
+        "RAI_ATHLETE_ID",
+        "RAI_DATASET_EPOCH",
+        "RAI_LOG_LEVEL",
+        "NO_PROXY",
+        "no_proxy"
+      ],
+      "envInheritedKeys": [
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR"
+      ],
+      "port": "0 (ephemeral)",
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S03.log"
+    },
+    {
+      "scenario": "S03",
+      "command": "node scripts/phase6/driver.mjs",
+      "args": [
+        "scripts/phase6/driver.mjs",
+        "--base-url",
+        "http://127.0.0.1:59267",
+        "--scenario",
+        "S03",
+        "--dataset",
+        "D3",
+        "--profile",
+        "dev",
+        "--run-id",
+        "dev-d3-20261024",
+        "--out",
+        "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S03",
+        "--rate",
+        "2",
+        "--duration-ms",
+        "10000",
+        "--warmup-ms",
+        "0",
+        "--timeout-ms",
+        "70000",
+        "--manifest",
+        "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/manifest.json"
+      ],
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S03.log"
+    },
+    {
+      "scenario": "S04",
+      "command": "node --import tsx apps/api/src/server.ts",
+      "cwd": "/Users/ta/running",
+      "envKeys": [
+        "RAI_RUNTIME_ROOT",
+        "RAI_DATABASE",
+        "RAI_CONTROL_DATABASE",
+        "RAI_API_PORT",
+        "RAI_API_HOST",
+        "RAI_API_TOKEN",
+        "RAI_SERVER_ID",
+        "RAI_ATHLETE_ID",
+        "RAI_DATASET_EPOCH",
+        "RAI_LOG_LEVEL",
+        "NO_PROXY",
+        "no_proxy"
+      ],
+      "envInheritedKeys": [
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR"
+      ],
+      "port": "0 (ephemeral)",
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S04.log"
+    },
+    {
+      "scenario": "S04",
+      "command": "node scripts/phase6/driver.mjs",
+      "args": [
+        "scripts/phase6/driver.mjs",
+        "--base-url",
+        "http://127.0.0.1:59542",
+        "--scenario",
+        "S04",
+        "--dataset",
+        "D3",
+        "--profile",
+        "dev",
+        "--run-id",
+        "dev-d3-20261024",
+        "--out",
+        "/Users/ta/rai-phase6-lab/phase6-dev-d3/results/S04",
+        "--rate",
+        "2",
+        "--duration-ms",
+        "10000",
+        "--warmup-ms",
+        "0",
+        "--timeout-ms",
+        "70000",
+        "--manifest",
+        "/Users/ta/rai-phase6-lab/fixture-d3/datasets/D3/manifest.json"
+      ],
+      "log": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S04.log"
+    }
+  ],
+  "scenariosResults": [
+    {
+      "scenario": "S01",
+      "exitCode": 0,
+      "signal": null,
+      "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S01.log",
+      "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S01.log",
+      "fixtureBytes": 1079635968,
+      "database": {
+        "bytes": 1079635968,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "summary": {
+        "scenario": "S01",
+        "runId": "dev-d3-20261024",
+        "profile": "dev",
+        "dataset": "D3",
+        "startedAt": "2026-10-24T05:23:56.498Z",
+        "finishedAt": "2026-10-24T05:23:56.623Z",
+        "requests": 3,
+        "outcomes": {
+          "success": 3
+        },
+        "oracleFailures": [],
+        "checks": [
+          {
+            "routeTemplate": "/v1/health",
+            "phase": "startup",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/handshake",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/runtime-status",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          }
+        ]
+      },
+      "requests": 3,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S02",
+      "exitCode": 0,
+      "signal": null,
+      "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S02.log",
+      "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S02.log",
+      "fixtureBytes": 1079635968,
+      "database": {
+        "bytes": 1079635968,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "summary": {
+        "scenario": "S02",
+        "runId": "dev-d3-20261024",
+        "profile": "dev",
+        "dataset": "D3",
+        "startedAt": "2026-10-24T05:24:17.703Z",
+        "finishedAt": "2026-10-24T05:24:34.824Z",
+        "requests": 8,
+        "outcomes": {
+          "success": 8
+        },
+        "oracleFailures": [],
+        "checks": [
+          {
+            "routeTemplate": "/v1/dashboard",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts",
+            "phase": "page:first",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts",
+            "phase": "page:middle",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts",
+            "phase": "page:last",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id",
+            "phase": "deleted:404",
+            "status": 404,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/mobile/today",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/mobile/training-plan-state",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          }
+        ]
+      },
+      "requests": 8,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S03",
+      "exitCode": 0,
+      "signal": null,
+      "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S03.log",
+      "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S03.log",
+      "fixtureBytes": 1079635968,
+      "database": {
+        "bytes": 1079635968,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "summary": {
+        "scenario": "S03",
+        "runId": "dev-d3-20261024",
+        "profile": "dev",
+        "dataset": "D3",
+        "startedAt": "2026-10-24T05:25:20.454Z",
+        "finishedAt": "2026-10-24T05:25:24.694Z",
+        "requests": 24,
+        "outcomes": {
+          "success": 24
+        },
+        "oracleFailures": [],
+        "checks": [
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:small:cold",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:small:hot-1",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:small:hot-2",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:small:hot-3",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:medium:cold",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:medium:hot-1",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:medium:hot-2",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:medium:hot-3",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:large:cold",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:large:hot-1",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:large:hot-2",
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/workouts/:id/series",
+            "phase": "series:large:hot-3",
+            "status": 200,
+            "ok": true
+          }
+        ]
+      },
+      "requests": 24,
+      "oracleFailures": 0,
+      "fatal": null
+    },
+    {
+      "scenario": "S04",
+      "exitCode": 0,
+      "signal": null,
+      "driverLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/driver-S04.log",
+      "apiLog": "/Users/ta/rai-phase6-lab/phase6-dev-d3/logs/api-S04.log",
+      "fixtureBytes": 1079635968,
+      "database": {
+        "bytes": 1079635968,
+        "walBytes": 0,
+        "shmBytes": 32768
+      },
+      "summary": {
+        "scenario": "S04",
+        "runId": "dev-d3-20261024",
+        "profile": "dev",
+        "dataset": "D3",
+        "startedAt": "2026-10-24T05:27:02.162Z",
+        "finishedAt": "2026-10-24T05:27:44.737Z",
+        "requests": 4,
+        "outcomes": {
+          "success": 4
+        },
+        "oracleFailures": [],
+        "checks": [
+          {
+            "routeTemplate": "/v1/data-summary",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/data-audit",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/diagnostics",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          },
+          {
+            "routeTemplate": "/v1/performance",
+            "phase": null,
+            "status": 200,
+            "ok": true
+          }
+        ]
+      },
+      "requests": 4,
+      "oracleFailures": 0,
+      "fatal": null
+    }
+  ],
+  "errors": [],
+  "environment": "environment.json",
+  "cleanup": [
+    "/Users/ta/rai-phase6-lab/phase6-dev-d3"
+  ]
+}

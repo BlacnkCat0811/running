@@ -1,0 +1,362 @@
+{
+  "protocolVersion": 1,
+  "protocolId": "rai-phase6-2026-10-24",
+  "frozenAt": "2026-10-24T12:56:00+08:00",
+  "inputs": {
+    "reviewPlan": "/Users/ta/Downloads/RAI_Phase6_Review_and_Implementation_Plan_2026-10-24.md",
+    "reviewPlanSha256": "pending-source-manifest",
+    "architecturePlanSha256": "f8b5d0f5dc2a21aa5206543b39562779a85c7a5cf62d98db83fb8e7b8b841887"
+  },
+  "code": {
+    "commit": "732f3cf3943b0f52915fb10192f07405b0e672de",
+    "worktree": "phase6 implementation changes (uncommitted at freeze; see source-manifest.json)",
+    "databaseSchemaVersion": 47,
+    "node": ">=22.12.0 <23 || >=24.0.0 <25"
+  },
+  "profiles": {
+    "dev": {
+      "purpose": "macOS/Windows 开发机工具、正确性与趋势冒烟",
+      "platform": "darwin-x64 (this run)",
+      "resourceReadBack": {
+        "cgroup": false,
+        "systemd": false,
+        "cpuQuota": null,
+        "memoryHighBytes": null,
+        "memoryMaxBytes": null,
+        "swapMaxBytes": null,
+        "tasksMax": null
+      },
+      "mayClaim": [
+        "G1-G4 tooling and DEV correctness",
+        "DEV read trend",
+        "fault-handling behavior on DEV"
+      ],
+      "mayNotClaim": [
+        "CLOUD capacity",
+        "production SLO",
+        "Linux cgroup/systemd behavior",
+        "N100 profile"
+      ]
+    },
+    "cloud-default": {
+      "purpose": "当前云部署配置语义的主基线",
+      "target": "独立隔离 Linux 宿主/VM：2 vCPU、2 GiB；服务 CPUQuota=150%、MemoryHigh=1100M、MemoryMax=1400M、MemorySwapMax=512M、TasksMax=128；命令候选能力关闭",
+      "resourceReadBackRequired": [
+        "cgroup cpu.max",
+        "memory.current",
+        "memory.peak",
+        "memory.max",
+        "memory.high",
+        "memory.swap.current",
+        "pids.current",
+        "pids.max",
+        "cpu.stat",
+        "memory.events"
+      ],
+      "status": "BLOCKED: 本会话没有隔离 Linux 目标；不从 macOS 数字换算",
+      "resourceReadBack": {
+        "cgroup": true,
+        "systemd": true,
+        "cpuQuotaCores": 1.5,
+        "memoryHighBytes": 1153433600,
+        "memoryMaxBytes": 1468006400,
+        "swapMaxBytes": 536870912,
+        "tasksMax": 128,
+        "unitTolerance": {
+          "cpuCores": 0.001,
+          "bytes": 0,
+          "tasks": 0
+        },
+        "host": {
+          "cpuCount": 2,
+          "totalMemoryBytes": 2147483648
+        }
+      }
+    },
+    "cloud-validation": {
+      "purpose": "阶段 5 候选写能力负载",
+      "target": "与 cloud-default 同资源；隔离环境设置 RAI_TRAINING_PLAN_COMMAND_MODE=validation 与客户端能力头；独立数据/输出",
+      "status": "BLOCKED: 同上，且不得在生产启用 validation",
+      "resourceReadBack": {
+        "cgroup": true,
+        "systemd": true,
+        "cpuQuotaCores": 1.5,
+        "memoryHighBytes": 1153433600,
+        "memoryMaxBytes": 1468006400,
+        "swapMaxBytes": 536870912,
+        "tasksMax": 128,
+        "unitTolerance": {
+          "cpuCores": 0.001,
+          "bytes": 0,
+          "tasks": 0
+        },
+        "host": {
+          "cpuCount": 2,
+          "totalMemoryBytes": 2147483648
+        }
+      }
+    },
+    "n100": {
+      "purpose": "可选：验证 N100 模板",
+      "status": "NOT_RUN: 无 N100 目标；不纳入 CLOUD 判定"
+    }
+  },
+  "datasets": {
+    "D0": {
+      "records": 3,
+      "workouts": 1,
+      "years": 1,
+      "note": "空态 + 各业务最小合法样本；另含 30 点序列/10 点路线"
+    },
+    "D1": {
+      "records": 50000,
+      "workouts": 100,
+      "years": 1,
+      "note": "工具冒烟、轻量读写与生命周期"
+    },
+    "D2": {
+      "records": 500000,
+      "workouts": 1000,
+      "years": 5,
+      "note": "代表性基线"
+    },
+    "D3": {
+      "records": 2000000,
+      "workouts": 5000,
+      "years": 10,
+      "note": "历史增长与容量上界探索"
+    },
+    "DX": {
+      "records": 0,
+      "workouts": 0,
+      "years": 0,
+      "note": "合法/超限/损坏输入集；不建立业务库"
+    }
+  },
+  "statistics": {
+    "percentile": "nearest-rank: sorted[ceil(p*n)-1]",
+    "minSamplesForP99": 10000,
+    "insufficientSamplesLabel": "insufficient_samples",
+    "warmupSeconds": 30,
+    "minimumHotReadSeconds": 300,
+    "steadyStateMinimumMinutes": 15,
+    "repeatsPerConfiguration": 3,
+    "lowFrequencyRuns": 10,
+    "coldStarts": 10,
+    "retainAllTimeoutsAndErrors": true,
+    "dropWarmupFromSteadyStatistics": true,
+    "openLoop": true,
+    "observationOverheadBudgetPercent": 5
+  },
+  "slo": {
+    "healthP95Ms": 100,
+    "healthP99Ms": 250,
+    "lightReadP95Ms": 500,
+    "lightReadP99Ms": 1500,
+    "hotSeriesP95Ms": 1500,
+    "hotSeriesP99Ms": 3000,
+    "eventLoopP95Ms": 50,
+    "eventLoopP99Ms": 200,
+    "stableCompletionRate": 0.999,
+    "memoryHighBytes": 1153433600,
+    "cpuQuotaCores": 1.5,
+    "cpuSteadyTargetRatio": 0.7,
+    "oomKillAllowed": 0,
+    "note": "建议实验目标，不是已存在的产品 SLO；正式业务签收仍待确认。DEV 运行不用于判定这些数值。"
+  },
+  "scenarios": {
+    "S01": {
+      "name": "启动/health/handshake/runtime-status",
+      "datasets": [
+        "D0",
+        "D2"
+      ],
+      "status": "DEV executed (S01)"
+    },
+    "S02": {
+      "name": "常规读与分页（dashboard/workouts/today/plan-state）",
+      "datasets": [
+        "D1",
+        "D2",
+        "D3"
+      ],
+      "status": "DEV executed (D1)"
+    },
+    "S03": {
+      "name": "series 小/中/大、冷/热/伴随 health",
+      "datasets": [
+        "D1",
+        "D2",
+        "D3"
+      ],
+      "status": "DEV executed (D1)"
+    },
+    "S04": {
+      "name": "data-summary/data-audit/诊断慢查询",
+      "datasets": [
+        "D1",
+        "D2",
+        "D3"
+      ],
+      "status": "DEV executed (D1)"
+    },
+    "S05": {
+      "name": "record-only ZIP 真实上传/inspect/job",
+      "datasets": [
+        "D1",
+        "DX"
+      ],
+      "status": "DEV executed (D1 + DX payloads)"
+    },
+    "S06": {
+      "name": "重复包/同内容不同身份/重试",
+      "datasets": [
+        "D1",
+        "DX"
+      ],
+      "status": "DEV executed (D1 + DX payloads)"
+    },
+    "S07": {
+      "name": "direct-sync + GPX 路线",
+      "datasets": [
+        "D1",
+        "DX"
+      ],
+      "status": "DEV executed (D1 + DX payloads)"
+    },
+    "S08": {
+      "name": "合法上限/超限/损坏输入",
+      "datasets": [
+        "DX"
+      ],
+      "status": "DEV executed (DX payloads)"
+    },
+    "S09": {
+      "name": "导入→分析→发布→读可见",
+      "datasets": [
+        "D1",
+        "DX"
+      ],
+      "status": "DEV executed (D1 + workout payload)"
+    },
+    "S10": {
+      "name": "增量分析与完整重算正确性",
+      "datasets": [
+        "D1",
+        "D2"
+      ],
+      "status": "PARTIAL: D1 full recompute; D2/D3 equivalence NOT_RUN"
+    },
+    "S11": {
+      "name": "预测读取与预测模型训练",
+      "datasets": [
+        "D2"
+      ],
+      "status": "NOT_RUN: 合成数据无足量标签；不伪造进入计算"
+    },
+    "S12": {
+      "name": "计划读取/候选写能力",
+      "datasets": [
+        "D1"
+      ],
+      "status": "DEV read-only executed; CLOUD-VALIDATION BLOCKED"
+    },
+    "S13": {
+      "name": "读写并发 + 后台任务",
+      "datasets": [
+        "D2"
+      ],
+      "status": "DEV smoke executed (short); CLOUD steady BLOCKED"
+    },
+    "S14": {
+      "name": "series/command 过载边界",
+      "datasets": [
+        "D1"
+      ],
+      "status": "DEV series overload executed; command queue 16 NOT_RUN"
+    },
+    "S15": {
+      "name": "worker/API 故障",
+      "datasets": [
+        "D1"
+      ],
+      "status": "NOT_RUN in this session; fixture hooks available"
+    },
+    "S16": {
+      "name": "恢复夹具/epoch 变更",
+      "datasets": [
+        "D1"
+      ],
+      "status": "NOT_RUN in this session; phase4 fixture reuse required"
+    },
+    "S17": {
+      "name": "停机积压后追赶",
+      "datasets": [
+        "D2"
+      ],
+      "status": "NOT_RUN"
+    },
+    "S18": {
+      "name": "≥2h 混合负载/100 周期",
+      "datasets": [
+        "D2"
+      ],
+      "status": "NOT_RUN"
+    },
+    "S19": {
+      "name": "备份/归档校验/恢复空间",
+      "datasets": [
+        "D2"
+      ],
+      "status": "NOT_RUN"
+    },
+    "S20": {
+      "name": "原生 iOS 体验",
+      "datasets": [
+        "D1"
+      ],
+      "status": "NOT_RUN: 需要真机/Simulator 与运行中的隔离 API"
+    }
+  },
+  "stopRules": {
+    "pathOrIdentityMismatch": "stop immediately, FAIL",
+    "unexpectedOomOrWatchdogRestart": "stop round, mark failed",
+    "memoryAboveRatioOfMax": {
+      "ratio": 0.9,
+      "sustainedSeconds": 10
+    },
+    "healthTimeout": {
+      "consecutive": 3,
+      "eachMs": 5000
+    },
+    "maxInFlight": 64,
+    "unplannedQueueGrowthSeconds": 600,
+    "diskSafetyMarginBytes": 2147483648,
+    "hardTimeoutPerRoundSeconds": 1800
+  },
+  "acceptance": {
+    "statusVocabulary": [
+      "PASS",
+      "FAIL",
+      "BLOCKED",
+      "NOT_RUN",
+      "NOT_APPLICABLE"
+    ],
+    "skipIsNotPass": true,
+    "requiredGates": [
+      "G0",
+      "G1",
+      "G2",
+      "G3",
+      "G4",
+      "G8",
+      "G9"
+    ],
+    "blockedGates": [
+      "G5",
+      "G6",
+      "G7"
+    ],
+    "note": "G5-G7 需要 CLOUD 资源读回/长跑/故障与 iOS 证据；本会话按文档标 BLOCKED/NOT_RUN，不冒充总 PASS。"
+  }
+}

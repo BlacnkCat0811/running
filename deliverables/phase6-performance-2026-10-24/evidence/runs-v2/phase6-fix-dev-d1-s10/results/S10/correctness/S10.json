@@ -1,0 +1,42 @@
+{
+  "scenario": "S10",
+  "runId": "phase6-fix-dev-s10-20261024-04",
+  "profile": "dev",
+  "dataset": "D1",
+  "startedAt": "2026-10-24T08:03:04.244Z",
+  "finishedAt": "2026-10-24T08:03:04.401Z",
+  "incomplete": false,
+  "interruptedBy": null,
+  "requests": 4,
+  "outcomes": {
+    "success": 4
+  },
+  "oracleFailures": [],
+  "cases": [],
+  "checks": [
+    {
+      "routeTemplate": "/v1/dashboard",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/model-runs",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/workouts",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    },
+    {
+      "routeTemplate": "/v1/data-summary",
+      "phase": null,
+      "status": 200,
+      "ok": true
+    }
+  ]
+}
