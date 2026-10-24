@@ -21,7 +21,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -853,10 +853,17 @@ test("每个任务的数据库调查：同路径换文件（恢复/换库）必�
     store.close();
     // 同路径、换文件：恢复/换库的真实形态（inode 变、路径不变）。
     // 侧车文件一起清掉，避免旧 WAL/SHM 让人误以为"还是原来那个库"。
+    //
+    // 用 `renameSync` 而不是 `rm` + `copyFileSync`（2026-10-24，CI #3 / ubuntu 实测）：
+    // ext4/tmpfs 会**立刻复用**刚 unlink 掉的 inode 号，`rm` 完再复制一份新文件，`dev:ino`
+    // 有可能一字未变，于是这条判据在 Linux 上偶发假红（那一轮 2626 条里唯一一条失败，
+    // 换到 APFS 本机恒绿）。这里要钉的是"同路径换成了**另一个**文件必须被看见"，
+    // 而两个文件曾经同时存在 ⇒ 它们的 inode 必然不同：前提由用例自己做出来，
+    // 不再取决于分配器的运气。判据与断言一个字没改。
     rmSync(main);
     rmSync(`${main}-wal`, { force: true });
     rmSync(`${main}-shm`, { force: true });
-    copyFileSync(replacement, main);
+    renameSync(replacement, main);
 
     const second = surveyDatabase(main, first);
     assert.equal(second.targetChanged, true,
