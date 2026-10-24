@@ -10,6 +10,29 @@ import type { CoachLoopRuntimeResponse, TrainingPlanStateResponseV2 } from "@rai
 import { MobileGoalsStore } from "../src/mobile-goals.js";
 import { coachLocalDate } from "../src/coach-loop-facts.js";
 
+import { posixOnlyReason } from "./posix-only.js";
+
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：本条红在
+ * `renameSync(rai.sqlite, rai.sqlite.unavailable)` 上 ——
+ * `EBUSY: resource busy or locked, rename '…\var\rai.sqlite' -> '…\var\rai.sqlite.unavailable'`。
+ * 机制是 Windows 的文件共享语义：**不允许 rename/unlink 一个仍被打开的文件**，而这里的
+ * 主库正被真子进程 API 服务开着（这条用例的全部价值就在于它是真服务、真路由）。POSIX 允许
+ * （rename 只换目录项，已打开的句柄继续读旧 inode）。
+ *
+ * 这条判据要证明的是"导库/重算繁忙期必须挡住新的 unmanaged 与 managed 生成，重放与暂停仍然
+ * 可用，并且随后库不可读时仍保留 database_not_ready 围栏"。它后半段依赖"把主库搬走"这个
+ * 动作，而该动作在 Windows 上做不出来，所以这条判据在那里没有被检查。
+ * 同文件其余 Phase 5 用例不搬库，在 Windows 上照常通过。
+ */
+const DATABASE_MOVE_ONLY = posixOnlyReason(
+  "Windows 不允许 rename/unlink 仍被打开的文件：主库正被真子进程 API 开着，"
+  + "用例把它 rename 成 rai.sqlite.unavailable 时直接 EBUSY"
+  + "（CI 2026-10-25：「EBUSY: resource busy or locked, rename …rai.sqlite」）。"
+  + "本条判据（繁忙期挡住新生成、重放与暂停仍可用、库不可读时保留 database_not_ready 围栏）"
+  + "依赖的『搬走主库』动作在 Windows 上做不出来，因此没有被检查；真正的 Windows 换库路径另立工单。"
+);
+
 const token = "synthetic-phase5-api-token";
 const scope = { serverId: "phase5-validation", athleteId: "athlete_1", datasetEpoch: "phase5-synthetic" };
 const key = JSON.stringify([scope.serverId, scope.athleteId, scope.datasetEpoch]);
@@ -124,7 +147,7 @@ test("real router: first coach enable generates for the retained unified race go
   } finally { if (server) await stop(server.child); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available", async () => {
+test("real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available", { skip: DATABASE_MOVE_ONLY }, async () => {
   const root = seed();
   let server: Awaited<ReturnType<typeof start>> | undefined;
   try {

@@ -15,11 +15,34 @@ import { apiErrorPayload } from "../src/api-error.js";
 import { assemblePlanCandidates, matchPlanDay } from "../src/workout-segments.js";
 import type { MobileRunCoachPlan, MobileSessionStructure } from "@rai/api-contracts";
 
+import { posixOnlyReason } from "./posix-only.js";
+
 const identity = () => ({ serverId: "server", athleteId: "athlete", datasetEpoch: "epoch" });
 const config = { goal: "fitness" as const, raceDate: null, raceDistanceKm: null, targetTimeSeconds: null,
   runningDays: [1, 3, 5], longRunDays: [5], targetType: "pace" as const, strengthTraining: false };
 const structure: MobileSessionStructure = { warmup: null, blocks: [{ iterations: 1,
   steps: [{ purpose: "work", goal: { type: "distance", meters: 4000 }, alert: null }] }], cooldown: null };
+
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：本条红在换库那一行 —— 用例把 `planHistory()`
+ * 换成"每次读都 `copyFileSync` + `renameSync` 覆盖 facts.sqlite"，Windows 报
+ * `EPERM: operation not permitted, rename '…\facts.sqlite.replacement-1' -> '…\facts.sqlite'`，
+ * 于是 `read.trainingPlanState()` 抛的是 EPERM，而不是判据要的
+ * `plan_snapshot_changed` / 503。机制是 Windows 的文件共享语义：**不允许 rename/unlink
+ * 一个仍被打开的文件**（读侧连接正开着），POSIX 允许（rename 只换目录项）。
+ *
+ * 这条判据要证明的是"读到一半被换库 ⇒ 重试三次后 fail closed 成可重试的 503，而不是
+ * 返回混合快照"。换库这个动作在 Windows 上做不出来，所以这条判据在那里没有被检查。
+ * 同文件 `P2-02: a WAL checkpoint moving the file mtime does not fail the plan snapshot`
+ * 只动 mtime、不换文件，在 Windows 上照常通过。
+ */
+const FILE_REPLACEMENT_ONLY = posixOnlyReason(
+  "Windows 不允许 rename/unlink 仍被打开的文件：读侧还开着 facts.sqlite，用例每次读都覆盖换库，"
+  + "`renameSync(staged, path)` 直接 EPERM（CI 2026-10-25：「EPERM: operation not permitted, rename」），"
+  + "抛出的错误因此是 EPERM 而不是判据要的 plan_snapshot_changed/503。"
+  + "本条判据（读到一半换库 ⇒ 有限重试后 fail closed 成可重试 503）所依赖的换库动作在 Windows 上"
+  + "做不出来，因此没有被检查；真正的 Windows 换库路径另立工单。"
+);
 
 test("TypeScript and Swift use the same unit, null, array order and six-decimal digest fixtures", () => {
   const fixtures = JSON.parse(readFileSync("apps/ios/tests/fixtures/prescription-digests.json", "utf8")) as Array<{ kind: string; structure: MobileSessionStructure | null; digest: string }>;
@@ -127,7 +150,7 @@ test("P2-02: a WAL checkpoint moving the file mtime does not fail the plan snaps
   } finally { read.close(); store.close(); database.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
-test("P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503", async context => {
+test("P2-02: replacing the database file mid-read retries and then fails closed with a retryable 503", { skip: FILE_REPLACEMENT_ONLY }, async context => {
   context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-09T04:00:00Z") });
   const root = mkdtempSync(join(tmpdir(), "rai-state-replace-"));
   const path = join(root, "facts.sqlite");

@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { posixOnlyReason } from "./posix-only.js";
+
 /**
  * Windows 盘符路径 → MSYS 形式（`C:/x` → `/c/x`）。
  *
@@ -42,11 +44,42 @@ function resolveTarPath(): string {
 const tarPath = canRunBash ? resolveTarPath() : "";
 const windowsSymlinkSkip = process.platform === "win32"
   ? "symbolic-link fixtures need privileges on Windows" : false;
+
+/**
+ * 只有真正读 systemd 服务配置的那一组判据在 Windows 上做不出来。
+ *
+ * 🔴 CI 2026-10-25（`windows-latest`）：19 条用例统一红在
+ * `backup service configuration: cannot read service EnvironmentFiles`（`2 !== 0`）。机制是
+ * 平台性的：`scripts/resolve-runtime-backup-service.mjs` 的 `show()` 用 **node 的
+ * `spawnSync("systemctl", …)`** 读 `EnvironmentFiles` / `Environment` / `UnsetEnvironment` /
+ * `MainPID`。Windows 上 node 的 spawn 只按 `PATHEXT` 解析 `.exe/.cmd/.bat`，夹具那个
+ * 无扩展名、带 `#!node` shebang 的替身永远起不来（`result.error` 非空）⇒ 服务环境读不出来。
+ * 脚本本身是 Linux `systemd` 的部署脚本，这条判据要在 Windows 上成立需要另一套服务管理器替身。
+ *
+ * 所以这些用例的结论（拒绝必须发生在停服/发布之前、manifest 的三个来源、archive window 的
+ * 变更判定……）在 Windows 上**没有被检查**；不涉及 `systemctl show` 的用例（dry-run、存档
+ * 校验器、tar 失败回滚等）仍然照常运行。
+ */
+const SYSTEMD_ONLY = posixOnlyReason(
+  "deploy/backup-runtime.sh 的服务判据读 `systemctl show -p EnvironmentFiles/Environment/"
+  + "UnsetEnvironment/MainPID --value`，而 `scripts/resolve-runtime-backup-service.mjs` 是用 **node 的 "
+  + "spawnSync(\"systemctl\")** 调它的：Windows 的 spawn 只解析 .exe/.cmd/.bat，无扩展名的 shebang "
+  + "替身起不来，于是统一报 `cannot read service EnvironmentFiles`（CI 2026-10-25：2 !== 0）。"
+  + "这条判据（拒绝必须发生在停服/发布之前、服务环境与备份环境必须一致、archive window 内变更必须拒绝）"
+  + "在 Windows 上没有被检查；Linux systemd 的服务语义无法在 Windows 上复现，另立工单。"
+);
 const bashTest = (name: string, fn: () => void | Promise<void>, extraSkip: boolean | string = false) =>
   test(name, {
     skip: !canRunBash ? "bash is required for deploy script tests"
       : tarPath === "" ? "a tar executable is required for deploy script tests" : extraSkip
   }, fn);
+
+/**
+ * 只有真正读 systemd 服务配置的用例走这条：Windows 上 `systemctl show` 的替身起不来，
+ * 服务环境一律读不出（机制与证据见 `SYSTEMD_ONLY`）。
+ */
+const systemdTest = (name: string, fn: () => void | Promise<void>) =>
+  bashTest(name, fn, SYSTEMD_ONLY);
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "rai-n100-backup-"));
@@ -206,7 +239,7 @@ bashTest("whole-runtime backup defaults dry-run and rejects output inside runtim
 });
 
 for (const state of ["active", "inactive"]) {
-  bashTest(`whole-runtime backup includes control/artifacts and restores ${state} service state`, () => {
+  systemdTest(`whole-runtime backup includes control/artifacts and restores ${state} service state`, () => {
     const f = fixture();
     try {
       writeFileSync(f.state, state);
@@ -231,7 +264,7 @@ for (const state of ["active", "inactive"]) {
   });
 }
 
-bashTest("active service without a MainPID is refused before stopping or publishing", () => {
+systemdTest("active service without a MainPID is refused before stopping or publishing", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], { TEST_SERVICE_MAIN_PID: "0" });
@@ -243,7 +276,7 @@ bashTest("active service without a MainPID is refused before stopping or publish
   } finally { f.close(); }
 });
 
-bashTest("active service live environment failure is refused before stopping", () => {
+systemdTest("active service live environment failure is refused before stopping", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], { TEST_LIVE_ENV_CHECK: "fail" });
@@ -254,7 +287,7 @@ bashTest("active service live environment failure is refused before stopping", (
   } finally { f.close(); }
 });
 
-bashTest("external authoritative database path is refused before stopping the service", () => {
+systemdTest("external authoritative database path is refused before stopping the service", () => {
   const f = fixture();
   try {
     const external = join(f.root, "elsewhere");
@@ -277,7 +310,7 @@ bashTest("external authoritative database path is refused before stopping the se
   } finally { f.close(); }
 });
 
-bashTest("backup records a five-store path manifest and refuses unverifiable apply", () => {
+systemdTest("backup records a five-store path manifest and refuses unverifiable apply", () => {
   const f = fixture();
   try {
     const missingPaths = spawnSync("bash", [
@@ -338,7 +371,7 @@ bashTest("archive verifier rejects a store sidecar that appears after the manife
   } finally { f.close(); }
 });
 
-bashTest("active CLI publication lock is refused after stopping the service", () => {
+systemdTest("active CLI publication lock is refused after stopping the service", () => {
   const f = fixture();
   try {
     writeFileSync(join(f.runtime, "var/rai.sqlite.import.lock"), JSON.stringify({
@@ -362,7 +395,7 @@ bashTest("failed backup removes partial output and restarts previously active se
   } finally { f.close(); }
 });
 
-bashTest("backup reports service restart failure even when the archive was created", () => {
+systemdTest("backup reports service restart failure even when the archive was created", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], { TEST_FAIL_START: "1" });
@@ -390,7 +423,7 @@ bashTest("dry-run writes an explicit read-only path manifest", () => {
   } finally { f.close(); }
 });
 
-bashTest("runtime-only env without explicit database paths is refused", () => {
+systemdTest("runtime-only env without explicit database paths is refused", () => {
   const f = fixture();
   try {
     const env = join(f.root, "runtime-only.env");
@@ -470,7 +503,7 @@ bashTest("unreadable authoritative file is refused before stopping", () => {
   }
 });
 
-bashTest("service env different from the backup env is refused before stopping", () => {
+systemdTest("service env different from the backup env is refused before stopping", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], {
@@ -509,7 +542,7 @@ for (const [name, override] of [
   });
 }
 
-bashTest("multiple and optional EnvironmentFiles are rejected before stop", () => {
+systemdTest("multiple and optional EnvironmentFiles are rejected before stop", () => {
   const f = fixture();
   try {
     const second = join(f.root, "second.env");
@@ -528,7 +561,7 @@ bashTest("multiple and optional EnvironmentFiles are rejected before stop", () =
   } finally { f.close(); }
 });
 
-bashTest("UnsetEnvironment and quoted path syntax are rejected before stop", () => {
+systemdTest("UnsetEnvironment and quoted path syntax are rejected before stop", () => {
   const f = fixture();
   try {
     for (const extra of [
@@ -563,7 +596,7 @@ bashTest("service database path through a symlink is refused", () => {
   } finally { f.close(); }
 }, windowsSymlinkSkip);
 
-bashTest("direct Environment configuration matching three paths produces a verified archive", () => {
+systemdTest("direct Environment configuration matching three paths produces a verified archive", () => {
   const f = fixture();
   try {
     const result = spawnSync("bash", [script, "--runtime-root", f.runtime, "--output-dir", f.output,
@@ -586,7 +619,7 @@ bashTest("direct Environment configuration matching three paths produces a verif
   } finally { f.close(); }
 });
 
-bashTest("source change during the archive window refuses to publish the archive", () => {
+systemdTest("source change during the archive window refuses to publish the archive", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], {
@@ -609,8 +642,11 @@ for (const [name, mutation, relative, target] of [
   ["present tree loses file", "delete", "var/model-artifacts/prediction/model.onnx", ""],
   ["present tree rewrites same-size file", "rewrite", "var/model-artifacts/prediction/model.onnx", ""]
 ] as const) {
-  const mutationSymlinkSkip = process.platform === "win32" && mutation === "link"
-    ? "symbolic-link mutations need privileges on Windows" : false;
+  // link 变体另需符号链接权限（Windows 上本来就跳过）；其余 5 条变体红在
+  // `cannot read service EnvironmentFiles` 上，理由见 `SYSTEMD_ONLY`。
+  const mutationSymlinkSkip = mutation === "link"
+    ? (process.platform === "win32" ? "symbolic-link mutations need privileges on Windows" : false)
+    : SYSTEMD_ONLY;
   bashTest(`archive window rejects ${name}`, () => {
     const f = fixture();
     try {

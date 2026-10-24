@@ -5,9 +5,36 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { posixOnlyReason } from "./posix-only.js";
+
 const canRunBash = spawnSync("bash", ["-c", "true"], { stdio: "ignore" }).status === 0;
+
+/**
+ * 本文件**四条用例全部是** `deploy/upgrade.sh` 的行为级判据（bash + PATH 替身），所以整文件
+ * 统一在 Windows 上显式跳过，而不是逐条挑。
+ *
+ * 🔴 CI 2026-10-25（`windows-latest`）：4 条全部红在 `scenario()` 的
+ * "deploy/upgrade.sh recorded no command — it died before the first stub ran"，
+ * `status=128`、stderr 是真实 git 的两行 `fatal: not a git repository`。机制是平台性的：
+ * 夹具把替身目录用 POSIX 的 `:` 拼进 `PATH`，而 Windows 的 `PATH` 是 `;` 分隔且条目带盘符，
+ * 拼出来的条目既不是 MSYS 形态也不是 Windows 形态，`git`/`systemctl`/`npm` 替身因此
+ * 命中不了（脚本直接用到宿主机的真实 `git`，在夹具目录里当然"不是 git 仓库"）。
+ * 升级脚本本身只面向 Linux systemd，它要证明的顺序（stop → migrate → reset-failed → restart）
+ * 在 Windows 上没有可复现的服务管理器语义。
+ */
+const UPGRADE_SCRIPT_ONLY = posixOnlyReason(
+  "deploy/upgrade.sh 的判据靠 bash + PATH 替身记录 systemctl/git/npm 的调用序列；Windows 的 PATH 是 "
+  + "\";\" 分隔且带盘符，夹具用 \":\" 拼进去的替身目录命中不了，脚本在第一个替身记录命令之前就以 "
+  + "status=128 退出（CI 2026-10-25：stderr 是真实 git 的 `fatal: not a git repository`，"
+  + "`recorded no command`）。因此『迁移必须落在停服与重启之间 / 发布脚本不得代做备份 / 迁移失败必须"
+  + "让服务保持停止 / HTTP 200 但未就绪必须拒绝』这四条判据在 Windows 上没有被检查；"
+  + "Linux systemd 语义另立工单。"
+);
+
 const bashTest = (name: string, fn: () => void | Promise<void>) =>
-  test(name, { skip: !canRunBash ? "bash is required for deploy script tests" : false }, fn);
+  test(name, {
+    skip: !canRunBash ? "bash is required for deploy script tests" : UPGRADE_SCRIPT_ONLY
+  }, fn);
 
 /**
  * `upgrade.sh` 用 `/*` 判"绝对路径"（与生产 Linux 语义一致）；Windows 盘符路径（`C:\…`）

@@ -33,9 +33,38 @@ import { ImportPublicationJournal } from "../src/import-publication.js";
 import { DatabaseMaintenance } from "../src/maintenance.js";
 import { RestoreJournal } from "../src/restore-journal.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
+import { posixOnlyReason } from "./posix-only.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const READY_TIMEOUT_MS = 60_000;
+
+/**
+ * 强杀型故障注入的 Windows 门槛。
+ *
+ * 🔴 CI 2026-10-25（`windows-latest`，node 22.x，`RAI_TEST_CONCURRENCY=2`）：本文件
+ * 16 条用例红在 `waitForHardKill` 的 `signalCode` 判据上（`exit=1 signal=null`）。
+ * 机制是平台性的：**Windows 没有 POSIX 信号**。子进程里的
+ * `process.kill(pid, "SIGKILL")`（以及父进程侧的 `child.kill("SIGKILL")`）由 libuv
+ * 映射成 `TerminateProcess`：没有 handler、没有 flush、没有 finally，退出码是 1 而不是
+ * 被信号杀死，所以 `child.signalCode` 永远是 `null`。
+ *
+ * 于是"故障点必须真的产生 SIGKILL"这条前提在本平台上无法成立，而本文件每条用例的
+ * 结论（强杀后旧库字节不变 / 只发一张许可 / 侧车补齐 / 不建空库 / 路由 409 ……）
+ * 都以"崩溃恰好发生在那个确定性屏障上、而不是别处"为前提。前提读不出来，结论就没有依据
+ * —— 这不是"判据不成立"，是"判据在这里做不出来"。真正的 Windows 崩溃注入（TerminateProcess
+ * + 退出码断言）是另一个工作包。
+ *
+ * 仍然通过、不动：P2-1、P1-1b、P2-2b、P2-6、P2-8、P2-10、P2-11、P1-5、P1-4、P1-7、
+ * P2-13、P2-14、P2-15c、P2-17、P2-18/18b/18c、P2-19、P2-20、P2-21 —— 它们要么不注入
+ * 强杀，要么把强杀断言包在 try/catch 里、只判持久状态（实测在 Windows 上通过）。
+ */
+const SIGKILL_ONLY = posixOnlyReason(
+  "Windows 没有 POSIX 信号：故障点里的 SIGKILL 被 libuv 映射成 TerminateProcess，子进程退出码是 1、"
+  + "child.signalCode 恒为 null，waitForHardKill（本文件 :134）的「故障点必须产生 SIGKILL」"
+  + "在 Windows 上永远不成立，因此强杀后的回滚 / 许可 / 侧车 / 路由结论没有前提可依赖"
+  + "（CI 2026-10-25：exit=1 signal=null）。这条判据在 Windows 上没有被检查；"
+  + "Windows 崩溃注入语义另立工单。"
+);
 
 interface ServerHandle {
   child: ChildProcess;
@@ -450,7 +479,7 @@ test("P1-1b 存量无 epoch 主库：启动回填 configured epoch", { timeout: 
   } finally { harness.remove(); }
 });
 
-test("P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch", { timeout: 180_000 }, async () => {
+test("P2-2 prepared 前/后强杀且主库仍在：旧库字节不变、无新许可、重启回滚旧 epoch", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   for (const fault of ["deletion:before-prepared", "deletion:after-prepared"]) {
     const harness = createHarness(`rai-p2-${fault.replaceAll(":", "-")}-`);
     const marker = join(harness.root, "fault.marker");
@@ -537,7 +566,7 @@ test("P2-2b 删除中途普通异常：maintenance 从保护快照回滚，旧 s
   }
 });
 
-test("P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包", { timeout: 240_000 }, async () => {
+test("P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认后只发一张 nextEpoch 许可并可首包", { timeout: 240_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-prepared-missing-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -597,7 +626,7 @@ test("P2-3 prepared 已写、主库已删：启动阻断不建库；运维确认
   } finally { harness.remove(); }
 });
 
-test("P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次", { timeout: 240_000 }, async () => {
+test("P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpoch 许可；首包一次", { timeout: 240_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-main-removed-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -646,7 +675,7 @@ test("P2-4 main_removed 强杀、许可未写：启动幂等补发同一 nextEpo
   } finally { harness.remove(); }
 });
 
-test("P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活", { timeout: 180_000 }, async () => {
+test("P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二个 epoch；旧 scope 不复活", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-permit-issued-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -683,7 +712,7 @@ test("P2-5 permit_issued 响应前强杀：重放不产生第二张许可/第二
   } finally { harness.remove(); }
 });
 
-test("P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复", { timeout: 120_000 }, async () => {
+test("P2-5b permit_issued 阶段保护快照轮换：CLI 仍按已有许可报告可恢复", { timeout: 120_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-permit-rotation-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -760,7 +789,7 @@ test("P2-6 写者已进入后主库消失且 runtime 账本损坏：不获得 pr
   } finally { harness.remove(); }
 });
 
-test("P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库", { timeout: 240_000 }, async () => {
+test("P2-7 侧车损坏/配置不匹配/快照缺失/账本实例不符/写账本失败：CLI 非零且不写主库", { timeout: 240_000, skip: SIGKILL_ONLY }, async () => {
   // a) 侧车损坏
   {
     const harness = createHarness("rai-p2-corrupt-sidecar-");
@@ -895,7 +924,7 @@ test("P2-8 恢复旧备份：删库意图收口，恢复后的 scope 为 establi
   } finally { harness.remove(); }
 });
 
-test("P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用", { timeout: 180_000 }, async () => {
+test("P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻断，备份恢复仍可用", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-prepared-epoch-conflict-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -946,7 +975,7 @@ test("P2-9 prepared 日志与可读主库 epoch 冲突：全局保持恢复阻�
 
 
 for (const stage of ["main_removed", "permit_issued"] as const) {
-  test(`P2-9b ${stage} + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志`, { timeout: 180_000 }, async () => {
+  test(`P2-9b ${stage} + 外来可读主库：保持 recovery_required，不撤销许可、不关闭日志`, { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
     const harness = createHarness(`rai-p2-foreign-readable-${stage}-`);
     try {
       await seedDatabaseAsync(harness, "foreign-readable-fixture");
@@ -1082,7 +1111,7 @@ test("P2-11 首包消费后恢复备份：旧删库日志 superseded，主库再
   } finally { harness.remove(); }
 });
 
-test("P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可", { timeout: 180_000 }, async () => {
+test("P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许可", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-snapshot-corrupt-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -1123,7 +1152,7 @@ test("P2-12 快照存在但字节损坏：自动恢复和 CLI 都拒绝补发许
 // P1-2 / P1-5 / P2-5（2026-10-23 复审）
 // ---------------------------------------------------------------------------
 
-test("P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次", { timeout: 240_000 }, async () => {
+test("P1-2 保护快照暂时移走再放回：原许可不被撤销，首包只消费一次", { timeout: 240_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p1-2-snapshot-rotation-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -1247,7 +1276,7 @@ test("P1-5 写者进入后建库前 SIGKILL：显式放弃生成新 epoch，旧 
   } finally { harness.remove(); }
 });
 
-test("P2-5 不可读主库只能通过显式隔离继续原 deletionId", { timeout: 240_000 }, async () => {
+test("P2-5 不可读主库只能通过显式隔离继续原 deletionId", { timeout: 240_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-5-quarantine-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -1357,7 +1386,7 @@ test("P1-4 待迁移主库 + 删库裁决：API 不退出 78，且恢复前不�
   } finally { harness.remove(); }
 });
 
-test("P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409", { timeout: 180_000 }, async () => {
+test("P2-9 删除恢复期间：退役路由仍 410、未知路由 404、现役业务路由 409", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-9-retired-priority-");
   try {
     await seedDatabaseAsync(harness, "old-dataset");
@@ -1539,7 +1568,7 @@ const abandonmentCounts = (harness: Harness): { rows: number; pristinePermits: n
   } finally { runtime.close(); }
 };
 
-test("P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch", { timeout: 180_000 }, async () => {
+test("P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车，不生成第二个 epoch", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-abandon-crash-ledger-");
   try {
     const at = "2026-10-23T00:00:00.000Z";
@@ -1599,7 +1628,7 @@ test("P2-15 账本提交后 SIGKILL：同一条放弃命令重试只补齐侧车
   } finally { harness.remove(); }
 });
 
-test("P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车", { timeout: 120_000 }, async () => {
+test("P2-15b 放弃重试发现新 epoch 许可已被消费：拒绝推进侧车", { timeout: 120_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-abandon-permit-consumed-");
   try {
     const at = "2026-10-23T00:00:00.000Z";
@@ -1663,7 +1692,7 @@ test("P2-15c 侧车已完成且首包消费许可后：同一放弃命令只报�
   } finally { harness.remove(); }
 });
 
-test("P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行", { timeout: 180_000 }, async () => {
+test("P2-16 侧车写入后 SIGKILL：重试只报告已完成，不新增 epoch/许可/操作行", { timeout: 180_000, skip: SIGKILL_ONLY }, async () => {
   const harness = createHarness("rai-p2-abandon-crash-sidecar-");
   try {
     const at = "2026-10-23T00:00:00.000Z";

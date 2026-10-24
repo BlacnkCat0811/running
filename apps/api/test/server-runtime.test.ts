@@ -20,6 +20,7 @@ import { MobileGoalsStore } from "../src/mobile-goals.js";
 import { mobileLocalDate } from "../src/data.js";
 import { weeklyPlanDates } from "../src/weekly-plan-service.js";
 import { seedRecentRunningWeeks } from "./weekly-training-fixture.js";
+import { posixOnlyReason } from "./posix-only.js";
 import { prescriptionDigest } from "../src/plan-digest.js";
 import { openapiDocument } from "../src/schemas.js";
 
@@ -2483,7 +2484,25 @@ test("retired backup endpoints create and delete nothing while the recovery path
  * 于是刚装好 / 刚删库的机器上永远看不到"备份责任已移交运维"这段提示。备份文件本身
  * 不需要数据库，`backupStream` 只打开 `var/backups/` 下的文件，所以这个夹具不建库。
  */
-test("retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe", async () => {
+/**
+ * 🔴 CI 2026-10-25（`windows-latest`）：本条在准备夹具时红在
+ * `ENOENT: no such file or directory, open '…\var\backups\operator"archive;v1.sqlite'`。
+ * 机制是 Windows 的文件名限制：**`"` 是保留字符**，含它的路径在 Windows 上根本建不出来。
+ *
+ * 夹具故意用"敌对文件名"（引号 + 分号）来证明 `/v1/backups/:name` 的 name 校验与
+ * `Content-Disposition` 头部安全编码：判据是"下载头里的文件名必须来自已校验的 name 并做
+ * 头部安全编码"，不是"下载一个叫 X 的文件"。Windows 上必须换一种仍属敌对的合法文件名
+ * （例如空格 / 分号 / `%22` 转义）才能把这条判据重新立起来——那是另一个工作包。
+ * 在此之前，这条判据在 Windows 上没有检查。
+ */
+const ILLEGAL_FILENAME_ONLY = posixOnlyReason(
+  "夹具的敌对文件名 `operator\"archive;v1.sqlite` 含 Windows 保留字符 `\"`，"
+  + "`writeFileSync` 直接 ENOENT（CI 2026-10-25：「ENOENT: no such file or directory, open …operator\"archive;v1.sqlite」）。"
+  + "这条判据（退役的备份路由在无库时也必须 410、下载不得被缓存、Content-Disposition 必须来自已校验的 "
+  + "name 并做头部安全编码）在 Windows 上没有被检查；改用 Windows 合法但同样敌对的文件名另立工单。"
+);
+
+test("retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe", { skip: ILLEGAL_FILENAME_ONLY }, async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-backup-nodb-"));
   const backupDirectory = join(runtimeRoot, "var/backups");
   mkdirSync(backupDirectory, { recursive: true });
