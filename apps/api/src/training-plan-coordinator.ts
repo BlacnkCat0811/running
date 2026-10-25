@@ -24,11 +24,11 @@ import type { TrainingPlanStateRow } from "./training-plan-store.js";
  * (generate outside the transaction, commit inside, re-verify the fingerprint).
  */
 
-export type RefreshReason = "plan_missing" | "config_changed" | "business_date_changed";
+export type RefreshReason = "plan_missing" | "config_changed" | "business_date_changed" | "input_changed";
 
 export type RefreshDecision =
   | { needed: true; reason: RefreshReason }
-  | { needed: false; reason: "not_migrated" | "paused" | "current" };
+  | { needed: false; reason: "not_migrated" | "paused" | "current" | "analysis_pending" | "backoff" };
 
 const WEEK_DAYS = 7;
 
@@ -36,7 +36,9 @@ function shiftDate(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
-export function refreshDecision(row: TrainingPlanStateRow | null, businessDate: string): RefreshDecision {
+export function refreshDecision(row: TrainingPlanStateRow | null, businessDate: string,
+  desired?: { inputKey: string; analysisReady: boolean } | null,
+  evaluation?: { inputKey: string; stateRevision: number } | null): RefreshDecision {
   if (row === null) return { needed: false, reason: "not_migrated" };
   const state = row.state;
   if (state.runState !== "active") return { needed: false, reason: "paused" };
@@ -46,6 +48,16 @@ export function refreshDecision(row: TrainingPlanStateRow | null, businessDate: 
   const windowEnd = shiftDate(businessDate, WEEK_DAYS - 1);
   const coversToday = (state.weekPlan ?? []).some((day) => day.localDate >= businessDate && day.localDate <= windowEnd);
   if (!coversToday) return { needed: true, reason: "business_date_changed" };
+  if (desired !== undefined && desired !== null) {
+    // A newer run that is not analysed yet must not be consumed as if it were
+    // current. The old publication stays readable and the update view explains
+    // the pending stage; a new release will trigger the next tick.
+    if (!desired.analysisReady) return { needed: false, reason: "analysis_pending" };
+    const alreadyChecked = evaluation !== undefined && evaluation !== null &&
+      evaluation.inputKey === desired.inputKey && evaluation.stateRevision === row.revision;
+    const publishedInputKey = state.schemaVersion === 2 ? state.publishedInputKey : null;
+    if (desired.inputKey !== publishedInputKey && !alreadyChecked) return { needed: true, reason: "input_changed" };
+  }
   return { needed: false, reason: "current" };
 }
 
@@ -55,13 +67,15 @@ export function coordinatorOperationId(input: {
   reason: RefreshReason;
   businessDate: string;
   stateRevision: number;
+  inputKey?: string | null;
 }): string {
   return `auto-${digest({
     kind: "training-plan-refresh",
     scopeKey: input.scopeKey,
     reason: input.reason,
     businessDate: input.businessDate,
-    stateRevision: input.stateRevision
+    stateRevision: input.stateRevision,
+    ...(input.inputKey == null ? {} : { inputKey: input.inputKey })
   }).slice(0, 40)}`;
 }
 
@@ -69,16 +83,26 @@ export interface TrainingPlanCoordinatorDeps {
   scopeKey: () => string;
   readState: () => TrainingPlanStateRow | null;
   /** Runs the unified refresh command with the derived operation id. */
-  refresh: (input: { operationId: string; reason: RefreshReason; businessDate: string; stateRevision: number }) => Promise<unknown>;
+  refresh: (input: { operationId: string; reason: RefreshReason; businessDate: string; stateRevision: number;
+    inputKey?: string | null }) => Promise<unknown>;
   businessDate: () => string;
+  /** B08: desired input identity and whether its analysis is published. */
+  desiredInput?: () => { inputKey: string; analysisReady: boolean } | null;
+  /** B08: durable cursor written by the previous evaluation. */
+  readEvaluation?: () => { inputKey: string; stateRevision: number } | null;
   /** Optional observer for tests/telemetry; never used for decisions. */
   onDecision?: (decision: RefreshDecision | { needed: true; reason: RefreshReason; operationId: string; ran: boolean }) => void;
 }
 
 export class TrainingPlanCoordinator {
   private running = false;
+  private consecutiveFailures = 0;
+  private retryAfter = 0;
+  private readonly now: () => number;
 
-  constructor(private readonly deps: TrainingPlanCoordinatorDeps) {}
+  constructor(private readonly deps: TrainingPlanCoordinatorDeps, now: () => number = Date.now) {
+    this.now = now;
+  }
 
   /**
    * One coordinator tick: decide, then run at most one refresh. Concurrent ticks
@@ -87,24 +111,37 @@ export class TrainingPlanCoordinator {
    */
   async tick(): Promise<{ ran: boolean; reason: RefreshDecision["reason"] }> {
     if (this.running) return { ran: false, reason: "current" };
+    if (this.now() < this.retryAfter) return { ran: false, reason: "backoff" };
     const row = this.deps.readState();
     const businessDate = this.deps.businessDate();
-    const decision = refreshDecision(row, businessDate);
+    const desired = this.deps.desiredInput?.() ?? null;
+    const decision = refreshDecision(row, businessDate, desired, this.deps.readEvaluation?.() ?? null);
     if (!decision.needed) {
       this.deps.onDecision?.(decision);
       return { ran: false, reason: decision.reason };
     }
     this.running = true;
+    const operationId = coordinatorOperationId({
+      scopeKey: this.deps.scopeKey(),
+      reason: decision.reason,
+      businessDate,
+      stateRevision: row!.revision,
+      inputKey: desired?.inputKey ?? null
+    });
     try {
-      const operationId = coordinatorOperationId({
-        scopeKey: this.deps.scopeKey(),
-        reason: decision.reason,
-        businessDate,
-        stateRevision: row!.revision
-      });
-      await this.deps.refresh({ operationId, reason: decision.reason, businessDate, stateRevision: row!.revision });
+      await this.deps.refresh({ operationId, reason: decision.reason, businessDate, stateRevision: row!.revision,
+        inputKey: desired?.inputKey ?? null });
+      this.consecutiveFailures = 0;
+      this.retryAfter = 0;
       this.deps.onDecision?.({ needed: true, reason: decision.reason, operationId, ran: true });
       return { ran: true, reason: decision.reason };
+    } catch (error) {
+      // Bounded exponential backoff for transient failures; a persistent failure
+      // remains visible through the update read instead of hot-looping.
+      this.consecutiveFailures += 1;
+      this.retryAfter = this.now() + Math.min(15 * 60_000, 5_000 * (2 ** (this.consecutiveFailures - 1)));
+      this.deps.onDecision?.({ needed: true, reason: decision.reason, operationId, ran: false });
+      throw error;
     } finally {
       this.running = false;
     }

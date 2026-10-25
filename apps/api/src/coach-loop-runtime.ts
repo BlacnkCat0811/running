@@ -27,6 +27,7 @@ import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { raceGoalFromCoachSettings, unifiedCoachSettings } from "./training-plan-ownership.js";
 import type { TrainingPlanState } from "./training-plan-store.js";
 import { assertTrainingFactsReady } from "./training-plan-generation.js";
+import { resolveTrainingPlanSessions, trainingPlanProtectedDays } from "./training-plan-session-policy.js";
 
 /** Explicit version negotiation + per-user acceptance. No environment activation. */
 export const COACH_RUNTIME_MANIFEST: CoachPolicyManifest = { ...COACH_POLICY_MANIFEST,
@@ -142,9 +143,23 @@ export class CoachLoopRuntime {
       throw new PlanOperationError("coach_policy_changed", "规则版本变化，需要通过update明确确认；暂停和结束始终可用。");
     }
     const settings = unifiedCoachSettings(state, saved.settings, this.localDate());
-    const goals = this.store.read();
+    // B03/S01-02: a future `user_protected` course is an obligation the runtime
+    // must see as an input reservation and must not rewrite, even though it is
+    // outside today's lock. The resolver still has the last word at commit time;
+    // this keeps the budget and repair solver honest before that check.
+    const protectedDays = trainingPlanProtectedDays(state, state.schemaVersion === 2
+      ? this.store.trainingPlanExecutions(JSON.stringify([this.identity().serverId, this.identity().athleteId,
+        this.identity().datasetEpoch]), state.planInstanceId) : []);
+    const protectedByDate = new Map(protectedDays.map(day => [day.localDate, day]));
+    const base = this.store.read();
+    const goals = protectedByDate.size === 0 ? base : {
+      ...base,
+      weekPlan: [...new Map([...base.weekPlan, ...protectedByDate.values()].map(day => [day.localDate, day])).values()]
+        .sort((left, right) => left.localDate.localeCompare(right.localDate))
+    };
     const facts = this.readFacts(this.effectiveGoals(goals, settings), this.store.planHistory(200));
-    const evaluated = this.evaluate(goals, facts, saved, settings, true);
+    const evaluated = this.evaluate(goals, facts, saved, settings, true,
+      protectedDays.map(day => day.localDate));
     assertTrainingFactsReady(this.publicationReady);
     const coachReceipt: Omit<CoachRuntimeReceipt, "goalsRevision"> = {
       settings, policyHash: COACH_RUNTIME_POLICY_HASH, policyManifest: COACH_RUNTIME_MANIFEST,
@@ -330,8 +345,23 @@ export class CoachLoopRuntime {
       }
       const facts = this.readFacts(this.effectiveGoals(goals, settings), this.store.planHistory(200));
       if (facts.factsHash !== before.factsHash) throw new PlanOperationError("coach_facts_changed", "发布前训练事实发生变化，原课表保持不变。");
-      const evaluation = this.evaluate(goals, facts, previous, settings, true);
-      const planned = evaluation.planned;
+      const executions = owner?.state.schemaVersion === 2
+        ? this.store.trainingPlanExecutions(owner.scope, owner.state.planInstanceId) : [];
+      const evaluation = this.evaluate(goals, facts, previous, settings, true,
+        trainingPlanProtectedDays(owner?.state ?? null, executions).map(day => day.localDate));
+      // B03: a schema-2 scope may still receive the legacy coach-loop command
+      // contract. Its plan must pass through the same resolver as unified refresh;
+      // otherwise this would be a second writer that can replace a protected
+      // course or materialize a week without session owners.
+      let planned = evaluation.planned;
+      if (owner !== null && owner.state.schemaVersion === 2 && settings.status === "active") {
+        const resolved = resolveTrainingPlanSessions({ state: owner.state, executions, generatedDays: planned,
+          businessDate: before.date, availableAt: new Date(Date.parse(facts.asOf)).toISOString(),
+          recommendation: { source: "heuristic", policyHash: COACH_RUNTIME_POLICY_HASH } });
+        planned = resolved.weekPlan;
+        this.store.stageTrainingPlanSessionState({ sessions: resolved.sessions, suppressions: resolved.suppressions,
+          archivedSessionIds: resolved.archivedSessionIds });
+      }
       const effectiveDigest = digest(evaluation.response.days.map(row =>
         [row.day.localDate, key(row.day), row.executable, row.decisionRef]));
       // F04: the public `raceTarget` is a legacy goal, not a second copy of the
@@ -354,7 +384,8 @@ export class CoachLoopRuntime {
       // would otherwise republish the same all-rest window and undo the release.
       // Keep `weekPlan`, its audit row and the migration-confirmation state;
       // the receipt still records the ended settings.
-      const publishesPlan = settings.status !== "ended";
+      const publishesPlan = settings.status !== "ended" &&
+        !(owner !== null && owner.state.schemaVersion === 2 && settings.status !== "active");
       const weekPlanChanged = publishesPlan &&
         digest(goals.weekPlan.map(d => [d.localDate, key(d)])) !== digest(planned.map(d => [d.localDate, key(d)]));
       const changed = weekPlanChanged || digest(previous?.settings) !== digest(settings) ||
@@ -373,7 +404,8 @@ export class CoachLoopRuntime {
           : declaredRace === null ? {} : { raceTarget: declaredRace }),
         ...(settings.status !== "active" ? { lockedSession: null } : {})
       }, { prescription: facts.inputs.prescription, runCoach: null,
-        ...(publishesPlan ? { confirmCoachPlan: true } : {}), evaluatedAt: facts.asOf }) : goals;
+        ...(publishesPlan ? { confirmCoachPlan: true } : {}), evaluatedAt: facts.asOf,
+        ...(owner !== null && owner.state.schemaVersion === 2 ? { preserveWeekPlan: true } : {}) }) : goals;
       const receipt: CoachRuntimeReceipt = {
         settings, policyHash: COACH_RUNTIME_POLICY_HASH, policyManifest: COACH_RUNTIME_MANIFEST,
         factsHash: facts.factsHash, inputDigest: evaluation.inputDigest, effectiveDigest,
@@ -399,7 +431,7 @@ export class CoachLoopRuntime {
   }
 
   private evaluate(goals: MobileGoalsResponse, facts: CoachRuntimeFacts, saved: CoachRuntimeReceipt | null,
-    settings: CoachLoopSettings | null, publishing = false) {
+    settings: CoachLoopSettings | null, publishing = false, extraProtectedDates: readonly string[] = []) {
     const date = facts.date, scope = this.identity(), zones = facts.inputs.prescription;
     const defaults: CoachLoopSettings = { mode: "daily_adaptive", status: "active", runningDays: [1,2,3,4,5,6,7],
       longRunDays: [7], availabilityMinutesByWeekday: {}, targetType: "pace", race: null };
@@ -497,8 +529,11 @@ export class CoachLoopRuntime {
       reservations: historicalReservations.filter(slot => slot.localDate !== date) });
     const window = Array.from({ length: 7 }, (_, i) => shiftCoachDate(date, i));
     const templateIds = { ...saved?.templateIds };
-    const protectedDates = lockedDay || goals.weekPlan.some(day => day.localDate === date) &&
-      (goals.weekPlanPreservedDate === date || completedDates.has(date)) ? [date] : [];
+    const protectedDates = [...new Set([
+      ...(lockedDay || goals.weekPlan.some(day => day.localDate === date) &&
+        (goals.weekPlanPreservedDate === date || completedDates.has(date)) ? [date] : []),
+      ...extraProtectedDates.filter(protectedDate => window.includes(protectedDate))
+    ])];
     const isExtension = candidate.allocation === "extension";
     const slotId = `extension:${scope.datasetEpoch}:${date}`;
     const decisionRef = originalToday?.prescriptionDigest === candidate.prescriptionDigest ? originalToday.decisionRef :

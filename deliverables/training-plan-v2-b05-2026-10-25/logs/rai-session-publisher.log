@@ -1,0 +1,109 @@
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: close button: fixture is previewing
+PASS: close button: cancellation invalidates immediately
+PASS: close button: late preview cannot restore a candidate after reopening
+PASS: close button: reopening requires another explicit preview
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: gesture dismissal: fixture is previewing
+PASS: gesture dismissal: cancellation invalidates immediately
+PASS: gesture dismissal: late preview cannot restore a candidate after reopening
+PASS: gesture dismissal: reopening requires another explicit preview
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: draft change: fixture is previewing
+PASS: draft change: cancellation invalidates immediately
+PASS: draft change: late preview cannot restore a candidate after reopening
+PASS: draft change: reopening requires another explicit preview
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: new draft may preview while the cancelled response is in flight
+PASS: old completion cannot clear or replace the new draft candidate
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview is accepted
+PASS: preview cancellation is zero writes and no journal
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview again
+PASS: intent persistence failure sends zero writes
+PASS: an unsent intent failure needs a new preview rather than an unrecoverable pending-operation gate
+PASS: closing and reopening after an unsent failure remains retryable
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview before in-flight submission dismissal
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: closing during submit preserves its generation and durable intent
+PASS: dismissed submission still acknowledges and completes the normal read lifecycle
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview after storage repair
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: unknown result preserves original intent
+PASS: preview cleanup never deletes an unresolved submit journal
+PASS: authenticated transport
+PASS: closing during query preserves its generation and original submit journal
+PASS: restart queries committed even with write capability off, without submitting twice
+PASS: state/goals watermarks remain separate and execution awaits read
+PASS: clear failure cannot report success
+PASS: authenticated transport
+PASS: committed read recovery closes only pending row
+PASS: authenticated transport
+PASS: HTTP 404 is not business notFound and never replays
+PASS: authenticated transport
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: explicit notFound replays original UUID and exact Data bytes
+PASS: authenticated transport
+PASS: acknowledgement failure preserves recoverable intent
+PASS: authenticated transport
+PASS: unknown status never replays or clears intent
+PASS: authenticated transport
+PASS: terminal scope mismatch closes only this pending row
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: refresh has its own endpoint without candidate
+PASS: fixture: close the acknowledged refresh before testing a rejected new command
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: policy rejection still follows an explicit preview
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: policy-change rejection closes only the rejected intent and tells the user to accept the rules rather than repeat previews
+PASS: zero retired URL requests
+PASS: session preview uses its own exact negotiated route
+PASS: session preview accepted
+PASS: closed session preview cannot submit
+PASS: session preview uses its own exact negotiated route
+PASS: new session preview accepted
+PASS: session intent failure sends zero HTTP
+PASS: session preview uses its own exact negotiated route
+PASS: session draft retry after storage repair
+PASS: session submit never uses configuration or retired routes
+PASS: session contract and instance survive durable encoding
+PASS: session unknown response keeps original journal
+PASS: session HTTP 404 is not business notFound
+PASS: session submit never uses configuration or retired routes
+PASS: session contract and instance survive durable encoding
+PASS: session restart replays original UUID and exact bytes only after business notFound
+PASS: session save persists separate state/goals floors before re-read
+PASS: session read completion closes journal
+PASS: session committed query works with independent write capability disabled
+PASS: session explicit clear differs from omission
+PASS: session structure sends canonical null fields rather than lossy optional encoding
+TrainingPlanPublisher regression passed

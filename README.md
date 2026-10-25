@@ -74,12 +74,13 @@ npm run check:package-boundaries
 | 导入、身份、时间语义、恢复事实、存储与发布合同 | [数据管线](docs/DATA_PIPELINE.md) |
 | 开发、迁移、五类存储备份/恢复、发布与排障 | [运维](docs/OPERATIONS.md) |
 | 导入恢复审查问题的待实施修复方法与验收条件 | [导入恢复修复方案](docs/IMPORT_RECOVERY_REVIEW_FIX_PLAN_2026-10-23.md) |
-| 长期约束与不能随意“优化”的决策（D1–D19） | [决策](docs/DECISIONS.md) |
+| 长期约束与不能随意“优化”的决策（D1–D21） | [决策](docs/DECISIONS.md) |
 | 当前状态、验证基线、未决问题与已收尾批次索引 | [项目审查](docs/PROJECT_REVIEW.md) |
 | 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |
 | 统一排课政策 G01/G02/G03（2026-10-20 所有者方向性批准并实现，非独立临床复核） | [训练计划政策](docs/TRAINING_PLAN_POLICY_REVIEW.md) |
 | iOS ↔ API 契约：handshake、统一训练 v2、410 退役矩阵 | [iOS API 契约](docs/IOS_NATIVE_API_CONTRACT.md) |
 | iOS 训练计划设备侧不变量：缓存水位、回执 v2、排期日志、先撤回再下发 | [训练排期](docs/IOS_NATIVE_PLAN_SCHEDULING.md) |
+| 训练计划 V2 完整闭环：B01–B08 已实现并通过本机回归，G1–G4 已签收；B09 本机故障/性能证据完成但 Linux 2C2G 门阻塞，B10 真机/Watch 门阻塞，B11 待生产授权 | [闭环实施方案](docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md) |
 | iOS 健康同步协议：增量、后台机制、锚点与路线 | [同步协议](docs/IOS_NATIVE_SYNC_PROTOCOL.md) |
 | HealthKit 记录同步 v2 合同 | [记录同步 v2](docs/HEALTHKIT_RECORD_SYNC_V2.md) |
 | iOS 构建、权限、测试与真机验收 | [iOS](apps/ios/README.md) / [运行说明](docs/IOS_NATIVE_RUNBOOK.md) |

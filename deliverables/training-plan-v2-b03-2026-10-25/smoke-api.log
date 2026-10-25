@@ -1,0 +1,10 @@
+
+> rai-running-intelligence@0.1.0 presmoke:api
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 smoke:api
+> node apps/api/test/production-runtime-smoke.mjs
+
+Production API runtime smoke test passed
+EXIT:0

@@ -1,0 +1,140 @@
+TAP version 13
+# (node:45331) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B09/T22/T28: session before_commit SIGTERM recovers atomically in a new process
+ok 1 - B09/T22/T28: session before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 3604.405009
+  type: 'test'
+  ...
+# darwin session/before_commit/SIGTERM: WAL integrity ok; operation=f6e71d22-43a6-458e-8e0a-f701c29039c0; stateRevision=3; recovery verified
+# {"beforeSHA256":"4d774795a2185ecc9423d29f5ed4cefefed88cb31eb2b5bbaa5cd7d6176791c2","afterSHA256":"e1e2c57d1e2cf3906f6a3abc77569f0cc2efbd4dbd5c7d19cedfb4f034a4fa81","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: session before_commit SIGKILL recovers atomically in a new process
+ok 2 - B09/T22/T28: session before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 3644.542391
+  type: 'test'
+  ...
+# darwin session/before_commit/SIGKILL: WAL integrity ok; operation=01e7c0c9-989d-47c7-946d-4052c3141ce9; stateRevision=3; recovery verified
+# {"beforeSHA256":"fa0770c9ad3381eb54802a84cadeb7c6ec37598cd0ab4e3ebee1088279f24e22","afterSHA256":"87496e0ae5427c911232f80b3c2344ca50ae152db4aec5d78eeda24194431cab","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: session after_commit SIGTERM recovers atomically in a new process
+ok 3 - B09/T22/T28: session after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 3323.210155
+  type: 'test'
+  ...
+# darwin session/after_commit/SIGTERM: WAL integrity ok; operation=b016b88a-061c-404e-b7cd-86126bf3e0d4; stateRevision=3; recovery verified
+# {"beforeSHA256":"3d07d0a2c86bd439d5b999d26687bcf62a90d89d597e3f3b7970c5189000787f","afterSHA256":"3d07d0a2c86bd439d5b999d26687bcf62a90d89d597e3f3b7970c5189000787f","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: session after_commit SIGKILL recovers atomically in a new process
+ok 4 - B09/T22/T28: session after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 2705.196642
+  type: 'test'
+  ...
+# darwin session/after_commit/SIGKILL: WAL integrity ok; operation=4dd5f951-706b-464b-a1ec-baef97fd7812; stateRevision=3; recovery verified
+# {"beforeSHA256":"462cfb9617f47376b6409d367866a5c5012c29c1694216867de3fec0d6fc7d5f","afterSHA256":"462cfb9617f47376b6409d367866a5c5012c29c1694216867de3fec0d6fc7d5f","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: execution before_commit SIGTERM recovers atomically in a new process
+ok 5 - B09/T22/T28: execution before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 2577.922162
+  type: 'test'
+  ...
+# darwin execution/before_commit/SIGTERM: WAL integrity ok; operation=58c9de50-3a96-4c84-b997-ac435f389add; stateRevision=3; recovery verified
+# {"beforeSHA256":"12990dc7717e2ba5c5238b69854268b1c23ac538bdf1b407460195e58adb8210","afterSHA256":"8a8a5495a0052690eb75c1f7b23a46cc1f682a6db5e0cada4d50c9b4d910fe1c","rows":{"mobile_goals":1,"mobile_goals_history":2,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":1,"mobile_training_execution_history":1,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: execution before_commit SIGKILL recovers atomically in a new process
+ok 6 - B09/T22/T28: execution before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 2197.963141
+  type: 'test'
+  ...
+# darwin execution/before_commit/SIGKILL: WAL integrity ok; operation=69a128dc-eccc-4c0a-b7fc-a4e56fc1d80c; stateRevision=3; recovery verified
+# {"beforeSHA256":"7a7df5c245aab5437ccd416f24e846bc28921493cfaf02f8940854b4ce6c4a75","afterSHA256":"af826691b42468fc5b043516cdee902b5dba157cad4ad495d95bea04403cdb5d","rows":{"mobile_goals":1,"mobile_goals_history":2,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":1,"mobile_training_execution_history":1,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: execution after_commit SIGTERM recovers atomically in a new process
+ok 7 - B09/T22/T28: execution after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 3846.100518
+  type: 'test'
+  ...
+# darwin execution/after_commit/SIGTERM: WAL integrity ok; operation=9fe120a6-e828-4417-807c-06ab27ed0a1b; stateRevision=3; recovery verified
+# {"beforeSHA256":"b8a841c55880fdb1794adc6a462a761b2aa74b59d190af20bb6b680694df8c21","afterSHA256":"b8a841c55880fdb1794adc6a462a761b2aa74b59d190af20bb6b680694df8c21","rows":{"mobile_goals":1,"mobile_goals_history":2,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":1,"mobile_training_execution_history":1,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: execution after_commit SIGKILL recovers atomically in a new process
+ok 8 - B09/T22/T28: execution after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 2550.102223
+  type: 'test'
+  ...
+# darwin execution/after_commit/SIGKILL: WAL integrity ok; operation=26b2f8b0-955a-4a0b-811b-e7b60018839d; stateRevision=3; recovery verified
+# {"beforeSHA256":"108e4814db8a72ece2add076629d1f2be44c2da86974fc660aef79d6543c0b6b","afterSHA256":"108e4814db8a72ece2add076629d1f2be44c2da86974fc660aef79d6543c0b6b","rows":{"mobile_goals":1,"mobile_goals_history":2,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":2,"mobile_training_execution":1,"mobile_training_execution_history":1,"mobile_training_plan_evaluation":0,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: refresh before_commit SIGTERM recovers atomically in a new process
+ok 9 - B09/T22/T28: refresh before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 2478.911936
+  type: 'test'
+  ...
+# darwin refresh/before_commit/SIGTERM: WAL integrity ok; operation=f59a90dc-941f-46d8-b7ab-9b6ebcdb0f3e; stateRevision=3; recovery verified
+# {"beforeSHA256":"0b42d34bf17a76e774b0e144f7ab5d5e4d0687dc50ea25d67e5692240190d11e","afterSHA256":"fa02369b8f3f1af008456ad6ba7224e566f206dc5a8679507575640568e992a7","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: refresh before_commit SIGKILL recovers atomically in a new process
+ok 10 - B09/T22/T28: refresh before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 2342.504429
+  type: 'test'
+  ...
+# darwin refresh/before_commit/SIGKILL: WAL integrity ok; operation=d46f7c17-594f-4829-a7af-427873edf80e; stateRevision=3; recovery verified
+# {"beforeSHA256":"c56a5fbcb5bdd5e90356f9a00ebf92fa199f30f091d11b9a510239b28543c163","afterSHA256":"d75e7951904b114bbfd003143eb49c4386e4024bacd07e5bece2488fa54ca676","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: refresh after_commit SIGTERM recovers atomically in a new process
+ok 11 - B09/T22/T28: refresh after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 2364.908665
+  type: 'test'
+  ...
+# darwin refresh/after_commit/SIGTERM: WAL integrity ok; operation=4fd5beec-e12c-447d-952a-54699ec46782; stateRevision=3; recovery verified
+# {"beforeSHA256":"58507eec512d391e879aaa0999754dcbc108469f803f3e32341bf1fb43df90b7","afterSHA256":"58507eec512d391e879aaa0999754dcbc108469f803f3e32341bf1fb43df90b7","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: refresh after_commit SIGKILL recovers atomically in a new process
+ok 12 - B09/T22/T28: refresh after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 2204.859656
+  type: 'test'
+  ...
+# darwin refresh/after_commit/SIGKILL: WAL integrity ok; operation=93c9ae69-65fe-4f19-8d4a-4bdd81cdd73e; stateRevision=3; recovery verified
+# {"beforeSHA256":"38879f36a580ea45c5be558e83085f9fe507cc0eb106bd5387b98f21c216528d","afterSHA256":"38879f36a580ea45c5be558e83085f9fe507cc0eb106bd5387b98f21c216528d","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":1,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: evaluation before_commit SIGTERM recovers atomically in a new process
+ok 13 - B09/T22/T28: evaluation before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 2249.521881
+  type: 'test'
+  ...
+# darwin evaluation/before_commit/SIGTERM: WAL integrity ok; operation=b9a64034-892c-497f-b44e-47d38d3c0996; stateRevision=3; recovery verified
+# {"beforeSHA256":"e1b563263f88ca9836dac4218f47bd91ee5cdbf70b26ada28b213dd1e6fc4d06","afterSHA256":"cc0b6af9e9362ec40b360488f932136297dc6d0e78da28b5354584a13a46a3fa","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":2,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: evaluation before_commit SIGKILL recovers atomically in a new process
+ok 14 - B09/T22/T28: evaluation before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 2544.733204
+  type: 'test'
+  ...
+# darwin evaluation/before_commit/SIGKILL: WAL integrity ok; operation=2bd833ab-2f53-4b46-8af6-b1745f482d5a; stateRevision=3; recovery verified
+# {"beforeSHA256":"6f8cce0f2f71fc6ecff9c45648e8fe163fe22d6822e264216b72fbd132d1a402","afterSHA256":"0fa200f7faca41050c806c3dd69422fded9357e01299edf6d03815e0316d4586","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":2,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: evaluation after_commit SIGTERM recovers atomically in a new process
+ok 15 - B09/T22/T28: evaluation after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 2949.610487
+  type: 'test'
+  ...
+# darwin evaluation/after_commit/SIGTERM: WAL integrity ok; operation=9772966d-b355-4fa0-b5a9-bdffa4822511; stateRevision=3; recovery verified
+# {"beforeSHA256":"444004a8b4d07a8f755e26aee622569b35c048c7c5840d1c9a45bb66ba1b73e1","afterSHA256":"444004a8b4d07a8f755e26aee622569b35c048c7c5840d1c9a45bb66ba1b73e1","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":2,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+# Subtest: B09/T22/T28: evaluation after_commit SIGKILL recovers atomically in a new process
+ok 16 - B09/T22/T28: evaluation after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 3395.204424
+  type: 'test'
+  ...
+# darwin evaluation/after_commit/SIGKILL: WAL integrity ok; operation=4cfa24b8-d367-4921-96c9-76085ac3ad89; stateRevision=3; recovery verified
+# {"beforeSHA256":"7e1f4d7f714f4279efeb8e4e119f05740ccbdcc973edfbd2e30de9fdd2f4a97f","afterSHA256":"7e1f4d7f714f4279efeb8e4e119f05740ccbdcc973edfbd2e30de9fdd2f4a97f","rows":{"mobile_goals":1,"mobile_goals_history":3,"mobile_training_state":1,"mobile_training_state_history":3,"mobile_training_session_history":1,"mobile_training_execution":0,"mobile_training_execution_history":0,"mobile_training_plan_evaluation":1,"mobile_plan_operations":2,"mobile_coach_loop_receipts":0,"mobile_plan_pushes":0}}
+1..16
+# tests 16
+# suites 0
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 46357.09245

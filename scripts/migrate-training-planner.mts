@@ -22,7 +22,7 @@
  *   node --import tsx scripts/migrate-training-planner.mts \
  *     --control-db var/rai-control.sqlite \
  *     --server-id local --athlete-id athlete_1 --dataset-epoch default \
- *     [--business-date 2026-10-20] [--apply --expect-source-digest <sha256>]
+ *     [--business-date 2026-10-20] [--session-identities] [--apply --expect-source-digest <sha256>]
  *
  * Output is one JSON document on stdout; exit code 0 means "dry run completed"
  * or "applied/replayed", 1 means "refused / conflict / error".
@@ -46,6 +46,7 @@ import {
 import { resolveTrainingMode } from "../apps/api/src/training-mode-policy.js";
 import { digest } from "../apps/api/src/plan-digest.js";
 import type { MobilePlanOperationScope } from "@rai/api-contracts";
+import { applySessionIdentityMigration, inspectSessionIdentityMigration, TrainingPlanSessionMigrationError } from "../apps/api/src/training-plan-session-migration.js";
 import { DatabasePathIdentityError, acquireDatabasePublicationLock, resolveDatabasePathIdentity } from "@rai/storage-sqlite";
 
 interface CliError {
@@ -57,7 +58,7 @@ const USAGE = `用法（从仓库根目录运行；默认 dry-run，不写任何
   node --import tsx scripts/migrate-training-planner.mts \\
     --control-db <控制库路径> \\
     --server-id <id> --athlete-id <id> --dataset-epoch <epoch> \\
-    [--business-date YYYY-MM-DD] \\
+    [--business-date YYYY-MM-DD] [--session-identities] \\
     [--apply --expect-source-digest <sha256>]
 
 参数:
@@ -67,6 +68,7 @@ const USAGE = `用法（从仓库根目录运行；默认 dry-run，不写任何
   --dataset-epoch         必填；scope 的 datasetEpoch
   --business-date         可选；派生日/赛事模式的上海业务日期，默认今天
   --apply                 显式写入；默认只有 dry-run
+  --session-identities    B02：升级已迁移的 unified schema 1 至课程身份 schema 2；同样先 dry-run
   --expect-source-digest  与 --apply 一起必填；必须等于 dry-run 打印的 sourceDigest
   --help                  打印本说明
 `;
@@ -83,6 +85,7 @@ function parseArguments(argv: string[]): { values: ReturnType<typeof parseArgs>[
       "dataset-epoch": { type: "string" },
       "business-date": { type: "string" },
       "apply": { type: "boolean", default: false },
+      "session-identities": { type: "boolean", default: false },
       "expect-source-digest": { type: "string" },
       "help": { type: "boolean", default: false }
     }
@@ -205,6 +208,15 @@ function main(argv: string[]): number {
       const database = openControlDatabase(controlDb, !apply);
       try {
         const scopeKey = trainingPlanScopeKey(identity);
+        if (values["session-identities"] === true) {
+          const report = inspectSessionIdentityMigration(database, scopeKey);
+          const context = { ...report, mode: apply ? "apply" : "dry-run", sessionIdentities: true };
+          if (!apply) { process.stdout.write(`${JSON.stringify({ ...context, ok: true }, null, 2)}\n`); return 0; }
+          if (expectedDigest === null) return emitFailure("expect_source_digest_required", "--apply 必须带 dry-run 的 --expect-source-digest", context);
+          const result = applySessionIdentityMigration(database, scopeKey, expectedDigest, report.existingRevision);
+          process.stdout.write(`${JSON.stringify({ ...context, ...result, ok: true, mode: "apply" }, null, 2)}\n`);
+          return 0;
+        }
         const sources = readTrainingPlanMigrationSources(database, identity);
         const classification = classifyTrainingPlanMigration({
           scope: identity,
@@ -253,6 +265,7 @@ function main(argv: string[]): number {
       releaseControlLock?.();
     }
   } catch (error) {
+    if (error instanceof TrainingPlanSessionMigrationError) return emitFailure(error.code, error.message, null);
     if (error instanceof CliFailure) return emitFailure(error.code, error.message, null);
     return emitFailure("internal_error", error instanceof Error ? error.message : String(error), null);
   }

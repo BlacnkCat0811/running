@@ -17,13 +17,18 @@ struct RaiHandshake: Codable, Equatable {
     var planReceiptMetadata: Bool? = nil
     var planSnapshotContractVersion: Int? = nil
     /// 2026-10-21（PR-02）：统一训练**读**能力（2 = `/training-plan-state` 接受
-    /// `X-RAI-Training-Contract: 2`）。与 `planSnapshotContractVersion` 一样，
-    /// 受 coach-loop 管理的 scope 不宣告。能力存在 ≠ 当前 scope 已迁移：
+    /// `X-RAI-Training-Contract: 2`）。独立于 legacy planSnapshotContractVersion：
+    /// managed scope 已迁移且 owner-ready 时也宣告。能力存在 ≠ 当前 scope 已迁移：
     /// 客户端仍须处理 `training_plan_not_migrated`。
     var trainingPlanContractVersion: Int? = nil
-    /// 2026-10-21（PR-02）：统一训练**写命令**能力。**当前服务端故意不宣告**；
-    /// 缺位即可写性未获认证（只读），不得用 `coachLoopContractVersion` 猜测。
+    /// 统一训练配置写能力：只在 validation + owner-ready + 精确协商时宣告 2。
+    /// 生产缺位即只读，不得用 coachLoopContractVersion 猜测。
     var trainingPlanCommandContractVersion: Int? = nil
+    /// B01 仅冻结协议与精确能力判定；服务端不宣告，无编辑/自动排期入口。
+    var trainingPlanSessionContractVersion: Int? = nil
+    var trainingPlanSessionCommandContractVersion: Int? = nil
+    var trainingPlanExecutionCommandContractVersion: Int? = nil
+    var trainingPlanUpdateContractVersion: Int? = nil
     var planPublicationContractVersion: Int? = nil
     var planReceiptContractVersion: Int? = nil
     var coachLoopContractVersion: Int? = nil
@@ -54,7 +59,9 @@ struct RaiHandshake: Codable, Equatable {
     /// capabilities never grant permission to invoke the retired write surface.
     var legacyPlanWritesSupported: Bool {
         guard syncProtocolCompatible, apiVersion == "v1",
-              trainingPlanContractVersion == nil, trainingPlanCommandContractVersion == nil else { return false }
+              trainingPlanContractVersion == nil, trainingPlanCommandContractVersion == nil,
+              trainingPlanSessionContractVersion == nil, trainingPlanSessionCommandContractVersion == nil,
+              trainingPlanExecutionCommandContractVersion == nil, trainingPlanUpdateContractVersion == nil else { return false }
         guard planSnapshotContractVersion == nil || planSnapshotContractVersion == 1,
               planPublicationContractVersion == nil || planPublicationContractVersion == 1,
               coachLoopContractVersion == nil || coachLoopContractVersion == 1 else { return false }
@@ -69,6 +76,22 @@ struct RaiHandshake: Codable, Equatable {
     /// remain separate checks. This never authorizes a legacy URL or WorkoutKit.
     var trainingPlanV2CommandsSupported: Bool {
         trainingPlanV2ReadsSupported && trainingPlanCommandContractVersion == 2 && planPublicationContractVersion == 1
+    }
+
+    var trainingPlanSessionsSupported: Bool {
+        trainingPlanV2ReadsSupported && trainingPlanSessionContractVersion == 1
+    }
+
+    var trainingPlanSessionCommandsSupported: Bool {
+        trainingPlanSessionsSupported && planPublicationContractVersion == 1 && trainingPlanSessionCommandContractVersion == 1
+    }
+
+    var trainingPlanExecutionCommandsSupported: Bool {
+        trainingPlanSessionsSupported && planPublicationContractVersion == 1 && trainingPlanExecutionCommandContractVersion == 1
+    }
+
+    var trainingPlanUpdatesSupported: Bool {
+        trainingPlanSessionsSupported && trainingPlanUpdateContractVersion == 1
     }
 }
 
@@ -1421,6 +1444,264 @@ struct TrainingPlanStateResponseV2: Codable, Equatable {
     let raceGoal: RaceGoal?
     let plan: Plan
     let execution: Execution
+    /// Optional, explicitly negotiated stable identities. Older caches omit it.
+    var sessions: TrainingPlanSessionsView? = nil
+    /// B08 optional four-stage update view. `nil` = old server or not negotiated;
+    /// never treated as "current".
+    var update: TrainingPlanUpdateView? = nil
+}
+
+/// B08 four-stage read. Each stage carries its own evidence; a plan is not
+/// "updated" merely because facts or analysis arrived.
+struct TrainingPlanUpdateView: Codable, Equatable {
+    struct Stage: Codable, Equatable { let status: String; let identity: String? }
+    struct Association: Codable, Equatable { let status: String; let identity: String? }
+    struct Plan: Codable, Equatable {
+        let status: String
+        let desiredInputKey: String?
+        let publishedInputKey: String?
+        let evaluatedInputKey: String?
+        let evaluatedStateRevision: Int?
+        let reasonCodes: [String]
+    }
+    let contractVersion: Int
+    let facts: Stage
+    let analysis: Stage
+    let association: Association
+    let plan: Plan
+}
+
+struct TrainingPlanSessionsView: Codable, Equatable {
+    struct Session: Codable, Equatable {
+        struct Recommendation: Codable, Equatable {
+            let prescription: MobilePlannedDay
+            let source: String
+            let policyHash: String?
+        }
+        struct Override: Codable, Equatable {
+            let action: String
+            let prescription: MobilePlannedDay
+            let availableAt: String
+        }
+        let planInstanceId: String
+        let sessionId: String
+        let sessionRevision: Int
+        let prescription: MobilePlannedDay
+        let recommendation: Recommendation?
+        let userOverride: Override?
+        let protection: String
+        let lifecycle: String
+        let availableAt: String
+        let supersededBySessionId: String?
+    }
+    struct Suppression: Codable, Equatable {
+        let localDate: String
+        let reason: String
+        let sessionId: String?
+        let availableAt: String
+    }
+    let contractVersion: Int
+    let planInstanceId: String
+    let sessions: [Session]
+    let suppressions: [Suppression]
+    let publishedInputKey: String?
+    /// B06 optional current execution rows. `nil` means the server did not
+    /// provide the execution view at all (unknown, not an empty history).
+    let executions: [TrainingPlanSessionExecution]?
+
+    private enum CodingKeys: String, CodingKey {
+        case contractVersion, planInstanceId, sessions, suppressions, publishedInputKey, executions
+    }
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        contractVersion = try fields.decode(Int.self, forKey: .contractVersion)
+        planInstanceId = try fields.decode(String.self, forKey: .planInstanceId)
+        sessions = try fields.decode([Session].self, forKey: .sessions)
+        suppressions = try fields.decode([Suppression].self, forKey: .suppressions)
+        publishedInputKey = try fields.decodeIfPresent(String.self, forKey: .publishedInputKey)
+        executions = try fields.decodeIfPresent([TrainingPlanSessionExecution].self, forKey: .executions)
+    }
+}
+
+/// B06 execution-candidate row. Evidence is never an automatic confirmation:
+/// `verified_identity` still requires the user's command in this contract.
+struct TrainingPlanExecutionCandidate: Codable, Equatable, Identifiable {
+    let trainingSessionId: String
+    let sourceFactDigest: String
+    let startedAt: String
+    let endedAt: String
+    let distanceMeters: Double?
+    let durationSeconds: Double?
+    let evidence: String
+    var id: String { trainingSessionId }
+}
+
+struct TrainingPlanExecutionCandidatesResponse: Codable, Equatable {
+    let contractVersion: Int
+    let scope: PlanReceiptScope
+    let stateRevision: Int
+    let planInstanceId: String
+    let sessionId: String
+    let sessionRevision: Int
+    let executionRevision: Int
+    let rangeStart: String
+    let rangeEnd: String
+    let candidates: [TrainingPlanExecutionCandidate]
+    let nextCursor: String?
+}
+
+/// `confirm`/`correct`/`retract` bind the exact fact digest; `skip` is only valid
+/// for a pending, unconfirmed session and requires an explicit reason.
+enum TrainingPlanExecutionDraft: Encodable, Equatable {
+    case confirm(trainingSessionId: String, sourceFactDigest: String)
+    case correct(trainingSessionId: String, sourceFactDigest: String)
+    case retract(trainingSessionId: String, sourceFactDigest: String)
+    case skip(reason: String)
+
+    enum CodingKeys: String, CodingKey { case action, trainingSessionId, sourceFactDigest, reason }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .confirm(id, digest), let .correct(id, digest), let .retract(id, digest):
+            let action: String
+            switch self {
+            case .confirm: action = "confirm"
+            case .correct: action = "correct"
+            default: action = "retract"
+            }
+            try container.encode(action, forKey: .action)
+            try container.encode(id, forKey: .trainingSessionId)
+            try container.encode(digest, forKey: .sourceFactDigest)
+        case let .skip(reason):
+            try container.encode("skip", forKey: .action)
+            try container.encode(reason, forKey: .reason)
+        }
+    }
+}
+
+struct TrainingPlanExecutionCommandRequest: Encodable, Equatable {
+    var contractVersion = 1
+    let operationId: String
+    let operationScope: PlanReceiptScope
+    let expectedStateRevision: Int
+    let planInstanceId: String
+    let sessionId: String
+    let sessionRevision: Int
+    let executionRevision: Int
+    let draft: TrainingPlanExecutionDraft
+}
+
+/// Mirrors `packages/api-contracts/src/coach-loop.ts` `WorkoutExecutionAssessment`.
+/// Values stay as wire strings for forward compatibility; every consumer validates
+/// the known set before using them, so an unknown value cannot become "met"/"unknown".
+struct WorkoutExecutionAssessment: Codable, Equatable {
+    struct EvidenceRef: Codable, Equatable {
+        let source: String
+        let id: String
+        let observedAt: String?
+        let availableAt: String?
+        let revisionOrHash: String?
+    }
+
+    struct DecisionReason: Codable, Equatable {
+        let code: String
+        let policyVersion: String
+        let evidenceRefs: [EvidenceRef]
+        let affectedDates: [String]
+        let params: [String: TrainingPlanJSONScalar]
+    }
+
+    struct Association: Codable, Equatable {
+        let status: String
+        let method: String?
+        let evidenceRefs: [EvidenceRef]
+    }
+
+    struct Dose: Codable, Equatable {
+        let status: String
+        let basis: String?
+        let requiredDistanceMeters: Double?
+        let observedDistanceMeters: Double?
+        let requiredWorkSeconds: Double?
+        let observedWorkSeconds: Double?
+        let requiredReps: Double?
+        let verifiedReps: Double?
+    }
+
+    struct Stimulus: Codable, Equatable {
+        let status: String
+        let channel: String?
+        let validCoverageFraction: Double?
+        let timeInTargetFraction: Double?
+    }
+
+    let version: String
+    let policyStatus: String
+    let localDate: String
+    let asOf: String
+    let planRevision: Int?
+    let prescriptionDigest: String?
+    let workoutIds: [String]
+    let association: Association
+    let observation: String
+    let evidenceLevel: String
+    let dose: Dose
+    let stimulus: Stimulus
+    let completion: String
+    let reasons: [DecisionReason]
+}
+
+/// A small JSON scalar so decision-reason params survive cache round-trips
+/// without turning a future numeric value into a decode failure.
+enum TrainingPlanJSONScalar: Codable, Equatable {
+    case null
+    case bool(Bool)
+    case number(Double)
+    case string(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Double.self) { self = .number(value) }
+        else { self = .string(try container.decode(String.self)) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case let .bool(value): try container.encode(value)
+        case let .number(value): try container.encode(value)
+        case let .string(value): try container.encode(value)
+        }
+    }
+}
+
+struct TrainingPlanSessionExecution: Codable, Equatable {
+    let sessionId: String
+    let executionRevision: Int
+    let association: String
+    let trainingSessionId: String?
+    let sourceFactDigest: String?
+    let prescriptionSessionRevision: Int
+    let assessment: WorkoutExecutionAssessment?
+    let availableAt: String
+    let reasonCodes: [String]
+}
+
+struct TrainingPlanClosedLoopCommandResponse: Codable, Equatable {
+    let contractVersion: Int
+    let operationId: String
+    let stateRevision: Int
+    let goalsRevision: Int?
+    let planInstanceId: String
+    let outcome: String
+    let session: TrainingPlanSessionsView.Session?
+    let execution: TrainingPlanSessionExecution?
+    let planUpdate: String
+    let warnings: [String]
 }
 
 extension TrainingPlanStateResponseV2 {
@@ -1487,6 +1768,7 @@ struct TrainingPlanRefreshRequest: Codable {
 
 /// Both command and refresh replies share these durable acknowledgement fields.
 struct TrainingPlanCommandResult: Codable, Equatable {
+    var planInstanceId: String? = nil
     let contractVersion: Int
     let operationId: String
     let stateRevision: Int
@@ -2305,4 +2587,122 @@ struct NativeWorkoutExport: Codable {
     let timezone: String
     let count: Int
     let csv: String
+}
+
+/// Session editing is a separate negotiated contract. Nil patch fields are kept
+/// unless their explicit update flag is set; clearing reason encodes JSON null.
+struct TrainingPlanSessionPatch: Encodable, Equatable {
+    var kind: String? = nil
+    var distanceKm: Double? = nil
+    var updatesDistance = false
+    var structure: MobileSessionStructure? = nil
+    var reason: String? = nil
+    var updatesReason = false
+    private enum CodingKeys: String, CodingKey { case kind, distanceKm, structure, reason }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(kind, forKey: .kind)
+        if updatesDistance { try c.encode(distanceKm, forKey: .distanceKm) }
+        if let structure { try c.encode(TrainingSessionWireStructure(value: structure), forKey: .structure) }
+        if updatesReason { try c.encode(reason, forKey: .reason) }
+    }
+}
+
+/// New commands use canonical structures; existing cache/receipt encoders keep
+/// their own compatibility semantics.
+private struct TrainingSessionWireStructure: Encodable {
+    let value: MobileSessionStructure
+    struct Step: Encodable {
+        let value: MobileWorkoutStep
+        struct Alert: Encodable {
+            let value: MobileStepAlert
+            enum CodingKeys: String, CodingKey { case kind, lower, upper }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(value.kind, forKey: .kind); try c.encode(value.lower, forKey: .lower); try c.encode(value.upper, forKey: .upper)
+            }
+        }
+        enum CodingKeys: String, CodingKey { case purpose, goal, alert }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(value.purpose, forKey: .purpose); try c.encode(value.goal, forKey: .goal)
+            try c.encode(value.alert.map { Alert(value: $0) }, forKey: .alert)
+        }
+    }
+    struct Block: Encodable { let iterations: Int; let steps: [Step] }
+    enum CodingKeys: String, CodingKey { case warmup, blocks, cooldown }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(value.warmup.map { Step(value: $0) }, forKey: .warmup)
+        try c.encode(value.blocks.map { Block(iterations: $0.iterations, steps: $0.steps.map { Step(value: $0) }) }, forKey: .blocks)
+        try c.encode(value.cooldown.map { Step(value: $0) }, forKey: .cooldown)
+    }
+}
+
+enum TrainingPlanSessionDraft: Encodable, Equatable {
+    case move(sessionId: String, sessionRevision: Int, localDate: String)
+    case edit(sessionId: String, sessionRevision: Int, patch: TrainingPlanSessionPatch)
+    case add(MobilePlannedDay)
+    case cancel(sessionId: String, sessionRevision: Int)
+    case setRest(localDate: String)
+    case unlock(sessionId: String, sessionRevision: Int)
+    enum CodingKeys: String, CodingKey { case action, sessionId, sessionRevision, localDate, patch, prescription }
+    private struct Prescription: Encodable {
+        let value: MobilePlannedDay
+        enum CodingKeys: String, CodingKey { case localDate, kind, distanceKm, structure, reason }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(value.localDate, forKey: .localDate); try c.encode(value.kind, forKey: .kind)
+            try c.encode(value.distanceKm, forKey: .distanceKm); try c.encode(value.reason, forKey: .reason)
+            try c.encode(value.structure.map { TrainingSessionWireStructure(value: $0) }, forKey: .structure)
+        }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        func existing(_ action: String, _ id: String, _ revision: Int) throws {
+            try c.encode(action, forKey: .action); try c.encode(id, forKey: .sessionId); try c.encode(revision, forKey: .sessionRevision)
+        }
+        switch self {
+        case let .move(id, revision, date): try existing("move", id, revision); try c.encode(date, forKey: .localDate)
+        case let .edit(id, revision, patch): try existing("edit", id, revision); try c.encode(patch, forKey: .patch)
+        case let .add(day): try c.encode("add", forKey: .action); try c.encode(Prescription(value: day), forKey: .prescription)
+        case let .cancel(id, revision): try existing("cancel", id, revision)
+        case let .setRest(date): try c.encode("set_rest", forKey: .action); try c.encode(date, forKey: .localDate)
+        case let .unlock(id, revision): try existing("unlock", id, revision)
+        }
+    }
+}
+struct TrainingPlanSessionPreviewRequest: Encodable, Equatable {
+    var contractVersion = 1
+    let operationScope: PlanReceiptScope
+    let expectedStateRevision: Int
+    let planInstanceId: String
+    let draft: TrainingPlanSessionDraft
+}
+struct TrainingPlanSessionPreview: Decodable {
+    struct Impact: Decodable {
+        let before: TrainingPlanSessionsView.Session?
+        let after: TrainingPlanSessionsView.Session?
+        let suppressions: [TrainingPlanSessionsView.Suppression]
+        let affectedDates: [String]
+        let deviceWithdrawalRequired: Bool
+        let warnings: [String]
+    }
+    let contractVersion: Int
+    let operationScope: PlanReceiptScope
+    let expectedStateRevision: Int
+    let planInstanceId: String
+    let candidateId: String
+    let expiresAt: String
+    let inputKey: String
+    let impact: Impact
+}
+struct TrainingPlanSessionCommandRequest: Encodable {
+    var contractVersion = 1
+    let operationId: String
+    let operationScope: PlanReceiptScope
+    let expectedStateRevision: Int
+    let planInstanceId: String
+    let draft: TrainingPlanSessionDraft
+    let candidateId: String
 }

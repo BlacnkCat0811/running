@@ -18,6 +18,7 @@ import {
 import {
   TrainingPlanStore,
   type TrainingPlanState,
+  type TrainingPlanLegacyState,
   type TrainingPlanStateRow
 } from "../src/training-plan-store.js";
 
@@ -36,7 +37,7 @@ const identity = () => ({ serverId: "server", athleteId: "athlete", datasetEpoch
 const scope = identity();
 const scopeKey = JSON.stringify([scope.serverId, scope.athleteId, scope.datasetEpoch]);
 
-const stateRow = (state: Partial<TrainingPlanState> = {}, revision = 3): TrainingPlanStateRow => ({
+const stateRow = (state: Partial<TrainingPlanLegacyState> = {}, revision = 3): TrainingPlanStateRow => ({
   scope: scopeKey,
   revision,
   updatedAt: "2026-10-20T04:00:00.000Z",

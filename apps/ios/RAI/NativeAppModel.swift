@@ -88,6 +88,12 @@ final class NativeAppModel {
         negotiatedConfiguration == configurationID && negotiatedCredential == session.apiToken &&
         negotiatedURL == session.serverURL && handshake?.trainingPlanV2CommandsSupported == true
     }
+    /// B07 capability is negotiated exactly like the session command contract:
+    /// an unknown/missing key or a different configuration closes the write path.
+    var executionCommandCapability: Bool {
+        negotiatedConfiguration == configurationID && negotiatedCredential == session.apiToken &&
+        negotiatedURL == session.serverURL && handshake?.trainingPlanExecutionCommandsSupported == true
+    }
 
     /// 旧写路由的 route 名（与 `APIClient.replayPlanPublication` 的映射同源）。
     /// 这些路由在 `planWritesAvailable == false` 时必须在发请求前拒绝。
@@ -1451,6 +1457,7 @@ final class NativeAppModel {
         workoutListError = nil
         bodyMetricsError = nil
         isTodayAvailable = false
+        clearExecutionCandidateState()
         trainingPlanStore.configure(scope: cacheScope, clear: true)
         statistics = nil
         trends = nil
@@ -1474,6 +1481,13 @@ final class NativeAppModel {
         lastCacheUpdate = nil
     }
 
+    private func clearExecutionCandidateState() {
+        executionCandidates = [:]
+        executionCandidateIssues = [:]
+        executionCandidateLoading = []
+        executionCandidateRequests = [:]
+    }
+
     private func invalidatePlanOperations() {
         negotiatedConfiguration = nil
         trainingPlanPublisher.invalidate()
@@ -1485,6 +1499,7 @@ final class NativeAppModel {
         isSavingGoals = false
         isSyncingPlan = false
         planSyncRequestID = UUID()
+        clearExecutionCandidateState()
         trainingPlanStore.configure(scope: cacheScope, clear: true)
         refreshQueued = false
         refreshHandshakeQueued = false
@@ -1634,6 +1649,226 @@ final class NativeAppModel {
         v2CommandCapability && !isOffline && trainingPlanStore.unifiedIsCurrent &&
         !isPlanBusy && !hasPendingPlanPublication && !trainingPlanPublisher.executionBlocked
     }
+    var canEditTrainingSessions: Bool {
+        handshake?.trainingPlanSessionCommandsSupported == true && !isOffline && trainingPlanStore.unifiedIsCurrent &&
+        trainingPlanStore.unified?.sessions != nil && !isPlanBusy && !hasPendingPlanPublication && !trainingPlanPublisher.executionBlocked
+    }
+    var canEditTrainingExecutions: Bool {
+        executionCommandCapability && !isOffline && trainingPlanStore.unifiedIsCurrent &&
+        trainingPlanStore.unified?.sessions != nil && !isPlanBusy && !hasPendingPlanPublication && !trainingPlanPublisher.executionBlocked
+    }
+    /// Candidate pages keyed by sessionId. Fetched on demand when a course detail
+    /// opens; it is never a source of automatic completion.
+    private(set) var executionCandidates: [String: TrainingPlanExecutionCandidatesResponse] = [:]
+    private(set) var executionCandidateIssues: [String: String] = [:]
+    private(set) var executionCandidateLoading: Set<String> = []
+    private var executionCandidateRequests: [String: UUID] = [:]
+    func executionCandidates(for sessionId: String) -> TrainingPlanExecutionCandidatesResponse? { executionCandidates[sessionId] }
+    func executionCandidateIssue(for sessionId: String) -> String? { executionCandidateIssues[sessionId] }
+    func isExecutionCandidateLoading(_ sessionId: String) -> Bool { executionCandidateLoading.contains(sessionId) }
+    func sessionExecution(for sessionId: String) -> TrainingPlanSessionExecution? { trainingPlanStore.sessionExecution(for: sessionId) }
+    var sessionExecutionsKnown: Bool { trainingPlanStore.sessionExecutionsKnown }
+
+    private func executionTarget(for sessionId: String) -> (session: TrainingPlanSessionsView.Session, target: TrainingPlanExecutionTarget)? {
+        guard let snapshot = trainingPlanStore.unified, let sessions = snapshot.sessions,
+              let session = sessions.sessions.first(where: { $0.sessionId == sessionId && $0.planInstanceId == sessions.planInstanceId }) else {
+            return nil
+        }
+        let execution = trainingPlanStore.sessionExecution(for: sessionId)
+        return (session, .init(planInstanceId: sessions.planInstanceId, sessionId: session.sessionId,
+            sessionRevision: session.sessionRevision, executionRevision: execution?.executionRevision ?? 0,
+            stateRevision: snapshot.stateRevision))
+    }
+
+    /// Explicit "load more" is always a separate request; the first page uses the
+    /// server's default ±2-day window, `widened` asks for the maximum 31-day range.
+    @discardableResult
+    func loadExecutionCandidates(for sessionId: String, widened: Bool = false, cursor: String? = nil) async -> Bool {
+        guard executionCommandCapability, !isOffline, trainingPlanStore.unifiedIsCurrent,
+              let snapshot = trainingPlanStore.unified, let sessions = snapshot.sessions,
+              let session = sessions.sessions.first(where: { $0.sessionId == sessionId && $0.planInstanceId == sessions.planInstanceId }),
+              let baseURL = self.session.serverURL, let handshake else {
+            let reason = executionCommandCapability
+                ? "执行候选需要当前已确认的课程状态；请先刷新训练安排。"
+                : "当前服务未启用执行关联，只能只读查看已有安排。"
+            executionCandidateIssues[sessionId] = reason
+            return false
+        }
+        let request = UUID()
+        executionCandidateRequests[sessionId] = request
+        executionCandidateLoading.insert(sessionId)
+        defer {
+            if executionCandidateRequests[sessionId] == request { executionCandidateLoading.remove(sessionId) }
+        }
+        let range: (start: String?, end: String?)
+        let previousPage = executionCandidates[sessionId]
+        if let cursor {
+            guard let previousPage, previousPage.nextCursor == cursor,
+                  previousPage.scope == snapshot.scope,
+                  previousPage.planInstanceId == sessions.planInstanceId,
+                  previousPage.sessionRevision == session.sessionRevision,
+                  previousPage.executionRevision == (trainingPlanStore.sessionExecution(for: sessionId)?.executionRevision ?? 0),
+                  previousPage.stateRevision == snapshot.stateRevision else {
+                executionCandidateIssues[sessionId] = "候选分页已变化，请重新读取候选。"
+                return false
+            }
+            range = (previousPage.rangeStart, previousPage.rangeEnd)
+        } else if widened {
+            guard let expanded = TrainingPlanExecutionPolicy.expandedRange(sessionDate: session.prescription.localDate) else {
+                executionCandidateIssues[sessionId] = "课程日期不可解析，无法扩大候选范围。"
+                return false
+            }
+            range = (expanded.start, expanded.end)
+        } else {
+            range = (nil, nil)
+        }
+        let execution = trainingPlanStore.sessionExecution(for: sessionId)
+        let identity = PlanReceiptScope(serverId: handshake.serverId, athleteId: handshake.athleteId,
+            datasetEpoch: handshake.datasetEpoch)
+        do {
+            let response = try await api.trainingPlanExecutionCandidates(sessionId: sessionId,
+                planInstanceId: sessions.planInstanceId, rangeStart: range.start, rangeEnd: range.end,
+                cursor: cursor, baseURL: baseURL, token: self.session.apiToken)
+            guard executionCandidateRequests[sessionId] == request, !Task.isCancelled,
+                  trainingPlanStore.unified?.stateRevision == snapshot.stateRevision,
+                  trainingPlanStore.unified?.sessions?.planInstanceId == sessions.planInstanceId else { return false }
+            if let reason = TrainingPlanExecutionPolicy.validate(response, identity: identity,
+                planInstanceId: sessions.planInstanceId, sessionId: sessionId,
+                sessionRevision: session.sessionRevision, executionRevision: execution?.executionRevision ?? 0,
+                expectedStateRevision: snapshot.stateRevision) {
+                throw RaiAPIClientError.decoding(reason)
+            }
+            if let start = range.start, let end = range.end,
+               response.rangeStart != start || response.rangeEnd != end {
+                throw RaiAPIClientError.decoding("候选分页返回了不同的日期范围，请重新读取。")
+            }
+            if cursor != nil, let existing = previousPage {
+                var seen = Set(existing.candidates.map(\.trainingSessionId))
+                let appended = response.candidates.filter { seen.insert($0.trainingSessionId).inserted }
+                executionCandidates[sessionId] = .init(contractVersion: response.contractVersion,
+                    scope: response.scope, stateRevision: response.stateRevision,
+                    planInstanceId: response.planInstanceId, sessionId: response.sessionId,
+                    sessionRevision: response.sessionRevision, executionRevision: response.executionRevision,
+                    rangeStart: existing.rangeStart, rangeEnd: existing.rangeEnd,
+                    candidates: existing.candidates + appended, nextCursor: response.nextCursor)
+            } else {
+                executionCandidates[sessionId] = response
+            }
+            executionCandidateIssues[sessionId] = nil
+            return true
+        } catch {
+            guard executionCandidateRequests[sessionId] == request else { return false }
+            let apiError = error as? RaiAPIClientError
+            executionCandidateIssues[sessionId] = TrainingPlanExecutionPolicy.serverErrorMessage(apiError?.serverCode ?? "")
+                ?? error.localizedDescription
+            return false
+        }
+    }
+
+    @discardableResult
+    func confirmExecutionLink(sessionId: String, candidate: TrainingPlanExecutionCandidate) async -> Bool {
+        guard canEditTrainingExecutions, let (session, target) = executionTarget(for: sessionId),
+              let page = executionCandidates[sessionId],
+              page.candidates.contains(where: { $0.trainingSessionId == candidate.trainingSessionId &&
+                  $0.sourceFactDigest == candidate.sourceFactDigest }) else { return false }
+        let execution = trainingPlanStore.sessionExecution(for: sessionId)
+        let draft: TrainingPlanExecutionDraft
+        if let association = execution?.association, ["confirmed", "invalidated"].contains(association) {
+            draft = .correct(trainingSessionId: candidate.trainingSessionId, sourceFactDigest: candidate.sourceFactDigest)
+        } else {
+            guard execution == nil || execution?.association == "unlinked" || execution?.association == "pending_confirmation",
+                  session.lifecycle == "pending" || session.lifecycle == "completed" || session.lifecycle == "partial" else { return false }
+            draft = .confirm(trainingSessionId: candidate.trainingSessionId, sourceFactDigest: candidate.sourceFactDigest)
+        }
+        return await submitExecution(draft, target: target, sessionId: sessionId)
+    }
+
+    @discardableResult
+    func retractExecutionLink(sessionId: String) async -> Bool {
+        guard canEditTrainingExecutions, let (_, target) = executionTarget(for: sessionId),
+              let execution = trainingPlanStore.sessionExecution(for: sessionId),
+              TrainingPlanExecutionPolicy.canRetract(execution),
+              let trainingSessionId = execution.trainingSessionId,
+              let digest = execution.sourceFactDigest else { return false }
+        return await submitExecution(.retract(trainingSessionId: trainingSessionId, sourceFactDigest: digest),
+            target: target, sessionId: sessionId)
+    }
+
+    @discardableResult
+    func skipTrainingSession(sessionId: String, reason: String) async -> Bool {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canEditTrainingExecutions, !trimmed.isEmpty,
+              let (session, target) = executionTarget(for: sessionId) else { return false }
+        let execution = trainingPlanStore.sessionExecution(for: sessionId)
+        // Skip is allowed only after the candidate page was actually read: an
+        // unread/unknown candidate window must not be treated as "no run".
+        guard executionCandidates[sessionId] != nil else { return false }
+        let hasCandidates = !(executionCandidates[sessionId]?.candidates.isEmpty ?? true)
+        guard TrainingPlanExecutionPolicy.canSkip(session: session, execution: execution, hasCandidates: hasCandidates) else {
+            return false
+        }
+        return await submitExecution(.skip(reason: trimmed), target: target, sessionId: sessionId)
+    }
+
+    private func submitExecution(_ draft: TrainingPlanExecutionDraft, target: TrainingPlanExecutionTarget,
+                                 sessionId: String) async -> Bool {
+        guard let context = commandContext else { return false }
+        // A submission invalidates reads that started before the user chose a
+        // candidate; the captured target (not a later read) is what gets submitted.
+        cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
+        let result = await trainingPlanPublisher.execute(draft, target: target, context: context) {
+            self.commandContext == context
+        }
+        guard commandContext == context else { return false }
+        guard let result else {
+            if trainingPlanPublisher.phase == .needsPreview && !hasPendingPlanPublication {
+                _ = await refreshPlanState(); _ = await refreshUnifiedTrainingPlan()
+            }
+            return false
+        }
+        return await acceptExecutionCommand(result, context: context, sessionId: sessionId)
+    }
+
+    private func acceptExecutionCommand(_ value: TrainingPlanClosedLoopCommandResponse,
+                                        context: TrainingPlanPublisher.Context,
+                                        sessionId: String?) async -> Bool {
+        guard trainingPlanPublisher.phase == .committedAwaitingRead else { return false }
+        planMutationEpoch = UUID(); cancelInFlightPlanRefresh()
+        trainingPlanStore.acknowledgeExecution(stateRevision: value.stateRevision, goalsRevision: value.goalsRevision)
+        guard !trainingPlanStore.persistenceFailed else { return false }
+        _ = await refreshPlanState()
+        let executionRead = trainingPlanStore.isCurrent
+        let unifiedRead = await refreshUnifiedTrainingPlan()
+        guard commandContext == context, executionRead, unifiedRead else { return false }
+        if let sessionId {
+            executionCandidates[sessionId] = nil
+            executionCandidateIssues[sessionId] = nil
+        }
+        return trainingPlanPublisher.finishRead(context: context)
+    }
+
+    func previewTrainingSession(_ draft: TrainingPlanSessionDraft) async -> Bool {
+        guard canEditTrainingSessions, let context = commandContext, let snapshot = trainingPlanStore.unified,
+              let sessions = snapshot.sessions else { return false }
+        return await trainingPlanPublisher.makeSessionPreview(.init(operationScope: context.identity,
+            expectedStateRevision: snapshot.stateRevision, planInstanceId: sessions.planInstanceId, draft: draft), context: context) {
+            self.commandContext == context && !Task.isCancelled
+        }
+    }
+    func confirmTrainingSession(_ draft: TrainingPlanSessionDraft) async -> Bool {
+        guard canEditTrainingSessions, let context = commandContext,
+              trainingPlanPublisher.matchesSessionPreview(draft) else { return false }
+        cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
+        let result = await trainingPlanPublisher.confirmSession(context: context) { self.commandContext == context }
+        guard commandContext == context else { return false }
+        guard let result else {
+            if trainingPlanPublisher.phase == .needsPreview && !hasPendingPlanPublication {
+                _ = await refreshPlanState(); _ = await refreshUnifiedTrainingPlan()
+            }
+            return false
+        }
+        return await acceptTrainingCommand(result, context: context)
+    }
     func previewTrainingPlanCommand(_ action: TrainingPlanCommandAction, raceGoal: TrainingPlanRaceGoalDraft? = nil) async -> Bool {
         guard canEditTrainingPlanV2, let context = commandContext, let snapshot = trainingPlanStore.unified else { return false }
         return await trainingPlanPublisher.makePreview(.init(operationScope: context.identity, action: action,
@@ -1682,7 +1917,17 @@ final class NativeAppModel {
     }
     func recoverTrainingPlanCommand() async -> Bool {
         guard !isOffline, !isPlanBusy, let context = commandContext else { return false }
-        let value = await trainingPlanPublisher.recover(context: context, mayReplay: v2CommandCapability) { self.commandContext == context }
+        let pending = cache.pendingPublication(scope: cacheScope).value ?? nil
+        if pending?.route == "training-execution" {
+            let value = await trainingPlanPublisher.recoverExecution(context: context,
+                mayReplay: executionCommandCapability) { self.commandContext == context }
+            guard commandContext == context, let value else { return false }
+            let sessionId = (try? JSONDecoder().decode(TrainingPlanExecutionJournalEnvelope.self,
+                from: pending?.payload ?? Data()))?.sessionId
+            return await acceptExecutionCommand(value, context: context, sessionId: sessionId)
+        }
+        let value = await trainingPlanPublisher.recover(context: context, mayReplay: pending?.route == "training-session"
+            ? handshake?.trainingPlanSessionCommandsSupported == true : v2CommandCapability) { self.commandContext == context }
         guard commandContext == context, let value else { return false }
         return await acceptTrainingCommand(value, context: context)
     }
@@ -1867,7 +2112,7 @@ final class NativeAppModel {
         let result = cache.pendingPublication(scope: cacheScope)
         guard !result.isFailure else { return "发布账目无法读取，不能当作无操作；请恢复本地存储。" }
         guard let pending = result.value ?? nil else { return "没有待确认发布。" }
-        if ["training-command", "training-refresh"].contains(pending.route) {
+        if ["training-command", "training-refresh", "training-session", "training-execution"].contains(pending.route) {
             _ = await recoverTrainingPlanCommand()
             return trainingPlanPublisher.message ?? "请查询原操作。"
         }

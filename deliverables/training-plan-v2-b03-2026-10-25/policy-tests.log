@@ -1,0 +1,91 @@
+TAP version 13
+# (node:45865) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B03/S01-02: protected course and explicit rest win field-by-field; moved source date never resurrects
+ok 1 - B03/S01-02: protected course and explicit rest win field-by-field; moved source date never resurrects
+  ---
+  duration_ms: 35.926657
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: a cancelled tombstone suppresses the date and repeated resolution never resurrects it
+ok 2 - B03/S01-02: a cancelled tombstone suppresses the date and repeated resolution never resurrects it
+  ---
+  duration_ms: 25.496626
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: future protected course outside the generated window is retained and materialized
+ok 3 - B03/S01-02: future protected course outside the generated window is retained and materialized
+  ---
+  duration_ms: 4.631773
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: today's lock is authoritative even when the generator proposes another course
+ok 4 - B03/S01-02: today's lock is authoritative even when the generator proposes another course
+  ---
+  duration_ms: 10.029143
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: automatic replacement uses a new ID plus superseded relation; re-planning to rest archives only the pending auto course
+ok 5 - B03/S01-02: automatic replacement uses a new ID plus superseded relation; re-planning to rest archives only the pending auto course
+  ---
+  duration_ms: 9.112057
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: duplicate generated dates and two active owners are rejected, never merged
+ok 6 - B03/S01-02: duplicate generated dates and two active owners are rejected, never merged
+  ---
+  duration_ms: 1.956043
+  type: 'test'
+  ...
+# Subtest: B03/S01-02/S01-04: protected courses spend the budget first and migrated running days/target type are actually consumed
+ok 7 - B03/S01-02/S01-04: protected courses spend the budget first and migrated running days/target type are actually consumed
+  ---
+  duration_ms: 45.892491
+  type: 'test'
+  ...
+# Subtest: B03/S01-04: the same run-coach source produces the same available days, target type and phase before and after the session migration
+ok 8 - B03/S01-04: the same run-coach source produces the same available days, target type and phase before and after the session migration
+  ---
+  duration_ms: 10.586001
+  type: 'test'
+  ...
+# Subtest: B03/S01-04: retained run-coach evidence maps to generation preferences; missing/ended evidence fails closed, legacy has no invented seven-day preference
+ok 9 - B03/S01-04: retained run-coach evidence maps to generation preferences; missing/ended evidence fails closed, legacy has no invented seven-day preference
+  ---
+  duration_ms: 3.912266
+  type: 'test'
+  ...
+# Subtest: B03/S01-02/G1: preserveWeekPlan keeps nullable reason and exact protected prescription through normalize/measure/copy
+ok 10 - B03/S01-02/G1: preserveWeekPlan keeps nullable reason and exact protected prescription through normalize/measure/copy
+  ---
+  duration_ms: 51.73972
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: real refresh on schema 2 preserves protection/suppression, preserves reason:null and replays without duplicate sessions
+ok 11 - B03/S01-02: real refresh on schema 2 preserves protection/suppression, preserves reason:null and replays without duplicate sessions
+  ---
+  duration_ms: 170.395481
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: a configuration submit that publishes a plan uses the same resolver and cannot drop protection
+ok 12 - B03/S01-02: a configuration submit that publishes a plan uses the same resolver and cannot drop protection
+  ---
+  duration_ms: 94.503202
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: refresh failure on a new session history write rolls the whole publication back
+ok 13 - B03/S01-02: refresh failure on a new session history write rolls the whole publication back
+  ---
+  duration_ms: 77.297045
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1814.905142
+EXIT:0

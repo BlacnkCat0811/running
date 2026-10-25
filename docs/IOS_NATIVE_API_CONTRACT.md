@@ -57,7 +57,11 @@ Web SPA 退役后不存在匿名业务读。
 | `planReceiptMetadata` | `true` | 旧回执扩展字段能力（legacy 形状） |
 | `planSnapshotContractVersion` | `1` | **条件返回**：coach-loop 托管的数据域省略（避免宣告同一份握手文档无法履约的读路由） |
 | `trainingPlanContractVersion` | `2` | **统一训练读能力**（`X-RAI-Training-Contract: 2`）；非托管数据域返回，coach-loop 托管但 `trainingPlanOwnerReady`（已迁移、投影/回执一致）时也返回；损坏/缺口继续省略 |
-| `trainingPlanCommandContractVersion` | **生产省略；隔离候选 `2`** | 统一训练写命令能力。仅在 `RAI_TRAINING_PLAN_COMMAND_MODE=validation` 且客户端发送 `X-RAI-Client-Training-Commands: 2` 时宣告；命令路由本身也要求同一请求头，缺位 ⇒ 只读，不得用 `coachLoopContractVersion` 猜测。生产启用是独立发布动作（D20/D5-E） |
+| `trainingPlanCommandContractVersion` | `2`（条件） | 统一训练写命令能力。仅在 `RAI_TRAINING_PLAN_COMMAND_MODE` 为 `validation` 或 `production` 且客户端发送 `X-RAI-Client-Training-Commands: 2` 时宣告；命令路由本身也要求同一请求头，缺位 ⇒ 只读，不得用 `coachLoopContractVersion` 猜测。生产启用是独立发布动作（D20/D5-E） |
+| `trainingPlanSessionContractVersion` | `1`（条件） | 课程身份只读扩展；仅 schema 2、owner-ready 的 scope 宣告。缺位时 `X-RAI-Training-Sessions: 1` 返回 409，不得当作空课程 |
+| `trainingPlanSessionCommandContractVersion` | `1`（条件） | 课程编辑命令；仅 `RAI_TRAINING_PLAN_SESSION_COMMAND_MODE` 为 `validation` 或 `production` + schema 2/owner-ready + publication + `X-RAI-Client-Training-Session-Commands: 1` 时宣告 |
+| `trainingPlanExecutionCommandContractVersion` | `1`（条件） | 执行关联命令；仅 `RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE` 为 `validation` 或 `production` + schema 2/owner-ready + publication + `X-RAI-Client-Training-Execution-Commands: 1` 时宣告；与课程写独立 |
+| `trainingPlanUpdateContractVersion` | `1`（条件） | 四阶段更新只读扩展；随 `trainingPlanSessionContractVersion` 宣告，不授权自动发布；缺位/未知时 `X-RAI-Training-Updates` 返回 409 |
 | `coachLoopContractVersion` | `1` | 新教练闭环合同 |
 | `planPublicationContractVersion` | `1` | 控制库持久发布操作能力；不支持控制库时省略 |
 | `planReceiptContractVersion` | `2` | 回执 v2（独立版本，不复用 `planReceiptMetadata` 布尔） |
@@ -66,11 +70,15 @@ Web SPA 退役后不存在匿名业务读。
 | `syncCoverageVersion` | `1` | 支持 `GET /v1/sync/coverage` |
 | `directSyncBounds` | 8 MiB / 5000 / 200 文件 / 64 MiB | 直连单批上界；`maxRecords` 在直连车道只约束**删除配额**，不约束 XML 记录条数 |
 
+所有写模式默认关闭；缺位、未知值或 `disabled` 均不准入。`validation` 继续要求临时隔离路径和 loopback；
+`production` 要求非空 `RAI_API_TOKEN` 及显式 runtime/主库/控制库路径，未满足时启动拒绝且不打开数据库。
+2026-10-25 用户要求在部署最新版本时再启用；当前未修改任何实际服务配置。见[运维启用说明](OPERATIONS.md#训练计划-v2-写能力部署时启用)。
+
 🔴 **读能力不等于写能力，也不等于该 scope 已迁移。** `trainingPlanContractVersion` 只说明
 `GET /v1/mobile/training-plan-state` 接受 `X-RAI-Training-Contract: 2`（§3.1）；未迁移的 scope
 仍返回 `409 training_plan_not_migrated`，客户端必须分别处理「能力存在」与「scope 未迁移」。
-`trainingPlanCommandContractVersion` 是独立的写侧注册项：**生产当前省略**，只有隔离验收候选
-才会在收到 `X-RAI-Client-Training-Commands: 2` 后宣告；缺位时客户端不得回退到已退役的旧写面，
+`trainingPlanCommandContractVersion` 是独立的写侧注册项：**默认不宣告**，显式开启 validation/production 模式、owner-ready
+且收到 `X-RAI-Client-Training-Commands: 2` 后才宣告；缺位时客户端不得回退到已退役的旧写面，
 也不得把 `coachLoopContractVersion == 1` 当成统一命令可用。iOS 的
 `legacyPlanWritesSupported` 与 `trainingPlanV2CommandsSupported` 是两个独立判定：
 精确匹配版本才允许 v2 写，v2 能力永远不放行旧 URL。
@@ -81,6 +89,44 @@ Web SPA 退役后不存在匿名业务读。
 全部握手键的语义、宣告前提、消费者与缺位行为登记在
 `packages/api-contracts/src/handshake-registry.ts`；`apps/api/test/handshake-registry.test.ts`
 从 `HandshakeResponse` 源码核对键集合，漏登记或重复登记会变红。
+
+2026-10-25 B01 另冻结 `trainingPlanSessionContractVersion`、`trainingPlanSessionCommandContractVersion`、
+`trainingPlanExecutionCommandContractVersion`、`trainingPlanUpdateContractVersion`，各自精确版本为 1。
+**B04 起课程命令在隔离 validation 有条件宣告并挂载预览/提交；B06 起执行命令按独立能力接入；B08 起更新读随课程读扩展宣告。生产课程/执行写仍关闭，自动发布另有独立开关。**请求头、依赖及旧构建兼容规则见
+[训练计划闭环合同](TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md)。已有配置命令 2 不推导课程写能力。
+
+B02 已增加身份只读兼容：在 v2 GET 同时发送 `X-RAI-Training-Sessions: 1`，且该 scope 已显式升级至
+payload schema 2 时，顶层可选 `sessions` 返回稳定实例/课程/修订、原建议、用户覆盖、保护与抑制。
+schema 1 或未知课程扩展版本返回 `409 training_session_contract_unsupported`，不隐式升级、不分配 ID。
+B03/G1 起 handshake 只在已完成该受控迁移且 owner-ready 的 scope 宣告 `trainingPlanSessionContractVersion: 1`；
+它仍是只读扩展，不授权课程写、执行关联或自动发布。
+该扩展带 `Vary: X-RAI-Training-Contract, X-RAI-Training-Sessions`；缺少扩展头不返回新字段。
+扩展只在 unified read 2 下解释，v1 路径保持原合同。B04 的课程写仅在
+`RAI_TRAINING_PLAN_SESSION_COMMAND_MODE=validation`、临时隔离 runtime/两库、loopback、schema 2/owner-ready、
+持久 publication 支持和请求头 `X-RAI-Client-Training-Session-Commands: 1` 同时满足时宣告/准入；
+与原配置命令开关独立。课程路由为 `/v1/mobile/training-plan/session-commands/preview` 和
+`/v1/mobile/training-plan/session-commands`（均 POST、contractVersion 1）。六动作和错误按闭环合同，
+预览零写，提交复用控制库原子发布、CAS、事实/排期输入再验证和幂等；已提交重放先于能力/TTL/事实门。
+取消/明确休息允许 metadata-only；其余动作须事实就绪及既有安全约束。服务重启只使未提交预览失效，已提交结果仍从 SQLite 恢复。
+B05 原生编辑/journal 已通过 G2（普通与 Accessibility XXXL 两轮真实点击），不授予生产启用。
+B06 执行命令仅在独立模式为 `validation` 或 `production` 且完成请求协商时宣告；B08 更新读在课程读扩展存在时宣告，
+但只报告阶段，不授权自动发布。
+
+B07 起 iOS 按 `trainingPlanExecutionCommandContractVersion == 1`（同时要求 sessions 1 与 publication 1）
+消费执行关联；服务端 B06 仍按独立开关决定该键是否宣告，缺失/未知一律只读。候选读为
+`GET /v1/mobile/training-plan/sessions/:sessionId/execution-candidates`（query：`planInstanceId` 必填，
+可选 `rangeStart`/`rangeEnd`/`cursor`），写为
+`POST /v1/mobile/training-plan/execution-commands`，两者都带
+`X-RAI-Training-Contract: 2`、`X-RAI-Training-Sessions: 1`、`X-RAI-Client-Training-Execution-Commands: 1`。
+候选只用于用户确认，`verified_identity` 也不自动完成；同日多跑保留歧义，默认窗口为课程日 ±2 天，可扩大到最多 31 天。
+新路由的 HTTP 404 若不带 `training_session_not_found`，客户端提示升级而不是当作 `plan_operation_notFound`；
+410 仍是退役终局，409/422/503 沿用闭环合同分类。执行命令复用唯一 pending row/journal：原 UUID 与字节一次编码后持久化，
+重启先按原 operationId 查询，已知 committed 不重提，只有业务 `notFound` 才按原字节重放；能力关闭仍可查询已提交操作。
+成功确认只把 state/goals 水位写入本地，不伪造 session/execution 全局水位；随后必须完整重读执行快照与统一状态。
+`TrainingPlanStateResponseV2.sessions.executions` 是可选数组：缺位表示执行视图未知，不是空历史；老缓存可兼容解码。
+B08 起同一读在同时发送 `X-RAI-Training-Updates: 1` 时增加可选 `update`：facts/analysis/association/plan 四阶段各自带证据，
+`plan.status` 由持久 `publishedInputKey` 和评估游标派生；自动发布关闭时可为 `blocked` 并带 `auto_publish_disabled`，
+不是“计划已更新”。更新读 GET 零写，不触发分析或发布。
 
 ## 3. 统一训练计划 v2
 

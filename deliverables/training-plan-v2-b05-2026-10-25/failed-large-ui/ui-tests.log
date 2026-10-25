@@ -1,0 +1,676 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -destination "platform=iOS Simulator,id=91C2D1F3-FB19-4843-B892-1A4F4AAF6D16" -derivedDataPath /tmp/rai-training-session-visual-retry/test-derived -resultBundlePath /tmp/rai-training-session-g2-large/tests.xcresult CODE_SIGNING_ALLOWED=NO "-only-testing:VisualAcceptance/Phase5Acceptance/testSessionEditorMovePreviewSaveAndRestart" test
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+
+Writing result bundle at path:
+	/tmp/rai-training-session-g2-large/tests.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'VisualAcceptance' in project 'VisualAcceptance' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: 573c907c0ae25d54d5e3f2dbaa6f42f8
+Build description path: /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/XCBuildData/573c907c0ae25d54d5e3f2dbaa6f42f8.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+ProcessInfoPlistFile /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-infoPlistUtility /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist -o /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist
+
+CopySwiftLibs /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/PlugIns --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/SystemExtensions --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Extensions --platform iphonesimulator --toolchain /Users/ta/Library/Developer/DVTDownloads/MetalToolchain/mounts/656653e63a393644d316d4c630af4cccd68d1d2f/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+2026-10-25 15:47:03.580686+0800 VisualAcceptance-Runner[80141:8030685] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-10-25 15:47:15.267.
+Test Suite 'VisualAcceptance.xctest' started at 2026-10-25 15:47:15.274.
+Test Suite 'Phase5Acceptance' started at 2026-10-25 15:47:15.278.
+Test Case '-[VisualAcceptance.Phase5Acceptance testSessionEditorMovePreviewSaveAndRestart]' started.
+    t =     0.08s Start Test at 2026-10-25 15:47:15.368
+    t =     0.16s Set Up
+    t =     0.20s Open app.rai.running.debug
+    t =     0.22s     Launch app.rai.running.debug
+    t =     0.63s         Setting up automation session
+    t =     5.56s         Wait for app.rai.running.debug to idle
+    t =    12.16s Waiting 40.0s for "tab.设置" Button to exist
+    t =    13.17s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    13.17s         Checking existence of `"tab.设置" Button`
+    t =    13.38s Tap "tab.设置" Button
+    t =    13.38s     Wait for app.rai.running.debug to idle
+    t =    13.47s     Find the "tab.设置" Button
+    t =    13.57s     Check for interrupting elements affecting "tab.设置" Button
+    t =    13.68s     Synthesize event
+    t =    14.07s     Wait for app.rai.running.debug to idle
+    t =    15.45s Waiting 20.0s for Button (First Match) to exist
+    t =    16.50s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    16.50s         Checking existence of `Button (First Match)`
+    t =    16.57s Tap Button (First Match)
+    t =    16.57s     Wait for app.rai.running.debug to idle
+    t =    16.58s     Find the Button (First Match)
+    t =    16.65s     Check for interrupting elements affecting "RAI 服务, 待连接" Button
+    t =    16.74s     Synthesize event
+    t =    17.11s     Wait for app.rai.running.debug to idle
+    t =    17.64s Waiting 15.0s for SecureTextField (First Match) to exist
+    t =    18.65s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =    18.66s         Checking existence of `SecureTextField (First Match)`
+    t =    18.81s Tap SecureTextField (First Match)
+    t =    18.81s     Wait for app.rai.running.debug to idle
+    t =    18.85s     Find the SecureTextField (First Match)
+    t =    18.96s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    19.10s     Synthesize event
+    t =    19.48s     Wait for app.rai.running.debug to idle
+    t =    21.60s Find the "云端部署时填写" SecureTextField
+    t =    22.32s Type 'rai-visua...' into "云端部署时填写" SecureTextField
+    t =    22.32s     Wait for app.rai.running.debug to idle
+    t =    22.75s     Find the "云端部署时填写" SecureTextField
+    t =    23.68s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    24.51s     Synthesize event
+    t =    25.40s     Wait for app.rai.running.debug to idle
+    t =    29.55s Checking existence of `"连接服务" Button`
+    t =    29.96s Tap "连接服务" Button
+    t =    29.96s     Wait for app.rai.running.debug to idle
+    t =    29.97s     Find the "连接服务" Button
+    t =    30.33s     Check for interrupting elements affecting "连接服务" Button
+    t =    30.64s     Synthesize event
+    t =    30.72s         Scroll element to visible
+    t =    30.77s         Find the "连接服务" Button
+    t =    31.29s         Computed hit point {214, 312.49999999999994} after scrolling to visible
+    t =    31.61s     Wait for app.rai.running.debug to idle
+    t =    31.84s Waiting 30.0s for "服务：phase5-validation" StaticText to exist
+    t =    32.91s     Checking `Expect predicate `existsNoRetry == 1` for object "服务：phase5-validation" StaticText`
+    t =    32.91s         Checking existence of `"服务：phase5-validation" StaticText`
+    t =    33.62s Checking existence of `Button (Element at index 0)`
+    t =    34.62s Tap Button (Element at index 0)
+    t =    34.62s     Wait for app.rai.running.debug to idle
+    t =    35.05s     Find the Button (Element at index 0)
+    t =    35.85s     Check for interrupting elements affecting "navigation.back" Button
+    t =    36.15s     Synthesize event
+    t =    36.53s     Wait for app.rai.running.debug to idle
+    t =    39.45s Waiting 15.0s for "tab.今日" Button to exist
+    t =    40.48s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.今日" Button`
+    t =    40.48s         Checking existence of `"tab.今日" Button`
+    t =    40.57s Tap "tab.今日" Button
+    t =    40.57s     Wait for app.rai.running.debug to idle
+    t =    40.58s     Find the "tab.今日" Button
+    t =    40.68s     Check for interrupting elements affecting "tab.今日" Button
+    t =    40.79s     Synthesize event
+    t =    41.14s     Wait for app.rai.running.debug to idle
+    t =    42.28s Waiting 30.0s for "打开训练计划" Button to exist
+    t =    43.37s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    43.37s         Checking existence of `"打开训练计划" Button`
+    t =    43.73s Tap "打开训练计划" Button
+    t =    43.73s     Wait for app.rai.running.debug to idle
+    t =    43.77s     Find the "打开训练计划" Button
+    t =    44.07s     Check for interrupting elements affecting "calendar" Button
+    t =    44.41s     Synthesize event
+    t =    44.79s     Wait for app.rai.running.debug to idle
+    t =    45.87s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    47.58s Swipe up Application 'app.rai.running.debug'
+    t =    47.58s     Wait for app.rai.running.debug to idle
+    t =    47.66s     Find the Application 'app.rai.running.debug'
+    t =    48.30s     Check for interrupting elements affecting "RAI" Application
+    t =    48.56s     Synthesize event
+    t =    49.05s     Wait for app.rai.running.debug to idle
+    t =    51.20s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    51.88s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    52.61s Swipe up Application 'app.rai.running.debug'
+    t =    52.61s     Wait for app.rai.running.debug to idle
+    t =    52.76s     Find the Application 'app.rai.running.debug'
+    t =    53.21s     Check for interrupting elements affecting "RAI" Application
+    t =    53.55s     Synthesize event
+    t =    54.03s     Wait for app.rai.running.debug to idle
+    t =    56.18s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    56.92s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    57.63s Swipe up Application 'app.rai.running.debug'
+    t =    57.63s     Wait for app.rai.running.debug to idle
+    t =    57.72s     Find the Application 'app.rai.running.debug'
+    t =    58.26s     Check for interrupting elements affecting "RAI" Application
+    t =    58.60s     Synthesize event
+    t =    59.07s     Wait for app.rai.running.debug to idle
+    t =    61.26s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    61.67s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    62.48s Swipe up Application 'app.rai.running.debug'
+    t =    62.48s     Wait for app.rai.running.debug to idle
+    t =    62.59s     Find the Application 'app.rai.running.debug'
+    t =    63.11s     Check for interrupting elements affecting "RAI" Application
+    t =    63.48s     Synthesize event
+    t =    63.94s     Wait for app.rai.running.debug to idle
+    t =    66.12s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    66.65s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    67.62s Swipe up Application 'app.rai.running.debug'
+    t =    67.62s     Wait for app.rai.running.debug to idle
+    t =    67.71s     Find the Application 'app.rai.running.debug'
+    t =    68.14s     Check for interrupting elements affecting "RAI" Application
+    t =    68.43s     Synthesize event
+    t =    68.92s     Wait for app.rai.running.debug to idle
+    t =    71.07s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    71.71s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    72.21s Swipe up Application 'app.rai.running.debug'
+    t =    72.21s     Wait for app.rai.running.debug to idle
+    t =    72.38s     Find the Application 'app.rai.running.debug'
+    t =    72.89s     Check for interrupting elements affecting "RAI" Application
+    t =    73.27s     Synthesize event
+    t =    73.77s     Wait for app.rai.running.debug to idle
+    t =    75.90s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    76.51s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    77.31s Swipe up Application 'app.rai.running.debug'
+    t =    77.31s     Wait for app.rai.running.debug to idle
+    t =    77.40s     Find the Application 'app.rai.running.debug'
+    t =    77.91s     Check for interrupting elements affecting "RAI" Application
+    t =    78.28s     Synthesize event
+    t =    78.81s     Wait for app.rai.running.debug to idle
+    t =    80.85s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    81.40s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    82.21s Swipe up Application 'app.rai.running.debug'
+    t =    82.21s     Wait for app.rai.running.debug to idle
+    t =    82.30s     Find the Application 'app.rai.running.debug'
+    t =    82.79s     Check for interrupting elements affecting "RAI" Application
+    t =    83.19s     Synthesize event
+    t =    83.64s     Wait for app.rai.running.debug to idle
+    t =    85.81s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    86.31s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    87.20s Swipe up Application 'app.rai.running.debug'
+    t =    87.20s     Wait for app.rai.running.debug to idle
+    t =    87.21s     Find the Application 'app.rai.running.debug'
+    t =    87.97s     Check for interrupting elements affecting "RAI" Application
+    t =    88.66s     Synthesize event
+    t =    89.11s     Wait for app.rai.running.debug to idle
+    t =    91.30s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    91.86s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    92.55s Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =    93.34s Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    93.73s Tap "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    93.73s     Wait for app.rai.running.debug to idle
+    t =    93.74s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    94.13s     Check for interrupting elements affecting "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =    94.58s     Synthesize event
+    t =    95.00s     Wait for app.rai.running.debug to idle
+    t =    96.67s Waiting 10.0s for "training.session.date" TextField to exist
+    t =    97.69s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.date" TextField`
+    t =    97.69s         Checking existence of `"training.session.date" TextField`
+    t =    98.37s Checking existence of `"调整课程" NavigationBar`
+    t =    98.91s Find the "training.session.date" TextField
+    t =    99.34s Tap "training.session.date" TextField
+    t =    99.35s     Wait for app.rai.running.debug to idle
+    t =    99.36s     Find the "training.session.date" TextField
+    t =    99.89s     Check for interrupting elements affecting "training.session.date" TextField
+    t =   100.47s     Synthesize event
+    t =   100.82s     Wait for app.rai.running.debug to idle
+    t =   102.04s Find the "training.session.date" TextField
+    t =   103.21s Type '2026-1...' into "training.session.date" TextField
+    t =   103.21s     Wait for app.rai.running.debug to idle
+    t =   103.30s     Find the "training.session.date" TextField
+    t =   104.23s     Check for interrupting elements affecting "training.session.date" TextField
+    t =   105.03s     Synthesize event
+    t =   105.75s     Wait for app.rai.running.debug to idle
+    t =   107.44s Tap "training.session.preview" Button
+    t =   107.44s     Wait for app.rai.running.debug to idle
+    t =   107.47s     Find the "training.session.preview" Button
+    t =   108.30s     Check for interrupting elements affecting "training.session.preview" Button
+    t =   109.21s     Synthesize event
+    t =   109.60s     Wait for app.rai.running.debug to idle
+    t =   110.43s Waiting 30.0s for "training.session.save" Button to exist
+    t =   111.49s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   111.49s         Checking existence of `"training.session.save" Button`
+    t =   111.90s         Capturing element debug description
+    t =   112.49s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   112.49s         Checking existence of `"training.session.save" Button`
+    t =   112.89s         Capturing element debug description
+    t =   113.53s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   113.53s         Checking existence of `"training.session.save" Button`
+    t =   114.14s         Capturing element debug description
+    t =   114.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   114.44s         Checking existence of `"training.session.save" Button`
+    t =   114.87s         Capturing element debug description
+    t =   115.49s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   115.49s         Checking existence of `"training.session.save" Button`
+    t =   115.82s         Capturing element debug description
+    t =   116.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   116.44s         Checking existence of `"training.session.save" Button`
+    t =   116.81s         Capturing element debug description
+    t =   117.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   117.44s         Checking existence of `"training.session.save" Button`
+    t =   118.05s         Capturing element debug description
+    t =   118.45s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   118.45s         Checking existence of `"training.session.save" Button`
+    t =   118.87s         Capturing element debug description
+    t =   119.49s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   119.49s         Checking existence of `"training.session.save" Button`
+    t =   120.64s         Capturing element debug description
+    t =   121.49s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   121.49s         Checking existence of `"training.session.save" Button`
+    t =   122.02s         Capturing element debug description
+    t =   122.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   122.44s         Checking existence of `"training.session.save" Button`
+    t =   123.05s         Capturing element debug description
+    t =   123.47s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   123.47s         Checking existence of `"training.session.save" Button`
+    t =   124.13s         Capturing element debug description
+    t =   124.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   124.45s         Checking existence of `"training.session.save" Button`
+    t =   125.19s         Capturing element debug description
+    t =   125.50s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   125.50s         Checking existence of `"training.session.save" Button`
+    t =   126.11s         Capturing element debug description
+    t =   126.51s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   126.51s         Checking existence of `"training.session.save" Button`
+    t =   127.21s         Capturing element debug description
+    t =   127.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   127.44s         Checking existence of `"training.session.save" Button`
+    t =   127.98s         Capturing element debug description
+    t =   128.50s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   128.50s         Checking existence of `"training.session.save" Button`
+    t =   129.22s         Capturing element debug description
+    t =   129.53s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   129.53s         Checking existence of `"training.session.save" Button`
+    t =   130.31s         Capturing element debug description
+    t =   130.51s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   130.52s         Checking existence of `"training.session.save" Button`
+    t =   131.26s         Capturing element debug description
+    t =   131.47s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   131.47s         Checking existence of `"training.session.save" Button`
+    t =   132.12s         Capturing element debug description
+    t =   132.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   132.44s         Checking existence of `"training.session.save" Button`
+    t =   133.11s         Capturing element debug description
+    t =   133.52s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   133.52s         Checking existence of `"training.session.save" Button`
+    t =   134.19s         Capturing element debug description
+    t =   134.49s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   134.49s         Checking existence of `"training.session.save" Button`
+    t =   135.12s         Capturing element debug description
+    t =   135.50s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   135.51s         Checking existence of `"training.session.save" Button`
+    t =   135.98s         Capturing element debug description
+    t =   136.51s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   136.51s         Checking existence of `"training.session.save" Button`
+    t =   136.91s         Capturing element debug description
+    t =   137.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   137.44s         Checking existence of `"training.session.save" Button`
+    t =   137.86s         Capturing element debug description
+    t =   138.45s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   138.45s         Checking existence of `"training.session.save" Button`
+    t =   139.17s         Capturing element debug description
+    t =   139.45s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   139.45s         Checking existence of `"training.session.save" Button`
+    t =   140.18s         Capturing element debug description
+    t =   140.44s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   140.44s         Checking existence of `"training.session.save" Button`
+    t =   140.76s         Capturing element debug description
+    t =   140.76s     Checking existence of `"training.session.save" Button`
+    t =   141.79s Collecting debug information to assist test failure triage
+    t =   141.79s     Requesting snapshot of accessibility hierarchy for app with pid 80382
+/Users/ta/running/apps/ios/tests/VisualAcceptance.swift:921: error: -[VisualAcceptance.Phase5Acceptance testSessionEditorMovePreviewSaveAndRestart] : XCTAssertTrue failed
+    t =   143.63s Find the Application 'app.rai.running.debug'
+    t =   144.73s Added attachment named 'session-move-preview'
+    t =   144.73s Requesting snapshot of accessibility hierarchy for app with pid 80382
+    t =   148.89s Requesting snapshot of accessibility hierarchy for app with pid 80382
+    t =   149.86s Added attachment named 'session-move-preview-accessibility'
+    t =   149.87s Tap "training.session.close" Button
+    t =   149.87s     Wait for app.rai.running.debug to idle
+    t =   149.88s     Find the "training.session.close" Button
+    t =   150.61s     Check for interrupting elements affecting "training.session.close" Button
+    t =   151.24s Tear Down
+    t =   151.35s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   152.79s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =   153.68s     Swipe up Application 'app.rai.running.debug'
+    t =   153.68s         Wait for app.rai.running.debug to idle
+    t =   154.06s         Find the Application 'app.rai.running.debug'
+    t =   154.54s         Check for interrupting elements affecting "RAI" Application
+    t =   154.95s         Synthesize event
+    t =   155.73s         Wait for app.rai.running.debug to idle
+    t =   157.12s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   157.87s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =   158.90s     Swipe up Application 'app.rai.running.debug'
+    t =   158.90s         Wait for app.rai.running.debug to idle
+    t =   159.24s         Find the Application 'app.rai.running.debug'
+    t =   159.68s         Check for interrupting elements affecting "RAI" Application
+    t =   160.32s         Synthesize event
+    t =   161.15s         Wait for app.rai.running.debug to idle
+    t =   162.71s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   163.56s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =   164.37s     Swipe up Application 'app.rai.running.debug'
+    t =   164.37s         Wait for app.rai.running.debug to idle
+    t =   164.78s         Find the Application 'app.rai.running.debug'
+    t =   165.32s         Check for interrupting elements affecting "RAI" Application
+    t =   165.80s         Synthesize event
+    t =   166.66s         Wait for app.rai.running.debug to idle
+    t =   168.29s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   168.84s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =   170.01s     Swipe up Application 'app.rai.running.debug'
+    t =   170.01s         Wait for app.rai.running.debug to idle
+    t =   170.43s         Find the Application 'app.rai.running.debug'
+    t =   171.00s         Check for interrupting elements affecting "RAI" Application
+    t =   171.77s         Synthesize event
+    t =   172.68s         Wait for app.rai.running.debug to idle
+    t =   173.81s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   174.56s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =   175.59s     Swipe up Application 'app.rai.running.debug'
+    t =   175.60s         Wait for app.rai.running.debug to idle
+    t =   175.99s         Find the Application 'app.rai.running.debug'
+    t =   176.42s         Check for interrupting elements affecting "RAI" Application
+    t =   176.98s         Synthesize event
+    t =   177.84s         Wait for app.rai.running.debug to idle
+    t =   179.25s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   180.00s     Find the "training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button
+    t =   181.15s     Swipe up Application 'app.rai.running.debug'
+    t =   181.15s         Wait for app.rai.running.debug to idle
+    t =   181.55s         Find the Application 'app.rai.running.debug'
+    t =   181.57s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   181.58s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   181.61s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   181.62s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   181.64s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   181.65s     Swipe up Application 'app.rai.running.debug'
+    t =   181.65s         Wait for app.rai.running.debug to idle
+    t =   181.66s             App event loop idle notification not received, will attempt to continue.
+    t =   181.67s         Find the Application 'app.rai.running.debug'
+    t =   181.68s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   181.71s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   181.72s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   181.73s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   181.73s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   181.75s     Swipe up Application 'app.rai.running.debug'
+    t =   181.75s         Wait for app.rai.running.debug to idle
+    t =   181.77s             App event loop idle notification not received, will attempt to continue.
+    t =   181.77s     App animations complete notification not received, will attempt to continue.
+    t =   181.77s         Find the Application 'app.rai.running.debug'
+    t =   181.78s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   181.78s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   181.79s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   181.80s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   181.81s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   181.81s     Swipe up Application 'app.rai.running.debug'
+    t =   181.81s         Wait for app.rai.running.debug to idle
+    t =   181.82s             App event loop idle notification not received, will attempt to continue.
+    t =   181.83s         Find the Application 'app.rai.running.debug'
+    t =   181.84s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   181.84s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   181.86s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   181.99s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   181.99s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.02s     Swipe up Application 'app.rai.running.debug'
+    t =   182.02s         Wait for app.rai.running.debug to idle
+    t =   182.09s         Find the Application 'app.rai.running.debug'
+    t =   182.10s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.11s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.13s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.14s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   182.16s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.18s     Swipe up Application 'app.rai.running.debug'
+    t =   182.18s         Wait for app.rai.running.debug to idle
+    t =   182.22s             App event loop idle notification not received, will attempt to continue.
+    t =   182.23s         Find the Application 'app.rai.running.debug'
+    t =   182.23s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.24s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.30s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.31s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   182.31s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.32s     Swipe up Application 'app.rai.running.debug'
+    t =   182.32s         Wait for app.rai.running.debug to idle
+    t =   182.34s             App event loop idle notification not received, will attempt to continue.
+    t =   182.34s         Find the Application 'app.rai.running.debug'
+    t =   182.35s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.35s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.39s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.41s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   182.42s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.43s     Swipe up Application 'app.rai.running.debug'
+    t =   182.43s         Wait for app.rai.running.debug to idle
+    t =   182.44s             App event loop idle notification not received, will attempt to continue.
+    t =   182.48s         Find the Application 'app.rai.running.debug'
+    t =   182.48s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.56s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.56s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.57s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   182.58s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.62s     Swipe up Application 'app.rai.running.debug'
+    t =   182.62s         Wait for app.rai.running.debug to idle
+    t =   182.63s             App event loop idle notification not received, will attempt to continue.
+    t =   182.64s         Find the Application 'app.rai.running.debug'
+    t =   182.64s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.67s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.68s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.71s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   182.72s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.73s     Swipe up Application 'app.rai.running.debug'
+    t =   182.73s         Wait for app.rai.running.debug to idle
+    t =   182.79s             App event loop idle notification not received, will attempt to continue.
+    t =   182.80s         Find the Application 'app.rai.running.debug'
+    t =   182.80s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.81s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.84s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.85s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   182.86s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   182.87s     Swipe up Application 'app.rai.running.debug'
+    t =   182.87s         Wait for app.rai.running.debug to idle
+    t =   182.91s             App event loop idle notification not received, will attempt to continue.
+    t =   182.91s         Find the Application 'app.rai.running.debug'
+    t =   182.94s             Find the Application 'app.rai.running.debug' (retry 1)
+    t =   182.97s             Find the Application 'app.rai.running.debug' (retry 2)
+    t =   182.99s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   182.99s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   183.03s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   183.55s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   183.56s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   183.57s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   184.08s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   184.09s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   184.09s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   184.60s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   184.61s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   184.61s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   185.12s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   185.12s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   185.13s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   185.64s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   185.64s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   185.65s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   186.16s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   186.17s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   186.17s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   186.68s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   186.69s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   186.70s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   187.20s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   187.21s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   187.22s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   187.72s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   187.73s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   187.74s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   188.25s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   188.25s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   188.26s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   188.79s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   188.79s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   188.80s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   189.32s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   189.32s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   189.34s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   189.85s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   189.86s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   189.86s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   190.37s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   190.38s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   190.40s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   190.91s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   190.92s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   190.93s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   191.45s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   191.46s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   191.46s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   191.97s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   191.97s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   191.98s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   192.49s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   192.50s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   192.50s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   193.01s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   193.02s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   193.03s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   193.54s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   193.54s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   193.55s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   194.05s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   194.06s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   194.06s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   194.57s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   194.57s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   194.59s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   195.10s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   195.11s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   195.11s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   195.62s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   195.62s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   195.63s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   196.14s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   196.14s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   196.15s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   196.66s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   196.67s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   196.69s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   197.29s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   197.30s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   197.31s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   197.85s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   197.85s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   197.87s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   198.40s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   198.41s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   198.43s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   198.95s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   199.04s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   199.07s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   199.60s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   199.61s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   199.61s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   200.12s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   200.13s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   200.13s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   200.64s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   200.65s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   200.65s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   201.17s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   201.17s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   201.18s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   201.69s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   201.69s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   201.70s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   202.22s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   202.22s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   202.23s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   202.73s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   202.74s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   202.74s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   203.25s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   203.25s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   203.26s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   203.76s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   203.77s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   203.78s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   204.28s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   204.29s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   204.30s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   204.81s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   204.81s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   204.82s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   205.32s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   205.33s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   205.34s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   205.84s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   205.85s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   205.85s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   206.36s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   206.37s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   206.38s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   206.88s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   206.89s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   206.89s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   207.40s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   207.41s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   207.41s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   207.92s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   207.93s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   207.93s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   208.44s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   208.45s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   208.46s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   208.96s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   208.97s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   208.97s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   209.48s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   209.49s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   209.49s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   210.00s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   210.01s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   210.02s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   210.52s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   210.53s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   210.53s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   211.05s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   211.05s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   211.06s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   211.57s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   211.58s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   211.58s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   212.09s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   212.10s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   212.10s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   212.61s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button`
+    t =   212.62s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 1)
+    t =   212.66s     Checking existence of `"training.session.edit.session-98f0b456-a6db-43cf-84e1-98014217b629" Button` (retry 2)
+    t =   213.16s     Tear Down
+Test Case '-[VisualAcceptance.Phase5Acceptance testSessionEditorMovePreviewSaveAndRestart]' failed (213.093 seconds).
+2026-10-25 15:50:48.454449+0800 VisualAcceptance-Runner[80141:8030685] [Default] Flushing outgoing messages to the IDE with timeout 600.00s
+2026-10-25 15:50:48.458292+0800 VisualAcceptance-Runner[80141:8041255] [Default] Received confirmation that IDE processed remaining outgoing messages
+2026-10-25 15:50:52.874574+0800 VisualAcceptance-Runner[81809:8043224] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-10-25 15:51:01.791.
+Test Suite 'VisualAcceptance.xctest' started at 2026-10-25 15:51:01.799.
+Test Suite 'VisualAcceptance.xctest' passed at 2026-10-25 15:51:01.800.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 15:51:01.808.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.017) seconds
+2026-10-25 15:53:39.405 xcodebuild[79939:8029473] [MT] IDETestOperationsObserverDebug: 407.693 elapsed -- Testing started completed.
+2026-10-25 15:53:39.405 xcodebuild[79939:8029473] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-25 15:53:39.405 xcodebuild[79939:8029473] [MT] IDETestOperationsObserverDebug: 407.693 sec, +407.693 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/rai-training-session-g2-large/tests.xcresult
+
+Failing tests:
+	Phase5Acceptance.testSessionEditorMovePreviewSaveAndRestart()
+
+** TEST FAILED **
+
+Testing started

@@ -1,0 +1,7 @@
+
+> rai-running-intelligence@0.1.0 check:docs
+> node scripts/check-doc-links.mjs
+
+Documentation: 107 files, 816 local links, 3 anchors, 0 problems
+
+EXIT_CODE=0

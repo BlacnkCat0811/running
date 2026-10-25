@@ -1,0 +1,20 @@
+Export determinism (live): 7 checks, 0 failed
+  ok   shipped: <MetadataEntry> 按键升序输出
+  ok   shipped: HKIndoorWorkout 被跳过（与修复前一致）
+  ok   shipped: HKMetadataKeySyncIdentifier 被跳过（与修复前一致）
+  ok   shipped: 输出条目数为 4（跳过 2 个保留键后）
+  ok   shipped: 同进程内两次调用字节一致
+  ok   shipped: 三次独立启动的 <MetadataEntry> 字节完全一致
+  ok   self-check: 去掉 .sorted() 后跨进程顺序确实会变（证明本门禁不是空转）
+(node:61713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Authenticated synthetic fixture ready; v2 refresh committed; legacy 410 and unauthenticated 401 verified.
+B07 execution fixture ready: session-21b5d83f-9443-450c-83d3-e349d566097e run visual-execution-run 2026-10-25
+Exported 4 attachments for: Phase5Acceptance/testExecutionConfirmRetract():
+File: D77721DB-77BE-4071-97E3-177EBF294E5F.txt, suggested name: "execution-retracted-accessibility_0_41C1EE4B-7F38-495C-949F-73ACDD9C45E7.txt"
+File: 0A85F6A1-86F0-4D84-8C54-67460ABB9431.png, suggested name: "execution-retracted_0_51186F0F-B61D-4DB6-87B2-FDE34EF4528B.png"
+File: A39780DF-9407-41C5-9B38-F864DE8926D7.txt, suggested name: "execution-confirmed-accessibility_0_F15FC2E0-598E-4A9F-B151-8AE85A1DB761.txt"
+File: 857674C4-1808-46D7-BAD1-888E047A4E47.png, suggested name: "execution-confirmed_0_B8588B17-CE3D-40F3-8FF0-6F80510C7FD6.png"
+
+Generated manifest file with attachment details: /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/attachments/manifest.json
+Review screenshots and test failures in: /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution

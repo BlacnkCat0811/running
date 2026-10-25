@@ -662,6 +662,17 @@ test("native session and race pickers exactly match their API contracts", () => 
         }
         continue;
       }
+      if (name.endsWith("TechTrainingSessionEditor.swift")) {
+        const options = balancedBlock(source, source.indexOf("{", close));
+        const tags = [...options.matchAll(/\.tag\(\s*"([^"]+)"\)/g)].map(match => match[1]!).sort();
+        if (args.includes('"操作"')) assert.deepEqual(tags, ["move", "edit", "cancel", "unlock", "add", "set_rest"].sort());
+        else if (args.includes('"类型 / 强度"')) assert.deepEqual(tags, sessionKinds.filter(value => value !== "rest").sort());
+        else if (args.includes('"分段用途"')) assert.deepEqual(tags, ["warmup", "work", "recovery", "cooldown"].sort());
+        else if (args.includes('"剂量单位"')) assert.deepEqual(tags, ["distance", "time", "open"].sort());
+        else { assert.ok(args.includes('"强度目标"'), "unexpected session editor picker");
+          assert.deepEqual(tags, ["none", "pace", "heart_rate"].sort()); }
+        continue;
+      }
       if (name.endsWith("TechPlanView.swift")) {
         const options = balancedBlock(source, source.indexOf("{", close));
         const tags = [...options.matchAll(/\.tag\(\s*([^)]*)\)/g)].map(match => match[1]!.trim());

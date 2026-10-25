@@ -15,7 +15,7 @@ import {
   TrainingPlanCommandService
 } from "../src/training-plan-commands.js";
 import { trainingPlanContextDigest } from "../src/training-mode-policy.js";
-import { TrainingPlanStore, type TrainingPlanState } from "../src/training-plan-store.js";
+import { TrainingPlanStore, type TrainingPlanState, type TrainingPlanLegacyState } from "../src/training-plan-store.js";
 import { createTrainingPlanCommandHandlers } from "../src/training-plan-routes.js";
 import { trainingPlanGenerationDeps } from "../src/training-plan-generation.js";
 import { TryAcquireGate } from "../src/try-acquire-gate.js";
@@ -47,7 +47,7 @@ const createFixture = () => {
   const goals = new MobileGoalsStore(root, controlPath);
   const database = new DatabaseSync(controlPath);
   const unified = new TrainingPlanStore(database);
-  const migrate = (overrides: Partial<TrainingPlanState> = {}) => {
+  const migrate = (overrides: Partial<TrainingPlanLegacyState> = {}) => {
     const state: TrainingPlanState = {
       schemaVersion: 1,
       migrationVersion: 1,
@@ -721,4 +721,49 @@ test("暂停命令不发布课表：planRefreshRequired 为真且 plan 为空", 
   } finally {
     fixture.close();
   }
+});
+
+test("B08/S04-03: an identical refresh advances only the evaluation cursor; a real content change publishes once", async () => {
+  const fixture = createFixture();
+  try {
+    fixture.migrate();
+    const service = fixture.service();
+    const row = () => fixture.goals.trainingPlanStateRow(scopeKey)!;
+    const historyCount = () => (fixture.database.prepare(
+      "SELECT COUNT(*) AS n FROM mobile_training_state_history WHERE scope=?").get(scopeKey) as { n: number }).n;
+    const deps = (inputKey: string, days = generatedDays()) => ({
+      prepare: async () => ({ days, audit: generatedAudit(), warnings: [], prescription: null, fingerprint: "fingerprint-a" }),
+      fingerprint: () => "fingerprint-a",
+      evaluation: () => ({ inputKey, businessDate: BUSINESS_DATE, policyHash: null, executionDigest: "a".repeat(64) })
+    });
+    const request = (operationId: string, revision: number) => ({ contractVersion: 2 as const, operationId,
+      operationScope: scope, expectedStateRevision: revision });
+
+    const first = await service.refresh(request("op-b08-1", row().revision), deps("input-1"));
+    assert.equal(first.outcome, "changed");
+    assert.equal(row().state.schemaVersion, 1);
+    assert.equal(fixture.goals.trainingPlanEvaluation(scopeKey)!.inputKey, "input-1");
+    const afterFirst = { revision: row().revision, goals: fixture.goals.read().revision, history: historyCount() };
+
+    const second = await service.refresh(request("op-b08-2", row().revision), deps("input-2"));
+    assert.equal(second.outcome, "no_change", "new input with identical content is not a content revision");
+    assert.equal(second.stateRevision, afterFirst.revision);
+    assert.equal(row().revision, afterFirst.revision, "the unified state revision does not move");
+    assert.equal(fixture.goals.read().revision, afterFirst.goals, "the goals mirror does not move");
+    assert.equal(historyCount(), afterFirst.history, "no plan history row is appended");
+    assert.equal(fixture.goals.trainingPlanEvaluation(scopeKey)!.inputKey, "input-2", "the cursor still advances");
+    assert.equal(fixture.goals.trainingPlanEvaluation(scopeKey)!.stateRevision, afterFirst.revision);
+
+    const changed = generatedDays().map(day => day.localDate === "2026-10-21" ? { ...day, distanceKm: 6 } : day);
+    const thirdRequest = request("op-b08-3", row().revision);
+    const third = await service.refresh(thirdRequest, deps("input-3", changed));
+    assert.equal(third.outcome, "changed");
+    assert.equal(row().revision, afterFirst.revision + 1);
+    assert.equal(fixture.goals.trainingPlanEvaluation(scopeKey)!.inputKey, "input-3");
+    assert.equal(fixture.goals.trainingPlanEvaluation(scopeKey)!.stateRevision, row().revision);
+
+    const replay = await service.refresh(thirdRequest, deps("input-3", changed));
+    assert.deepEqual(replay, third, "the durable operation result is the replay, not a second generation");
+    assert.equal(row().revision, afterFirst.revision + 1);
+  } finally { fixture.close(); }
 });

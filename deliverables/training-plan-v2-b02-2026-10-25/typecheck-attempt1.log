@@ -1,0 +1,26 @@
+
+> rai-running-intelligence@0.1.0 pretypecheck
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json
+
+apps/api/test/training-plan-commands.test.ts(51,11): error TS2322: Type '{ schemaVersion: 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; sourceDigest: string; ... 10 more ...; migratedAt: string; } | { ...; }' is not assignable to type 'TrainingPlanState'.
+  Type '{ schemaVersion: 2 | 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; ... 15 more ...; publishedInputKey?: string | null; }' is not assignable to type 'TrainingPlanState'.
+    Type '{ schemaVersion: 2 | 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; ... 15 more ...; publishedInputKey?: string | null; }' is not assignable to type 'TrainingPlanSessionState'.
+      Types of property 'schemaVersion' are incompatible.
+        Type '2 | 1' is not assignable to type '2'.
+          Type '1' is not assignable to type '2'.
+apps/api/test/training-plan-coordinator.test.ts(25,9): error TS2322: Type '{ schemaVersion: 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; sourceDigest: string; ... 10 more ...; migratedAt: string; } | { ...; }' is not assignable to type 'TrainingPlanState'.
+  Type '{ schemaVersion: 2 | 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; ... 15 more ...; publishedInputKey?: string | null; }' is not assignable to type 'TrainingPlanState'.
+    Type '{ schemaVersion: 2 | 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; ... 15 more ...; publishedInputKey?: string | null; }' is not assignable to type 'TrainingPlanSessionState'.
+      Types of property 'schemaVersion' are incompatible.
+        Type '2 | 1' is not assignable to type '2'.
+          Type '1' is not assignable to type '2'.
+apps/api/test/training-plan-v2-route.test.ts(43,3): error TS2322: Type '{ schemaVersion: 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; sourceDigest: string; ... 10 more ...; migratedAt: string; } | { ...; }' is not assignable to type 'TrainingPlanState'.
+  Type '{ schemaVersion: 2 | 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; ... 15 more ...; publishedInputKey?: string | null; }' is not assignable to type 'TrainingPlanState'.
+    Type '{ schemaVersion: 2 | 1; migrationVersion: number; source: TrainingPlanSource; sourceStatus: TrainingPlanSourceStatus; ... 15 more ...; publishedInputKey?: string | null; }' is not assignable to type 'TrainingPlanSessionState'.
+      Types of property 'schemaVersion' are incompatible.
+        Type '2 | 1' is not assignable to type '2'.
+          Type '1' is not assignable to type '2'.

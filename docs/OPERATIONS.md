@@ -200,6 +200,35 @@ node --import tsx scripts/migrate-training-planner.mts \
   --apply --expect-source-digest <dry-run 输出的 sha256>
 ```
 
+## 训练计划 V2 写能力：部署时启用
+
+2026-10-25 用户决定：**先不开启，等部署最新版本时再开启**（[D22](DECISIONS.md#d22-训练计划-v2-写能力准备生产模式实际启用随最新版本部署2026-10-25)）。
+仓库模板保持 `disabled`；以下是部署时的配置值，不代表线上已生效。G5/G6 未签收项须继续如实记录。
+
+```dotenv
+RAI_TRAINING_PLAN_COMMAND_MODE=production
+RAI_TRAINING_PLAN_SESSION_COMMAND_MODE=production
+RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE=production
+RAI_TRAINING_PLAN_AUTO_PUBLISH_MODE=production
+```
+
+四项相互独立；手动写入不隐式打开自动发布。`production` 启动要求非空 `RAI_API_TOKEN` 及显式
+`RAI_RUNTIME_ROOT`、`RAI_DATABASE`、`RAI_CONTROL_DATABASE`，缺失时在打开数据库之前拒绝。
+`validation` 仍只能用于临时隔离库和 loopback，不能用它代替生产模式。
+
+部署时先核对实际 scope、数据库/代码身份和备份闭包，按上节做控制库 dry-run；课程编辑和关联需要 unified payload schema 2，
+必要时用同一 CLI 的 `--session-identities` 先 dry-run，再于停服窗口携准确 sourceDigest apply。
+控制库 DDL 5 与 payload schema 2 是不同版本，禁止手改版本号或用新空库替代迁移。
+
+完成兼容版本部署和实际迁移后，再在权威服务环境文件逐项启用并重启。核对握手需要携相应精确协商头：
+配置命令 `X-RAI-Client-Training-Commands: 2`、课程编辑 `X-RAI-Client-Training-Session-Commands: 1`、
+执行关联 `X-RAI-Client-Training-Execution-Commands: 1`；无协商头的握手不应宣告对应写能力。
+课程/关联需 schema 2、owner-ready 和 publication 支持；只读能力出现不证明写入已经启用。
+自动发布核对四阶段更新与已评估输入键，不以同步 receipt 成功替代计划已更新。
+
+关闭时将对应模式改回 `disabled` 并重启；已有课程/覆盖/冻结历史及原 operation 查询/重放保留。
+不要回退到不能识别新增 schema 的旧二进制，不恢复退役 goals/run-coach/preview 写面，不通过删除健康库回滚改课。
+
 ## 导入、重算与事实回填
 
 首选 iOS App 的「同步健康」（HealthKit 导出 → ZIP/直连批次）。**API 运行期只有两条导入车道**：`data-only`（严格白名单+基线合同戳）在前、`direct-sync`（统一接收器）在后；两条都不合格时以 `ImportLaneRefusal` **终态失败**（稳定 failureCode），不回退候选库、不做文件换库。[架构](ARCHITECTURE.md)与[数据管线](DATA_PIPELINE.md)描述同一事实。

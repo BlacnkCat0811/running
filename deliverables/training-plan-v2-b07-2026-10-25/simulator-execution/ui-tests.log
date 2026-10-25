@@ -1,0 +1,228 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -destination "platform=iOS Simulator,id=91C2D1F3-FB19-4843-B892-1A4F4AAF6D16" -derivedDataPath /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived -resultBundlePath /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/tests.xcresult CODE_SIGNING_ALLOWED=NO "-only-testing:VisualAcceptance/Phase5Acceptance/testExecutionConfirmRetract" test
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+
+Writing result bundle at path:
+	/Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/tests.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'VisualAcceptance' in project 'VisualAcceptance' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: 74d15a997f65db313c018d794210afcf
+Build description path: /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Intermediates.noindex/XCBuildData/74d15a997f65db313c018d794210afcf.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+ProcessInfoPlistFile /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-infoPlistUtility /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist -o /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist
+
+CopySwiftLibs /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --scan-folder /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --scan-folder /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/PlugIns --scan-folder /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/SystemExtensions --scan-folder /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Extensions --platform iphonesimulator --toolchain /Users/ta/Library/Developer/DVTDownloads/MetalToolchain/mounts/656653e63a393644d316d4c630af4cccd68d1d2f/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+2026-10-25 22:25:58.675434+0800 VisualAcceptance-Runner[62052:8985709] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-10-25 22:26:03.028.
+Test Suite 'VisualAcceptance.xctest' started at 2026-10-25 22:26:03.037.
+Test Suite 'Phase5Acceptance' started at 2026-10-25 22:26:03.043.
+Test Case '-[VisualAcceptance.Phase5Acceptance testExecutionConfirmRetract]' started.
+    t =     0.03s Start Test at 2026-10-25 22:26:03.073
+    t =     0.11s Set Up
+    t =     0.16s Open app.rai.running.debug
+    t =     0.17s     Launch app.rai.running.debug
+    t =     0.73s         Setting up automation session
+    t =     4.88s         Wait for app.rai.running.debug to idle
+    t =    10.30s Waiting 40.0s for "tab.设置" Button to exist
+    t =    11.33s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    11.33s         Checking existence of `"tab.设置" Button`
+    t =    11.63s Tap "tab.设置" Button
+    t =    11.64s     Wait for app.rai.running.debug to idle
+    t =    11.67s     Find the "tab.设置" Button
+    t =    11.77s     Check for interrupting elements affecting "tab.设置" Button
+    t =    11.84s     Synthesize event
+    t =    12.18s     Wait for app.rai.running.debug to idle
+    t =    13.38s Waiting 20.0s for Button (First Match) to exist
+    t =    14.42s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    14.42s         Checking existence of `Button (First Match)`
+    t =    14.50s Tap Button (First Match)
+    t =    14.50s     Wait for app.rai.running.debug to idle
+    t =    14.51s     Find the Button (First Match)
+    t =    14.61s     Check for interrupting elements affecting "RAI 服务, 待连接" Button
+    t =    14.73s     Synthesize event
+    t =    15.09s     Wait for app.rai.running.debug to idle
+    t =    15.47s Waiting 15.0s for SecureTextField (First Match) to exist
+    t =    16.53s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =    16.53s         Checking existence of `SecureTextField (First Match)`
+    t =    16.61s Tap SecureTextField (First Match)
+    t =    16.61s     Wait for app.rai.running.debug to idle
+    t =    16.62s     Find the SecureTextField (First Match)
+    t =    16.77s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    16.88s     Synthesize event
+    t =    17.26s     Wait for app.rai.running.debug to idle
+    t =    18.94s Find the "云端部署时填写" SecureTextField
+    t =    19.44s Type 'rai-visua...' into "云端部署时填写" SecureTextField
+    t =    19.44s     Wait for app.rai.running.debug to idle
+    t =    19.72s     Find the "云端部署时填写" SecureTextField
+    t =    20.10s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    20.83s     Synthesize event
+    t =    22.14s     Wait for app.rai.running.debug to idle
+    t =    23.88s Checking existence of `"连接服务" Button`
+    t =    24.10s Tap "连接服务" Button
+    t =    24.10s     Wait for app.rai.running.debug to idle
+    t =    24.68s     Find the "连接服务" Button
+    t =    24.85s     Check for interrupting elements affecting "连接服务" Button
+    t =    24.96s     Synthesize event
+    t =    25.32s     Wait for app.rai.running.debug to idle
+    t =    25.96s Waiting 30.0s for "服务：phase5-validation" StaticText to exist
+    t =    27.01s     Checking `Expect predicate `existsNoRetry == 1` for object "服务：phase5-validation" StaticText`
+    t =    27.01s         Checking existence of `"服务：phase5-validation" StaticText`
+    t =    28.04s Checking existence of `Button (Element at index 0)`
+    t =    28.36s Tap Button (Element at index 0)
+    t =    28.36s     Wait for app.rai.running.debug to idle
+    t =    28.70s     Find the Button (Element at index 0)
+    t =    28.90s     Check for interrupting elements affecting "navigation.back" Button
+    t =    29.03s     Synthesize event
+    t =    29.39s     Wait for app.rai.running.debug to idle
+    t =    32.47s Waiting 15.0s for "tab.今日" Button to exist
+    t =    33.50s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.今日" Button`
+    t =    33.50s         Checking existence of `"tab.今日" Button`
+    t =    33.58s Tap "tab.今日" Button
+    t =    33.59s     Wait for app.rai.running.debug to idle
+    t =    33.60s     Find the "tab.今日" Button
+    t =    33.68s     Check for interrupting elements affecting "tab.今日" Button
+    t =    33.76s     Synthesize event
+    t =    34.09s     Wait for app.rai.running.debug to idle
+    t =    34.95s Waiting 30.0s for "打开训练计划" Button to exist
+    t =    36.01s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    36.01s         Checking existence of `"打开训练计划" Button`
+    t =    36.23s Tap "打开训练计划" Button
+    t =    36.23s     Wait for app.rai.running.debug to idle
+    t =    36.24s     Find the "打开训练计划" Button
+    t =    36.46s     Check for interrupting elements affecting "calendar" Button
+    t =    36.66s     Synthesize event
+    t =    37.06s     Wait for app.rai.running.debug to idle
+    t =    38.63s Checking existence of `"training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button`
+    t =    39.46s Find the "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button
+    t =    40.12s Swipe up Application 'app.rai.running.debug'
+    t =    40.12s     Wait for app.rai.running.debug to idle
+    t =    40.13s     Find the Application 'app.rai.running.debug'
+    t =    40.38s     Check for interrupting elements affecting "RAI" Application
+    t =    40.55s     Synthesize event
+    t =    41.04s     Wait for app.rai.running.debug to idle
+    t =    43.23s Checking existence of `"training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button`
+    t =    43.64s Find the "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button
+    t =    44.01s Waiting 20.0s for "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button to exist
+    t =    45.08s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button`
+    t =    45.08s         Checking existence of `"training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button`
+    t =    45.25s Tap "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button
+    t =    45.25s     Wait for app.rai.running.debug to idle
+    t =    45.26s     Find the "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button
+    t =    45.44s     Check for interrupting elements affecting "training.session.edit.session-21b5d83f-9443-450c-83d3-e349d566097e" Button
+    t =    45.62s     Synthesize event
+    t =    46.00s     Wait for app.rai.running.debug to idle
+    t =    47.23s Checking existence of `"training.execution.candidate.visual-execution-run" Button`
+    t =    48.36s Find the "training.execution.candidate.visual-execution-run" Button
+    t =    48.98s Waiting 30.0s for "training.execution.candidate.visual-execution-run" Button to exist
+    t =    50.00s     Checking `Expect predicate `existsNoRetry == 1` for object "training.execution.candidate.visual-execution-run" Button`
+    t =    50.00s         Checking existence of `"training.execution.candidate.visual-execution-run" Button`
+    t =    50.26s Tap "training.execution.candidate.visual-execution-run" Button
+    t =    50.26s     Wait for app.rai.running.debug to idle
+    t =    50.27s     Find the "training.execution.candidate.visual-execution-run" Button
+    t =    50.53s     Check for interrupting elements affecting "training.execution.candidate.visual-execution-run" Button
+    t =    50.77s     Synthesize event
+    t =    51.14s     Wait for app.rai.running.debug to idle
+    t =    51.18s Checking existence of `"training.execution.confirm" Button`
+    t =    51.85s Find the "training.execution.confirm" Button
+    t =    52.16s Waiting 15.0s for "training.execution.confirm" Button to exist
+    t =    53.20s     Checking `Expect predicate `existsNoRetry == 1` for object "training.execution.confirm" Button`
+    t =    53.20s         Checking existence of `"training.execution.confirm" Button`
+    t =    53.44s Tap "training.execution.confirm" Button
+    t =    53.44s     Wait for app.rai.running.debug to idle
+    t =    53.45s     Find the "training.execution.confirm" Button
+    t =    53.81s     Check for interrupting elements affecting "training.execution.confirm" Button
+    t =    54.69s     Synthesize event
+    t =    55.15s     Wait for app.rai.running.debug to idle
+    t =    56.20s Waiting 40.0s for "关联已保存，正在重读计划与实际。" StaticText to exist
+    t =    57.29s     Checking `Expect predicate `existsNoRetry == 1` for object "关联已保存，正在重读计划与实际。" StaticText`
+    t =    57.29s         Checking existence of `"关联已保存，正在重读计划与实际。" StaticText`
+    t =    58.27s         Capturing element debug description
+    t =    59.23s     Checking `Expect predicate `existsNoRetry == 1` for object "关联已保存，正在重读计划与实际。" StaticText`
+    t =    59.23s         Checking existence of `"关联已保存，正在重读计划与实际。" StaticText`
+    t =    59.52s Find the Application 'app.rai.running.debug'
+    t =    60.12s Added attachment named 'execution-confirmed'
+    t =    60.12s Requesting snapshot of accessibility hierarchy for app with pid 62060
+    t =    62.59s Requesting snapshot of accessibility hierarchy for app with pid 62060
+    t =    63.07s Added attachment named 'execution-confirmed-accessibility'
+    t =    63.10s Checking existence of `"training.execution.retract" Button`
+    t =    63.45s Find the "training.execution.retract" Button
+    t =    63.93s Waiting 15.0s for "training.execution.retract" Button to exist
+    t =    64.94s     Checking `Expect predicate `existsNoRetry == 1` for object "training.execution.retract" Button`
+    t =    64.94s         Checking existence of `"training.execution.retract" Button`
+    t =    65.24s Tap "training.execution.retract" Button
+    t =    65.24s     Wait for app.rai.running.debug to idle
+    t =    65.26s     Find the "training.execution.retract" Button
+    t =    65.57s     Check for interrupting elements affecting "training.execution.retract" Button
+    t =    65.85s     Synthesize event
+    t =    66.23s     Wait for app.rai.running.debug to idle
+    t =    66.79s Waiting 40.0s for "撤回已保存，原完成历史仍保留。" StaticText to exist
+    t =    67.84s     Checking `Expect predicate `existsNoRetry == 1` for object "撤回已保存，原完成历史仍保留。" StaticText`
+    t =    67.84s         Checking existence of `"撤回已保存，原完成历史仍保留。" StaticText`
+    t =    68.40s         Capturing element debug description
+    t =    68.82s     Checking `Expect predicate `existsNoRetry == 1` for object "撤回已保存，原完成历史仍保留。" StaticText`
+    t =    68.82s         Checking existence of `"撤回已保存，原完成历史仍保留。" StaticText`
+    t =    69.39s Find the Application 'app.rai.running.debug'
+    t =    70.09s Added attachment named 'execution-retracted'
+    t =    70.09s Requesting snapshot of accessibility hierarchy for app with pid 62060
+    t =    72.09s Requesting snapshot of accessibility hierarchy for app with pid 62060
+    t =    72.58s Added attachment named 'execution-retracted-accessibility'
+    t =    72.60s Tap "training.session.close" Button
+    t =    72.60s     Wait for app.rai.running.debug to idle
+    t =    72.61s     Find the "training.session.close" Button
+    t =    72.96s     Check for interrupting elements affecting "training.session.close" Button
+    t =    73.42s     Synthesize event
+    t =    73.80s     Wait for app.rai.running.debug to idle
+    t =    74.80s Tear Down
+Test Case '-[VisualAcceptance.Phase5Acceptance testExecutionConfirmRetract]' passed (75.536 seconds).
+Test Suite 'Phase5Acceptance' passed at 2026-10-25 22:27:18.606.
+	 Executed 1 test, with 0 failures (0 unexpected) in 75.536 (75.563) seconds
+Test Suite 'VisualAcceptance.xctest' passed at 2026-10-25 22:27:18.607.
+	 Executed 1 test, with 0 failures (0 unexpected) in 75.536 (75.570) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 22:27:18.607.
+	 Executed 1 test, with 0 failures (0 unexpected) in 75.536 (75.579) seconds
+2026-10-25 22:27:19.163 xcodebuild[62026:8984508] [MT] IDETestOperationsObserverDebug: 89.835 elapsed -- Testing started completed.
+2026-10-25 22:27:19.163 xcodebuild[62026:8984508] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-25 22:27:19.163 xcodebuild[62026:8984508] [MT] IDETestOperationsObserverDebug: 89.835 sec, +89.835 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/ta/running/deliverables/training-plan-v2-b07-2026-10-25/simulator-execution/tests.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

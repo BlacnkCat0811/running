@@ -19,6 +19,7 @@ import {
   SqliteCoachFactsRepository,
   activeDurationSecondsSql,
   loadPerformanceEventSessions,
+  readFactReadView,
   readFactReadViewInTransaction,
   sessionFactPresentConditionSql,
   workoutPresentConditionSql,
@@ -48,6 +49,7 @@ import { coachPredictionIdentity } from "./coach-prediction-companion.js";
 import { coachLocalDate, shiftCoachDate, type CoachRunFact } from "./coach-loop-facts.js";
 import { assessWorkoutExecution, coachQualityExecutionSummary, type CoachExecutionWorkout, type CoachExecutionAssociation } from "./coach-execution-assessment.js";
 import { prescriptionDigest } from "./plan-digest.js";
+import { executionFactDigest, type ExecutionFact } from "./training-plan-execution-match.js";
 
 import type {
   AbilityMetricSet,
@@ -58,6 +60,7 @@ import type {
   MobileCoverage,
   MobileCoverageMetric,
   MobileGoalsResponse,
+  MobilePlannedDay,
   MobileStatisticsResponse,
   MobileTodayResponse,
   MobileTrendsResponse,
@@ -433,7 +436,7 @@ export class RaiReadStore {
           evidenceLevel: series.hasMeasuredWorkoutSteps ? "measured_steps" : series.segmentPlan ? "reconstructed_segments" : "summary_only",
           measuredStepsComplete: series.hasMeasuredWorkoutSteps === true && !!day.structure &&
             series.segments.length === (day.structure.warmup ? 1 : 0) + (day.structure.cooldown ? 1 : 0) +
-              day.structure.blocks.reduce((sum, block) => sum + block.iterations * block.steps.length, 0),
+              day.structure.blocks.reduce((sum: number, block) => sum + block.iterations * block.steps.length, 0),
           segments: series.segments, signalIntervals,
           evidenceRef: { source: "workout", id: fact.id, observedAt: fact.startedAt, availableAt: fact.availableAt, revisionOrHash: fact.revisionOrHash } });
         // A same-day timestamp is not a binding. The segmentation matcher must
@@ -1906,6 +1909,107 @@ export class RaiReadStore {
   workoutSeries(id: string, candidates: PlanCandidateDay[] = []): WorkoutSeriesResponse | null {
     return this.inReadSnapshot(() => this.buildWorkoutSeries(id, candidates));
   }
+  /**
+   * B06: running facts for candidate search, bounded by local dates.
+   *
+   * Only what an association can verify is returned; plan fields are deliberately
+   * absent so a matcher cannot "prove" identity from the course it is trying to
+   * link. `sourceFactDigest` includes `updated_at`, so a correction or re-import
+   * invalidates a candidate prepared against the old fact.
+   */
+  executionCandidateFacts(rangeStart: string, rangeEnd: string): ExecutionFact[] {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rangeStart) || !/^\d{4}-\d{2}-\d{2}$/.test(rangeEnd)) return [];
+    const rows = this.database.prepare(`SELECT s.id, s.anchor_start_at AS startedAt, s.anchor_end_at AS endedAt,
+      s.anchor_distance_km AS distanceKm, w.duration_seconds AS durationSeconds, s.updated_at AS updatedAt
+      FROM training_sessions s JOIN workouts w ON w.id=s.canonical_workout_id
+      WHERE s.status='active' AND ${workoutPresentConditionSql("w")}
+        AND s.activity_type='HKWorkoutActivityTypeRunning'
+        AND julianday(s.anchor_start_at)>=julianday(?) AND julianday(s.anchor_start_at)<julianday(?)
+      ORDER BY s.anchor_start_at,s.id`).all(`${rangeStart}T00:00:00+08:00`, `${shiftCoachDate(rangeEnd, 1)}T00:00:00+08:00`) as
+      Array<{ id: string; startedAt: string; endedAt: string; distanceKm: number | null;
+        durationSeconds: number | null; updatedAt: string }>;
+    return rows.filter(row => row.distanceKm !== null && row.distanceKm > 0 && row.durationSeconds !== null && row.durationSeconds > 0)
+      .map(row => ({ trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
+        distanceMeters: row.distanceKm === null ? null : Math.round(row.distanceKm * 1000),
+        durationSeconds: row.durationSeconds,
+        sourceFactDigest: executionFactDigest({
+          trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
+          distanceMeters: row.distanceKm === null ? null : Math.round(row.distanceKm * 1000),
+          durationSeconds: row.durationSeconds, updatedAt: row.updatedAt }) }));
+  }
+
+  /**
+   * B08: the input identity's read side. Only running facts in the rolling
+   * load window and the published analysis release take part; a record-only
+   * import that changes no running fact and publishes no new release produces
+   * the same digest.
+   */
+  trainingPlanInputFacts(businessDate: string): { facts: import("./training-plan-input-identity.js").TrainingPlanInputFact[];
+    analysis: import("./training-plan-input-identity.js").TrainingPlanAnalysisIdentity } {
+    const view = readFactReadView(this.database, { factRows: 1, analysisRows: 1 });
+    const rows = this.database.prepare(`SELECT s.id, s.anchor_start_at AS startedAt, s.anchor_end_at AS endedAt,
+      s.anchor_distance_km AS distanceKm, w.duration_seconds AS durationSeconds, s.updated_at AS updatedAt
+      FROM training_sessions s JOIN workouts w ON w.id=s.canonical_workout_id
+      WHERE s.status='active' AND ${workoutPresentConditionSql("w")}
+        AND s.activity_type='HKWorkoutActivityTypeRunning'
+        AND julianday(s.anchor_start_at)>=julianday(?) AND julianday(s.anchor_start_at)<julianday(?)
+      ORDER BY s.anchor_start_at,s.id`).all(`${shiftCoachDate(businessDate, -28)}T00:00:00+08:00`,
+        `${shiftCoachDate(businessDate, 8)}T00:00:00+08:00`) as Array<{ id: string; startedAt: string; endedAt: string;
+        distanceKm: number | null; durationSeconds: number | null; updatedAt: string }>;
+    return { facts: rows.map(row => ({ trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
+      distanceMeters: row.distanceKm === null ? null : Math.round(row.distanceKm * 1000),
+      durationSeconds: row.durationSeconds, updatedAt: row.updatedAt })),
+      analysis: { releaseId: view.versions.releaseId, analysisStatus: view.versions.analysisStatus,
+        factsGeneration: view.versions.facts, dependencyGeneration: view.versions.analysis } };
+  }
+
+  /**
+   * B06: one fact in the shape `assessWorkoutExecution` expects. Segments and
+   * signal intervals are measured from the stored series; when a structured
+   * course was pushed, the plan only supplies labels/boundaries and never the
+   * observed numbers. Missing series yields summary-only evidence, not a replay
+   * of the prescription as if it were measured.
+   */
+  executionWorkout(id: string, day: MobilePlannedDay, asOf: string): CoachExecutionWorkout | null {
+    return this.inReadSnapshot(() => {
+      const session = this.seriesRepository.sessionForSeries(id);
+      if (!session) return null;
+      const updated = this.database.prepare("SELECT updated_at FROM training_sessions WHERE id=?").get(id) as
+        { updated_at: string } | undefined;
+      const availableAt = updated && Number.isFinite(Date.parse(updated.updated_at))
+        ? new Date(updated.updated_at).toISOString() : null;
+      const candidate = day.structure ? [{ localDate: day.localDate, kind: day.kind, revision: 0,
+        matchedBy: "plan_history" as const, structure: day.structure, distanceKm: day.distanceKm, pushedAt: null }] : [];
+      const series = this.buildWorkoutSeries(id, candidate);
+      if (!series) return null;
+      const signalIntervals: CoachExecutionWorkout["signalIntervals"][number][] = [];
+      const tracked = this.seriesRepository.sessionForSeries(id);
+      if (tracked) {
+        for (const interval of this.seriesRepository.metricIntervals("HKQuantityTypeIdentifierHeartRate",
+          tracked.sourceName, tracked.startedAt, tracked.endedAt)) signalIntervals.push({
+          channel: "heart_rate", startOffsetSeconds: (interval.startMs - Date.parse(tracked.startedAt)) / 1000,
+          durationSeconds: (interval.endMs - interval.startMs) / 1000, value: interval.value, availableAt: asOf });
+        const track = this.seriesRepository.speedTrack(tracked.startedAt, tracked.endedAt, tracked.sourceName,
+          tracked.distanceKm ?? 0);
+        for (const sample of track?.samples ?? []) if (sample.metersPerSecond > 0) signalIntervals.push({
+          channel: "pace", startOffsetSeconds: (sample.startMs - Date.parse(tracked.startedAt)) / 1000,
+          durationSeconds: (sample.endMs - sample.startMs) / 1000, value: 1000 / sample.metersPerSecond, availableAt: asOf });
+      }
+      const steps = day.structure ? (day.structure.warmup ? 1 : 0) + (day.structure.cooldown ? 1 : 0) +
+        day.structure.blocks.reduce((sum: number, block) => sum + block.iterations * block.steps.length, 0) : 0;
+      return { id, startedAt: session.startedAt, endedAt: session.endedAt, availableAt,
+        distanceMeters: session.distanceKm === null ? null : Math.round(session.distanceKm * 1000),
+        durationSeconds: (Date.parse(session.endedAt) - Date.parse(session.startedAt)) / 1000,
+        evidenceLevel: series.hasMeasuredWorkoutSteps === true ? "measured_steps"
+          : series.segmentPlan ? "reconstructed_segments" : "summary_only",
+        measuredStepsComplete: series.hasMeasuredWorkoutSteps === true && steps > 0 && series.segments.length === steps,
+        segments: series.segments, signalIntervals,
+        evidenceRef: { source: "workout", id, observedAt: session.startedAt,
+          availableAt: availableAt ?? asOf, revisionOrHash: digest({ id, startedAt: session.startedAt,
+            endedAt: session.endedAt, distanceKm: session.distanceKm }) } };
+    });
+  }
+
 
   /**
    * One short read snapshot for a whole `/series` body.

@@ -1,0 +1,92 @@
+[
+  {
+    "name": "single-writer",
+    "command": [
+      "npm",
+      "run",
+      "check:training-plan-single-writer"
+    ],
+    "startedAt": "2026-10-25T13:45:40.416131+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T13:45:43.220228+00:00"
+  },
+  {
+    "name": "acceptance",
+    "command": [
+      "npm",
+      "run",
+      "check:acceptance-matrix"
+    ],
+    "startedAt": "2026-10-25T13:45:43.222471+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T13:45:46.106704+00:00"
+  },
+  {
+    "name": "scripts",
+    "command": [
+      "npm",
+      "run",
+      "check:scripts"
+    ],
+    "startedAt": "2026-10-25T13:45:46.108491+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T13:45:47.132045+00:00"
+  },
+  {
+    "name": "boundaries",
+    "command": [
+      "npm",
+      "run",
+      "check:package-boundaries"
+    ],
+    "startedAt": "2026-10-25T13:45:47.133486+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T13:45:48.441801+00:00"
+  },
+  {
+    "name": "docs",
+    "command": [
+      "npm",
+      "run",
+      "check:docs"
+    ],
+    "startedAt": "2026-10-25T13:47:30.734139+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T13:47:35.249944+00:00"
+  },
+  {
+    "name": "plan-line-refs",
+    "command": [
+      "node",
+      "scripts/check-doc-line-refs.mjs",
+      "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md",
+      "--problems-only"
+    ],
+    "startedAt": "2026-10-25T13:47:35.251431+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T13:47:35.694800+00:00"
+  },
+  {
+    "name": "docs-final",
+    "command": [
+      "npm",
+      "run",
+      "check:docs"
+    ],
+    "startedAt": "2026-10-25T14:20:12.699167+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:20:16.781227+00:00"
+  },
+  {
+    "name": "plan-line-refs-final",
+    "command": [
+      "node",
+      "scripts/check-doc-line-refs.mjs",
+      "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md",
+      "--problems-only"
+    ],
+    "startedAt": "2026-10-25T14:20:16.790248+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:20:17.075009+00:00"
+  }
+]

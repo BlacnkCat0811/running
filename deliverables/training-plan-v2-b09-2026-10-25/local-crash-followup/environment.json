@@ -1,0 +1,18 @@
+{
+  "capturedAt": "2026-10-25T13:47:20.658399+00:00",
+  "timezone": "Asia/Shanghai",
+  "platform": "macOS-26.6.2-x86_64-i386-64bit",
+  "machine": "x86_64",
+  "cpuCount": 6,
+  "node": "v22.23.2",
+  "sqlite": "3.51.3",
+  "hostMemoryBytes": "17179869184",
+  "loadAverage": [
+    18.8291015625,
+    22.990234375,
+    24.384765625
+  ],
+  "linux2C2G": false,
+  "systemd": false,
+  "productionActions": false
+}

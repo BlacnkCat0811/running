@@ -1,0 +1,36 @@
+TAP version 13
+# (node:72959) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 41 missing mappings have runnable assertions: 77/78 without explicit compile evidence, not a fake AC8-05 pass
+ok 1 - 41 missing mappings have runnable assertions: 77/78 without explicit compile evidence, not a fake AC8-05 pass
+  ---
+  duration_ms: 74347.157746
+  type: 'test'
+  ...
+# Subtest: AC8-05 only consumes current, intact, complete compiled named mutation results
+ok 2 - AC8-05 only consumes current, intact, complete compiled named mutation results
+  ---
+  duration_ms: 124.180273
+  type: 'test'
+  ...
+# Subtest: release requires the same linked compile artifact before accepting AC8-05
+ok 3 - release requires the same linked compile artifact before accepting AC8-05
+  ---
+  duration_ms: 4.690587
+  type: 'test'
+  ...
+# Subtest: failed/non-deterministic scenario cannot certify its earlier passing assertion
+ok 4 - failed/non-deterministic scenario cannot certify its earlier passing assertion
+  ---
+  duration_ms: 19.365563
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 76649.202285

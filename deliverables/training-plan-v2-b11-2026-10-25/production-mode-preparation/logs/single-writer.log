@@ -1,0 +1,6 @@
+
+> rai-running-intelligence@0.1.0 check:training-plan-single-writer
+> node scripts/check-training-plan-single-writer.mjs
+
+single-writer 结构门禁：R1–R5 / 生产源文件 536 / 测试文件 176（R1/R2/R4 豁免）/ 违规 0
+single-writer 结构门禁通过。

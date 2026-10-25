@@ -778,11 +778,18 @@ final class VisualAcceptance: XCTestCase {
     private let app = XCUIApplication(bundleIdentifier: "app.rai.running.debug")
     private let base = "http://127.0.0.1:8792"
     private let fixtureToken = "rai-visual-isolated-test-token"
+    private var sessionContract = false
+    private var executionContract = false
     private func call(_ path: String, body: [String: Any]? = nil) async throws -> [String: Any] {
         var request = URLRequest(url: URL(string: base + path)!)
         request.setValue("Bearer " + fixtureToken, forHTTPHeaderField: "Authorization")
         request.setValue("2", forHTTPHeaderField: "X-RAI-Training-Contract")
         request.setValue("2", forHTTPHeaderField: "X-RAI-Client-Training-Commands")
+        if sessionContract {
+            request.setValue("1", forHTTPHeaderField: "X-RAI-Training-Sessions")
+            request.setValue("1", forHTTPHeaderField: "X-RAI-Client-Training-Session-Commands")
+        }
+        if executionContract { request.setValue("1", forHTTPHeaderField: "X-RAI-Client-Training-Execution-Commands") }
         if let body {
             request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -875,4 +882,134 @@ final class VisualAcceptance: XCTestCase {
         let after = try await call("/v1/mobile/training-plan-state")
         XCTAssertEqual(after["runState"] as? String, "paused")
     }
+    /// Opt-in synthetic schema-2 runtime; see RAI_VISUAL_SESSION_COMMANDS.
+    func testSessionEditorMovePreviewSaveAndRestart() async throws {
+        sessionContract = true
+        continueAfterFailure = false
+        app.launchArguments = ["-rai.serverURL", base, "-rai.privacy.amap.state", "declined", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch(); connectService()
+        let before = try await call("/v1/mobile/training-plan-state")
+        let entities = try XCTUnwrap(before["sessions"] as? [String: Any])
+        let courses = try XCTUnwrap(entities["sessions"] as? [[String: Any]])
+        let today = try XCTUnwrap(before["businessDate"] as? String)
+        let course = try XCTUnwrap(courses.first {
+            let day = $0["prescription"] as? [String: Any]
+            return (day?["localDate"] as? String ?? "") > today && ["easy", "recovery"].contains(day?["kind"] as? String ?? "")
+        })
+        let id = try XCTUnwrap(course["sessionId"] as? String)
+        let originalDate = try XCTUnwrap((course["prescription"] as? [String: Any])?["localDate"] as? String)
+        let destination = String(try XCTUnwrap(Calendar(identifier: .gregorian).date(byAdding: .day, value: 10,
+            to: ISO8601DateFormatter().date(from: today + "T00:00:00Z")!)).ISO8601Format().prefix(10))
+        func openPlan() {
+            XCTAssertTrue(app.buttons["tab.今日"].waitForExistence(timeout: 15)); app.buttons["tab.今日"].tap()
+            XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 30)); app.buttons["打开训练计划"].tap()
+        }
+        func openCourse(expectedDate: String) {
+            let button = app.buttons["training.session.edit." + id]
+            for _ in 0..<16 { if button.exists && button.isHittable { break }; app.swipeUp() }
+            XCTAssertTrue(waitUntilEnabled(button)); button.tap()
+            XCTAssertTrue(app.textFields["training.session.date"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.navigationBars["调整课程"].exists)
+            XCTAssertEqual(app.textFields["training.session.date"].value as? String, expectedDate,
+                "the first tap must initialize from the selected server course, never the empty add form")
+        }
+        func fillDate() {
+            let field = app.textFields["training.session.date"]
+            XCTAssertTrue(app.buttons["training.session.clear-date"].waitForExistence(timeout: 5))
+            app.buttons["training.session.clear-date"].tap()
+            let cleared = field.value as? String ?? ""
+            XCTAssertTrue(cleared.isEmpty || cleared == "日期（年-月-日）")
+            field.typeText(destination)
+            XCTAssertEqual(field.value as? String, destination, "the complete date is replaced at every Dynamic Type size")
+            XCTAssertTrue(app.buttons["training.session.done-editing"].waitForExistence(timeout: 5))
+            app.buttons["training.session.done-editing"].tap()
+            XCTAssertEqual(app.keyboards.count, 0, "the native keyboard completion action makes preview reachable")
+        }
+        func reveal(_ identifier: String) throws -> XCUIElement {
+            let button = app.buttons[identifier]
+            for _ in 0..<16 {
+                if button.exists && button.isHittable && button.frame.midY > 115 &&
+                    button.frame.midY < app.windows.firstMatch.frame.height - 34 { break }
+                app.swipeUp()
+            }
+            let visible = try XCTUnwrap(button.waitForExistence(timeout: 15) ? button : nil,
+                "the full form must remain scrollable at Accessibility XXXL")
+            XCTAssertTrue(waitUntilEnabled(visible))
+            return visible
+        }
+        openPlan(); openCourse(expectedDate: originalDate); fillDate()
+        try reveal("training.session.preview").tap()
+        XCTAssertEqual(app.keyboards.count, 0, "preview must dismiss the keyboard so the complete impact and save action remain visible")
+        _ = try reveal("training.session.save")
+        capture("session-move-preview")
+        app.buttons["training.session.close"].tap()
+        let cancelled = try await call("/v1/mobile/training-plan-state")
+        XCTAssertEqual(cancelled["stateRevision"] as? Int, before["stateRevision"] as? Int)
+        openCourse(expectedDate: originalDate); fillDate(); try reveal("training.session.preview").tap()
+        try reveal("training.session.save").tap()
+        XCTAssertTrue(app.staticTexts["已保存并刷新。"].waitForExistence(timeout: 40)); capture("session-move-saved")
+        let committed = try await call("/v1/mobile/training-plan-state")
+        let savedCourses = try XCTUnwrap((committed["sessions"] as? [String: Any])?["sessions"] as? [[String: Any]])
+        let saved = try XCTUnwrap(savedCourses.first { $0["sessionId"] as? String == id })
+        XCTAssertEqual((saved["prescription"] as? [String: Any])?["localDate"] as? String, destination)
+        XCTAssertEqual(saved["protection"] as? String, "user_protected")
+        app.terminate(); app.launch(); connectService(); openPlan(); openCourse(expectedDate: destination); capture("session-move-restart")
+        XCTAssertEqual(app.textFields["training.session.date"].value as? String, destination)
+        app.buttons["training.session.close"].tap()
+    }
+
+
+    func testExecutionConfirmRetract() async throws {
+        sessionContract = true
+        executionContract = true
+        continueAfterFailure = false
+        app.launchArguments = ["-rai.serverURL", base, "-rai.privacy.amap.state", "declined",
+            "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch(); connectService()
+        let before = try await call("/v1/mobile/training-plan-state")
+        let entities = try XCTUnwrap(before["sessions"] as? [String: Any])
+        let courses = try XCTUnwrap(entities["sessions"] as? [[String: Any]])
+        let today = try XCTUnwrap(before["businessDate"] as? String)
+        let course = try XCTUnwrap(courses.first {
+            (($0["prescription"] as? [String: Any])?["localDate"] as? String) == today && ($0["lifecycle"] as? String) == "pending"
+        })
+        let id = try XCTUnwrap(course["sessionId"] as? String)
+        XCTAssertTrue(app.buttons["tab.今日"].waitForExistence(timeout: 15)); app.buttons["tab.今日"].tap()
+        XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 30)); app.buttons["打开训练计划"].tap()
+        let review = app.buttons["training.session.edit." + id]
+        for _ in 0..<18 { if review.exists && review.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(review.waitForExistence(timeout: 20), "the course row opens the combined plan/actual sheet")
+        review.tap()
+        let candidate = app.buttons["training.execution.candidate.visual-execution-run"]
+        for _ in 0..<18 { if candidate.exists && candidate.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(candidate.waitForExistence(timeout: 30), "the isolated run appears as a candidate, never auto-confirmed")
+        candidate.tap()
+        let confirm = app.buttons["training.execution.confirm"]
+        for _ in 0..<18 { if confirm.exists && confirm.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(confirm.waitForExistence(timeout: 15)); confirm.tap()
+        XCTAssertTrue(app.staticTexts["关联已保存，正在重读计划与实际。"].waitForExistence(timeout: 40))
+        capture("execution-confirmed")
+        let confirmed = try await call("/v1/mobile/training-plan-state")
+        let confirmedEntities = try XCTUnwrap(confirmed["sessions"] as? [String: Any])
+        let confirmedCourses = try XCTUnwrap(confirmedEntities["sessions"] as? [[String: Any]])
+        let confirmedCourse = try XCTUnwrap(confirmedCourses.first { $0["sessionId"] as? String == id })
+        XCTAssertEqual(confirmedCourse["lifecycle"] as? String, "completed")
+        let executions = try XCTUnwrap(confirmedEntities["executions"] as? [[String: Any]])
+        let execution = try XCTUnwrap(executions.first { $0["sessionId"] as? String == id })
+        XCTAssertEqual(execution["association"] as? String, "confirmed")
+        XCTAssertEqual(execution["trainingSessionId"] as? String, "visual-execution-run")
+        let retract = app.buttons["training.execution.retract"]
+        for _ in 0..<18 { if retract.exists && retract.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(retract.waitForExistence(timeout: 15)); retract.tap()
+        XCTAssertTrue(app.staticTexts["撤回已保存，原完成历史仍保留。"].waitForExistence(timeout: 40))
+        capture("execution-retracted")
+        let after = try await call("/v1/mobile/training-plan-state")
+        let afterEntities = try XCTUnwrap(after["sessions"] as? [String: Any])
+        let afterCourse = try XCTUnwrap((afterEntities["sessions"] as? [[String: Any]])?.first { $0["sessionId"] as? String == id })
+        XCTAssertEqual(afterCourse["lifecycle"] as? String, "pending")
+        let afterExecution = try XCTUnwrap((afterEntities["executions"] as? [[String: Any]])?.first { $0["sessionId"] as? String == id })
+        XCTAssertEqual(afterExecution["association"] as? String, "invalidated")
+        app.buttons["training.session.close"].tap()
+    }
+
 }

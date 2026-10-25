@@ -1,0 +1,44 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "D77721DB-77BE-4071-97E3-177EBF294E5F.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "execution-retracted-accessibility_0_41C1EE4B-7F38-495C-949F-73ACDD9C45E7.txt",
+        "timestamp" : 1792938435.623
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "0A85F6A1-86F0-4D84-8C54-67460ABB9431.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "execution-retracted_0_51186F0F-B61D-4DB6-87B2-FDE34EF4528B.png",
+        "timestamp" : 1792938433.135
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "A39780DF-9407-41C5-9B38-F864DE8926D7.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "execution-confirmed-accessibility_0_F15FC2E0-598E-4A9F-B151-8AE85A1DB761.txt",
+        "timestamp" : 1792938426.112
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "857674C4-1808-46D7-BAD1-888E047A4E47.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "execution-confirmed_0_B8588B17-CE3D-40F3-8FF0-6F80510C7FD6.png",
+        "timestamp" : 1792938423.164
+      }
+    ],
+    "testIdentifier" : "Phase5Acceptance/testExecutionConfirmRetract()",
+    "testIdentifierURL" : "test://com.apple.xcode/VisualAcceptance/VisualAcceptance/Phase5Acceptance/testExecutionConfirmRetract"
+  }
+]

@@ -78,16 +78,44 @@ export const HANDSHAKE_KEY_REGISTRY = [
   {
     key: "trainingPlanContractVersion", kind: "capability", version: 2,
     semantics: "统一训练读合同（`X-RAI-Training-Contract: 2`）",
-    advertisedWhen: "非 coach-loop 托管的数据域（路由可用）",
+    advertisedWhen: "非托管数据域；或已迁移且 owner-ready 的 managed 数据域",
     consumer: "iOS 读写能力分离 + `planWritesAvailable`",
     whenAbsent: "客户端不得请求 v2 统一读；按未支持/只读处理"
   },
   {
     key: "trainingPlanCommandContractVersion", kind: "capability", version: 2,
     semantics: "统一训练写命令合同（`/training-plan/commands*`）",
-    advertisedWhen: "仅隔离验收候选（RAI_TRAINING_PLAN_COMMAND_MODE=validation）且客户端发送 X-RAI-Client-Training-Commands: 2；生产能力在阶段 5 G6/G7 完成前保持关闭",
+    advertisedWhen: "独立模式 validation/production 已显式启用、owner-ready，且客户端发送 X-RAI-Client-Training-Commands: 2；默认关闭，实际生产启用随部署单独核查",
     consumer: "iOS TrainingPlanPublisher（阶段 5）",
     whenAbsent: "只读；命令路由也拒绝新的写；不得回退到已退役的旧写面"
+  },
+  {
+    key: "trainingPlanSessionContractVersion", kind: "capability", version: 1,
+    semantics: "统一读 2 的稳定课程/保护扩展（X-RAI-Training-Sessions: 1）",
+    advertisedWhen: "B03/G1 起：已完成受控身份迁移（schema 2）且 owner-ready 的 scope；B01/B02 不宣告",
+    consumer: "iOS 精确能力判定；课程 DTO 消费自 B02，保护只读展示自 B03",
+    whenAbsent: "无课程实体能力；不以日期/hash 伪造 ID，不回流旧写面"
+  },
+  {
+    key: "trainingPlanSessionCommandContractVersion", kind: "capability", version: 1,
+    semantics: "独立课程 preview/submit（X-RAI-Client-Training-Session-Commands: 1）",
+    advertisedWhen: "schema 2、owner-ready、publication 1，独立模式 validation/production 已启用且精确协商 X-RAI-Client-Training-Session-Commands: 1",
+    consumer: "iOS 精确能力判定、原生课程编辑与 TrainingPlanPublisher",
+    whenAbsent: "课程只读；仍可查询原 operation，不改发配置 refresh 或旧 URL"
+  },
+  {
+    key: "trainingPlanExecutionCommandContractVersion", kind: "capability", version: 1,
+    semantics: "课程关联确认/纠错/撤回/明确跳过（X-RAI-Client-Training-Execution-Commands: 1）",
+    advertisedWhen: "schema 2、owner-ready、publication 1，独立模式 validation/production 已启用且精确协商 X-RAI-Client-Training-Execution-Commands: 1",
+    consumer: "iOS 精确能力判定、原生执行关联/回顾与 TrainingPlanPublisher",
+    whenAbsent: "关联只读，不把同日观测当可靠完成"
+  },
+  {
+    key: "trainingPlanUpdateContractVersion", kind: "capability", version: 1,
+    semantics: "统一读 2 的事实/分析/关联/计划四阶段（X-RAI-Training-Updates: 1）",
+    advertisedWhen: "B01 不宣告；G3 后 B08 实现验收，不等同于开启自动发布",
+    consumer: "iOS 精确能力判定；阶段视图消费 deferred 至 B08",
+    whenAbsent: "更新阶段未知；不能由同步成功推导计划已更新"
   },
   {
     key: "coachLoopContractVersion", kind: "capability", version: 1,

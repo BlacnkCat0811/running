@@ -458,6 +458,65 @@ enum TrainingPlanUnifiedPolicy {
             }
             previous = day.localDate
         }
+        if let identities = snapshot.sessions {
+            guard identities.contractVersion == 1 else {
+                throw TrainingPlanUnifiedValidationError.unknownValue(field: "sessions.contractVersion", value: "\(identities.contractVersion)")
+            }
+            guard !identities.planInstanceId.isEmpty else { throw TrainingPlanUnifiedValidationError.invalidDays("课程实例身份缺失") }
+            var ids = Set<String>(), activeDates = Set<String>()
+            let protections: Set<String> = ["automatic", "user_protected"]
+            let lifecycles: Set<String> = ["pending", "completed", "partial", "skipped", "cancelled"]
+            let instant = ISO8601DateFormatter()
+            instant.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            for session in identities.sessions {
+                guard session.planInstanceId == identities.planInstanceId, !session.sessionId.isEmpty,
+                      session.sessionRevision > 0, ids.insert(session.sessionId).inserted,
+                      isValidLocalDate(session.prescription.localDate), session.prescription.kind != "rest",
+                      protections.contains(session.protection), lifecycles.contains(session.lifecycle),
+                      instant.date(from: session.availableAt) != nil,
+                      session.supersededBySessionId != session.sessionId else {
+                    throw TrainingPlanUnifiedValidationError.invalidDays("课程身份、修订或状态不可信")
+                }
+                if let override = session.userOverride {
+                    guard session.protection == "user_protected", override.prescription == session.prescription,
+                          instant.date(from: override.availableAt) != nil else {
+                        throw TrainingPlanUnifiedValidationError.invalidDays("用户覆盖与有效处方不一致")
+                    }
+                }
+                if session.lifecycle != "cancelled" && session.supersededBySessionId == nil {
+                    let date = session.prescription.localDate
+                    guard activeDates.insert(date).inserted else { throw TrainingPlanUnifiedValidationError.invalidDays("同日课程占位冲突") }
+                    if date >= snapshot.businessDate && date <= end && !snapshot.plan.days.contains(session.prescription) {
+                        throw TrainingPlanUnifiedValidationError.invalidDays("课程与已发布意图不一致")
+                    }
+                }
+            }
+            for day in snapshot.plan.days where day.kind != "rest" {
+                guard identities.sessions.contains(where: { $0.prescription == day && $0.lifecycle != "cancelled" && $0.supersededBySessionId == nil }) else {
+                    throw TrainingPlanUnifiedValidationError.invalidDays("已发布意图没有稳定课程身份")
+                }
+            }
+            if let executions = identities.executions {
+                var executionIds = Set<String>()
+                for execution in executions {
+                    guard executionIds.insert(execution.sessionId).inserted,
+                          let session = identities.sessions.first(where: { $0.sessionId == execution.sessionId }) else {
+                        throw TrainingPlanUnifiedValidationError.invalidDays("执行行重复或没有对应课程")
+                    }
+                    if let message = TrainingPlanExecutionPolicy.validate(execution: execution, session: session) {
+                        throw TrainingPlanUnifiedValidationError.invalidDays(message)
+                    }
+                }
+            }
+            for suppression in identities.suppressions {
+                guard isValidLocalDate(suppression.localDate), ["moved", "cancelled", "explicit_rest"].contains(suppression.reason),
+                      instant.date(from: suppression.availableAt) != nil,
+                      suppression.sessionId.map({ ids.contains($0) }) ?? (suppression.reason == "explicit_rest"),
+                      suppression.reason != "explicit_rest" || !activeDates.contains(suppression.localDate) else {
+                    throw TrainingPlanUnifiedValidationError.invalidDays("课程日期抑制不可信")
+                }
+            }
+        }
         if snapshot.mode == "race" {
             guard snapshot.raceGoal != nil, let days = snapshot.daysToRace, days >= 0 else {
                 throw TrainingPlanUnifiedValidationError.inconsistentRaceMode(

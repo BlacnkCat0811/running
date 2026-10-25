@@ -4,7 +4,9 @@ import type {
   TrainingPlanCommandRequest,
   TrainingPlanRaceGoalView,
   TrainingPlanScope,
-  TrainingPlanStateResponseV2
+  TrainingPlanSessionExecution,
+  TrainingPlanStateResponseV2,
+  TrainingPlanUpdateView
 } from "@rai/api-contracts";
 import { TRAINING_PLAN_CONTRACT_VERSION } from "@rai/api-contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -83,6 +85,11 @@ export function buildTrainingPlanStateV2(input: {
   businessDate: string;
   row: TrainingPlanStateRow;
   currentGoalsRevision: number;
+  includeSessions?: boolean;
+  /** Current execution links for this instance. Empty means "none", not unknown. */
+  executions?: TrainingPlanSessionExecution[];
+  /** B08 negotiated update stages. Absent unless the update header was negotiated. */
+  update?: TrainingPlanUpdateView;
 }): TrainingPlanStateResponseV2 {
   const state: TrainingPlanState = input.row.state;
   if (!isValidLocalDate(input.businessDate)) {
@@ -136,7 +143,12 @@ export function buildTrainingPlanStateV2(input: {
     execution: {
       permitted: false,
       reasonCodes: ["projection_only", "facts_freshness_not_evaluated", "device_coordination_not_evaluated"]
-    }
+    },
+    ...(input.includeSessions && state.schemaVersion === 2 ? { sessions: { contractVersion: 1 as const,
+      planInstanceId: state.planInstanceId, sessions: state.sessions, suppressions: state.suppressions,
+      publishedInputKey: state.publishedInputKey,
+      ...(input.executions === undefined ? {} : { executions: input.executions }) } } : {}),
+    ...(input.update === undefined ? {} : { update: input.update })
   };
 }
 
@@ -147,6 +159,10 @@ export interface TrainingPlanStateRouteDeps {
   /** Canonical scope key → migrated row, or `null` when this scope is not migrated. */
   readUnifiedState: (scopeKey: string) => TrainingPlanStateRow | null;
   readGoalsRevision: () => number;
+  /** B06: current execution links, read inside the same request as the sessions view. */
+  readExecutions?: (scopeKey: string, planInstanceId: string) => TrainingPlanSessionExecution[];
+  /** B08: negotiated four-stage update view; absence means "update read unsupported". */
+  readUpdate?: (scopeKey: string, row: TrainingPlanStateRow) => TrainingPlanUpdateView;
   /** The unchanged v1 handler; used for every non-v2 request. */
   legacy: (request: FastifyRequest, reply: FastifyReply) => unknown | Promise<unknown>;
 }
@@ -184,12 +200,35 @@ export function createTrainingPlanStateRoute(deps: TrainingPlanStateRouteDeps) {
         message: "该数据域尚未迁移到统一训练状态；请先按迁移方案完成 dry-run 与 apply。"
       });
     }
+    const sessionsHeader = request.headers["x-rai-training-sessions"];
+    const updatesHeader = request.headers["x-rai-training-updates"];
+    if (updatesHeader !== undefined) {
+      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
+    }
+    if (updatesHeader !== undefined && updatesHeader !== "1") {
+      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
+      return reply.code(409).send({ code: "training_update_contract_unsupported", message: "计划更新阶段读扩展版本不支持。" });
+    }
+    if (updatesHeader === "1" && (sessionsHeader !== "1" || row.state.schemaVersion !== 2 || deps.readUpdate === undefined)) {
+      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
+      return reply.code(409).send({ code: "training_update_contract_unsupported", message: "计划更新阶段读扩展需要精确的课程读协商。" });
+    }
+    if (sessionsHeader !== undefined) {
+      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions");
+      if (sessionsHeader !== "1" || row.state.schemaVersion !== 2) {
+        return reply.code(409).send({ code: "training_session_contract_unsupported", message: "课程身份读扩展尚未迁移或版本不支持。" });
+      }
+    }
     try {
       return buildTrainingPlanStateV2({
         scope,
         businessDate: deps.businessDate(),
         row,
-        currentGoalsRevision: deps.readGoalsRevision()
+        currentGoalsRevision: deps.readGoalsRevision(),
+        includeSessions: sessionsHeader === "1",
+        ...(sessionsHeader === "1" && deps.readExecutions && row.state.schemaVersion === 2
+          ? { executions: deps.readExecutions(scopeKey, row.state.planInstanceId) } : {}),
+        ...(updatesHeader === "1" && deps.readUpdate ? { update: deps.readUpdate(scopeKey, row) } : {})
       });
     } catch (error) {
       // Known projection rejections carry a deliberate, user-facing message.
@@ -270,6 +309,10 @@ export function createTrainingPlanCommandHandlers(service: TrainingPlanCommandSe
         // digest before the atomic write. A pause publishes no plan.
         if (planDeps !== undefined && body.action !== "pause") {
           const next = service.planFor(body);
+          // A paused/ended programme publishes no plan; preparing a candidate would
+          // consume facts and could reject a valid configuration command for a
+          // preference that is not going to be used.
+          if (next.afterState.runState !== "active") return service.submit(body);
           // Generation reads the main DB; hold the same lease as legacy main-DB
           // writers so a zones/profile write cannot commit between generation and
           // the fingerprint re-check unnoticed.

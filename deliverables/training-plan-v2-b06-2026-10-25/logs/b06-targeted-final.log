@@ -1,0 +1,116 @@
+TAP version 13
+# (node:62885) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+ok 1 - B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+  ---
+  duration_ms: 162.96246
+  type: 'test'
+  ...
+# Subtest: B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+ok 2 - B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+  ---
+  duration_ms: 101.590147
+  type: 'test'
+  ...
+# Subtest: B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+ok 3 - B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+  ---
+  duration_ms: 158.514356
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+ok 4 - B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+  ---
+  duration_ms: 133.281368
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+ok 5 - B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+  ---
+  duration_ms: 116.111952
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+ok 6 - B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+  ---
+  duration_ms: 67.8645
+  type: 'test'
+  ...
+# Subtest: B06: strict wire parsing rejects malformed execution drafts before any write
+ok 7 - B06: strict wire parsing rejects malformed execution drafts before any write
+  ---
+  duration_ms: 41.948046
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+ok 8 - B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+  ---
+  duration_ms: 91.382323
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: default window is ±2 natural days; expanded range is capped at 31 days and must contain the course
+ok 9 - B06/S03-02: default window is ±2 natural days; expanded range is capped at 31 days and must contain the course
+  ---
+  duration_ms: 6.265056
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: cross-midnight runs are filtered by startedAt's Shanghai date, not endedAt
+ok 10 - B06/S03-02: cross-midnight runs are filtered by startedAt's Shanghai date, not endedAt
+  ---
+  duration_ms: 22.537907
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is not a write token
+ok 11 - B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is not a write token
+  ---
+  duration_ms: 9.362405
+  type: 'test'
+  ...
+# Subtest: B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial
+ok 12 - B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial
+  ---
+  duration_ms: 0.250459
+  type: 'test'
+  ...
+# Subtest: B06: the fact digest changes when the main library corrects or re-imports the run
+ok 13 - B06: the fact digest changes when the main library corrects or re-imports the run
+  ---
+  duration_ms: 0.355809
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: early/late runs stay candidates in the ±2 window and same-day runs are never merged
+ok 14 - B06/S03-02: early/late runs stay candidates in the ±2 window and same-day runs are never merged
+  ---
+  duration_ms: 0.466818
+  type: 'test'
+  ...
+# (node:62888) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-01: execution rows are transaction-only, revision-monotonic and immutable in history
+ok 15 - B06/S03-01: execution rows are transaction-only, revision-monotonic and immutable in history
+  ---
+  duration_ms: 55.088872
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: one actual run can be confirmed by at most one course, but an unlinked/missing run does not occupy the key
+ok 16 - B06/S03-01: one actual run can be confirmed by at most one course, but an unlinked/missing run does not occupy the key
+  ---
+  duration_ms: 25.79847
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: a rolled-back publication leaves no ghost execution or history
+ok 17 - B06/S03-01: a rolled-back publication leaves no ghost execution or history
+  ---
+  duration_ms: 27.789533
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1667.731354

@@ -269,8 +269,8 @@ test("control-schema migration 2 is appended after version 1 and keeps legacy ro
     try {
       const database = new DatabaseSync(controlPath);
       try {
-        assert.deepEqual(controlSchemaVersions(database), [1, CONTROL_SCHEMA_VERSION],
-          "the new migration is appended after the existing version 1, never renumbered");
+        assert.deepEqual(controlSchemaVersions(database), [1, CONTROL_SCHEMA_VERSION, 3, 4, 5],
+          "new migrations are appended after the existing versions, never renumbered");
         for (const table of ["mobile_training_state", "mobile_training_state_history", "mobile_training_migration_audit"]) {
           assert.ok(database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
             `${table} exists`);
@@ -295,7 +295,7 @@ test("control-schema migration 2 is appended after version 1 and keeps legacy ro
     try {
       const database = new DatabaseSync(controlPath);
       try {
-        assert.deepEqual(controlSchemaVersions(database), [1, CONTROL_SCHEMA_VERSION], "no duplicate ledger row");
+        assert.deepEqual(controlSchemaVersions(database), [1, CONTROL_SCHEMA_VERSION, 3, 4, 5], "no duplicate ledger row");
         assert.equal(counts(database).receipts, 1);
       } finally {
         database.close();

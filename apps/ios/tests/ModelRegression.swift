@@ -2708,6 +2708,89 @@ final class RequestLog: @unchecked Sendable {
         check(refreshLog.count(method: "GET", path: detailPath) == beforeSettled,
               "a settled workout must not cost a network read per sync generation")
 
+        try await checkExecutionCandidatePagination(api: api) { check($0, $1) }
         print("All model regression checks passed.")
     }
+}
+
+/// Exercise the production model and transport across the 50-row page boundary.
+@MainActor private func checkExecutionCandidatePagination(api: RaiAPIClient, check: (Bool, String) -> Void) async throws {
+    CacheStore.resetScheduleSafety()
+    let session = ServerSession()
+    let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+    let model = NativeAppModel(session: session, api: api, now: { clock })
+    let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+        syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, trainingPlanContractVersion: 2,
+        trainingPlanSessionContractVersion: 1, trainingPlanExecutionCommandContractVersion: 1, planPublicationContractVersion: 1))
+    let legacyState = try PlanTestFixtures.json(PlanTestFixtures.state())
+    var unified = try JSONSerialization.jsonObject(with: Data(PlanTestFixtures.json(PlanTestFixtures.unified()).utf8)) as! [String: Any]
+    let prescription: [String: Any] = ["localDate": "2026-10-09", "kind": "easy", "distanceKm": 8,
+        "structure": NSNull(), "reason": NSNull()]
+    var plan = unified["plan"] as! [String: Any]
+    plan["days"] = [prescription]
+    unified["plan"] = plan
+    unified["sessions"] = ["contractVersion": 1, "planInstanceId": "paging-plan", "sessions": [
+        ["planInstanceId": "paging-plan", "sessionId": "paging-course", "sessionRevision": 1,
+         "prescription": prescription, "recommendation": NSNull(), "userOverride": NSNull(),
+         "protection": "automatic", "lifecycle": "pending", "availableAt": "2026-10-08T00:00:00.000Z",
+         "supersededBySessionId": NSNull()]], "suppressions": [], "publishedInputKey": NSNull(), "executions": []] as [String: Any]
+    let unifiedJSON = String(decoding: try JSONSerialization.data(withJSONObject: unified), as: UTF8.self)
+    let expanded = TrainingPlanExecutionPolicy.expandedRange(sessionDate: "2026-10-09")!
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let start = formatter.date(from: expanded.start + "T00:00:00.000Z")!
+    var rows: [[String: Any]] = []
+    for index in 0..<62 {
+        let started = start.addingTimeInterval(Double(index / 2) * 86_400 + Double(index % 2) * 3_600)
+        rows.append(["trainingSessionId": String(format: "run-%02d", index), "sourceFactDigest": String(repeating: "a", count: 64),
+            "startedAt": formatter.string(from: started), "endedAt": formatter.string(from: started.addingTimeInterval(1_800)),
+            "distanceMeters": 5_000, "durationSeconds": 1_800, "evidence": "needs_confirmation"])
+    }
+    var candidateQueries: [[String: String]] = []
+    var returnWrongRange = false
+    let path = "/v1/mobile/training-plan/sessions/paging-course/execution-candidates"
+    StubProtocol.handler = { request in
+        if request.url!.path == "/v1/handshake" { return (200, capabilities, 0) }
+        if request.url!.path == "/v1/mobile/training-plan-state" {
+            return (200, request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" ? unifiedJSON : legacyState, 0)
+        }
+        guard request.url!.path == path else { return (503, "{}", 0) }
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+            .compactMap { item in item.value.map { (item.name, $0) } })
+        candidateQueries.append(query)
+        let from = query["rangeStart"] ?? "2026-10-07", through = query["rangeEnd"] ?? "2026-10-11"
+        let visible = rows.filter { row in
+            let date = String((row["startedAt"] as! String).prefix(10))
+            return date >= from && date <= through && (query["cursor"] == nil || (row["trainingSessionId"] as! String) > "run-49")
+        }
+        let response: [String: Any] = ["contractVersion": 1, "scope": ["serverId": "server", "athleteId": "athlete", "datasetEpoch": "epoch"],
+            "stateRevision": 2, "planInstanceId": "paging-plan", "sessionId": "paging-course", "sessionRevision": 1, "executionRevision": 0,
+            "rangeStart": returnWrongRange ? "2026-10-07" : from, "rangeEnd": returnWrongRange ? "2026-10-11" : through,
+            "candidates": Array(visible.prefix(50)), "nextCursor": visible.count > 50 ? "next-page" as Any : NSNull()]
+        return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), 0)
+    }
+    await model.bootstrap()
+    let read = await model.refreshUnifiedTrainingPlan()
+    check(read && model.canEditTrainingExecutions, "paging fixture negotiates current session/execution reads")
+    let first = await model.loadExecutionCandidates(for: "paging-course", widened: true)
+    check(first && model.executionCandidates(for: "paging-course")?.candidates.count == 50,
+          "widened candidate search loads the first 50 of 62 actual runs")
+    let second = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+    check(second && model.executionCandidates(for: "paging-course")?.candidates.count == 62 &&
+          model.executionCandidates(for: "paging-course")?.nextCursor == nil,
+          "loading more after widening retains all 12 remaining candidates")
+    check(candidateQueries.last?["rangeStart"] == expanded.start && candidateQueries.last?["rangeEnd"] == expanded.end &&
+          candidateQueries.last?["cursor"] == "next-page", "pagination transmits the original expanded range with its cursor")
+    let fresh = await model.loadExecutionCandidates(for: "paging-course")
+    check(fresh && model.executionCandidates(for: "paging-course")?.candidates.count == 10 && candidateQueries.last?["rangeStart"] == nil,
+          "a fresh search deliberately resets to the default five-day range")
+    let requests = candidateQueries.count
+    let staleCursor = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+    check(!staleCursor && candidateQueries.count == requests, "a cursor from a replaced page cannot be reused for the new range")
+    _ = await model.loadExecutionCandidates(for: "paging-course", widened: true)
+    returnWrongRange = true
+    let wrongRange = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+    check(!wrongRange && model.executionCandidates(for: "paging-course")?.candidates.count == 50,
+          "a mismatched response range cannot silently truncate the candidate list")
+    CacheStore.resetScheduleSafety()
 }

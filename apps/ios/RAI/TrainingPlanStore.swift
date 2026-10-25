@@ -19,6 +19,13 @@ final class TrainingPlanStore {
     private(set) var unifiedIsCurrent = false
     private(set) var isRefreshingUnified = false
     private(set) var unifiedCachedAt: Date?
+    /// Optional B06 execution rows for the current sessions view. `nil` means the
+    /// server omitted the view entirely (unknown), never "no executions".
+    var sessionExecutions: [TrainingPlanSessionExecution]? { unified?.sessions?.executions }
+    var sessionExecutionsKnown: Bool { unified?.sessions?.executions != nil }
+    func sessionExecution(for sessionId: String) -> TrainingPlanSessionExecution? {
+        sessionExecutions?.first { $0.sessionId == sessionId }
+    }
     private(set) var availability: PlanAvailability = .unavailable
     private(set) var issue: PlanReadIssue?
     private(set) var minimumRevision = 0
@@ -184,6 +191,18 @@ final class TrainingPlanStore {
         availability = .savedAwaitingRefresh
     }
 
+    /// Execution commands confirm state/goals floors only. `sessionRevision` and
+    /// `executionRevision` are response fields, never acknowledgement watermarks;
+    /// a null goals revision must not lower the existing goals floor.
+    func acknowledgeExecution(stateRevision: Int, goalsRevision: Int?) {
+        if let goalsRevision {
+            acknowledge(revision: goalsRevision, action: "training-execution")
+        } else {
+            invalidate()
+            availability = .savedAwaitingRefresh
+        }
+    }
+
     func loadCache() {
         restoreSafety()
         guard !isCurrent else { return }
@@ -275,7 +294,11 @@ final class TrainingPlanStore {
         isRefreshingUnified = true
         defer { if unifiedRequestID == request { isRefreshingUnified = false } }
         do {
-            let value = try await repository.readUnifiedPlan(baseURL: baseURL, token: token)
+            let expectsSessions = handshake?.trainingPlanSessionsSupported == true
+            let expectsUpdates = handshake?.trainingPlanUpdatesSupported == true
+            let value = try await repository.readUnifiedPlan(baseURL: baseURL, token: token, sessionEntities: expectsSessions,
+                updateStages: expectsUpdates)
+            if expectsSessions && value.sessions == nil { throw RaiAPIClientError.decoding("服务器未返回已协商的课程身份扩展") }
             guard valid() else { return false }
             serviceReachable = true
             // 版本下限取**写确认**过的下限（`minimumRevision`），不是 `revision`：
@@ -288,6 +311,21 @@ final class TrainingPlanStore {
                 minimumGoalsRevision: minimumRevision,
                 now: now()
             )
+            // B07: never let an older GET roll back a just-confirmed execution or
+            // swap in a different plan instance at the same/lower state revision.
+            if let previous = unified {
+                if previous.sessions != nil && value.sessions == nil {
+                    throw RaiAPIClientError.decoding("服务器未返回上次已确认的课程执行视图，不能当作空历史覆盖。")
+                }
+                guard TrainingPlanExecutionPolicy.acceptsSnapshot(
+                    incomingStateRevision: value.stateRevision,
+                    incomingPlanInstanceId: value.sessions?.planInstanceId,
+                    existingStateRevision: previous.stateRevision,
+                    existingPlanInstanceId: previous.sessions?.planInstanceId
+                ) else {
+                    throw RaiAPIClientError.decoding("收到的计划状态早于已确认状态或更换了计划实例，请重读。")
+                }
+            }
             let watermark = repository.cache.trainingPlanCommandWatermark(scope: scope)
             guard !watermark.isFailure else {
                 throw RaiAPIClientError.decoding("已确认写入水位不可读，请恢复本地存储后重读。")

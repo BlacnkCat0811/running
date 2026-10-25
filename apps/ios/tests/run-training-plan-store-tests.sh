@@ -7,6 +7,7 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/CacheStore.swift > "$tm
 xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift apps/ios/RAI/PlanStatePolicy.swift \
   apps/ios/RAI/TrainingPlanRepository.swift apps/ios/RAI/TrainingPlanStore.swift \
+  apps/ios/RAI/TrainingPlanExecutionPolicy.swift \
   apps/ios/RAI/ServerSession.swift "$tmp/CacheStore.swift" apps/ios/RAI/SQLiteSupport.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/PlanWatchScheduling.swift \
   apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/UserDataNoticePolicy.swift \

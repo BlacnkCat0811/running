@@ -1,0 +1,6 @@
+🟠 锚在空行       apps/api/src/server.ts:2118                  -> apps/api/src/server.ts
+docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md: 26 处引用，0 处越界/无法解析，内容漂移 未核对（无基线），1 处锚在空行（告警）（--problems-only）
+
+合计 26 处（去重后）；越界/无法解析 0 处；内容漂移 未核对（无基线；1 份文档均无 .linerefs.json）；锚在空行 1 处（告警）
+
+EXIT_CODE=0

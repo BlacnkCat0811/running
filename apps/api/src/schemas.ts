@@ -934,6 +934,41 @@ export const openapiDocument = {
       })
     },
     "/v1/mobile/coach-execution": { get: operation(["Read"], "过去28日冻结处方的观测、剂量和刺激评价") },
+    "/v1/mobile/training-plan/session-commands/preview": {
+      post: operation(["Workouts"], "课程编辑合同1：预览 move/edit/add/cancel/set_rest/unlock；零写入，绑定120秒候选", {
+        requestBody: body(trainingSessionCommandSchema(false), "精确数据域、实例、状态/课程修订与草稿"),
+        responses: trainingSessionResponses(false)
+      })
+    },
+    "/v1/mobile/training-plan/session-commands": {
+      post: operation(["Workouts"], "课程编辑合同1：原子保存课程、投影、冻结历史与持久操作结果", {
+        requestBody: body(trainingSessionCommandSchema(true), "原预览内容、候选和持久UUID；已提交重放先于能力门"),
+        responses: trainingSessionResponses(true)
+      })
+    },
+    "/v1/mobile/training-plan/sessions/{sessionId}/execution-candidates": {
+      get: operation(["Read"], "执行关联合同1：课程日前后候选实际训练；分页、窗口扩大只读，不自动确认", {
+        parameters: [
+          { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+          { name: "planInstanceId", in: "query", required: true, schema: { type: "string" } },
+          { name: "rangeStart", in: "query", required: false, schema: { type: "string" } },
+          { name: "rangeEnd", in: "query", required: false, schema: { type: "string" } },
+          { name: "cursor", in: "query", required: false, schema: { type: "string" } }
+        ]
+      })
+    },
+    "/v1/mobile/training-plan/execution-commands": {
+      post: operation(["Workouts"], "执行关联合同1：confirm/correct/retract/skip；源事实摘要、执行修订CAS与原子操作结果", {
+        requestBody: body({ type: "object", additionalProperties: true,
+          required: ["contractVersion", "operationId", "operationScope", "expectedStateRevision", "planInstanceId",
+            "sessionId", "sessionRevision", "executionRevision", "draft"],
+          properties: { contractVersion: { const: 1 }, operationId: { type: "string" },
+            operationScope: planOperationScopeSchema, expectedStateRevision: { type: "integer", minimum: 1 },
+            planInstanceId: { type: "string" }, sessionId: { type: "string" },
+            sessionRevision: { type: "integer", minimum: 1 }, executionRevision: { type: "integer", minimum: 0 },
+            draft: { type: "object" } } }, "精确数据域、课程/执行修订与执行草稿")
+      })
+    },
     "/v1/mobile/training-plan/commands/preview": {
       post: operation(["Workouts"], "统一训练合同：预览赛事目标/暂停/恢复的配置转换；不写库、不发课表", {
         requestBody: body({ type: "object", additionalProperties: false,
@@ -1240,3 +1275,36 @@ export const openapiDocument = {
     }) }
   }
 } as const;
+
+
+/** Shape matches the strict runtime union; runtime also compares measured dose,
+ * current facts and CAS. New manual structures cannot be null or normalized. */
+function trainingSessionCommandSchema(submit: boolean) {
+  const identity = { sessionId: { type: "string", minLength: 1, maxLength: 200 }, sessionRevision: { type: "integer", minimum: 1 } };
+  const date = { type: "string", format: "date" };
+  const patch = { type: "object", minProperties: 1, additionalProperties: false, properties: {
+    kind: { enum: MOBILE_SESSION_KINDS.filter(kind => kind !== "rest") },
+    distanceKm: mobileWeekPlanItemSchema.properties.distanceKm,
+    structure: mobileSessionStructureSchema, reason: mobileWeekPlanItemSchema.properties.reason } };
+  const existing = (action: string, extra: Record<string, unknown> = {}) => ({ type: "object", additionalProperties: false,
+    required: ["action", "sessionId", "sessionRevision", ...Object.keys(extra)], properties: { action: { const: action }, ...identity, ...extra } });
+  const draft = { oneOf: [existing("move", { localDate: date }), existing("edit", { patch }), existing("cancel"), existing("unlock"),
+    { type: "object", additionalProperties: false, required: ["action", "localDate"], properties: { action: { const: "set_rest" }, localDate: date } },
+    { type: "object", additionalProperties: false, required: ["action", "prescription"], properties: { action: { const: "add" },
+      prescription: { ...mobileWeekPlanItemSchema, required: ["localDate", "kind", "distanceKm", "structure"], properties: {
+        ...mobileWeekPlanItemSchema.properties, kind: { enum: MOBILE_SESSION_KINDS.filter(kind => kind !== "rest") }, structure: mobileSessionStructureSchema } } } }
+  ] };
+  return { type: "object", additionalProperties: false,
+    required: ["contractVersion", "operationScope", "expectedStateRevision", "planInstanceId", "draft", ...(submit ? ["operationId", "candidateId"] : [])],
+    properties: { contractVersion: { const: 1 }, operationScope: planOperationScopeSchema,
+      expectedStateRevision: { type: "integer", minimum: 1 }, planInstanceId: { type: "string", minLength: 1, maxLength: 200 }, draft,
+      ...(submit ? { operationId: { type: "string", format: "uuid" }, candidateId: { type: "string", minLength: 1, maxLength: 4096 } } : {}) } };
+}
+function trainingSessionResponses(submit: boolean) {
+  const fields = submit ? ["contractVersion", "operationId", "stateRevision", "goalsRevision", "planInstanceId", "outcome", "session", "execution", "planUpdate", "warnings"]
+    : ["contractVersion", "operationScope", "expectedStateRevision", "planInstanceId", "draft", "candidateId", "expiresAt", "inputKey", "impact"];
+  return { "200": jsonResponse("课程命令合同 1", { ...objectSchema(...fields), properties: {
+    ...objectSchema(...fields).properties, contractVersion: { const: 1 },
+    ...(submit ? { outcome: { enum: ["changed", "no_change"] }, planUpdate: { enum: ["pending", "current", "blocked"] } } : {}) } }),
+    "404": errorResponse, "409": errorResponse, "410": errorResponse, "422": errorResponse, "503": errorResponse };
+}

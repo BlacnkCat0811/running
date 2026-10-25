@@ -59,8 +59,10 @@ struct TrainingPlanRepository {
     /// 包装，它没有今日建议和可执行处方。把它塞进 `TrainingPlanRead` 会迫使调用点
     /// 在两个合同之间挑一个当"当前"，而 PR5 的规则是两者各管各的：
     /// 执行授权只能来自执行快照，模式/准入/意图只能来自统一状态。
-    func readUnifiedPlan(baseURL: URL, token: String) async throws -> TrainingPlanStateResponseV2 {
-        try await api.trainingPlanStateV2(baseURL: baseURL, token: token)
+    func readUnifiedPlan(baseURL: URL, token: String, sessionEntities: Bool = false,
+                         updateStages: Bool = false) async throws -> TrainingPlanStateResponseV2 {
+        try await api.trainingPlanStateV2(baseURL: baseURL, token: token, sessionEntities: sessionEntities,
+            updateStages: updateStages)
     }
 }
 

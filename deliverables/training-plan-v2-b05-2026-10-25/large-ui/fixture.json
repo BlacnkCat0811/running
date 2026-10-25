@@ -1,0 +1,103 @@
+{
+  "synthetic": true,
+  "database": "/tmp/rai-visual-runtime.ZXDlzf/var/rai.sqlite",
+  "control": "/tmp/rai-visual-runtime.ZXDlzf/var/rai-control.sqlite",
+  "dryRun": {
+    "ok": true,
+    "scope": {
+      "serverId": "phase5-validation",
+      "athleteId": "athlete_1",
+      "datasetEpoch": "phase5-synthetic"
+    },
+    "scopeKey": "[\"phase5-validation\",\"athlete_1\",\"phase5-synthetic\"]",
+    "businessDate": "2026-10-25",
+    "migrationVersion": 1,
+    "source": "run_coach",
+    "sourceStatus": "active",
+    "runState": "active",
+    "derivedMode": {
+      "mode": "coach",
+      "reason": "no_race_goal",
+      "daysToRace": null
+    },
+    "raceGoal": null,
+    "publicRaceTarget": null,
+    "goalsRevision": 1,
+    "existingRevision": null,
+    "sourceDigest": "c66e26acff2aae774b9c654935af51142744e4d25a23c211278365c77ee129e5",
+    "conflicts": [],
+    "notes": [],
+    "applyAllowed": true,
+    "mode": "dry-run"
+  },
+  "applied": {
+    "ok": true,
+    "scope": {
+      "serverId": "phase5-validation",
+      "athleteId": "athlete_1",
+      "datasetEpoch": "phase5-synthetic"
+    },
+    "scopeKey": "[\"phase5-validation\",\"athlete_1\",\"phase5-synthetic\"]",
+    "businessDate": "2026-10-25",
+    "migrationVersion": 1,
+    "source": "run_coach",
+    "sourceStatus": "active",
+    "runState": "active",
+    "derivedMode": {
+      "mode": "coach",
+      "reason": "no_race_goal",
+      "daysToRace": null
+    },
+    "raceGoal": null,
+    "publicRaceTarget": null,
+    "goalsRevision": 1,
+    "existingRevision": null,
+    "sourceDigest": "c66e26acff2aae774b9c654935af51142744e4d25a23c211278365c77ee129e5",
+    "conflicts": [],
+    "notes": [],
+    "applyAllowed": true,
+    "applied": {
+      "status": "applied",
+      "revision": 1,
+      "stateDigest": "ba133aa49daa0390a7d832c3702f06a7bc1a4c53184de20733c745b0fe77776d",
+      "readBackRevision": 1
+    },
+    "mode": "apply"
+  },
+  "repeated": {
+    "ok": true,
+    "scope": {
+      "serverId": "phase5-validation",
+      "athleteId": "athlete_1",
+      "datasetEpoch": "phase5-synthetic"
+    },
+    "scopeKey": "[\"phase5-validation\",\"athlete_1\",\"phase5-synthetic\"]",
+    "businessDate": "2026-10-25",
+    "migrationVersion": 1,
+    "source": "new",
+    "sourceStatus": "active",
+    "runState": "active",
+    "derivedMode": {
+      "mode": "coach",
+      "reason": "no_race_goal",
+      "daysToRace": null
+    },
+    "raceGoal": null,
+    "publicRaceTarget": null,
+    "goalsRevision": 1,
+    "existingRevision": 1,
+    "sourceDigest": "c66e26acff2aae774b9c654935af51142744e4d25a23c211278365c77ee129e5",
+    "conflicts": [],
+    "notes": [
+      "scope already has a unified training state; --apply only replays the recorded migration result"
+    ],
+    "applyAllowed": true,
+    "applied": {
+      "status": "replayed",
+      "revision": 1,
+      "stateDigest": "ba133aa49daa0390a7d832c3702f06a7bc1a4c53184de20733c745b0fe77776d",
+      "readBackRevision": 1
+    },
+    "mode": "apply"
+  }
+}

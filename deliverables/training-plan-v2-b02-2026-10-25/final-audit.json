@@ -1,0 +1,23 @@
+{
+  "batch": "B02",
+  "tasks": [
+    "S01-01",
+    "S01-03",
+    "S01-05"
+  ],
+  "result": "accepted_with_documented_scope",
+  "G1": "not_accepted",
+  "nextBatch": "B03",
+  "head": "1b6a10b4769526b2930090e79860d2f93cc50318",
+  "branch": "main",
+  "recordedAtUTC": "2026-10-25T04:10:10.961541+00:00",
+  "sourceFreezeFiles": 1002,
+  "sourceFreezeMismatches": [],
+  "testFileCount": 316,
+  "productionMigration": false,
+  "productionEnablement": false,
+  "deployment": false,
+  "remoteCI": "not_run",
+  "unscopedLegacyHistory": "preserved_unattributed",
+  "status": "M README.md\n M apps/api/src/mobile-goals.ts\n M apps/api/src/server.ts\n M apps/api/src/training-plan-routes.ts\n M apps/api/src/training-plan-store.ts\n M apps/api/test/phase5-training-plan.test.ts\n M apps/api/test/plan-receipt-identity.test.ts\n M apps/api/test/training-plan-commands.test.ts\n M apps/api/test/training-plan-coordinator.test.ts\n M apps/api/test/training-plan-migration.test.ts\n M apps/api/test/training-plan-v2-route.test.ts\n M apps/ios/RAI/APIClient.swift\n M apps/ios/RAI/APIModels.swift\n M apps/ios/RAI/PlanStatePolicy.swift\n M apps/ios/RAI/TrainingPlanRepository.swift\n M apps/ios/RAI/TrainingPlanStore.swift\n M apps/ios/tests/TrainingPlanStoreRegression.swift\n M apps/ios/tests/TrainingPlanV2Regression.swift\n M docs/DECISIONS.md\n M docs/IOS_NATIVE_API_CONTRACT.md\n M docs/RUN_COACH.md\n M packages/api-contracts/src/handshake-registry.ts\n M packages/api-contracts/src/index.ts\n M scripts/migrate-training-planner.mts\n?? apps/api/src/training-plan-session-migration.ts\n?? apps/api/src/training-plan-session-repository.ts\n?? apps/api/src/training-plan-session-state.ts\n?? apps/api/test/training-plan-closed-loop-contract.test.ts\n?? apps/api/test/training-plan-session-migration.test.ts\n?? apps/api/test/training-plan-session-state.test.ts\n?? apps/ios/tests/fixtures/training-plan-closed-loop.json\n?? apps/ios/tests/fixtures/training-plan-sessions-v2.json\n?? deliverables/training-plan-v2-b01-2026-10-25/\n?? deliverables/training-plan-v2-b02-2026-10-25/\n?? docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md\n?? docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md\n?? packages/api-contracts/src/training-plan-closed-loop.ts"
+}

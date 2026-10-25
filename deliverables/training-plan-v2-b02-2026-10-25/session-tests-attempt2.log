@@ -1,0 +1,94 @@
+TAP version 13
+# Subtest: B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+ok 1 - B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+  ---
+  duration_ms: 2.53381
+  type: 'test'
+  ...
+# Subtest: B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+ok 2 - B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+  ---
+  duration_ms: 6.361867
+  type: 'test'
+  ...
+# Subtest: B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+ok 3 - B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+  ---
+  duration_ms: 1.013716
+  type: 'test'
+  ...
+# Subtest: B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+ok 4 - B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+  ---
+  duration_ms: 0.591758
+  type: 'test'
+  ...
+# Subtest: B01: all new error codes and capability headers are documented without declaring runtime support
+ok 5 - B01: all new error codes and capability headers are documented without declaring runtime support
+  ---
+  duration_ms: 0.885867
+  type: 'test'
+  ...
+# (node:19011) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:19011) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: B02/T24/T26: dry-run allocates nothing; controlled apply maps all 1001 scoped revisions without guessing continuity
+ok 6 - B02/T24/T26: dry-run allocates nothing; controlled apply maps all 1001 scoped revisions without guessing continuity
+  ---
+  duration_ms: 1932.34919
+  type: 'test'
+  ...
+# Subtest: B02/T24/T25: stale digest/CAS, source duplicates, unknown payload and owner disagreement refuse without writes
+ok 7 - B02/T24/T25: stale digest/CAS, source duplicates, unknown payload and owner disagreement refuse without writes
+  ---
+  duration_ms: 39.415249
+  type: 'test'
+  ...
+# Subtest: B02/T22/T24: each new migration write point and COMMIT failure rolls back schema/ID mapping/state/audit together
+ok 8 - B02/T22/T24: each new migration write point and COMMIT failure rolls back schema/ID mapping/state/audit together
+  ---
+  duration_ms: 153.154651
+  type: 'test'
+  ...
+# Subtest: B02/T24: CLI session mode is read-only by default, enforces digest/lock, applies once and never opens the health DB
+ok 9 - B02/T24: CLI session mode is read-only by default, enforces digest/lock, applies once and never opens the health DB
+  ---
+  duration_ms: 3172.062523
+  type: 'test'
+  ...
+# (node:19015) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:19015) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/override/null/structure fields without normalization
+ok 10 - B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/override/null/structure fields without normalization
+  ---
+  duration_ms: 39.092346
+  type: 'test'
+  ...
+# Subtest: B02/T26: stable identity and frozen prescriptions survive moving/editing and 1000 newer whole-plan revisions
+ok 11 - B02/T26: stable identity and frozen prescriptions survive moving/editing and 1000 newer whole-plan revisions
+  ---
+  duration_ms: 3167.572998
+  type: 'test'
+  ...
+# Subtest: B02/T22: course history failure rolls back state, history, projection and operation result in the existing publication transaction
+ok 12 - B02/T22: course history failure rolls back state, history, projection and operation result in the existing publication transaction
+  ---
+  duration_ms: 31.677658
+  type: 'test'
+  ...
+# Subtest: B02/T25: exact session read negotiation is zero-write and older wire stays identical
+ok 13 - B02/T25: exact session read negotiation is zero-write and older wire stays identical
+  ---
+  duration_ms: 135.793039
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6132.889523

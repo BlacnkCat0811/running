@@ -1,0 +1,35 @@
+
+> rai-running-intelligence@0.1.0 pretypecheck
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 typecheck
+> tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json
+
+
+> rai-running-intelligence@0.1.0 check:training-plan-single-writer
+> node scripts/check-training-plan-single-writer.mjs
+
+single-writer 结构门禁：R1–R5 / 生产源文件 523 / 测试文件 158（R1/R2/R4 豁免）/ 违规 0
+single-writer 结构门禁通过。
+
+> rai-running-intelligence@0.1.0 check:acceptance-matrix
+> tsx scripts/check-acceptance-matrix.mts
+
+§16.1 矩阵：80 条；cited 80；declared-gap 0；missing 0
+  注：cited 仅表示测试**标题**引用了该 ID，不代表断言存在；覆盖强度请看测试内容，不要只看这个数字。
+
+验收矩阵检查通过。
+
+> rai-running-intelligence@0.1.0 check:package-boundaries
+> node scripts/check-package-boundaries.mjs
+
+包边界：16 个包 / 31 条 src 边；禁线 4 条
+包边界检查通过。
+
+> rai-running-intelligence@0.1.0 check:scripts
+> node scripts/check-npm-scripts-portable.mjs
+
+✅ npm script 跨平台语法检查通过：18 个 package.json / 117 条 script。
+
+EXIT_CODE=0

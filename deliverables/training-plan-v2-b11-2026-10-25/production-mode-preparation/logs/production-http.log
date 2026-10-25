@@ -1,0 +1,36 @@
+TAP version 13
+# (node:64011) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B04 real HTTP: independent negotiation, six session actions, safety, restart replay and writer disable/replay (production)
+ok 1 - B04 real HTTP: independent negotiation, six session actions, safety, restart replay and writer disable/replay (production)
+  ---
+  duration_ms: 11992.161403
+  type: 'test'
+  ...
+# Subtest: B06 real HTTP: execution candidates, confirm, unified execution read, replay and retract (production)
+ok 2 - B06 real HTTP: execution candidates, confirm, unified execution read, replay and retract (production)
+  ---
+  duration_ms: 7782.889974
+  type: 'test'
+  ...
+# Subtest: B08 real server timer: a newly confirmed execution converges to a current evaluation without a manual refresh (production)
+ok 3 - B08 real server timer: a newly confirmed execution converges to a current evaluation without a manual refresh (production)
+  ---
+  duration_ms: 79360.691374
+  type: 'test'
+  ...
+# Subtest: production training writes require authentication and explicit database targets before opening any database
+ok 4 - production training writes require authentication and explicit database targets before opening any database
+  ---
+  duration_ms: 6878.183716
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 106735.046759

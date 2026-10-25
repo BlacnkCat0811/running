@@ -1,0 +1,10 @@
+run_at=2026-10-25T19:58:54+0800
+
+> rai-running-intelligence@0.1.0 check:acceptance-matrix
+> tsx scripts/check-acceptance-matrix.mts
+
+§16.1 矩阵：80 条；cited 80；declared-gap 0；missing 0
+  注：cited 仅表示测试**标题**引用了该 ID，不代表断言存在；覆盖强度请看测试内容，不要只看这个数字。
+
+验收矩阵检查通过。
+exit=0

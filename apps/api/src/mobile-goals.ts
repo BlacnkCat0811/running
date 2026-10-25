@@ -43,7 +43,11 @@ import {
   readPublicationGuard,
   type PublicationGuardState
 } from "./publication-guard.js";
-import { TrainingPlanStore, ensureTrainingPlanSchema, type TrainingPlanState, type TrainingPlanStateRow } from "./training-plan-store.js";
+import { TrainingPlanStore, ensureTrainingPlanSchema, type TrainingPlanSessionState, type TrainingPlanState, type TrainingPlanStateRow } from "./training-plan-store.js";
+import { parseSessionPrescription } from "./training-plan-session-state.js";
+import { ensureTrainingPlanSessionSchema, TrainingPlanSessionRepository } from "./training-plan-session-repository.js";
+import { ensureTrainingPlanExecutionSchema, TrainingPlanExecutionRepository } from "./training-plan-execution-repository.js";
+import { ensureTrainingPlanEvaluationSchema, TrainingPlanEvaluationRepository, type TrainingPlanEvaluation } from "./training-plan-evaluation-repository.js";
 import { raceGoalFromCoachSettings, unifiedCoachSettings } from "./training-plan-ownership.js";
 import { trainingPlanContextDigest } from "./training-mode-policy.js";
 import { coachLocalDate } from "./coach-loop-facts.js";
@@ -182,6 +186,8 @@ const emptyGoals = (): StoredGoals => ({
  * own structure does not describe.
  */
 export interface PlanMergeOptions {
+  /** Internal schema-2 edit transaction; preserves the existing confirmation fence. */
+  sessionCommand?: boolean;
   /** Internal programme capability, never accepted by the public goals body. */
   runCoach?: MobileRunCoachPlan | null;
   prescription?: CoachZonePrescription | null;
@@ -191,6 +197,14 @@ export interface PlanMergeOptions {
   validate?: (candidate: MobileGoalsResponse) => MobileGoalsResponse | void;
   /** Explicit command clock for deterministic coach publication/replay. */
   evaluatedAt?: string;
+  /**
+   * B03: the unified session resolver already validated and measured this exact
+   * plan. Re-running the legacy normalize/measure path could silently drop a
+   * nullable field (`reason: null`) or re-round a protected prescription, which
+   * would make the materialized week disagree with its stable session. Internal
+   * only; never accepted from the public goals body.
+   */
+  preserveWeekPlan?: boolean;
 }
 
 /** One stored plan revision, as it was written. */
@@ -284,6 +298,8 @@ export class MobileGoalsStore {
   private trainingBusinessDate = () => coachLocalDate(new Date().toISOString());
   private stagedCoachReceipt: { operationId: string; state: { settings: CoachLoopSettings; policyHash: string; evaluatedAt: string };
     raceGoal?: TrainingPlanState["raceGoal"]; replaceEnded?: boolean } | null = null;
+  private stagedSessionFields: { sessions: TrainingPlanSessionState["sessions"]; suppressions: TrainingPlanSessionState["suppressions"];
+    archivedSessionIds: readonly string[] } | null = null;
   private publicationTransaction = false;
   private readonly filePath: string;
   private readonly controlDatabase: DatabaseSync | null;
@@ -346,9 +362,11 @@ export class MobileGoalsStore {
     const goals = this.read();
     const receipt = this.stagedCoachReceipt;
     if (row.state.goalsRevision === goals.revision && receipt === null) return;
+    const stagedSessions = row.state.schemaVersion === 2 ? this.stagedSessionFields : null;
     const state: TrainingPlanState = { ...row.state, goalsRevision: goals.revision,
       legacyRaceTarget: goals.raceTarget ?? null,
       weekPlan: goals.weekPlan, lockedSession: goals.lockedSession,
+      ...(stagedSessions === null ? {} : { sessions: stagedSessions.sessions, suppressions: stagedSessions.suppressions }),
       // The legacy projection stops running a programme after v2 takes over.
       // Its migrated preferences stay in unified until a coach receipt replaces
       // them with an explicitly configured set of current preferences.
@@ -369,7 +387,8 @@ export class MobileGoalsStore {
       state.planContextDigest = trainingPlanContextDigest(state);
     }
     this.commitTrainingPlanCommandState({ scope: row.scope, expectedRevision: row.revision, state,
-      eventType: receipt ? "owner:coach-loop" : "owner:projection" });
+      eventType: receipt ? "owner:coach-loop" : "owner:projection" },
+      stagedSessions === null ? {} : { archivedSessionIds: stagedSessions.archivedSessionIds, archiveBefore: this.trainingBusinessDate() });
   }
 
   trainingPlanOwnerReady(): boolean {
@@ -413,6 +432,62 @@ export class MobileGoalsStore {
     return new TrainingPlanStore(this.controlDatabase).read(scope);
   }
 
+  /** Indexed frozen course reads, independent of the capped compatibility planHistory. */
+  trainingPlanSessionHistory(scope: string, instance: string, id: string, revision: number) {
+    return this.controlDatabase ? new TrainingPlanSessionRepository(this.controlDatabase).get(scope, instance, id, revision) : null;
+  }
+
+  trainingPlanSessionAt(scope: string, instance: string, id: string, asOf: string) {
+    return this.controlDatabase ? new TrainingPlanSessionRepository(this.controlDatabase).effectiveAt(scope, instance, id, asOf) : null;
+  }
+
+  trainingPlanSessionsForDate(scope: string, date: string, asOf: string,
+    options: Parameters<TrainingPlanSessionRepository["forDate"]>[3] = {}) {
+    return this.controlDatabase ? new TrainingPlanSessionRepository(this.controlDatabase).forDate(scope, date, asOf, options) : [];
+  }
+
+  /** B06: current execution associations for one scope/instance. */
+  trainingPlanExecutions(scope: string, instance: string) {
+    return this.controlDatabase ? new TrainingPlanExecutionRepository(this.controlDatabase).list(scope, instance).map(row => row.execution) : [];
+  }
+
+  trainingPlanExecution(scope: string, id: string) {
+    return this.controlDatabase ? new TrainingPlanExecutionRepository(this.controlDatabase).current(scope, id) : null;
+  }
+
+  trainingPlanExecutionHistory(scope: string, id: string) {
+    return this.controlDatabase ? new TrainingPlanExecutionRepository(this.controlDatabase).history(scope, id) : [];
+  }
+
+  /** The one session currently claiming this actual run, across the whole scope. */
+  trainingPlanExecutionForRun(scope: string, trainingSessionId: string) {
+    return this.controlDatabase ? new TrainingPlanExecutionRepository(this.controlDatabase)
+      .confirmedByTrainingSession(scope, trainingSessionId) : null;
+  }
+
+  /** B08: newest input checked for this scope, or null before the first publication. */
+  trainingPlanEvaluation(scope: string): TrainingPlanEvaluation | null {
+    return this.controlDatabase ? new TrainingPlanEvaluationRepository(this.controlDatabase).get(scope) : null;
+  }
+
+  recordTrainingPlanEvaluation(scope: string, value: TrainingPlanEvaluation): void {
+    if (!this.controlDatabase || !this.publicationTransaction) {
+      throw new PlanOperationError("training_plan_transaction_required", "评估游标必须与发布在同一事务内提交。", 500);
+    }
+    new TrainingPlanEvaluationRepository(this.controlDatabase).record(scope, value);
+  }
+
+  /**
+   * B06: append an execution revision inside the caller's publication
+   * transaction. The course/lifecycle state and this link share one COMMIT.
+   */
+  appendTrainingPlanExecution(scope: string, instance: string, execution: import("@rai/api-contracts").TrainingPlanSessionExecution, reason: string): void {
+    if (!this.controlDatabase || !this.publicationTransaction) {
+      throw new PlanOperationError("training_plan_transaction_required", "执行关联必须与发布在同一事务内提交。", 500);
+    }
+    new TrainingPlanExecutionRepository(this.controlDatabase).append(scope, instance, execution, reason);
+  }
+
   /**
    * PR4-2: CAS write of a command-derived unified state.
    *
@@ -421,19 +496,42 @@ export class MobileGoalsStore {
    * back together. Calling it without a transaction throws instead of silently
    * creating a second, torn publication path.
    */
+  /**
+   * B03: the legacy coach-loop command path still owns an existing operation
+   * contract. When the scope has already been migrated to schema 2, its planned
+   * window must go through the same session resolver as the unified refresh; this
+   * stages the resolved fields for reconciliation inside the same publication
+   * transaction. It is internal to a publication action and cannot be called
+   * outside one.
+   */
+  stageTrainingPlanSessionState(fields: { sessions: TrainingPlanSessionState["sessions"]; suppressions: TrainingPlanSessionState["suppressions"];
+    archivedSessionIds?: readonly string[] }): void {
+    if (!this.publicationTransaction) throw new PlanOperationError("training_plan_transaction_required",
+      "课程会话只能随发布事务提交。", 500);
+    this.stagedSessionFields = { sessions: fields.sessions, suppressions: fields.suppressions,
+      archivedSessionIds: fields.archivedSessionIds ?? [] };
+  }
+
   commitTrainingPlanCommandState(input: {
     scope: string;
     expectedRevision: number;
     state: TrainingPlanState;
     eventType: string;
-  }): { revision: number; updatedAt: string } {
+  }, options: { archivedSessionIds?: readonly string[]; archiveBefore?: string } = {}): { revision: number; updatedAt: string } {
     if (!this.controlDatabase) throw new PlanOperationError("training_plan_state_unavailable",
       "当前存储没有控制库，不能提交统一训练状态。", 503);
     if (!this.publicationTransaction) throw new PlanOperationError("training_plan_transaction_required",
       "统一状态必须与发布在同一事务内提交。", 500);
-    const result = new TrainingPlanStore(this.controlDatabase).commitState(input, { inTransaction: true });
+    const result = new TrainingPlanStore(this.controlDatabase).commitState(input, { inTransaction: true, ...options });
     if (this.stagedCoachReceipt?.operationId === input.state.coachLoop?.operationId) this.stagedCoachReceipt = null;
     return result;
+  }
+
+  /** One immutable receipt by operation id; used for semantic no-change checks. */
+  coachLoopReceipt<T>(scope: string, operationId: string): T | null {
+    const row = this.controlDatabase?.prepare("SELECT payload_json FROM mobile_coach_loop_receipts WHERE scope=? AND operation_id=?")
+      .get(scope, operationId) as { payload_json: string } | undefined;
+    return row ? JSON.parse(row.payload_json) as T : null;
   }
 
   coachLoopReceipts<T>(scope: string, limit = 100): T[] {
@@ -567,6 +665,7 @@ export class MobileGoalsStore {
     } finally {
       this.publicationTransaction = false;
       this.stagedCoachReceipt = null;
+      this.stagedSessionFields = null;
     }
   }
 
@@ -697,7 +796,10 @@ export class MobileGoalsStore {
     if (options?.confirmCoachPlan && (input.weekPlan === undefined || input.weekPlanAudit?.generatedBy !== "heuristic")) {
       throw new MobileGoalsInputError("确认课表必须提供规则教练方案");
     }
-    if (current.weekPlanReplanRequired && input.weekPlan !== undefined && !options?.confirmCoachPlan) {
+    const sessionCommand = options?.sessionCommand === true && this.publicationTransaction &&
+      options.preserveWeekPlan === true && this.currentTrainingPlan()?.state.schemaVersion === 2;
+    if (options?.sessionCommand === true && !sessionCommand) throw new MobileGoalsInputError("课程编辑需要统一课程发布事务");
+    if (current.weekPlanReplanRequired && input.weekPlan !== undefined && !options?.confirmCoachPlan && !sessionCommand) {
       throw new WeeklyPlanConfirmationRequiredError();
     }
     const stored: StoredGoals = {
@@ -712,7 +814,9 @@ export class MobileGoalsStore {
       // Merged rather than replaced: the goals editor only carries kind and
       // distance, so a blind replace would erase the generated structure (and
       // its tuned rep count) every time a user saves their weekly distance.
-      weekPlan: input.weekPlan === undefined ? current.weekPlan : normalizeWeekPlan(input.weekPlan, current.weekPlan, options),
+      weekPlan: input.weekPlan === undefined ? current.weekPlan
+        : options?.preserveWeekPlan === true ? input.weekPlan.map(day => structuredClone(day))
+          : normalizeWeekPlan(input.weekPlan, current.weekPlan, options),
       lockedSession:
         input.lockedSession === undefined
           ? current.lockedSession
@@ -1264,7 +1368,13 @@ export class MobileGoalsStore {
       // in any control database when it was added); `applied` above is still the
       // runtime source of truth, so a restored/older database only runs what it
       // has not recorded yet.
-      { version: 2, apply: () => this.migrateTrainingPlanState(database) }
+      { version: 2, apply: () => this.migrateTrainingPlanState(database) },
+      // B02: append-only identity history; no runtime data migration or capability enablement.
+      { version: 3, apply: () => ensureTrainingPlanSessionSchema(database) },
+      // B06: current execution link + append-only execution revisions.
+      { version: 4, apply: () => ensureTrainingPlanExecutionSchema(database) },
+      // B08: one per-scope evaluation cursor (not a task queue).
+      { version: 5, apply: () => ensureTrainingPlanEvaluationSchema(database) }
     ];
     for (const migration of migrations) {
       if (migration.version <= applied) continue;
@@ -1357,6 +1467,17 @@ export class MobileGoalsStore {
     ensureTrainingPlanSchema(database);
   }
 
+  /**
+   * A schema-2 unified scope must read its materialized week byte-for-byte. The
+   * legacy normalize path is a v1 compatibility adapter; using it here would drop
+   * `reason:null` (and potentially reshape a protected prescription) and make the
+   * compatibility projection disagree with the frozen session identity.
+   */
+  private preserveUnifiedWeekPlan(): boolean {
+    if (!this.trainingIdentity) return false;
+    try { return this.currentTrainingPlan()?.state.schemaVersion === 2; } catch { return false; }
+  }
+
   private readControlGoals(): StoredGoals {
     const row = this.controlDatabase?.prepare("SELECT revision, payload_json, updated_at FROM mobile_goals WHERE singleton = 1").get() as { revision: number; payload_json: string; updated_at: string } | undefined;
     if (!row) return emptyGoals();
@@ -1364,12 +1485,13 @@ export class MobileGoalsStore {
     // older build has no `weekPlanAudit` (nor `structure`/`reason` on its plan
     // days), and the response type promises `null` — never a missing key.
     const parsed = JSON.parse(row.payload_json) as Partial<StoredGoals>;
+    const rawWeekPlan = Array.isArray(parsed.weekPlan) ? parsed.weekPlan : [];
     return {
       revision: Number(row.revision),
       easyDurationFloorFraction: Number.isFinite(Number(parsed.easyDurationFloorFraction)) ? clampFraction(Number(parsed.easyDurationFloorFraction)) : DEFAULT_EASY_DURATION_FLOOR,
       qualitySessionCap: Number.isFinite(Number(parsed.qualitySessionCap)) ? clampCap(Number(parsed.qualitySessionCap)) : DEFAULT_QUALITY_SESSION_CAP,
       raceTarget: normalizeRaceTarget(parsed.raceTarget ?? null),
-      weekPlan: normalizeWeekPlan(Array.isArray(parsed.weekPlan) ? parsed.weekPlan : [], []),
+      weekPlan: this.preserveUnifiedWeekPlan() ? rawWeekPlan.map(day => parseSessionPrescription(day)) : normalizeWeekPlan(rawWeekPlan, []),
       lockedSession: normalizeLockedSession(parsed.lockedSession ?? null),
       weekPlanAudit: normalizePlanAudit(parsed.weekPlanAudit ?? null),
       weekPlanReplanRequired: parsed.weekPlanReplanRequired === true,
@@ -1611,8 +1733,14 @@ function normalizeWeekPlan(
       distanceKm
     };
     if (structure && item.kind !== "rest") day.structure = structure;
-    const reason = typeof item.reason === "string" && item.reason.length > 0 ? item.reason.slice(0, 400) : (prior?.reason ?? null);
-    if (reason) day.reason = reason;
+    const explicitNull = item.reason === null;
+    const reason = typeof item.reason === "string" && item.reason.length > 0 ? item.reason.slice(0, 400)
+      : explicitNull ? null : (prior?.reason ?? null);
+    // `null` is a value ("no reason"), not the same byte shape as an omitted
+    // field. A schema-2 materialization compares exact prescriptions, so the
+    // legacy normalizer must not erase it on the way through.
+    if (reason !== null) day.reason = reason;
+    else if (explicitNull || prior?.reason === null) day.reason = null;
     return [day];
   });
 }
@@ -1646,7 +1774,10 @@ function measurePlanDay(
     distanceKm: numbers.distanceKm
   };
   if (numbers.structure) measured.structure = numbers.structure;
-  if (day.reason) measured.reason = day.reason;
+  // Preserve an explicit `null` as well: a stored schema-2 prescription uses the
+  // field to say "no reason", and dropping it would make the measured copy differ
+  // from the frozen session identity on the next ownership reconciliation.
+  if (day.reason !== undefined) measured.reason = day.reason;
   return measured;
 }
 

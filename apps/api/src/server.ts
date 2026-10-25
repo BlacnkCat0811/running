@@ -143,7 +143,15 @@ import {
   trainingPlanCommandError
 } from "./training-plan-commands.js";
 import { TrainingPlanCoordinator } from "./training-plan-coordinator.js";
+import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers } from "./training-plan-session-commands.js";
+import { TrainingPlanExecutionCommandService, createTrainingExecutionCommandHandlers } from "./training-plan-execution-commands.js";
+import { validateTrainingSessionSafety } from "./training-plan-session-safety.js";
 import { trainingPlanGenerationDeps } from "./training-plan-generation.js";
+import { trainingPlanAnalysisReady, trainingPlanConfigDigest, trainingPlanDesiredInputKey,
+  trainingPlanExecutionDigest, trainingPlanOverridesDigest } from "./training-plan-input-identity.js";
+import type { TrainingPlanState } from "./training-plan-store.js";
+import { trainingPlanGenerationPreferences } from "./training-plan-preferences.js";
+import { trainingPlanProtectedDays } from "./training-plan-session-policy.js";
 import type { TrainingPlanRefreshRequest } from "@rai/api-contracts";
 import {
   RETIRED_TRAINING_PLAN_SURFACES,
@@ -173,14 +181,22 @@ const configuredControlDatabasePath = process.env.RAI_CONTROL_DATABASE
 const predictionArtifactRoot = resolve(runtimeRoot, "var", "model-artifacts", "prediction");
 const port = Number(process.env.RAI_API_PORT ?? 8787);
 const host = process.env.RAI_API_HOST ?? "127.0.0.1";
-const trainingCommandValidation = process.env.RAI_TRAINING_PLAN_COMMAND_MODE === "validation";
+// Each capability is independently opt-in. Unknown/missing values stay closed.
+const trainingWriteModes = [process.env.RAI_TRAINING_PLAN_COMMAND_MODE,
+  process.env.RAI_TRAINING_PLAN_SESSION_COMMAND_MODE, process.env.RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE,
+  process.env.RAI_TRAINING_PLAN_AUTO_PUBLISH_MODE];
+const trainingWriteEnabled = (mode: string | undefined): boolean => mode === "validation" || mode === "production";
+const trainingCommandEnabled = trainingWriteEnabled(trainingWriteModes[0]);
+const trainingSessionCommandEnabled = trainingWriteEnabled(trainingWriteModes[1]);
+const trainingExecutionCommandEnabled = trainingWriteEnabled(trainingWriteModes[2]);
+const trainingPlanAutoPublishEnabled = trainingWriteEnabled(trainingWriteModes[3]);
 /**
  * Candidate-only write admission. It must be impossible to enable this mode
  * against a personal/production runtime; every path is compared after resolving
  * symlinks, and the API may only bind loopback. Missing paths fail closed with a
  * readable message instead of throwing a raw ENOENT before the server logs.
  */
-if (trainingCommandValidation) {
+if (trainingWriteModes.includes("validation")) {
   const real = (path: string): string | null => { try { return realpathSync(path); } catch { return null; } };
   const runtimeReal = real(runtimeRoot);
   const tempRoots = [tmpdir(), "/tmp"].map(real).filter((path): path is string => path !== null);
@@ -195,6 +211,13 @@ if (trainingCommandValidation) {
   }
 }
 const apiToken = process.env.RAI_API_TOKEN?.trim() || undefined;
+if (trainingWriteModes.includes("production")) {
+  if (!apiToken) throw new Error("Training plan production writes require RAI_API_TOKEN.");
+  if (![process.env.RAI_RUNTIME_ROOT, process.env.RAI_DATABASE, process.env.RAI_CONTROL_DATABASE]
+    .every(value => typeof value === "string" && value.trim().length > 0)) {
+    throw new Error("Training plan production writes require explicit RAI_RUNTIME_ROOT, RAI_DATABASE and RAI_CONTROL_DATABASE.");
+  }
+}
 // 单批上传的 ZIP 上界（S3.6 收口：4 GiB → 64 MiB）。
 // 分批后（iOS 阶段 2）单批 ZIP 上界 = XML ≤2 MiB + routes ≤32 MiB + 包壳，64 MiB 有 ≥1.9× 余量；
 // 旧值在 50 GB 盘上构成真实威胁（一个异常包就能吃光解压预算）。生产 env 若显式设置该键需同步改。
@@ -402,6 +425,7 @@ const tokenRequiredReadRoutes = new Set([
   "/v1/mobile/today",
   "/v1/mobile/workout-plan",
   "/v1/mobile/training-plan-state",
+  "/v1/mobile/training-plan/sessions/:sessionId/execution-candidates",
   "/v1/mobile/goals",
   "/v1/mobile/statistics",
   "/v1/mobile/trends",
@@ -477,7 +501,12 @@ const metadataOnlyMutationRoutes = new Set([
   // remain available while a main-database writer owns the mutation lease.
   "/v1/mobile/training-plan/commands/preview",
   "/v1/mobile/training-plan/commands",
-  "/v1/mobile/training-plan/commands/refresh"
+  "/v1/mobile/training-plan/commands/refresh",
+  "/v1/mobile/training-plan/session-commands/preview",
+  "/v1/mobile/training-plan/session-commands",
+  // B06: execution confirm/correct take the generation lease inside the handler;
+  // retract/skip are metadata-only and must stay available during a sync.
+  "/v1/mobile/training-plan/execution-commands"
 ]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/mobile/coach-loop",
@@ -764,7 +793,9 @@ const planPublication = new PlanPublicationService(mobileGoalsStore, () => JSON.
   () => ({ serverId, athleteId, datasetEpoch }));
 mobileGoalsStore.retireLegacyModelPlan(mobileLocalDate());
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
-const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error), taskAdmission.owner("recompute"));
+let analysisRoundHook: () => void = () => {};
+const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error),
+  taskAdmission.owner("recompute"), () => analysisRoundHook());
 const importSources = createImportSourceManager(runtimeRoot, projectRoot, maxImportZipBytes);
 await importSources.cleanupAbandonedUploads().catch((error) => {
   app.log.warn(error, "Failed to clean abandoned import uploads during startup");
@@ -1261,6 +1292,14 @@ async function ensureWeeklyPlan(): Promise<void> {
     if (!mobileGoalsStore.trainingPlanOwnerReady()) {
       throw new PlanOperationError("training_plan_owner_invalid", "训练状态所有权尚未就绪。", 503);
     }
+    // B06: a corrected/deleted source invalidates the current link even when the
+    // automatic publisher is closed; the write is a deterministic replayable
+    // operation, never a GET side effect.
+    const reconciled = await trainingExecutionService.reconcileSourceChanges();
+    if (reconciled.changed > 0) return;
+    // Automatic publication has its own explicit gate. Enabling manual writes
+    // never implicitly enables background publication.
+    if (!trainingPlanAutoPublishEnabled) return;
     await trainingPlanCoordinator.tick();
     return;
   }
@@ -1279,6 +1318,16 @@ const weeklyPlanTimer = setInterval(() => {
   });
 }, 60 * 60_000);
 weeklyPlanTimer.unref();
+// B08: the initial convergence target is 60 s after the last necessary analysis.
+// This timer only compares persistent input keys; it does not query health data or
+// write anything when the cursor already matches.
+const trainingPlanUpdateTimer = setInterval(() => {
+  if (closing || !trainingPlanAutoPublishEnabled) return;
+  void ensureWeeklyPlan().catch((error) => {
+    app.log.error(error, "Training plan input convergence failed");
+  });
+}, 60_000);
+trainingPlanUpdateTimer.unref();
 // The hourly tick alone means a service restarted on a Monday morning would not
 // plan that week until an hour later, so probe once shortly after boot too.
 const weeklyPlanKickoff = setTimeout(() => {
@@ -1290,6 +1339,7 @@ const weeklyPlanKickoff = setTimeout(() => {
 weeklyPlanKickoff.unref();
 app.addHook("onClose", async () => {
   clearInterval(weeklyPlanTimer);
+  clearInterval(trainingPlanUpdateTimer);
   clearTimeout(weeklyPlanKickoff);
 });
 
@@ -1306,6 +1356,21 @@ app.get("/v1/health", async (): Promise<HealthResponse> => {
     now: new Date().toISOString()
   };
 });
+/**
+ * B03/G1: the session read extension may be advertised only after the controlled
+ * identity migration produced schema 2 AND the unified owner is ready. A legacy
+ * read capability is not proof that stable session IDs exist, and a damaged
+ * owner must not be papered over by a capability bit.
+ */
+const trainingPlanSessionReadAdvertised = (): boolean => {
+  try {
+    return mobileGoalsStore.currentTrainingPlan()?.state.schemaVersion === 2 &&
+      mobileGoalsStore.trainingPlanOwnerReady();
+  } catch {
+    return false;
+  }
+};
+
 app.get("/v1/handshake", async (request): Promise<HandshakeResponse> => ({
   serverId,
   athleteId,
@@ -1320,21 +1385,23 @@ app.get("/v1/handshake", async (request): Promise<HandshakeResponse> => ({
   // set, which is what a client in this state must use.
   //
   // 2026-10-21（PR-02）：`trainingPlanContractVersion` is the new **read**
-  // contract (`X-RAI-Training-Contract: 2`). It is advertised under the same
-  // precondition: the managed preHandler currently answers that route with 409,
-  // so a managed dataset must not claim it. "Capability present" is not "this
-  // scope is migrated" — unmigrated scopes still answer the typed
+  // contract (`X-RAI-Training-Contract: 2`). Managed scopes may advertise it once
+  // migrated and owner-ready; they still omit the legacy snapshot capability.
+  // "Capability present" is not "this scope is migrated" — unmigrated scopes answer
   // `training_plan_not_migrated` 409 the client must handle separately.
   ...(coachLoopManaged() ? {} : { planSnapshotContractVersion: 1, trainingPlanContractVersion: 2 }),
   ...(coachLoopManaged() && mobileGoalsStore.trainingPlanOwnerReady() ? { trainingPlanContractVersion: 2 } : {}),
-  ...(trainingCommandValidation && request.headers["x-rai-client-training-commands"] === "2" && mobileGoalsStore.trainingPlanOwnerReady()
+  ...(trainingCommandEnabled && request.headers["x-rai-client-training-commands"] === "2" && mobileGoalsStore.trainingPlanOwnerReady()
     ? { trainingPlanCommandContractVersion: 2 } : {}),
+  ...(trainingPlanSessionReadAdvertised() ? { trainingPlanSessionContractVersion: 1 } : {}),
+  ...(trainingSessionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
+    request.headers["x-rai-client-training-session-commands"] === "1" ? { trainingPlanSessionCommandContractVersion: 1 } : {}),
+  ...(trainingExecutionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
+    request.headers["x-rai-client-training-execution-commands"] === "1" ? { trainingPlanExecutionCommandContractVersion: 1 } : {}),
+  ...(trainingPlanSessionReadAdvertised() ? { trainingPlanUpdateContractVersion: 1 } : {}),
   coachLoopContractVersion: 1,
-  // PR-02 deliberately does NOT advertise `trainingPlanCommandContractVersion`:
-  // the configuration command surface exists, but the plan single-ownership
-  // decision (PR-03) and the iOS Publisher (PR-04) are not accepted yet. Absence
-  // means "read-only" to a client; it must never guess write availability from
-  // `coachLoopContractVersion`.
+  // Write capabilities require their own server switch and exact request
+  // negotiation. The read/publication capabilities do not grant write access.
   ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),
   planReceiptContractVersion: 2,
   factsAnalysisContractVersion: 1,
@@ -1877,6 +1944,8 @@ app.get("/v1/mobile/training-plan-state", createTrainingPlanStateRoute({
   businessDate: () => mobileLocalDate(),
   readUnifiedState: scopeKey => mobileGoalsStore.trainingPlanStateRow(scopeKey),
   readGoalsRevision: () => mobileGoalsStore.read().revision,
+  readExecutions: (scopeKey, instance) => mobileGoalsStore.trainingPlanExecutions(scopeKey, instance),
+  readUpdate: (_scopeKey, row) => trainingPlanUpdateViewFor(row),
   legacy: () => withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })))
 }));
 
@@ -1928,21 +1997,39 @@ const trainingPlanCommands = (() => {
     generate: async ({ goals, inputs }, state) => {
       if (state.coachLoop !== null) return coachLoopRuntime.prepareUnified(state);
       const mirror = legacyRaceTargetMirror(state);
+      // B03/S01-04: consume migrated run-coach preferences instead of clearing the
+      // evidence and generating a default seven-day week. The adapter throws
+      // `training_preferences_incomplete` rather than guessing when evidence is
+      // missing/invalid; `preferences.runningDays === null` is the honest "no
+      // saved restriction", not an invented 7-day preference.
+      const preferences = trainingPlanGenerationPreferences(state);
+      const protectedDays = trainingPlanProtectedDays(state, state.schemaVersion === 2
+        ? mobileGoalsStore.trainingPlanExecutions(JSON.stringify([serverId, athleteId, datasetEpoch]), state.planInstanceId) : []);
       const result = await generateWeeklyPlan({
         today: inputs.today,
         goals: { ...goals, runCoach: null, raceTarget: mirror === undefined ? null : mirror },
         prescription: inputs.prescription,
         weeklyVolumeBaselineKm: inputs.weeklyVolumeBaselineKm,
         recentWeeklyKm: inputs.recentWeeklyKm,
-        previousWeekDistanceKm: inputs.previousWeekDistanceKm
+        previousWeekDistanceKm: inputs.previousWeekDistanceKm,
+        preferences,
+        protectedDays
       });
       return { days: result.days, audit: result.audit, warnings: result.warnings, prescription: inputs.prescription };
+    },
+    evaluation: (state) => {
+      // B08 only owns the migrated schema 2 entity model; a legacy schema 1 plan
+      // keeps the pre-B08 refresh semantics byte for byte.
+      if (state.schemaVersion !== 2) return null;
+      const input = trainingPlanEvaluationFor(state);
+      return { inputKey: input.inputKey, businessDate: input.businessDate,
+        policyHash: input.policyHash, executionDigest: input.executionDigest };
     }
   });
   const admit = (request: FastifyRequest) => {
     if (mobileGoalsStore.currentTrainingPlan() === null) throw new PlanOperationError("training_plan_not_migrated", "请先离线迁移训练状态。", 409);
     if (!mobileGoalsStore.trainingPlanOwnerReady()) throw new PlanOperationError("training_plan_owner_invalid", "训练状态所有权尚未就绪。", 503);
-    if (!trainingCommandValidation) throw new PlanOperationError("training_commands_disabled", "训练命令尚未启用，请保持只读。", 409);
+    if (!trainingCommandEnabled) throw new PlanOperationError("training_commands_disabled", "训练命令尚未启用，请保持只读。", 409);
     // Capability discovery is not enough: a client must explicitly negotiate the
     // command contract in the same request. Replay paths are deliberately before
     // admit(), so an already-committed operation can still be queried read-only.
@@ -1971,6 +2058,18 @@ const trainingPlanCoordinator = new TrainingPlanCoordinator({
   scopeKey: () => JSON.stringify([serverId, athleteId, datasetEpoch]),
   readState: () => mobileGoalsStore.trainingPlanStateRow(JSON.stringify([serverId, athleteId, datasetEpoch])),
   businessDate: () => mobileLocalDate(),
+  desiredInput: () => {
+    const row = mobileGoalsStore.trainingPlanStateRow(JSON.stringify([serverId, athleteId, datasetEpoch]));
+    if (row === null || row.state.runState !== "active" || row.state.schemaVersion !== 2) return null;
+    const input = trainingPlanEvaluationFor(row.state);
+    return { inputKey: input.inputKey, analysisReady: input.analysisReady };
+  },
+  readEvaluation: () => {
+    const row = mobileGoalsStore.trainingPlanStateRow(JSON.stringify([serverId, athleteId, datasetEpoch]));
+    const evaluation = mobileGoalsStore.trainingPlanEvaluation(JSON.stringify([serverId, athleteId, datasetEpoch]));
+    return row === null || evaluation === null ? null
+      : { inputKey: evaluation.inputKey, stateRevision: evaluation.stateRevision };
+  },
   refresh: input => withTrainingPlanGenerationLease(() => trainingPlanCommands.refresh({
     contractVersion: 2,
     operationId: input.operationId,
@@ -1978,6 +2077,62 @@ const trainingPlanCoordinator = new TrainingPlanCoordinator({
     expectedStateRevision: input.stateRevision
   }))
 });
+
+analysisRoundHook = () => {
+  if (!trainingPlanAutoPublishEnabled) return;
+  void ensureWeeklyPlan().catch((error) => {
+    app.log.error(error, "Training plan analysis convergence failed");
+  });
+};
+
+// B04: separate explicit write admission. Retrying a committed operation is a
+// read and remains available after this gate is closed.
+const trainingSessionCommands = createTrainingSessionCommandHandlers(new TrainingPlanSessionCommandService(
+  mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch }), () => mobileLocalDate(), () => {
+    if (taskAdmission.isBlocked || !existsSync(databasePath)) {
+      throw new PlanOperationError("publication_recovery_required", "数据库发布需要恢复。", 409);
+    }
+    if (isDatabaseWriteBusy()) throw new PlanOperationError("coach_sync_pending", "训练事实正在更新，请完成后重新预览。", 409);
+    const version = readStores.dataVersionFingerprint();
+    const snapshot = weeklyPlanSnapshot();
+    if (readStores.dataVersionFingerprint() !== version) {
+      throw new PlanOperationError("training_session_candidate_mismatch", "读取期间训练事实变化，请重新预览。", 409);
+    }
+    return { fingerprint: `${snapshot.fingerprint}:${version}`, prescription: snapshot.inputs.prescription,
+      validate: (state, impact) => validateTrainingSessionSafety(state, impact, { goals: snapshot.goals, ...snapshot.inputs }) };
+  }), request => {
+    if (!trainingSessionCommandEnabled || !trainingPlanSessionReadAdvertised() ||
+      !mobileGoalsStore.supportsPublicationOperations || request.headers["x-rai-client-training-session-commands"] !== "1") {
+      throw new PlanOperationError("training_session_commands_disabled", "课程编辑尚未启用或未完成合同协商。", 409);
+    }
+  }, withTrainingPlanGenerationLease);
+app.post("/v1/mobile/training-plan/session-commands/preview", trainingSessionCommands.preview);
+app.post("/v1/mobile/training-plan/session-commands", trainingSessionCommands.submit);
+
+// B06: execution association is a separate opt-in capability. Candidate
+// reads and writes share the same negotiated contract; a committed operation
+// still replays after the gate closes.
+const trainingExecutionService = new TrainingPlanExecutionCommandService(
+  mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch }), () => mobileLocalDate(), () => ({
+    fingerprint: () => {
+      if (taskAdmission.isBlocked || !existsSync(databasePath)) {
+        throw new PlanOperationError("publication_recovery_required", "数据库发布需要恢复。", 409);
+      }
+      if (isDatabaseWriteBusy()) throw new PlanOperationError("coach_sync_pending", "训练事实正在更新，请完成后重试。", 409);
+      return readStores.dataVersionFingerprint();
+    },
+    candidates: (rangeStart, rangeEnd) => withReadStore(store => store.executionCandidateFacts(rangeStart, rangeEnd)),
+    workout: (id, day, asOf) => withReadStore(store => store.executionWorkout(id, day, asOf))
+  }));
+const trainingExecutionCommands = createTrainingExecutionCommandHandlers(trainingExecutionService, request => {
+    if (!trainingExecutionCommandEnabled || !trainingPlanSessionReadAdvertised() ||
+      !mobileGoalsStore.supportsPublicationOperations || request.headers["x-rai-client-training-execution-commands"] !== "1") {
+      throw new PlanOperationError("training_execution_commands_disabled", "执行关联尚未启用或未完成合同协商。", 409);
+    }
+  }, withTrainingPlanGenerationLease);
+app.get<{ Params: { sessionId: string } }>("/v1/mobile/training-plan/sessions/:sessionId/execution-candidates",
+  trainingExecutionCommands.candidates);
+app.post("/v1/mobile/training-plan/execution-commands", trainingExecutionCommands.submit);
 
 app.post("/v1/mobile/training-plan/commands/preview", trainingPlanCommands.preview);
 app.post("/v1/mobile/training-plan/commands", trainingPlanCommands.submit);
@@ -2096,6 +2251,70 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
 }
 
 const weeklyPlanGenerationGate = new TryAcquireGate();
+
+/**
+ * B08: one definition of "the inputs the next plan would use". The coordinator,
+ * the refresh commit and the update read all call this, so they cannot disagree
+ * about whether the plan is current. Reads only: no plan write, no analysis
+ * trigger, no wall clock in the key.
+ */
+function trainingPlanEvaluationFor(state: TrainingPlanState) {
+  const businessDate = mobileLocalDate();
+  const read = withReadStore(store => store.trainingPlanInputFacts(businessDate));
+  const executions = state.schemaVersion === 2
+    ? mobileGoalsStore.trainingPlanExecutions(JSON.stringify([serverId, athleteId, datasetEpoch]), state.planInstanceId) : [];
+  const executionDigest = trainingPlanExecutionDigest(executions);
+  const configDigest = trainingPlanConfigDigest(state);
+  const overridesDigest = trainingPlanOverridesDigest(state);
+  const policyHash = state.coachLoop?.policyHash ?? null;
+  return { inputKey: trainingPlanDesiredInputKey({ scope: { serverId, athleteId, datasetEpoch }, businessDate,
+    facts: read.facts, analysis: read.analysis, configDigest, overridesDigest, executionDigest, policyHash }),
+  businessDate, policyHash, executionDigest, analysisReady: trainingPlanAnalysisReady(read.analysis),
+  analysis: read.analysis, facts: read.facts, executions };
+}
+
+/**
+ * B08 four-stage read. Each stage keeps its own evidence; a plan that has not
+ * consumed the newest published analysis is never presented as current. This
+ * function reads; it does not trigger publication.
+ */
+function trainingPlanUpdateViewFor(row: import("./training-plan-store.js").TrainingPlanStateRow) {
+  const input = trainingPlanEvaluationFor(row.state);
+  const scopeKey = JSON.stringify([serverId, athleteId, datasetEpoch]);
+  const evaluation = mobileGoalsStore.trainingPlanEvaluation(scopeKey);
+  const businessDate = mobileLocalDate();
+  const state = row.state;
+  const sessions = state.schemaVersion === 2 ? state.sessions : [];
+  const executions = input.executions;
+  const associationPending = sessions.some(session => session.lifecycle === "pending" &&
+    session.prescription.localDate <= businessDate &&
+    !executions.some(execution => execution.sessionId === session.sessionId && execution.association === "confirmed"));
+  const associationBlocked = executions.some(execution => execution.association === "invalidated");
+  const current = state.schemaVersion === 2 && (state.publishedInputKey === input.inputKey ||
+    (evaluation !== null && evaluation.inputKey === input.inputKey && evaluation.stateRevision === row.revision));
+  const reasonCodes: string[] = [];
+  if (!current) {
+    if (state.runState !== "active") reasonCodes.push("training_paused");
+    else if (!trainingPlanAutoPublishEnabled) reasonCodes.push("auto_publish_disabled");
+    else if (!input.analysisReady) reasonCodes.push("analysis_pending");
+    else reasonCodes.push("input_changed");
+  }
+  if (associationBlocked) reasonCodes.push("execution_invalidated");
+  return { contractVersion: 1 as const,
+    facts: { status: input.facts.length > 0 ? "stored" as const : "pending" as const,
+      identity: input.analysis.factsGeneration },
+    analysis: { status: input.analysis.analysisStatus === "published" ? "ready" as const
+      : input.analysis.analysisStatus === "failed" ? "failed" as const : "pending" as const,
+      identity: input.analysis.releaseId },
+    association: { status: associationBlocked ? "blocked" as const : associationPending ? "pending" as const : "current" as const,
+      identity: trainingPlanExecutionDigest(executions) },
+    plan: { status: current ? "current" as const : trainingPlanAutoPublishEnabled ? "pending" as const : "blocked" as const,
+      desiredInputKey: input.inputKey,
+      publishedInputKey: state.schemaVersion === 2 ? state.publishedInputKey : null,
+      evaluatedInputKey: evaluation?.inputKey ?? null,
+      evaluatedStateRevision: evaluation?.stateRevision ?? null,
+      reasonCodes } };
+}
 
 function weeklyPlanSnapshot() {
   const goals = mobileGoalsStore.read(planPrescription());

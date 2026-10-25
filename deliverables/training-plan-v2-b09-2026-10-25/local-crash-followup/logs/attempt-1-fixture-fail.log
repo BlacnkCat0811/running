@@ -1,0 +1,347 @@
+TAP version 13
+# (node:45094) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B09/T22/T28: session before_commit SIGTERM recovers atomically in a new process
+not ok 1 - B09/T22/T28: session before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 125.682097
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: B09/T22/T28: session before_commit SIGKILL recovers atomically in a new process
+not ok 2 - B09/T22/T28: session before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 54.786288
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: session after_commit SIGTERM recovers atomically in a new process
+not ok 3 - B09/T22/T28: session after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 62.183311
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: session after_commit SIGKILL recovers atomically in a new process
+not ok 4 - B09/T22/T28: session after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 46.852838
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: execution before_commit SIGTERM recovers atomically in a new process
+not ok 5 - B09/T22/T28: execution before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 82.899905
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: execution before_commit SIGKILL recovers atomically in a new process
+not ok 6 - B09/T22/T28: execution before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 62.42405
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: execution after_commit SIGTERM recovers atomically in a new process
+not ok 7 - B09/T22/T28: execution after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 197.643272
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: execution after_commit SIGKILL recovers atomically in a new process
+not ok 8 - B09/T22/T28: execution after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 119.758658
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: refresh before_commit SIGTERM recovers atomically in a new process
+not ok 9 - B09/T22/T28: refresh before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 93.175028
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: refresh before_commit SIGKILL recovers atomically in a new process
+not ok 10 - B09/T22/T28: refresh before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 85.176046
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: refresh after_commit SIGTERM recovers atomically in a new process
+not ok 11 - B09/T22/T28: refresh after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 67.395252
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: refresh after_commit SIGKILL recovers atomically in a new process
+not ok 12 - B09/T22/T28: refresh after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 40.096323
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: evaluation before_commit SIGTERM recovers atomically in a new process
+not ok 13 - B09/T22/T28: evaluation before_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 93.053877
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: evaluation before_commit SIGKILL recovers atomically in a new process
+not ok 14 - B09/T22/T28: evaluation before_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 72.341324
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: evaluation after_commit SIGTERM recovers atomically in a new process
+not ok 15 - B09/T22/T28: evaluation after_commit SIGTERM recovers atomically in a new process
+  ---
+  duration_ms: 58.263565
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+# Subtest: B09/T22/T28: evaluation after_commit SIGKILL recovers atomically in a new process
+not ok 16 - B09/T22/T28: evaluation after_commit SIGKILL recovers atomically in a new process
+  ---
+  duration_ms: 120.736615
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:1:1329'
+  failureType: 'testCodeFailure'
+  error: 'session revision/availability must advance monotonically'
+  code: 'ERR_TEST_FAILURE'
+  stack: |-
+    TrainingPlanSessionRepository.append (/Users/ta/running/apps/api/src/training-plan-session-repository.ts:75:13)
+    TrainingPlanStore.insertHistory (/Users/ta/running/apps/api/src/training-plan-store.ts:810:54)
+    TrainingPlanStore.commitState (/Users/ta/running/apps/api/src/training-plan-store.ts:795:12)
+    seedCrashFixture (/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts:75:13)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-closed-loop-crash.test.ts:40:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+  ...
+1..16
+# tests 16
+# suites 0
+# pass 0
+# fail 16
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3163.502674

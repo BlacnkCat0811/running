@@ -1,0 +1,14 @@
+{
+  "path": "packages/api-contracts/src/handshake-registry.ts",
+  "beforeSHA256": "b4cd97b703d95e1a8eed394f5a4f1d1d11b8261232311a98193919fedf12fe1e",
+  "afterSHA256": "74a43e1cb8ea94cb5cd59efef3107e5443812636da0d028ed8db4d573d2201e7",
+  "replacements": {
+    "仅隔离验收候选（RAI_TRAINING_PLAN_COMMAND_MODE=validation）且客户端发送 X-RAI-Client-Training-Commands: 2；生产能力在阶段 5 G6/G7 完成前保持关闭": "独立模式 validation/production 已显式启用、owner-ready，且客户端发送 X-RAI-Client-Training-Commands: 2；默认关闭，实际生产启用随部署单独核查",
+    "B01 不宣告；G1 后实现并在隔离 validation 显式协商，生产另行授权": "schema 2、owner-ready、publication 1，独立模式 validation/production 已启用且精确协商 X-RAI-Client-Training-Session-Commands: 1",
+    "iOS 精确能力判定；编辑/Publisher deferred 至 B04/B05": "iOS 精确能力判定、原生课程编辑与 TrainingPlanPublisher",
+    "B01 不宣告；G2 后隔离实现验收，生产另行授权": "schema 2、owner-ready、publication 1，独立模式 validation/production 已启用且精确协商 X-RAI-Client-Training-Execution-Commands: 1",
+    "iOS 精确能力判定；执行关联写 deferred 至 B06/B07": "iOS 精确能力判定、原生执行关联/回顾与 TrainingPlanPublisher"
+  },
+  "kind": "description fields only; no capability key/version or execution logic change",
+  "appliedAfterFullRun": true
+}

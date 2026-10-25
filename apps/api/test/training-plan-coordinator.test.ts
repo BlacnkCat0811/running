@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { TrainingPlanState } from "../src/training-plan-store.js";
+import type { TrainingPlanState, TrainingPlanLegacyState } from "../src/training-plan-store.js";
 import type { TrainingPlanStateRow } from "../src/training-plan-store.js";
 import { trainingPlanContextDigest } from "../src/training-mode-policy.js";
 import {
@@ -21,7 +21,7 @@ import {
 
 const BUSINESS_DATE = "2026-10-20";
 
-const row = (state: Partial<TrainingPlanState> = {}, revision = 3): TrainingPlanStateRow => {
+const row = (state: Partial<TrainingPlanLegacyState> = {}, revision = 3): TrainingPlanStateRow => {
   const base: TrainingPlanState = {
     schemaVersion: 1,
     migrationVersion: 1,
@@ -98,16 +98,19 @@ test("协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那�
   assert.equal(calls, 1);
 
   // A failed refresh must clear the running flag so the next tick can retry.
-  let fail = true;
+  let fail = true, clock = 0;
   const failing = new TrainingPlanCoordinator({
     scopeKey: () => "s",
     readState: () => row({ planContextDigest: null }),
     businessDate: () => BUSINESS_DATE,
     refresh: async () => { if (fail) throw new Error("boom"); }
-  });
+  }, () => clock);
   await assert.rejects(() => failing.tick());
   fail = false;
-  assert.equal((await failing.tick()).ran, true, "the coordinator must recover after a failed run");
+  assert.equal((await failing.tick()).ran, false, "a transient failure backs off instead of hot-looping");
+  assert.equal((await failing.tick()).reason, "backoff");
+  clock += 5_000;
+  assert.equal((await failing.tick()).ran, true, "the coordinator must recover after the bounded backoff");
 });
 
 test("协调器：不需要刷新的 scope 不调用刷新，也不写任何东西", async () => {
@@ -121,4 +124,53 @@ test("协调器：不需要刷新的 scope 不调用刷新，也不写任何东�
   const result = await coordinator.tick();
   assert.deepEqual(result, { ran: false, reason: "not_migrated" });
   assert.equal(calls, 0);
+});
+
+test("B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats", async () => {
+  const v2 = (publishedInputKey: string | null, revision = 5): TrainingPlanStateRow => {
+    const base = row({}, revision);
+    return { ...base, state: { ...(base.state as TrainingPlanLegacyState), schemaVersion: 2, migrationVersion: 2,
+      planInstanceId: "plan-1", sessions: [], suppressions: [], publishedInputKey } as unknown as TrainingPlanState };
+  };
+  let calls = 0, current = v2("input-1"), evaluation: { inputKey: string; stateRevision: number } | null = null;
+  const coordinator = new TrainingPlanCoordinator({
+    scopeKey: () => "s",
+    readState: () => current,
+    businessDate: () => BUSINESS_DATE,
+    desiredInput: () => ({ inputKey: "input-2", analysisReady: true }),
+    readEvaluation: () => evaluation,
+    refresh: async (input) => {
+      calls += 1;
+      assert.equal(input.reason, "input_changed");
+      assert.match(input.operationId, /^auto-/);
+      evaluation = { inputKey: "input-2", stateRevision: current.revision };
+    }
+  });
+  assert.deepEqual(await coordinator.tick(), { ran: true, reason: "input_changed" });
+  assert.equal(calls, 1);
+  assert.deepEqual(await coordinator.tick(), { ran: false, reason: "current" }, "the cursor prevents repeating the same input");
+  assert.equal(calls, 1);
+  evaluation = { inputKey: "input-2", stateRevision: current.revision - 1 };
+  assert.deepEqual(await coordinator.tick(), { ran: true, reason: "input_changed" },
+    "a cursor from an older state cannot certify the current state");
+  assert.equal(calls, 2);
+
+  const pending = new TrainingPlanCoordinator({
+    scopeKey: () => "s", readState: () => v2("input-1"), businessDate: () => BUSINESS_DATE,
+    desiredInput: () => ({ inputKey: "input-9", analysisReady: false }),
+    readEvaluation: () => null, refresh: async () => { calls += 1; }
+  });
+  assert.deepEqual(await pending.tick(), { ran: false, reason: "analysis_pending" },
+    "an unanalysed run never becomes a plan input");
+  assert.equal(calls, 2);
+});
+
+test("B08: the automatic operation key changes with the input identity, not only the state revision", () => {
+  const first = coordinatorOperationId({ scopeKey: "s", reason: "input_changed", businessDate: BUSINESS_DATE,
+    stateRevision: 5, inputKey: "input-1" });
+  const second = coordinatorOperationId({ scopeKey: "s", reason: "input_changed", businessDate: BUSINESS_DATE,
+    stateRevision: 5, inputKey: "input-2" });
+  assert.notEqual(first, second);
+  assert.equal(first, coordinatorOperationId({ scopeKey: "s", reason: "input_changed", businessDate: BUSINESS_DATE,
+    stateRevision: 5, inputKey: "input-1" }));
 });

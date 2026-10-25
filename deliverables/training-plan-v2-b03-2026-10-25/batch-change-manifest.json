@@ -1,0 +1,24 @@
+{
+  "baseline": "deliverables/training-plan-v2-b02-2026-10-25/verification-source-freeze.json",
+  "baselineFileCount": 1002,
+  "currentFileCount": 1006,
+  "changed": [
+    "apps/api/src/coach-loop-runtime.ts",
+    "apps/api/src/mobile-goals.ts",
+    "apps/api/src/server.ts",
+    "apps/api/src/training-plan-commands.ts",
+    "apps/api/src/training-plan-routes.ts",
+    "apps/api/src/training-plan-store.ts",
+    "apps/api/src/weekly-plan-service.ts",
+    "apps/api/test/phase5-training-plan.test.ts",
+    "packages/api-contracts/src/handshake-registry.ts"
+  ],
+  "added": [
+    "apps/api/src/training-plan-preferences.ts",
+    "apps/api/src/training-plan-session-policy.ts",
+    "apps/api/test/training-plan-session-policy.test.ts",
+    "apps/api/test/training-plan-session-protection-runtime.test.ts"
+  ],
+  "removed": [],
+  "note": "B03 compares against the accepted B02 source identity; docs and deliverables are documented separately. No source drift outside this listing."
+}

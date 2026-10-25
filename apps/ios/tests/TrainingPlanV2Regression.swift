@@ -129,6 +129,35 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         check(legacyHandshake.factsAnalysisContractVersion == nil && legacyHandshake.factsAnalysisViewContractVersion == nil,
               "an old server's missing capability keys decode as nil, never as a zero/empty view")
 
+        // B01 protocol freeze: same synthetic matrix as the Node contract tests.
+        // New routes/storage/UI remain deferred; these gates do not grant execution.
+        let sharedURL = URL(fileURLWithPath: "apps/ios/tests/fixtures/training-plan-closed-loop.json")
+        let shared = try JSONSerialization.jsonObject(with: Data(contentsOf: sharedURL)) as! [String: Any]
+        let capabilityCases = shared["capabilities"] as! [[String: Any]]
+        check(capabilityCases.count == 22, "the complete B01 capability matrix is loaded")
+        for row in capabilityCases {
+            let payload = try JSONSerialization.data(withJSONObject: row["handshake"]!)
+            let value = try JSONDecoder().decode(RaiHandshake.self, from: payload)
+            let expected = row["expected"] as! [String: Bool]
+            let name = row["name"] as! String
+            check(value.trainingPlanSessionsSupported == expected["sessions"] &&
+                  value.trainingPlanSessionCommandsSupported == expected["sessionCommands"] &&
+                  value.trainingPlanExecutionCommandsSupported == expected["executionCommands"] &&
+                  value.trainingPlanUpdatesSupported == expected["updates"], "B01 exact capabilities: \(name)")
+            check(value.legacyPlanWritesSupported == (row["legacyWrites"] as! Bool),
+                  "B01 capabilities never authorize retired URLs: \(name)")
+        }
+        for row in shared["projections"] as! [[String: Any]] where row["rejected"] as! Bool == false {
+            let payload = try JSONSerialization.data(withJSONObject: row["wire"]!)
+            let before = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: payload)
+            var extended = row["wire"] as! [String: Any]
+            extended["sessions"] = shared["sessions"]
+            let withExtension = try JSONSerialization.data(withJSONObject: extended)
+            let after = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: withExtension)
+            check(before.plan == after.plan && before.scope == after.scope && !after.execution.permitted && after.sessions != nil,
+                  "B02 optional extension retains identities without altering the existing projection: \(row["name"]!)")
+        }
+
         let v2JSON = """
         {
           "contractVersion": 2,
@@ -162,9 +191,13 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         }
         var observedHeader: String?
         var observedPath: String?
+        var observedMethod: String?
+        var observedBody: Data?
         V2ContractProtocol.handler = { request in
             observedHeader = request.value(forHTTPHeaderField: RaiTrainingPlanContract.headerField)
             observedPath = request.url?.path
+            observedMethod = request.httpMethod
+            observedBody = request.httpBody
             return (200, v2JSON)
         }
         let live = try await api.trainingPlanStateV2(baseURL: base, token: "test-token")
@@ -172,6 +205,8 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
               "the v2 read call decodes the unified payload from the wire")
         check(observedHeader == "2" && observedPath == "/v1/mobile/training-plan-state",
               "the training-plan read always requests contract 2 on its own path")
+        check(observedMethod == "GET" && observedBody == nil,
+              "the negotiated unified read sends GET with no mutation body")
         func contractFailure(_ status: Int, _ body: String) async -> RaiTrainingPlanContractError? {
             V2ContractProtocol.handler = { _ in (status, body) }
             do {
@@ -426,6 +461,83 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         check(TrainingPlanUnifiedPolicy.observationNote(neverPlannedRow) == "未排课",
             "single-day note distinguishes never-planned")
 
+        // B02 stable identity fixture is shared with the real TypeScript reader.
+        let identitiesURL = URL(fileURLWithPath: "apps/ios/tests/fixtures/training-plan-sessions-v2.json")
+        let identitiesFixture = try JSONSerialization.jsonObject(with: Data(contentsOf: identitiesURL)) as! [String: Any]
+        let identitiesWire = identitiesFixture["wire"] as! [String: Any]
+        let identitiesData = try JSONSerialization.data(withJSONObject: identitiesWire)
+        let identitiesSnapshot = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: identitiesData)
+        let identitiesScope = PlanReceiptScope(serverId: "synthetic-server", athleteId: "synthetic-athlete", datasetEpoch: "synthetic-epoch")
+        let identitiesNow = ISO8601DateFormatter().date(from: "2026-10-25T04:00:00Z")!
+        try TrainingPlanUnifiedPolicy.validate(identitiesSnapshot, identity: identitiesScope, minimumGoalsRevision: 7, now: identitiesNow)
+        let roundTrip = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: JSONEncoder().encode(identitiesSnapshot))
+        check(roundTrip == identitiesSnapshot && roundTrip.sessions?.sessions.first?.sessionRevision == 3,
+              "B02 identity, revision, override, protection, suppression and units survive Codable round-trip")
+        check(roundTrip.sessions?.sessions.first?.userOverride?.prescription.distanceKm == 10 &&
+              roundTrip.sessions?.sessions.first?.sessionId == "synthetic-stable-session" &&
+              roundTrip.sessions?.suppressions.count == 2 && !roundTrip.execution.permitted,
+              "B02 moved and edited intent keeps one stable ID and grants no execution")
+        V2ContractProtocol.handler = { request in
+            precondition(request.httpMethod == "GET" && request.httpBody == nil && request.url?.path == "/v1/mobile/training-plan-state")
+            precondition(request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" &&
+                         request.value(forHTTPHeaderField: "X-RAI-Training-Sessions") == "1")
+            return (200, String(decoding: identitiesData, as: UTF8.self))
+        }
+        let identitiesLive = try await api.trainingPlanStateV2(baseURL: base, token: "test-token", sessionEntities: true)
+        check(identitiesLive.sessions == identitiesSnapshot.sessions, "B02 actual transport requests exactly the optional session read extension")
+        for variant in ["unknown_version", "duplicate", "foreign_instance", "unknown_lifecycle", "unknown_protection", "lost_owner", "bad_override", "unknown_reference"] {
+            var wire = identitiesWire
+            var extensionValue = wire["sessions"] as! [String: Any]
+            var sessions = extensionValue["sessions"] as! [[String: Any]]
+            switch variant {
+            case "unknown_version": extensionValue["contractVersion"] = 99
+            case "duplicate": sessions.append(sessions[0])
+            case "foreign_instance": sessions[0]["planInstanceId"] = "other"
+            case "unknown_lifecycle": sessions[0]["lifecycle"] = "scheduled_is_completed"
+            case "unknown_protection": sessions[0]["protection"] = "future_value"
+            case "lost_owner": sessions = []
+            case "bad_override": sessions[0]["protection"] = "automatic"
+            default:
+                var suppressions = extensionValue["suppressions"] as! [[String: Any]]
+                suppressions[0]["sessionId"] = "other-session"
+                extensionValue["suppressions"] = suppressions
+            }
+            extensionValue["sessions"] = sessions; wire["sessions"] = extensionValue
+            let changed = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: JSONSerialization.data(withJSONObject: wire))
+            do {
+                try TrainingPlanUnifiedPolicy.validate(changed, identity: identitiesScope, minimumGoalsRevision: 7, now: identitiesNow)
+                check(false, "B02 corrupt identity view must be rejected: \(variant)")
+            } catch { check(true, "B02 identity validation fails closed: \(variant)") }
+        }
+        check(RaiTrainingPlanContractError.classification(serverCode: "training_session_contract_unsupported", status: 409) == .contractUnsupported,
+              "B02 unsupported session extension is an upgrade state and never a legacy fallback")
+        // B07 replaces the B02 refusal with a compatible optional decoder: a
+        // present execution view must be preserved, not thrown away. Absence is
+        // still distinguishable from an explicit empty history.
+        var executionsWire = identitiesWire
+        var executionsExtension = executionsWire["sessions"] as! [String: Any]
+        executionsExtension["executions"] = [["sessionId": "synthetic-stable-session", "executionRevision": 1,
+            "association": "unlinked", "trainingSessionId": NSNull(), "sourceFactDigest": NSNull(),
+            "prescriptionSessionRevision": 3, "assessment": NSNull(),
+            "availableAt": "2026-10-25T02:00:00.000Z", "reasonCodes": []]]
+        executionsWire["sessions"] = executionsExtension
+        let withExecutions = try JSONDecoder().decode(TrainingPlanStateResponseV2.self,
+            from: JSONSerialization.data(withJSONObject: executionsWire))
+        check(withExecutions.sessions?.executions?.count == 1 &&
+              withExecutions.sessions?.executions?.first?.association == "unlinked" &&
+              withExecutions.sessions?.executions?.first?.trainingSessionId == nil,
+              "B07 optional executions decode compatibly and keep unknown-vs-unlinked identity")
+        let roundTrippedExecutions = try JSONDecoder().decode(TrainingPlanStateResponseV2.self,
+            from: JSONEncoder().encode(withExecutions))
+        check(roundTrippedExecutions.sessions?.executions == withExecutions.sessions?.executions,
+              "B07 execution rows survive the real cache Codable round-trip")
+        var absentExecutionsWire = identitiesWire
+        var absentExtension = absentExecutionsWire["sessions"] as! [String: Any]
+        absentExtension.removeValue(forKey: "executions"); absentExecutionsWire["sessions"] = absentExtension
+        let absentExecutions = try JSONDecoder().decode(TrainingPlanStateResponseV2.self,
+            from: JSONSerialization.data(withJSONObject: absentExecutionsWire))
+        check(absentExecutions.sessions?.executions == nil,
+              "B07 absent executions remain unknown, never an empty history")
         print("Training plan v2 contract regression: \(count) checks passed")
     }
 }

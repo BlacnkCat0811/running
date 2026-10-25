@@ -1,0 +1,12 @@
+{
+  "command": [
+    "npm",
+    "test"
+  ],
+  "testConcurrency": 2,
+  "platform": "macOS-26.6.2-x86_64-i386-64bit",
+  "node": "v22.23.2",
+  "startedAt": "2026-10-25T13:45:14.832059+00:00",
+  "exitCode": 0,
+  "finishedAt": "2026-10-25T14:18:37.169384+00:00"
+}

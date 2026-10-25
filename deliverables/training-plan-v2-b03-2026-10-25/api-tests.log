@@ -1,0 +1,307 @@
+TAP version 13
+# (node:44681) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: real router: first coach enable generates for the retained unified race goal
+ok 1 - real router: first coach enable generates for the retained unified race goal
+  ---
+  duration_ms: 8054.81211
+  type: 'test'
+  ...
+# Subtest: real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available
+ok 2 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available
+  ---
+  duration_ms: 5961.336834
+  type: 'test'
+  ...
+# Subtest: real router: lock → pause clears both current locks and stops today/aggregate execution; resume cannot reuse the old lock
+ok 3 - real router: lock → pause clears both current locks and stops today/aggregate execution; resume cannot reuse the old lock
+  ---
+  duration_ms: 6402.12544
+  type: 'test'
+  ...
+# Subtest: real server startup timer: migrated managed empty window refreshes; paused and corrupt owners never publish
+ok 4 - real server startup timer: migrated managed empty window refreshes; paused and corrupt owners never publish
+  ---
+  duration_ms: 86171.1398
+  type: 'test'
+  ...
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+ok 5 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 9793.442044
+  type: 'test'
+  ...
+# (node:44682) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 6 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 66.898393
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 7 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 26.104044
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 8 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 38.765087
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 9 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 42.985042
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 10 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 30.516758
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 11 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 61.694792
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 12 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 27.916708
+  type: 'test'
+  ...
+# Subtest: migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening
+ok 13 - migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening
+  ---
+  duration_ms: 76.878972
+  type: 'test'
+  ...
+# Subtest: generation latch: facts changed during generation cannot be stamped with the new version
+ok 14 - generation latch: facts changed during generation cannot be stamped with the new version
+  ---
+  duration_ms: 49.254984
+  type: 'test'
+  ...
+# Subtest: facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first
+ok 15 - facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first
+  ---
+  duration_ms: 232.424954
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 16 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 56.472781
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 17 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 52.930595
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals: all business rows roll back and lane can retry
+ok 18 - publication abort at mobile_goals: all business rows roll back and lane can retry
+  ---
+  duration_ms: 41.584577
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals_history: all business rows roll back and lane can retry
+ok 19 - publication abort at mobile_goals_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 65.630848
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state: all business rows roll back and lane can retry
+ok 20 - publication abort at mobile_training_state: all business rows roll back and lane can retry
+  ---
+  duration_ms: 51.887264
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+ok 21 - publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 46.857017
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+ok 22 - publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+  ---
+  duration_ms: 42.545873
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 23 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 29.500131
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 24 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 25.038137
+  type: 'test'
+  ...
+# Subtest: 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+ok 25 - 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+  ---
+  duration_ms: 25.055498
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 26 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 64.675202
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 27 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 34.355258
+  type: 'test'
+  ...
+# Subtest: 命令体形状错误返回 422 training_command_invalid，而不是 500
+ok 28 - 命令体形状错误返回 422 training_command_invalid，而不是 500
+  ---
+  duration_ms: 35.328745
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 29 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 31.088975
+  type: 'test'
+  ...
+# (node:44697) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: control-schema migration 2 is appended after version 1 and keeps legacy rows readable
+ok 30 - control-schema migration 2 is appended after version 1 and keeps legacy rows readable
+  ---
+  duration_ms: 736.255332
+  type: 'test'
+  ...
+# Subtest: apply writes state, one history row and one audit row together, and read returns the same state
+ok 31 - apply writes state, one history row and one audit row together, and read returns the same state
+  ---
+  duration_ms: 53.896667
+  type: 'test'
+  ...
+# Subtest: replaying the same source digest is a no-op; a different digest is an explicit conflict
+ok 32 - replaying the same source digest is a no-op; a different digest is an explicit conflict
+  ---
+  duration_ms: 49.888476
+  type: 'test'
+  ...
+# Subtest: CAS conflict on a concurrent revision is detected and does not overwrite
+ok 33 - CAS conflict on a concurrent revision is detected and does not overwrite
+  ---
+  duration_ms: 41.467187
+  type: 'test'
+  ...
+# Subtest: state validation fails closed on unknown schemaVersion, non-canonical scope and ended/active state
+ok 34 - state validation fails closed on unknown schemaVersion, non-canonical scope and ended/active state
+  ---
+  duration_ms: 61.463993
+  type: 'test'
+  ...
+# Subtest: a pre-existing public race goal is preserved into the state (F04 data half)
+ok 35 - a pre-existing public race goal is preserved into the state (F04 data half)
+  ---
+  duration_ms: 47.156296
+  type: 'test'
+  ...
+# Subtest: an ended coach loop is stored as paused/ended and its all-rest window is not recorded as intent
+ok 36 - an ended coach loop is stored as paused/ended and its all-rest window is not recorded as intent
+  ---
+  duration_ms: 37.87435
+  type: 'test'
+  ...
+# Subtest: conflicting legacy sources are reported as conflicts and refused without writing
+ok 37 - conflicting legacy sources are reported as conflicts and refused without writing
+  ---
+  duration_ms: 812.450596
+  type: 'test'
+  ...
+# Subtest: CLI dry-run writes nothing and delegates the derived mode to training-mode-policy
+ok 38 - CLI dry-run writes nothing and delegates the derived mode to training-mode-policy
+  ---
+  duration_ms: 770.86483
+  type: 'test'
+  ...
+# Subtest: CLI apply requires the dry-run digest, writes once, replays idempotently and rejects a mismatch
+ok 39 - CLI apply requires the dry-run digest, writes once, replays idempotently and rejects a mismatch
+  ---
+  duration_ms: 3501.285529
+  type: 'test'
+  ...
+# Subtest: store refuses a schema-less database instead of creating tables implicitly
+ok 40 - store refuses a schema-less database instead of creating tables implicitly
+  ---
+  duration_ms: 13.322591
+  type: 'test'
+  ...
+# (node:44781) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+ok 41 - 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+  ---
+  duration_ms: 1.826283
+  type: 'test'
+  ...
+# Subtest: v2 投影：模式按业务日期派生，读取不带执行授权
+ok 42 - v2 投影：模式按业务日期派生，读取不带执行授权
+  ---
+  duration_ms: 3.306438
+  type: 'test'
+  ...
+# Subtest: v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+ok 43 - v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+  ---
+  duration_ms: 0.480018
+  type: 'test'
+  ...
+# Subtest: v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+ok 44 - v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+  ---
+  duration_ms: 18.335432
+  type: 'test'
+  ...
+# Subtest: 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+ok 45 - 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+  ---
+  duration_ms: 166.812535
+  type: 'test'
+  ...
+# Subtest: 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+ok 46 - 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+  ---
+  duration_ms: 5.600799
+  type: 'test'
+  ...
+# Subtest: 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+ok 47 - 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+  ---
+  duration_ms: 31.371074
+  type: 'test'
+  ...
+# Subtest: 未迁移的 store 读返回 null（不是伪造的空状态）
+ok 48 - 未迁移的 store 读返回 null（不是伪造的空状态）
+  ---
+  duration_ms: 34.085894
+  type: 'test'
+  ...
+1..48
+# tests 48
+# suites 0
+# pass 48
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 116984.099414
+EXIT:0

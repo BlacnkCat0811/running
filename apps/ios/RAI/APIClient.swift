@@ -121,6 +121,16 @@ enum RaiTrainingPlanContract {
     static let requestedVersion = "2"
 }
 
+/// B07 execution association is a separate negotiated contract. A 404 from
+/// either new route is translated to `training_execution_route_unsupported`
+/// before it can be mistaken for `plan_operation_notFound`.
+enum RaiTrainingPlanExecutionContract {
+    static let headerField = "X-RAI-Client-Training-Execution-Commands"
+    static let requestedVersion = "1"
+    static let routeUnsupportedCode = "training_execution_route_unsupported"
+    static let routeUnsupportedMessage = "当前服务未提供执行关联接口，请升级 App 或服务端；本版本不会退回旧接口。"
+}
+
 /// v2 训练读被服务端**显式拒绝**时的分类错误。
 ///
 /// 为什么不折叠进 `.server(code:message:status:)`：这几种拒绝的处置方式各不相同 ——
@@ -157,7 +167,7 @@ enum RaiTrainingPlanContractError: LocalizedError, Equatable {
         // 缺 code 时落到 `default`（不是合同拒绝），所以这里的空串只用于 switch 匹配。
         let code = serverCode ?? ""
         switch code {
-        case "training_contract_unsupported":
+        case "training_contract_unsupported", "training_session_contract_unsupported", "training_update_contract_unsupported":
             return .contractUnsupported
         case "training_plan_not_migrated":
             return .notMigrated
@@ -227,7 +237,8 @@ struct RaiAPIClient {
 
     func handshake(baseURL: URL, token: String) async throws -> RaiHandshake {
         try await get(path: "/v1/handshake", baseURL: baseURL, token: token,
-                      headers: ["X-RAI-Client-Training-Commands": "2"])
+                      headers: ["X-RAI-Client-Training-Commands": "2", "X-RAI-Client-Training-Session-Commands": "1",
+                                RaiTrainingPlanExecutionContract.headerField: RaiTrainingPlanExecutionContract.requestedVersion])
     }
 
     func today(baseURL: URL, token: String) async throws -> MobileTodayResponse {
@@ -289,10 +300,14 @@ struct RaiAPIClient {
     /// 显式拒绝（未知版本/未迁移/暂不可读）在这里翻译成
     /// `RaiTrainingPlanContractError`；网络与鉴权错误原样抛出，因为"连不上"不该
     /// 被提示成"升级 App"。
-    func trainingPlanStateV2(baseURL: URL, token: String) async throws -> TrainingPlanStateResponseV2 {
+    func trainingPlanStateV2(baseURL: URL, token: String, sessionEntities: Bool = false,
+                             updateStages: Bool = false) async throws -> TrainingPlanStateResponseV2 {
         do {
+            var headers = [RaiTrainingPlanContract.headerField: RaiTrainingPlanContract.requestedVersion]
+            if sessionEntities { headers["X-RAI-Training-Sessions"] = "1" }
+            if sessionEntities && updateStages { headers["X-RAI-Training-Updates"] = "1" }
             return try await get(path: "/v1/mobile/training-plan-state", baseURL: baseURL, token: token,
-                headers: [RaiTrainingPlanContract.headerField: RaiTrainingPlanContract.requestedVersion])
+                headers: headers)
         } catch let error as RaiAPIClientError {
             if let classified = RaiTrainingPlanContractError.classification(
                 serverCode: error.serverCode, status: error.httpStatus ?? 0) {
@@ -306,10 +321,86 @@ struct RaiAPIClient {
         try await get(path: "/v1/mobile/plan-operations/\(escapedPath(id))", baseURL: baseURL, token: token)
     }
 
+    /// B07: candidates for one stable session. The server never auto-confirms;
+    /// evidence only tells the user which row is identity-verified.
+    func trainingPlanExecutionCandidates(
+        sessionId: String,
+        planInstanceId: String,
+        rangeStart: String? = nil,
+        rangeEnd: String? = nil,
+        cursor: String? = nil,
+        baseURL: URL,
+        token: String
+    ) async throws -> TrainingPlanExecutionCandidatesResponse {
+        var query = [URLQueryItem(name: "planInstanceId", value: planInstanceId)]
+        if let rangeStart, !rangeStart.isEmpty { query.append(.init(name: "rangeStart", value: rangeStart)) }
+        if let rangeEnd, !rangeEnd.isEmpty { query.append(.init(name: "rangeEnd", value: rangeEnd)) }
+        if let cursor, !cursor.isEmpty { query.append(.init(name: "cursor", value: cursor)) }
+        do {
+            return try await get(path: "/v1/mobile/training-plan/sessions/\(escapedPath(sessionId))/execution-candidates",
+                query: query, baseURL: baseURL, token: token,
+                headers: [RaiTrainingPlanContract.headerField: RaiTrainingPlanContract.requestedVersion,
+                          "X-RAI-Training-Sessions": "1",
+                          RaiTrainingPlanExecutionContract.headerField: RaiTrainingPlanExecutionContract.requestedVersion])
+        } catch {
+            throw Self.classifiedExecutionRoute(error)
+        }
+    }
+
+    func submitTrainingExecutionCommand(
+        _ request: TrainingPlanExecutionCommandRequest,
+        baseURL: URL,
+        token: String
+    ) async throws -> TrainingPlanClosedLoopCommandResponse {
+        do {
+            return try await send(path: "/v1/mobile/training-plan/execution-commands", method: "POST", body: request,
+                baseURL: baseURL, token: token,
+                headers: [RaiTrainingPlanContract.headerField: RaiTrainingPlanContract.requestedVersion,
+                          "X-RAI-Training-Sessions": "1",
+                          RaiTrainingPlanExecutionContract.headerField: RaiTrainingPlanExecutionContract.requestedVersion])
+        } catch {
+            throw Self.classifiedExecutionRoute(error)
+        }
+    }
+
+    /// Replays the exact durable bytes. The caller only calls this after the
+    /// business operation query returned `notFound` (not an HTTP 404).
+    func submitTrainingExecutionCommand(
+        _ pending: PendingPlanPublication,
+        baseURL: URL,
+        token: String
+    ) async throws -> TrainingPlanClosedLoopCommandResponse {
+        do {
+            return try await request(path: "/v1/mobile/training-plan/execution-commands", query: [], method: "POST",
+                body: pending.payload, baseURL: baseURL, token: token,
+                headers: [RaiTrainingPlanContract.headerField: RaiTrainingPlanContract.requestedVersion,
+                          "X-RAI-Training-Sessions": "1",
+                          RaiTrainingPlanExecutionContract.headerField: RaiTrainingPlanExecutionContract.requestedVersion])
+        } catch {
+            throw Self.classifiedExecutionRoute(error)
+        }
+    }
+
+    /// An HTTP 404 without the explicit business code means the route itself is
+    /// absent (old server / upgrade required). `training_session_not_found` is
+    /// a real business answer and keeps its code.
+    private static func classifiedExecutionRoute(_ error: Error) -> Error {
+        guard let apiError = error as? RaiAPIClientError,
+              apiError.httpStatus == 404,
+              apiError.serverCode != "training_session_not_found" else { return error }
+        return RaiAPIClientError.server(code: RaiTrainingPlanExecutionContract.routeUnsupportedCode,
+            message: RaiTrainingPlanExecutionContract.routeUnsupportedMessage, status: 404)
+    }
+
     func previewTrainingPlanCommand(_ input: TrainingPlanCommandPreviewRequest, baseURL: URL, token: String) async throws -> TrainingPlanCommandPreview {
         try await send(path: "/v1/mobile/training-plan/commands/preview", method: "POST", body: input,
                        baseURL: baseURL, token: token,
                        headers: ["X-RAI-Client-Training-Commands": "2"])
+    }
+
+    func previewTrainingSession(_ input: TrainingPlanSessionPreviewRequest, baseURL: URL, token: String) async throws -> TrainingPlanSessionPreview {
+        try await send(path: "/v1/mobile/training-plan/session-commands/preview", method: "POST", body: input,
+            baseURL: baseURL, token: token, headers: ["X-RAI-Client-Training-Session-Commands": "1"])
     }
 
     func submitTrainingPlanCommand(_ pending: PendingPlanPublication, baseURL: URL, token: String) async throws -> TrainingPlanCommandResult {
@@ -317,10 +408,11 @@ struct RaiAPIClient {
         switch pending.route {
         case "training-command": path = "/v1/mobile/training-plan/commands"
         case "training-refresh": path = "/v1/mobile/training-plan/commands/refresh"
+        case "training-session": path = "/v1/mobile/training-plan/session-commands"
         default: throw RaiAPIClientError.decoding("该操作不是 v2 训练命令")
         }
         return try await request(path: path, query: [], method: "POST", body: pending.payload, baseURL: baseURL, token: token,
-                                 headers: ["X-RAI-Client-Training-Commands": "2"])
+                                 headers: pending.route == "training-session" ? ["X-RAI-Client-Training-Session-Commands": "1"] : ["X-RAI-Client-Training-Commands": "2"])
     }
     func replayPlanPublication<Result: Decodable>(_ operation: PendingPlanPublication, baseURL: URL, token: String) async throws -> Result {
         let paths = ["coach": "/v1/mobile/run-coach", "coach-loop": "/v1/mobile/coach-loop", "confirm": "/v1/mobile/workout-plan/confirm", "goals": "/v1/mobile/goals", "lock": "/v1/mobile/lock"]

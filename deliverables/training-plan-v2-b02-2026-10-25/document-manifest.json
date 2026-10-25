@@ -1,0 +1,25 @@
+{
+  "recordedAtUTC": "2026-10-25T04:10:10.961541+00:00",
+  "files": [
+    {
+      "path": "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md",
+      "beforeB01": "75dfe2fc6e0f6d970b2a629869b67706c57750d8eda30288340a651caf969f9d",
+      "sha256": "6a42f7b611fd8f98660957a2fb2c38b213737ac1c2f0e398e6d8a55ced7919af"
+    },
+    {
+      "path": "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md",
+      "beforeB01": "608e09fa2bd1fd1e4fb49fdc6d76cf9059b219272b40d162a2a31c6d60418338",
+      "sha256": "dd845411ec3b77854c379281e6feb6a316194e514a0d58b3701e366c8b8d3fdb"
+    },
+    {
+      "path": "docs/IOS_NATIVE_API_CONTRACT.md",
+      "beforeB01": "601fea7c0f82cf0191e9a94f8fe92d872d3b405d36bd498ffd89509a4e7e1edb",
+      "sha256": "e8e4c82814e6e14138c682038489acffd0fb1dee24e5cfd46e536c4aa106d06d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-b02-2026-10-25/B02_REPORT.md",
+      "beforeB01": null,
+      "sha256": "8d1ac9c7e2446b7ddf7310b8ba45745a98571f120ce435adb95f93b3046bf4b5"
+    }
+  ]
+}
