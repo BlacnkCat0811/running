@@ -20,9 +20,11 @@ const ALERT_KINDS = new Set<MobileStepAlert["kind"]>(["pace", "heart_rate"]);
 
 /** Bounds keep a hallucinated plan from producing an absurd workout. */
 export const MAX_STEP_METERS = 100_000;
-export const MAX_STEP_SECONDS = 4 * 60 * 60;
+export const MAX_PLANNED_DURATION_SECONDS = 4 * 60 * 60;
+export const MAX_STEP_SECONDS = MAX_PLANNED_DURATION_SECONDS;
 export const MAX_BLOCK_ITERATIONS = 20;
 export const MAX_BLOCKS = 8;
+export const MAX_STEPS_PER_BLOCK = 8;
 export const MAX_ALERT_PACE_SECONDS_PER_KM = 1200;
 export const MAX_ALERT_HEART_RATE_BPM = 240;
 /**
@@ -119,7 +121,18 @@ function normalizeBlock(value: unknown): MobileIntervalBlock | null {
   };
 }
 
-/** Returns a sanitized structure, or null when nothing usable remains. */
+/**
+ * Quantity limits for new/edited prescriptions, after lossless shape parsing.
+ * Separate from legacy normalization: old commands could persist more than
+ * eight steps, which reads, migration and replay must preserve.
+ */
+export function sessionStructureWithinWriteLimits(structure: MobileSessionStructure): boolean {
+  return structure.blocks.length <= MAX_BLOCKS && structure.blocks.every(block =>
+    Number.isInteger(block.iterations) && block.iterations >= 1 && block.iterations <= MAX_BLOCK_ITERATIONS &&
+    block.steps.length >= 1 && block.steps.length <= MAX_STEPS_PER_BLOCK);
+}
+
+/** Legacy sanitization, not a strict write validator. Never slice historical steps. */
 export function normalizeSessionStructure(value: unknown): MobileSessionStructure | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;

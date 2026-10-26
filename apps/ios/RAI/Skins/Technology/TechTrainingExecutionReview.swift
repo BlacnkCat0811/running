@@ -39,8 +39,7 @@ struct TechTrainingExecutionReview: View {
         "\(session.sessionId)|\(current.sessionRevision)|\(execution?.executionRevision ?? 0)|\(capability)|\(native.canEditTrainingExecutions)|\(native.trainingPlanStore.unified?.stateRevision ?? 0)"
     }
     private var canSkip: Bool {
-        TrainingPlanExecutionPolicy.canSkip(session: current, execution: execution,
-            hasCandidates: !(page?.candidates.isEmpty ?? true))
+        native.canSkipTrainingSession(sessionId: session.sessionId)
     }
 
     var body: some View {
@@ -155,20 +154,27 @@ struct TechTrainingExecutionReview: View {
             if let selectedCandidate {
                 Button(TrainingPlanExecutionPolicy.candidateActionTitle(association: execution?.association, session: current)) {
                     Task {
+                        localMessage = nil
                         if await native.confirmExecutionLink(sessionId: session.sessionId, candidate: selectedCandidate) {
                             localMessage = "关联已保存，正在重读计划与实际。"
                             selectedCandidateId = nil
+                        } else {
+                            localMessage = TrainingPlanExecutionPolicy.actionFailureMessage(
+                                execution?.association == "confirmed" ? "correct" : "confirm")
                         }
                     }
                 }
-                .disabled(!native.canEditTrainingExecutions)
+                .disabled(!native.canLinkTrainingExecutions)
                 .accessibilityIdentifier(execution?.association == "confirmed" ? "training.execution.correct" : "training.execution.confirm")
             }
             if TrainingPlanExecutionPolicy.canRetract(execution) {
                 Button("撤回当前关联", role: .destructive) {
                     Task {
+                        localMessage = nil
                         if await native.retractExecutionLink(sessionId: session.sessionId) {
                             localMessage = "撤回已保存，原完成历史仍保留。"
+                        } else {
+                            localMessage = TrainingPlanExecutionPolicy.actionFailureMessage("retract")
                         }
                     }
                 }
@@ -182,9 +188,12 @@ struct TechTrainingExecutionReview: View {
                     HStack {
                         Button("确认跳过") {
                             Task {
+                                localMessage = nil
                                 if await native.skipTrainingSession(sessionId: session.sessionId, reason: skipReason) {
                                     localMessage = "已明确跳过；不会把一次真实完成改成跳过。"
                                     showingSkip = false
+                                } else {
+                                    localMessage = TrainingPlanExecutionPolicy.actionFailureMessage("skip")
                                 }
                             }
                         }

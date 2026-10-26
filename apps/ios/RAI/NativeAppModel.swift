@@ -1657,6 +1657,11 @@ final class NativeAppModel {
         executionCommandCapability && !isOffline && trainingPlanStore.unifiedIsCurrent &&
         trainingPlanStore.unified?.sessions != nil && !isPlanBusy && !hasPendingPlanPublication && !trainingPlanPublisher.executionBlocked
     }
+    var canLinkTrainingExecutions: Bool {
+        canEditTrainingExecutions && TrainingPlanExecutionPolicy.permitsNewExecution(
+            runState: trainingPlanStore.unified?.runState,
+            sourceStatus: trainingPlanStore.unified?.migration.sourceStatus)
+    }
     /// Candidate pages keyed by sessionId. Fetched on demand when a course detail
     /// opens; it is never a source of automatic completion.
     private(set) var executionCandidates: [String: TrainingPlanExecutionCandidatesResponse] = [:]
@@ -1731,7 +1736,12 @@ final class NativeAppModel {
                 cursor: cursor, baseURL: baseURL, token: self.session.apiToken)
             guard executionCandidateRequests[sessionId] == request, !Task.isCancelled,
                   trainingPlanStore.unified?.stateRevision == snapshot.stateRevision,
-                  trainingPlanStore.unified?.sessions?.planInstanceId == sessions.planInstanceId else { return false }
+                  trainingPlanStore.unified?.sessions?.planInstanceId == sessions.planInstanceId else {
+                if executionCandidateRequests[sessionId] == request {
+                    executionCandidateIssues[sessionId] = "候选读取已失效，请重新读取后再决定是否跳过。"
+                }
+                return false
+            }
             if let reason = TrainingPlanExecutionPolicy.validate(response, identity: identity,
                 planInstanceId: sessions.planInstanceId, sessionId: sessionId,
                 sessionRevision: session.sessionRevision, executionRevision: execution?.executionRevision ?? 0,
@@ -1767,17 +1777,27 @@ final class NativeAppModel {
 
     @discardableResult
     func confirmExecutionLink(sessionId: String, candidate: TrainingPlanExecutionCandidate) async -> Bool {
-        guard canEditTrainingExecutions, let (session, target) = executionTarget(for: sessionId),
+        guard canLinkTrainingExecutions, let (session, target) = executionTarget(for: sessionId),
               let page = executionCandidates[sessionId],
               page.candidates.contains(where: { $0.trainingSessionId == candidate.trainingSessionId &&
                   $0.sourceFactDigest == candidate.sourceFactDigest }) else { return false }
+        if let reason = TrainingPlanExecutionPolicy.candidatePageMismatch(page,
+            planInstanceId: target.planInstanceId, sessionId: target.sessionId,
+            sessionRevision: target.sessionRevision, executionRevision: target.executionRevision,
+            stateRevision: target.stateRevision) {
+            executionCandidateIssues[sessionId] = reason
+            return false
+        }
         let execution = trainingPlanStore.sessionExecution(for: sessionId)
         let draft: TrainingPlanExecutionDraft
         if let association = execution?.association, ["confirmed", "invalidated"].contains(association) {
             draft = .correct(trainingSessionId: candidate.trainingSessionId, sourceFactDigest: candidate.sourceFactDigest)
         } else {
             guard execution == nil || execution?.association == "unlinked" || execution?.association == "pending_confirmation",
-                  session.lifecycle == "pending" || session.lifecycle == "completed" || session.lifecycle == "partial" else { return false }
+                  session.lifecycle == "pending" || session.lifecycle == "completed" || session.lifecycle == "partial" else {
+                executionCandidateIssues[sessionId] = "当前课程或关联状态不能确认这条候选，请重新读取。"
+                return false
+            }
             draft = .confirm(trainingSessionId: candidate.trainingSessionId, sourceFactDigest: candidate.sourceFactDigest)
         }
         return await submitExecution(draft, target: target, sessionId: sessionId)
@@ -1794,17 +1814,41 @@ final class NativeAppModel {
             target: target, sessionId: sessionId)
     }
 
+    /// Shared by the button and command path; failed/in-flight reads never
+    /// authorize Skip using the last successful (possibly empty) page.
+    private func skipTrainingSessionIssue(sessionId: String) -> String? {
+        guard let (session, target) = executionTarget(for: sessionId) else {
+            return "请先刷新训练安排。"
+        }
+        if executionCandidateLoading.contains(sessionId) { return "候选正在加载，请等待读取完成后再决定是否跳过。" }
+        if let issue = executionCandidateIssues[sessionId] { return issue }
+        guard let page = executionCandidates[sessionId] else {
+            return "请先读取候选实际训练，再决定是否跳过。"
+        }
+        guard page.scope == trainingPlanStore.unified?.scope else { return "执行候选属于其他数据域，请重新读取。" }
+        if let reason = TrainingPlanExecutionPolicy.candidatePageMismatch(page,
+            planInstanceId: target.planInstanceId, sessionId: target.sessionId,
+            sessionRevision: target.sessionRevision, executionRevision: target.executionRevision,
+            stateRevision: target.stateRevision) { return reason }
+        guard TrainingPlanExecutionPolicy.canSkip(session: session,
+            execution: trainingPlanStore.sessionExecution(for: sessionId),
+            hasCandidates: !page.candidates.isEmpty) else {
+            return "当前课程或候选状态不允许跳过；请重新读取课程与实际。"
+        }
+        return nil
+    }
+
+    func canSkipTrainingSession(sessionId: String) -> Bool {
+        canLinkTrainingExecutions && skipTrainingSessionIssue(sessionId: sessionId) == nil
+    }
+
     @discardableResult
     func skipTrainingSession(sessionId: String, reason: String) async -> Bool {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard canEditTrainingExecutions, !trimmed.isEmpty,
-              let (session, target) = executionTarget(for: sessionId) else { return false }
-        let execution = trainingPlanStore.sessionExecution(for: sessionId)
-        // Skip is allowed only after the candidate page was actually read: an
-        // unread/unknown candidate window must not be treated as "no run".
-        guard executionCandidates[sessionId] != nil else { return false }
-        let hasCandidates = !(executionCandidates[sessionId]?.candidates.isEmpty ?? true)
-        guard TrainingPlanExecutionPolicy.canSkip(session: session, execution: execution, hasCandidates: hasCandidates) else {
+        guard canLinkTrainingExecutions, !trimmed.isEmpty,
+              let (_, target) = executionTarget(for: sessionId) else { return false }
+        if let issue = skipTrainingSessionIssue(sessionId: sessionId) {
+            executionCandidateIssues[sessionId] = issue
             return false
         }
         return await submitExecution(.skip(reason: trimmed), target: target, sessionId: sessionId)
@@ -1812,7 +1856,15 @@ final class NativeAppModel {
 
     private func submitExecution(_ draft: TrainingPlanExecutionDraft, target: TrainingPlanExecutionTarget,
                                  sessionId: String) async -> Bool {
+        if case .retract = draft {
+            guard canEditTrainingExecutions else { return false }
+        } else {
+            guard canLinkTrainingExecutions else { return false }
+        }
         guard let context = commandContext else { return false }
+        // Skip must require a fresh candidate read after rejection as well as
+        // success: a server fact conflict can leave state revisions unchanged.
+        if case .skip = draft { executionCandidates[sessionId] = nil }
         // A submission invalidates reads that started before the user chose a
         // candidate; the captured target (not a later read) is what gets submitted.
         cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
@@ -1847,16 +1899,21 @@ final class NativeAppModel {
         return trainingPlanPublisher.finishRead(context: context)
     }
 
-    func previewTrainingSession(_ draft: TrainingPlanSessionDraft) async -> Bool {
+    func previewTrainingSession(_ draft: TrainingPlanSessionDraft,
+                                editorIdentity: TrainingPlanSessionEditorPolicy.DraftIdentity) async -> Bool {
         guard canEditTrainingSessions, let context = commandContext, let snapshot = trainingPlanStore.unified,
-              let sessions = snapshot.sessions else { return false }
+              !draft.requiresDistanceOmission || handshake?.trainingPlanSessionDistanceOmissionSupported == true,
+              editorIdentity.issue(in: snapshot) == nil, editorIdentity.matches(draft) else { return false }
         return await trainingPlanPublisher.makeSessionPreview(.init(operationScope: context.identity,
-            expectedStateRevision: snapshot.stateRevision, planInstanceId: sessions.planInstanceId, draft: draft), context: context) {
-            self.commandContext == context && !Task.isCancelled
+            expectedStateRevision: editorIdentity.stateRevision, planInstanceId: editorIdentity.planInstanceId, draft: draft), context: context) {
+            self.commandContext == context && !Task.isCancelled && editorIdentity.issue(in: self.trainingPlanStore.unified) == nil
         }
     }
-    func confirmTrainingSession(_ draft: TrainingPlanSessionDraft) async -> Bool {
+    func confirmTrainingSession(_ draft: TrainingPlanSessionDraft,
+                                editorIdentity: TrainingPlanSessionEditorPolicy.DraftIdentity) async -> Bool {
         guard canEditTrainingSessions, let context = commandContext,
+              !draft.requiresDistanceOmission || handshake?.trainingPlanSessionDistanceOmissionSupported == true,
+              editorIdentity.issue(in: trainingPlanStore.unified) == nil, editorIdentity.matches(draft),
               trainingPlanPublisher.matchesSessionPreview(draft) else { return false }
         cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
         let result = await trainingPlanPublisher.confirmSession(context: context) { self.commandContext == context }
@@ -1927,7 +1984,10 @@ final class NativeAppModel {
             return await acceptExecutionCommand(value, context: context, sessionId: sessionId)
         }
         let value = await trainingPlanPublisher.recover(context: context, mayReplay: pending?.route == "training-session"
-            ? handshake?.trainingPlanSessionCommandsSupported == true : v2CommandCapability) { self.commandContext == context }
+            ? handshake?.trainingPlanSessionCommandsSupported == true &&
+                (handshake?.trainingPlanSessionDistanceOmissionSupported == true ||
+                 !TrainingPlanSessionDraft.payloadRequiresDistanceOmission(pending?.payload ?? Data()))
+            : v2CommandCapability) { self.commandContext == context }
         guard commandContext == context, let value else { return false }
         return await acceptTrainingCommand(value, context: context)
     }

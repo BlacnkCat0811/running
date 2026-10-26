@@ -13,7 +13,8 @@ import { parseSessionPrescription, sessionRecord, sessionKeys, sessionId, sessio
 import { parseTrainingPlanState, type TrainingPlanSessionState } from "./training-plan-store.js";
 import { isValidLocalDate } from "./local-date.js";
 import { internalErrorLogDetail } from "./training-plan-commands.js";
-import { MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
+import { MAX_PLANNED_DISTANCE_KM, MAX_PLANNED_DURATION_SECONDS, sessionStructureWithinWriteLimits } from "./session-structure.js";
+import { trainingSessionPreviewBodySchema, trainingSessionSubmitBodySchema } from "./schemas.js";
 import { measureStructure, pacesFromZones, roundKm, type CoachZonePrescription } from "./mobile-coach.js";
 
 const route = "training-plan-session-command";
@@ -51,7 +52,8 @@ export function parseTrainingSessionRequest(body: unknown, submit: boolean): Tra
     }
     if (["move", "set_rest"].includes(draft.action) && (typeof draft.localDate !== "string" || !isValidLocalDate(draft.localDate))) return invalid("日期非法。");
     if (draft.action === "add") {
-      const day = parseSessionPrescription(draft.prescription);
+      if (!sessionRecord(draft.prescription)) return invalid("新增跑课需要完整训练结构。");
+      const day = parseSessionPrescription({ distanceKm: null, ...draft.prescription });
       if (day.kind === "rest" || !day.structure) return invalid("新增跑课需要完整训练结构。");
     }
     if (draft.action === "edit") {
@@ -71,6 +73,32 @@ export function parseTrainingSessionRequest(body: unknown, submit: boolean): Tra
   }
 }
 
+/** Only supplied content is new. Metadata operations retain historical steps. */
+function assertDraftStructureLimits(draft: TrainingPlanSessionDraft): void {
+  const structure = draft.action === "add" ? draft.prescription.structure
+    : draft.action === "edit" ? draft.patch.structure : null;
+  if (structure && !sessionStructureWithinWriteLimits(structure)) invalid("训练结构最多8个区块，每区块最多8步、20次重复。");
+}
+
+/**
+ * Parse before AJV can coerce input. Defer schema errors to the handler so an
+ * already committed historical operation replays before new-write validation.
+ */
+export function trainingSessionCommandRouteOptions(submit: boolean) {
+  return {
+    schema: { body: submit ? trainingSessionSubmitBodySchema : trainingSessionPreviewBodySchema },
+    attachValidation: true,
+    preValidation: async (request: FastifyRequest, reply: FastifyReply) => {
+      reply.header("Cache-Control", "no-store");
+      try { parseTrainingSessionRequest(request.body, submit); }
+      catch (error) {
+        if (error instanceof PlanOperationError) return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+        throw error;
+      }
+    }
+  };
+}
+
 export const trainingSessionMetadataOnly = (draft: TrainingPlanSessionDraft): boolean =>
   draft.action === "cancel" || draft.action === "set_rest";
 
@@ -81,7 +109,7 @@ export interface TrainingSessionFacts {
   validate: (after: TrainingPlanSessionState, impact: TrainingPlanSessionImpact) => void;
 }
 
-type Candidate = { availableAt: string; expiresAt: string; newSessionId: string; inputKey: string };
+type Candidate = { previewedAt: string; expiresAt: string; newSessionId: string; inputKey: string };
 
 /** Existing publication/CAS primitives own every business write. Preview writes nothing. */
 export class TrainingPlanSessionCommandService {
@@ -128,7 +156,7 @@ export class TrainingPlanSessionCommandService {
     const [encoded, signature, extra] = request.candidateId.split(".");
     try {
       candidate = JSON.parse(Buffer.from(encoded!, "base64url").toString()) as Candidate;
-      if (!candidate || typeof candidate.availableAt !== "string" || typeof candidate.expiresAt !== "string" ||
+      if (!candidate || typeof candidate.previewedAt !== "string" || typeof candidate.expiresAt !== "string" ||
         typeof candidate.newSessionId !== "string" || typeof candidate.inputKey !== "string" || extra !== undefined ||
         typeof signature !== "string" || !/^[a-f0-9]{64}$/.test(signature) ||
         !timingSafeEqual(Buffer.from(signature), Buffer.from(this.signature(request, candidate)))) throw new Error("signature");
@@ -140,7 +168,7 @@ export class TrainingPlanSessionCommandService {
   }
 
   private apply(request: TrainingPlanSessionPreviewRequest, state: TrainingPlanSessionState, c: Candidate,
-    facts: TrainingSessionFacts | null): { state: TrainingPlanSessionState; impact: TrainingPlanSessionImpact; changed: boolean } {
+    facts: TrainingSessionFacts | null, availableAt: string): { state: TrainingPlanSessionState; impact: TrainingPlanSessionImpact; changed: boolean } {
     const after = structuredClone(state);
     const draft = request.draft;
     const existing = "sessionId" in draft ? after.sessions.find(s => s.sessionId === draft.sessionId) : null;
@@ -156,20 +184,30 @@ export class TrainingPlanSessionCommandService {
       : draft.action === "add" ? draft.prescription.localDate : existing!.prescription.localDate;
     if (targetDate < this.businessDate()) invalid("不能向过去日期排课或改写休息。");
     if (draft.action === "add" || draft.action === "move" && targetDate !== existing!.prescription.localDate || draft.action === "set_rest") {
+      // add may explicitly replace a rest/tombstone decision on its target date
+      // (listed in impact/warnings and released in the same transaction). move
+      // may not land on an explicit rest day; set_rest is idempotent.
+      const explicitRest = after.suppressions.some(s => s.localDate === targetDate && s.reason === "explicit_rest");
       if (after.sessions.some(s => s.lifecycle !== "cancelled" && s.supersededBySessionId === null && s.prescription.localDate === targetDate) ||
-        after.suppressions.some(s => s.localDate === targetDate && s.reason === "explicit_rest" && draft.action !== "set_rest") ||
+        draft.action === "move" && explicitRest ||
         after.lockedSession?.localDate === targetDate) conflict("training_session_date_occupied", "目标日期已有课程、锁课或明确休息，请先处理占位。");
     }
     let session: TrainingPlanSession | null = existing ?? null;
+    /** Replace only this owner's suppression for the date: never another course's tombstone. */
     const suppress = (localDate: string, reason: "moved" | "cancelled" | "explicit_rest", id: string | null) => {
-      after.suppressions = after.suppressions.filter(s => s.localDate !== localDate);
-      after.suppressions.push({ localDate, reason, sessionId: id, availableAt: c.availableAt });
+      after.suppressions = after.suppressions.filter(s => id === null
+        ? !(s.localDate === localDate && s.sessionId === null && s.reason === reason)
+        : !(s.localDate === localDate && s.sessionId === id));
+      after.suppressions.push({ localDate, reason, sessionId: id, availableAt });
     };
     if (draft.action === "add") {
+      // Contract §1: a new add explicitly lists every suppression it releases on
+      // its target date (moved/cancelled/explicit_rest) and releases them in the
+      // same transaction. Other dates are never touched.
       after.suppressions = after.suppressions.filter(s => s.localDate !== targetDate);
       session = { planInstanceId: state.planInstanceId, sessionId: c.newSessionId, sessionRevision: 1,
-        prescription: structuredClone(draft.prescription), recommendation: null,
-        userOverride: null, protection: "user_protected", lifecycle: "pending", availableAt: c.availableAt, supersededBySessionId: null };
+        prescription: { distanceKm: null, ...structuredClone(draft.prescription) }, recommendation: null,
+        userOverride: null, protection: "user_protected", lifecycle: "pending", availableAt, supersededBySessionId: null };
       after.sessions.push(session);
     } else if (draft.action === "move") {
       if (targetDate !== session!.prescription.localDate) suppress(session!.prescription.localDate, "moved", session!.sessionId);
@@ -187,21 +225,53 @@ export class TrainingPlanSessionCommandService {
       session!.userOverride = null;
       after.suppressions = after.suppressions.filter(s => s.sessionId !== session!.sessionId);
     }
+    if (session && (draft.action === "add" || draft.action === "edit" &&
+      ["kind", "distanceKm", "structure"].some(key => Object.hasOwn(draft.patch, key)))) {
+      const p = session.prescription;
+      if (p.structure && !sessionStructureWithinWriteLimits(p.structure)) invalid("训练结构最多8个区块，每区块最多8步、20次重复；修改历史训练内容须提供合法结构。");
+      if (!p.structure) return invalid("修改训练内容需要明确结构，不能只改显示距离。");
+      const steps = [...(p.structure.warmup ? [p.structure.warmup] : []), ...p.structure.blocks.flatMap(b => b.steps),
+        ...(p.structure.cooldown ? [p.structure.cooldown] : [])];
+      if (steps.some(step => step.goal.type === "open")) invalid("人工课程需要整米或整秒剂量。");
+      const measured = measureStructure(p.structure, p.kind, pacesFromZones(facts!.prescription));
+      if (!Number.isFinite(measured.distanceKm) || !Number.isFinite(measured.durationSeconds) ||
+        measured.distanceKm <= 0 || measured.distanceKm > MAX_PLANNED_DISTANCE_KM || measured.durationSeconds > MAX_PLANNED_DURATION_SECONDS) {
+        invalid("训练剂量超出合法范围。");
+      }
+      const hasDistanceStep = steps.some(step => step.goal.type === "distance");
+      const sameStructure = before !== null && p.kind === before.prescription.kind &&
+        digest(p.structure) === digest(before.prescription.structure);
+      const explicitDistance = Object.hasOwn(draft.action === "add" ? draft.prescription : draft.patch, "distanceKm");
+      // Omission delegates a new/changed dose to the single server measurer.
+      // Unchanged edits keep the persisted value, including legacy 0.1 km precision.
+      if (!explicitDistance && !sameStructure) {
+        p.distanceKm = hasDistanceStep ? Math.round(measured.distanceKm * 1000) / 1000 : null;
+      }
+      if (hasDistanceStep && p.distanceKm === null) invalid("结构包含距离步骤时必须提供一致的 distanceKm。");
+      if (p.distanceKm !== null) {
+        if (p.distanceKm <= 0 || p.distanceKm > MAX_PLANNED_DISTANCE_KM) invalid("训练距离超出合法范围。");
+        const exact = Math.round(p.distanceKm * 1000) === Math.round(measured.distanceKm * 1000);
+        const unchangedLegacy = sameStructure && p.distanceKm === before!.prescription.distanceKm &&
+          p.distanceKm === roundKm(measured.distanceKm);
+        if (!exact && !unchangedLegacy) invalid("距离与训练结构不一致，请同时调整结构，或省略距离由服务端测量。");
+      }
+    }
     if (session) {
       if (draft.action !== "unlock") {
         session.protection = "user_protected";
-        session.userOverride = { action: draft.action, prescription: structuredClone(session.prescription), availableAt: c.availableAt };
+        session.userOverride = { action: draft.action, prescription: structuredClone(session.prescription), availableAt };
       }
       // Pure no-op edit/move/unlock preserves the existing version and history.
       const semantic = (s: TrainingPlanSession) => ({ prescription: s.prescription, protection: s.protection,
         lifecycle: s.lifecycle, supersededBySessionId: s.supersededBySessionId });
       if (before && digest(semantic(before)) === digest(semantic(session))) {
         Object.assign(session, before);
-      } else if (before) { session.sessionRevision++; session.availableAt = c.availableAt; }
+      } else if (before) { session.sessionRevision++; session.availableAt = availableAt; }
     }
-    const releasedDates = draft.action === "add" || draft.action === "unlock"
+    const released = draft.action === "add" || draft.action === "unlock"
       ? state.suppressions.filter(s => !after.suppressions.some(next =>
-        next.localDate === s.localDate && next.reason === s.reason && next.sessionId === s.sessionId)).map(s => s.localDate) : [];
+        next.localDate === s.localDate && next.reason === s.reason && next.sessionId === s.sessionId)) : [];
+    const releasedDates = released.map(s => s.localDate);
     const affectedDates = [...new Set([...(before ? [before.prescription.localDate] : []), targetDate, ...releasedDates])].sort();
     if (after.lockedSession && affectedDates.includes(after.lockedSession.localDate)) after.lockedSession = null;
     // Materialize only from entities + existing rest decisions, never edit weekPlan independently.
@@ -211,25 +281,17 @@ export class TrainingPlanSessionCommandService {
       structure: null, reason: s.reason === "explicit_rest" ? "用户指定休息。" : "课程已改期或取消；不自动补课。" });
     for (const s of after.sessions) if (s.lifecycle !== "cancelled" && s.supersededBySessionId === null) days.set(s.prescription.localDate, s.prescription);
     after.weekPlan = [...days.values()].sort((a, b) => a.localDate.localeCompare(b.localDate));
+    const suppressionLabel = (reason: TrainingPlanSessionImpact["suppressions"][number]["reason"]): string =>
+      reason === "moved" ? "改期源日" : reason === "cancelled" ? "取消记录" : "明确休息";
+    const warning = draft.action === "add" && released.length > 0
+      ? [`新增课程将释放以下抑制：${released.map(s => `${s.localDate}（${suppressionLabel(s.reason)}）`).join("、")}。`]
+      : draft.action === "unlock" && releasedDates.length > 0
+        ? [`解除保护将释放以下日期的旧抑制：${releasedDates.join("、")}。`] : [];
     const impact: TrainingPlanSessionImpact = { before, after: session ? structuredClone(session) : null,
       affectedDates, suppressions: after.suppressions.filter(s => affectedDates.includes(s.localDate)),
       deviceWithdrawalRequired: this.devicePushes().some(push => affectedDates.includes(push.localDate)),
-      warnings: ["保存课程不会自动更新设备排期；如有已排期内容，需先撤回再重新下发。",
-        ...(releasedDates.length ? [`${draft.action === "add" ? "新增课程" : "解除保护"}将释放以下日期的旧抑制：${releasedDates.join("、")}。`] : [])] };
+      warnings: ["保存课程不会自动更新设备排期；如有已排期内容，需先撤回再重新下发。", ...warning] };
     if (!trainingSessionMetadataOnly(draft) && session) {
-      const p = session.prescription;
-      // Legacy nullable structures survive moves/unlock. New content must be fully sized.
-      const contentChanged = draft.action === "add" || draft.action === "edit" &&
-        ["kind", "distanceKm", "structure"].some(key => Object.hasOwn(draft.patch, key));
-      if (contentChanged) {
-        if (!p.structure) return invalid("修改训练内容需要明确结构，不能只改显示距离。");
-        const steps = [...(p.structure.warmup ? [p.structure.warmup] : []), ...p.structure.blocks.flatMap(b => b.steps),
-          ...(p.structure.cooldown ? [p.structure.cooldown] : [])];
-        if (steps.some(step => step.goal.type === "open")) invalid("人工课程需要整米或整秒剂量。");
-        const measured = measureStructure(p.structure, p.kind, pacesFromZones(facts!.prescription));
-        if (measured.distanceKm <= 0 || measured.distanceKm > MAX_PLANNED_DISTANCE_KM || measured.durationSeconds > 4 * 3600) invalid("训练剂量超出合法范围。");
-        if (p.distanceKm !== null && Math.abs(p.distanceKm - roundKm(measured.distanceKm)) > 1e-8) invalid("距离与训练结构不一致，请同时调整结构。");
-      }
       facts!.validate(after, impact);
     }
     parseTrainingPlanState(after);
@@ -238,11 +300,15 @@ export class TrainingPlanSessionCommandService {
 
   preview(raw: TrainingPlanSessionPreviewRequest): TrainingPlanSessionPreviewResponse {
     const request = parseTrainingSessionRequest(raw, false) as TrainingPlanSessionPreviewRequest;
+    assertDraftStructureLimits(request.draft);
     const row = this.current(request);
     const facts = trainingSessionMetadataOnly(request.draft) ? null : this.facts();
-    const c: Candidate = { availableAt: new Date(this.now()).toISOString(), expiresAt: new Date(this.now() + 120_000).toISOString(),
+    const previewedAt = new Date(this.now()).toISOString();
+    // The preview instant is display/audit only. It is never persisted as the
+    // course's published/available time; submit stamps the commit instant.
+    const c: Candidate = { previewedAt, expiresAt: new Date(Date.parse(previewedAt) + 120_000).toISOString(),
       newSessionId: `session-${randomUUID()}`, inputKey: this.inputKey(request, row.state, facts?.fingerprint ?? "metadata-only") };
-    const result = this.apply(request, row.state, c, facts);
+    const result = this.apply(request, row.state, c, facts, previewedAt);
     return { ...request, candidateId: this.encode(request, c), expiresAt: c.expiresAt, inputKey: c.inputKey, impact: result.impact };
   }
 
@@ -250,15 +316,21 @@ export class TrainingPlanSessionCommandService {
     const request = parseTrainingSessionRequest(raw, true) as TrainingPlanSessionCommandRequest;
     const replay = this.replay(request);
     if (replay !== null) return replay;
+    assertDraftStructureLimits(request.draft);
     const c = this.decode(request);
     const row = this.current(request);
     const facts = trainingSessionMetadataOnly(request.draft) ? null : this.facts();
     if (this.inputKey(request, row.state, facts?.fingerprint ?? "metadata-only") !== c.inputKey) conflict("training_session_candidate_mismatch", "事实或政策已变化，请重新预览。");
-    const prepared = this.apply(request, row.state, c, facts);
     return new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, request, () => {
       const current = this.current(request);
       const liveFacts = trainingSessionMetadataOnly(request.draft) ? null : this.facts();
       if (this.inputKey(request, current.state, liveFacts?.fingerprint ?? "metadata-only") !== c.inputKey) conflict("training_session_candidate_mismatch", "提交前输入已变化，请重新预览。");
+      // One commit instant for every written row: session/override/suppression
+      // availability must describe when this revision actually became known, not
+      // when its preview was rendered. Otherwise a preview taken before the run
+      // would make an after-the-run edit look like a pre-run prescription.
+      const submittedAt = new Date(this.now()).toISOString();
+      const prepared = this.apply(request, current.state, c, liveFacts, submittedAt);
       if (!prepared.changed) return { contractVersion: 1, operationId: request.operationId, stateRevision: current.revision,
         goalsRevision: current.state.goalsRevision, planInstanceId: current.state.planInstanceId, outcome: "no_change",
         session: prepared.impact.after, execution: null, planUpdate: "pending", warnings: prepared.impact.warnings };
@@ -286,6 +358,7 @@ export function createTrainingSessionCommandHandlers(service: TrainingPlanSessio
         const replay = service.replay(body as TrainingPlanSessionCommandRequest);
         if (replay !== null) return replay;
       }
+      if (request.validationError) invalid("课程命令不符合请求结构合同。");
       admit(request);
       const run = async () => submit ? service.submit(body as TrainingPlanSessionCommandRequest) : service.preview(body);
       return trainingSessionMetadataOnly(body.draft) ? await run() : await withFactsLease(run);

@@ -104,6 +104,13 @@ export const HANDSHAKE_KEY_REGISTRY = [
     whenAbsent: "课程只读；仍可查询原 operation，不改发配置 refresh 或旧 URL"
   },
   {
+    key: "trainingPlanSessionDistanceOmissionContractVersion", kind: "capability", version: 1,
+    semantics: "add/edit 省略距离由服务端保留或测量，不由课程命令 1 推导",
+    advertisedWhen: "课程命令 1 可用且同请求精确协商 X-RAI-Client-Training-Session-Distance-Omission: 1",
+    consumer: "iOS 课程编辑器与重放准入",
+    whenAbsent: "发送显式合法距离/null；无法表达的 mixed 内容变更提示升级，不猜测剂量"
+  },
+  {
     key: "trainingPlanExecutionCommandContractVersion", kind: "capability", version: 1,
     semantics: "课程关联确认/纠错/撤回/明确跳过（X-RAI-Client-Training-Execution-Commands: 1）",
     advertisedWhen: "schema 2、owner-ready、publication 1，独立模式 validation/production 已启用且精确协商 X-RAI-Client-Training-Execution-Commands: 1",

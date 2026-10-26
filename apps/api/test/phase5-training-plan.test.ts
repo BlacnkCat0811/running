@@ -528,6 +528,14 @@ test(`B04 real HTTP: independent negotiation, six session actions, safety, resta
     assert.equal((await api.call("/v1/handshake")).value.trainingPlanSessionCommandContractVersion, undefined);
     const sessionHandshake = (await api.call("/v1/handshake", undefined, headers)).value;
     assert.equal(sessionHandshake.trainingPlanSessionCommandContractVersion, 1);
+    assert.equal(sessionHandshake.trainingPlanSessionDistanceOmissionContractVersion, undefined,
+      "COMPAT-01: session command 1 alone does not negotiate omission");
+    const omissionHeaders = { ...headers, "X-RAI-Client-Training-Session-Distance-Omission": "1" };
+    assert.equal((await api.call("/v1/handshake", undefined, omissionHeaders)).value.trainingPlanSessionDistanceOmissionContractVersion, 1,
+      "COMPAT-01: current server explicitly negotiates distance omission");
+    assert.equal((await api.call("/v1/handshake", undefined,
+      { ...headers, "X-RAI-Client-Training-Session-Distance-Omission": "2" })).value.trainingPlanSessionDistanceOmissionContractVersion, undefined);
+
     assert.equal(sessionHandshake.trainingPlanCommandContractVersion, undefined, "session writes do not require the separate configuration switch");
     const add = await request({ action: "add", prescription: prescription(2, 2) });
     assert.equal((await api.call("/v1/mobile/training-plan/session-commands/preview", add)).value.code, "training_session_commands_disabled");

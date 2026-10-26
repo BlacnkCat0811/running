@@ -14,6 +14,7 @@ import {
   MAX_BLOCK_ITERATIONS,
   MAX_BLOCKS,
   MAX_PLANNED_DISTANCE_KM,
+  MAX_STEPS_PER_BLOCK,
   MAX_STEP_METERS,
   MAX_STEP_SECONDS
 } from "./session-structure.js";
@@ -279,7 +280,7 @@ const mobileSessionStructureSchema = {
         required: ["iterations", "steps"],
         properties: {
           iterations: { type: "integer", minimum: 1, maximum: MAX_BLOCK_ITERATIONS },
-          steps: { type: "array", minItems: 1, maxItems: 8, items: mobileWorkoutStepSchema }
+          steps: { type: "array", minItems: 1, maxItems: MAX_STEPS_PER_BLOCK, items: mobileWorkoutStepSchema }
         }
       }
     },
@@ -882,6 +883,9 @@ const body = (schema: unknown, description: string) => ({
   content: { "application/json": { schema } }
 });
 
+export const trainingSessionPreviewBodySchema = trainingSessionCommandSchema(false);
+export const trainingSessionSubmitBodySchema = trainingSessionCommandSchema(true);
+
 export const openapiDocument = {
   openapi: "3.1.0",
   info: {
@@ -936,13 +940,13 @@ export const openapiDocument = {
     "/v1/mobile/coach-execution": { get: operation(["Read"], "过去28日冻结处方的观测、剂量和刺激评价") },
     "/v1/mobile/training-plan/session-commands/preview": {
       post: operation(["Workouts"], "课程编辑合同1：预览 move/edit/add/cancel/set_rest/unlock；零写入，绑定120秒候选", {
-        requestBody: body(trainingSessionCommandSchema(false), "精确数据域、实例、状态/课程修订与草稿"),
+        requestBody: body(trainingSessionPreviewBodySchema, "精确数据域、实例、状态/课程修订与草稿"),
         responses: trainingSessionResponses(false)
       })
     },
     "/v1/mobile/training-plan/session-commands": {
       post: operation(["Workouts"], "课程编辑合同1：原子保存课程、投影、冻结历史与持久操作结果", {
-        requestBody: body(trainingSessionCommandSchema(true), "原预览内容、候选和持久UUID；已提交重放先于能力门"),
+        requestBody: body(trainingSessionSubmitBodySchema, "原预览内容、候选和持久UUID；已提交重放先于能力门"),
         responses: trainingSessionResponses(true)
       })
     },
@@ -1291,7 +1295,7 @@ function trainingSessionCommandSchema(submit: boolean) {
   const draft = { oneOf: [existing("move", { localDate: date }), existing("edit", { patch }), existing("cancel"), existing("unlock"),
     { type: "object", additionalProperties: false, required: ["action", "localDate"], properties: { action: { const: "set_rest" }, localDate: date } },
     { type: "object", additionalProperties: false, required: ["action", "prescription"], properties: { action: { const: "add" },
-      prescription: { ...mobileWeekPlanItemSchema, required: ["localDate", "kind", "distanceKm", "structure"], properties: {
+      prescription: { ...mobileWeekPlanItemSchema, required: ["localDate", "kind", "structure"], properties: {
         ...mobileWeekPlanItemSchema.properties, kind: { enum: MOBILE_SESSION_KINDS.filter(kind => kind !== "rest") }, structure: mobileSessionStructureSchema } } } }
   ] };
   return { type: "object", additionalProperties: false,

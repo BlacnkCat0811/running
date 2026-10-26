@@ -17,7 +17,7 @@ import { digest } from "./plan-digest.js";
 import { normalizeRunCoachPlan } from "./run-coach-policy.js";
 import { normalizeSessionStructure } from "./session-structure.js";
 import { validateRaceGoal, type RaceGoal, type RunState } from "./training-mode-policy.js";
-import { parseSessionPrescription, parseTrainingPlanSessionFields, sessionKeys,
+import { assertTrainingPlanLockedRestInvariant, trainingPlanLockedRestConflicts, parseSessionPrescription, parseTrainingPlanSessionFields, sessionKeys,
   TrainingPlanSessionStateError, type TrainingPlanSessionFields } from "./training-plan-session-state.js";
 import { TrainingPlanSessionRepository } from "./training-plan-session-repository.js";
 
@@ -418,6 +418,8 @@ function collectCoachLoopRef(value: unknown, path: string): Collected<TrainingPl
  */
 export function parseTrainingPlanState(value: unknown): TrainingPlanState {
   if (!isRecord(value)) throw new TrainingPlanStateError("training plan state must be a JSON object");
+  try { assertTrainingPlanLockedRestInvariant(value); }
+  catch (error) { throw new TrainingPlanStateError(error instanceof Error ? error.message : "training_plan_locked_rest_conflict"); }
   if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
     throw new TrainingPlanStateError(
       `unknown training plan state schemaVersion ${JSON.stringify(value.schemaVersion)}; expected 1 or 2`);
@@ -905,6 +907,7 @@ function parseJsonOrNull(value: string): unknown {
 // ---------------------------------------------------------------------------
 
 export type TrainingPlanMigrationConflictCode =
+  | "locked_rest_conflict"
   | "invalid_goals_payload"
   | "invalid_race_target"
   | "invalid_coach_loop_receipt"
@@ -1198,6 +1201,9 @@ export function classifyTrainingPlanMigration(input: {
       conflicts.push({ code: "invalid_goals_payload", detail: collected.problems.join("; ") });
     } else {
       goals = collected.value;
+      for (const conflict of trainingPlanLockedRestConflicts(goals).filter(value => value.lockedKind !== "rest")) {
+        conflicts.push({ code: "locked_rest_conflict", detail: `${conflict.kind}: ${conflict.localDate}; offline intent review required` });
+      }
     }
   }
 

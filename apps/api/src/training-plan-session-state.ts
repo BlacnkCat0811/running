@@ -11,6 +11,47 @@ export class TrainingPlanSessionStateError extends Error {}
 const fail = (message: string): never => { throw new TrainingPlanSessionStateError(message); };
 export const sessionRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+export interface TrainingPlanLockedRestConflict {
+  localDate: string;
+  lockedKind: MobilePlannedDay["kind"] | null;
+  kind: "locked_session_explicit_rest" | "locked_session_week_plan_rest";
+  lockedAt: string | null;
+  availableAt: string | null;
+}
+
+// Inspect raw historical payloads before a strict parser rejects them. Only
+// dates and parseable timestamps leave this boundary, never a prescription.
+export function trainingPlanLockedRestConflicts(raw: unknown): TrainingPlanLockedRestConflict[] {
+  if (!sessionRecord(raw) || !sessionRecord(raw.lockedSession)) return [];
+  const lock = raw.lockedSession, date = lock.localDate;
+  if (typeof date !== "string" || !isValidLocalDate(date)) return [];
+  const lockedPrescription = sessionRecord(lock.session) ? lock.session : null;
+  const lockedKind = MOBILE_SESSION_KINDS.find(kind => kind === lockedPrescription?.kind) ?? null;
+  const instant = (value: unknown): string | null => typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
+  const conflicts: TrainingPlanLockedRestConflict[] = [];
+  if (lockedKind !== "rest" && Array.isArray(raw.weekPlan) && raw.weekPlan.some(day => sessionRecord(day) && day.localDate === date && day.kind === "rest")) {
+    conflicts.push({ localDate: date, lockedKind, kind: "locked_session_week_plan_rest", lockedAt: instant(lock.lockedAt), availableAt: null });
+  }
+  if (Array.isArray(raw.suppressions)) for (const value of raw.suppressions) {
+    if (sessionRecord(value) && value.localDate === date && value.reason === "explicit_rest") {
+      conflicts.push({ localDate: date, lockedKind, kind: "locked_session_explicit_rest", lockedAt: instant(lock.lockedAt), availableAt: instant(value.availableAt) });
+    }
+  }
+  return conflicts;
+}
+
+export function assertTrainingPlanLockedRestInvariant(raw: unknown): void {
+  // Legacy can lock rest itself. Its matching rest materialization is one intent,
+  // not a running prescription colliding with rest. explicit_rest remains strict.
+  const conflicts = trainingPlanLockedRestConflicts(raw);
+  if (conflicts.length > 0) {
+    const kind = conflicts.some(value => value.kind === "locked_session_explicit_rest") ? "explicit rest" : "weekPlan rest";
+    throw new TrainingPlanSessionStateError(
+      `training_plan_locked_rest_conflict: ${kind} and locked session share a date: ${conflicts[0]!.localDate}`);
+  }
+}
 export function sessionKeys(value: Record<string, unknown>, keys: readonly string[], path: string): void {
   for (const key of Object.keys(value)) if (!keys.includes(key)) fail(`${path}: unknown field ${key}`);
 }
@@ -94,6 +135,7 @@ export interface TrainingPlanSessionFields {
 
 /** Structural identity/materialization check; B03 owns generation and protection policy. */
 export function parseTrainingPlanSessionFields(raw: Record<string, unknown>, weekPlan: MobilePlannedDay[]): TrainingPlanSessionFields {
+  assertTrainingPlanLockedRestInvariant(raw);
   const instance = sessionId(raw.planInstanceId, "planInstanceId");
   if (!Array.isArray(raw.sessions) || !Array.isArray(raw.suppressions)) return fail("sessions/suppressions arrays required");
   const sessions = raw.sessions.map((value, i) => parseTrainingPlanSession(value, `sessions[${i}]`));

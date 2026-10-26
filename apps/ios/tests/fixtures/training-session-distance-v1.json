@@ -1,0 +1,406 @@
+{
+  "contractVersion": 1,
+  "generatorInput": {
+    "allowedDates": [
+      "2026-10-26",
+      "2026-10-27",
+      "2026-10-28",
+      "2026-10-29",
+      "2026-10-30",
+      "2026-10-31",
+      "2026-11-01"
+    ],
+    "prescription": {
+      "easyPaceLower": 360,
+      "easyPaceUpper": 407,
+      "thresholdPaceLower": 260,
+      "thresholdPaceUpper": 283,
+      "intervalPaceLower": 230,
+      "intervalPaceUpper": 251,
+      "easyHrLower": null,
+      "easyHrUpper": null,
+      "thresholdHrLower": null,
+      "thresholdHrUpper": null
+    },
+    "weeklyDistanceKm": 100,
+    "previousWeekDistanceKm": 100,
+    "qualitySessionCap": 2,
+    "easyDurationFloorFraction": 0,
+    "injuryFlagCodes": []
+  },
+  "cases": [
+    {
+      "id": "easy",
+      "generated": true,
+      "prescription": {
+        "localDate": "2026-10-26",
+        "kind": "easy",
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": null
+          },
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 1200
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 360,
+                    "upper": 407
+                  }
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": null
+          }
+        },
+        "distanceKm": 4.4,
+        "reason": "\u5b8c\u6574\u5242\u91cf\u4f18\u5148\uff1brai-coach-session-dose-v2\uff0c\u672a\u5206\u914d\u5efa\u8bae\u91cf\u4e0d\u4ea7\u751f\u8865\u8bfe\u4e49\u52a1\u3002"
+      },
+      "measured": {
+        "distanceKm": 4.422604422604422,
+        "durationSeconds": 1800
+      },
+      "displayDistanceKm": 4.4,
+      "editorDistanceMode": "omit"
+    },
+    {
+      "id": "interval",
+      "generated": true,
+      "prescription": {
+        "localDate": "2026-10-28",
+        "kind": "interval",
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": null
+          },
+          "blocks": [
+            {
+              "iterations": 4,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 800
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 230,
+                    "upper": 251
+                  }
+                },
+                {
+                  "purpose": "recovery",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 120
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": null
+          }
+        },
+        "distanceKm": 7.3,
+        "reason": "\u5b8c\u6574\u5242\u91cf\u4f18\u5148\uff1brai-coach-session-dose-v2\uff0c\u672a\u5206\u914d\u5efa\u8bae\u91cf\u4e0d\u4ea7\u751f\u8865\u8bfe\u4e49\u52a1\u3002"
+      },
+      "measured": {
+        "distanceKm": 7.327764127764128,
+        "durationSeconds": 2483.2
+      },
+      "displayDistanceKm": 7.3,
+      "editorDistanceMode": "omit"
+    },
+    {
+      "id": "tempo",
+      "generated": true,
+      "prescription": {
+        "localDate": "2026-11-01",
+        "kind": "tempo",
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": null
+          },
+          "blocks": [
+            {
+              "iterations": 3,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 480
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 260,
+                    "upper": 283
+                  }
+                },
+                {
+                  "purpose": "recovery",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 120
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": null
+          }
+        },
+        "distanceKm": 8.9,
+        "reason": "\u5b8c\u6574\u5242\u91cf\u4f18\u5148\uff1brai-coach-session-dose-v2\uff0c\u672a\u5206\u914d\u5efa\u8bae\u91cf\u4e0d\u4ea7\u751f\u8865\u8bfe\u4e49\u52a1\u3002"
+      },
+      "measured": {
+        "distanceKm": 8.921263055538674,
+        "durationSeconds": 3000
+      },
+      "displayDistanceKm": 8.9,
+      "editorDistanceMode": "omit"
+    },
+    {
+      "id": "distance-only",
+      "generated": false,
+      "prescription": {
+        "localDate": "2026-10-28",
+        "kind": "easy",
+        "distanceKm": 8.05,
+        "structure": {
+          "warmup": null,
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 8050
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": null
+        },
+        "reason": null
+      },
+      "measured": {
+        "distanceKm": 8.05,
+        "durationSeconds": 3276.3500000000004
+      },
+      "displayDistanceKm": 8.1,
+      "editorDistanceMode": "value"
+    },
+    {
+      "id": "time-only",
+      "generated": false,
+      "prescription": {
+        "localDate": "2026-10-28",
+        "kind": "easy",
+        "distanceKm": null,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": null
+          },
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 1200
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": null
+          }
+        },
+        "reason": null
+      },
+      "measured": {
+        "distanceKm": 4.422604422604422,
+        "durationSeconds": 1800
+      },
+      "displayDistanceKm": 4.4,
+      "editorDistanceMode": "null"
+    },
+    {
+      "id": "mixed",
+      "generated": false,
+      "prescription": {
+        "localDate": "2026-10-28",
+        "kind": "interval",
+        "distanceKm": 5.822,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "distance",
+              "meters": 1000
+            },
+            "alert": null
+          },
+          "blocks": [
+            {
+              "iterations": 4,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 800
+                  },
+                  "alert": null
+                },
+                {
+                  "purpose": "recovery",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 90
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": null
+          }
+        },
+        "reason": null
+      },
+      "measured": {
+        "distanceKm": 5.821621621621621,
+        "durationSeconds": 1870.1999999999998
+      },
+      "displayDistanceKm": 5.8,
+      "editorDistanceMode": "omit"
+    },
+    {
+      "id": "historical-distance-only",
+      "generated": false,
+      "prescription": {
+        "localDate": "2026-10-28",
+        "kind": "easy",
+        "distanceKm": 8.1,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "distance",
+              "meters": 1000
+            },
+            "alert": null
+          },
+          "blocks": [
+            {
+              "iterations": 3,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 2000
+                  },
+                  "alert": null
+                },
+                {
+                  "purpose": "recovery",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 100
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "distance",
+              "meters": 760
+            },
+            "alert": null
+          }
+        },
+        "reason": null
+      },
+      "measured": {
+        "distanceKm": 8.06,
+        "durationSeconds": 3280.42
+      },
+      "displayDistanceKm": 8.1,
+      "editorDistanceMode": "value"
+    }
+  ]
+}

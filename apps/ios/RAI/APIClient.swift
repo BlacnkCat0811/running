@@ -238,6 +238,7 @@ struct RaiAPIClient {
     func handshake(baseURL: URL, token: String) async throws -> RaiHandshake {
         try await get(path: "/v1/handshake", baseURL: baseURL, token: token,
                       headers: ["X-RAI-Client-Training-Commands": "2", "X-RAI-Client-Training-Session-Commands": "1",
+                                "X-RAI-Client-Training-Session-Distance-Omission": "1",
                                 RaiTrainingPlanExecutionContract.headerField: RaiTrainingPlanExecutionContract.requestedVersion])
     }
 

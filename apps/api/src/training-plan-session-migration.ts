@@ -3,12 +3,18 @@ import type { DatabaseSync } from "node:sqlite";
 import type { TrainingPlanSession, TrainingPlanSuppression } from "@rai/api-contracts";
 import { digest } from "./plan-digest.js";
 import { ensureTrainingPlanSessionSchema, TrainingPlanSessionRepository } from "./training-plan-session-repository.js";
-import { parseSessionPrescription, sessionRecord } from "./training-plan-session-state.js";
+import { parseSessionPrescription, sessionRecord, trainingPlanLockedRestConflicts,
+  type TrainingPlanLockedRestConflict } from "./training-plan-session-state.js";
 import { parseTrainingPlanState, parseTrainingPlanScopeKey, readTrainingPlanMigrationSources, TrainingPlanStore,
   TrainingPlanStateError, type TrainingPlanSessionState, type TrainingPlanStateRow } from "./training-plan-store.js";
 
 export class TrainingPlanSessionMigrationError extends Error {
-  constructor(readonly code: string, message: string) { super(message); }
+  constructor(readonly code: string, message: string, readonly conflicts: SessionMigrationRestConflict[] = []) { super(message); }
+}
+interface SessionMigrationRestConflict extends TrainingPlanLockedRestConflict {
+  scope: string;
+  source: string;
+  revision: number;
 }
 const refuse = (code: string, message: string): never => { throw new TrainingPlanSessionMigrationError(code, message); };
 interface Snapshot { revision: number; payload_json: string; changed_at: string }
@@ -64,6 +70,25 @@ function checkLedger(database: DatabaseSync): number {
 function inspect(database: DatabaseSync, scope: string): { report: SessionIdentityMigrationReport; current: TrainingPlanStateRow; history: Snapshot[] } {
   checkLedger(database);
   const identity = parseTrainingPlanScopeKey(scope);
+  // Do this before the strict reader and before any ID allocation/DDL. A schema
+  // 1 running lock/rest collision must never report ready. A rest lock already
+  // owns that intent; apply retains it without adding duplicate explicit_rest.
+  const history = snapshots(database, scope);
+  const currentRaw = database.prepare("SELECT revision,payload_json FROM mobile_training_state WHERE scope=?").get(scope) as
+    { revision: number; payload_json: string } | undefined;
+  const conflicts: SessionMigrationRestConflict[] = [];
+  const checkRest = (payload: string, source: string, revision: number) => {
+    let raw: unknown;
+    try { raw = JSON.parse(payload); } catch { return; } // Existing strict validation below reports invalid JSON.
+    conflicts.push(...trainingPlanLockedRestConflicts(raw).map(conflict => ({ ...conflict, scope, source, revision })));
+  };
+  if (currentRaw) checkRest(currentRaw.payload_json, "mobile_training_state", currentRaw.revision);
+  for (const row of history) checkRest(row.payload_json, "mobile_training_state_history", row.revision);
+  const goalsRaw = database.prepare("SELECT revision,payload_json FROM mobile_goals WHERE singleton=1").get() as
+    { revision: number; payload_json: string } | undefined;
+  if (goalsRaw) checkRest(goalsRaw.payload_json, "mobile_goals", goalsRaw.revision);
+  if (conflicts.length > 0) throw new TrainingPlanSessionMigrationError("session_migration_locked_rest_conflict",
+    `Locked session/rest conflict at ${conflicts.map(value => `${value.source}@${value.revision}:${value.localDate}`).join(", ")}; offline intent review required.`, conflicts);
   const sources = readTrainingPlanMigrationSources(database, identity);
   const current = sources.existingState;
   if (!current) return refuse("training_plan_not_migrated", "Migrate to unified schema 1 before session identity migration.");
@@ -109,7 +134,6 @@ function inspect(database: DatabaseSync, scope: string): { report: SessionIdenti
       !(current.state.sourceStatus === "ended" && current.state.weekPlan.length === 0 && normalizedGoals.weekPlan.every(day => day.kind === "rest"))) {
     refuse("session_migration_owner_invalid", "Unified/goals plan content disagrees.");
   }
-  const history = snapshots(database, scope);
   const latest = history.find(row => row.revision === current.revision);
   if (!latest || digest(parseTrainingPlanState(JSON.parse(latest.payload_json))) !== digest(current.state)) {
     refuse("session_migration_invalid_history", "Current state has no matching source history revision.");
@@ -164,7 +188,9 @@ export function applySessionIdentityMigration(database: DatabaseSync, scope: str
       });
       if (isCurrent) {
         currentDays = days; currentSessions = sessions;
-        suppressions = days.filter(day => day.kind === "rest").map(day => ({ localDate: day.localDate, reason: "explicit_rest", sessionId: null, availableAt }));
+        suppressions = days.filter(day => day.kind === "rest" && !(current.state.lockedSession?.localDate === day.localDate &&
+          current.state.lockedSession.session.kind === "rest"))
+          .map(day => ({ localDate: day.localDate, reason: "explicit_rest", sessionId: null, availableAt }));
       }
     }
     const state = parseTrainingPlanState({ ...current.state, schemaVersion: 2, migrationVersion: 2,

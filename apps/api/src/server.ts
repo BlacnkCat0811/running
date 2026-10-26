@@ -143,7 +143,7 @@ import {
   trainingPlanCommandError
 } from "./training-plan-commands.js";
 import { TrainingPlanCoordinator } from "./training-plan-coordinator.js";
-import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers } from "./training-plan-session-commands.js";
+import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers, trainingSessionCommandRouteOptions } from "./training-plan-session-commands.js";
 import { TrainingPlanExecutionCommandService, createTrainingExecutionCommandHandlers } from "./training-plan-execution-commands.js";
 import { validateTrainingSessionSafety } from "./training-plan-session-safety.js";
 import { trainingPlanGenerationDeps } from "./training-plan-generation.js";
@@ -1295,7 +1295,7 @@ async function ensureWeeklyPlan(): Promise<void> {
     // B06: a corrected/deleted source invalidates the current link even when the
     // automatic publisher is closed; the write is a deterministic replayable
     // operation, never a GET side effect.
-    const reconciled = await trainingExecutionService.reconcileSourceChanges();
+    const reconciled = await trainingExecutionCommands.reconcile();
     if (reconciled.changed > 0) return;
     // Automatic publication has its own explicit gate. Enabling manual writes
     // never implicitly enables background publication.
@@ -1362,16 +1362,47 @@ app.get("/v1/health", async (): Promise<HealthResponse> => {
  * read capability is not proof that stable session IDs exist, and a damaged
  * owner must not be papered over by a capability bit.
  */
+const trainingPlanSessionReadAvailable = (): boolean =>
+  mobileGoalsStore.currentTrainingPlan()?.state.schemaVersion === 2 &&
+  mobileGoalsStore.trainingPlanOwnerReady();
+
 const trainingPlanSessionReadAdvertised = (): boolean => {
   try {
-    return mobileGoalsStore.currentTrainingPlan()?.state.schemaVersion === 2 &&
-      mobileGoalsStore.trainingPlanOwnerReady();
+    return trainingPlanSessionReadAvailable();
   } catch {
+    // The handshake must stay available so a client can still discover every
+    // unrelated capability; command admission uses the throwing assertion below
+    // and reports this as a retryable storage failure instead.
     return false;
   }
 };
 
-app.get("/v1/handshake", async (request): Promise<HandshakeResponse> => ({
+/**
+ * Command admission must distinguish "this write capability is off" from
+ * "the state store cannot be read". Collapsing both into a 409 disabled code
+ * hides a retryable corruption/recovery condition from the user and the client.
+ */
+const assertTrainingPlanSessionReadForCommand = (
+  code: "training_session_commands_disabled" | "training_execution_commands_disabled",
+  message: string
+): void => {
+  let available: boolean;
+  try {
+    available = trainingPlanSessionReadAvailable();
+  } catch {
+    throw new PlanOperationError("training_session_storage_unavailable",
+      "训练计划存储暂不可读，请稍后重试；本次命令没有写入。", 503);
+  }
+  if (!available) throw new PlanOperationError(code, message, 409);
+};
+
+app.get("/v1/handshake", async (request, reply): Promise<HandshakeResponse> => {
+  // Write capabilities depend on exact client request headers, so the response
+  // must never be reused for a different negotiation. `no-store` is the primary
+  // guard; Vary keeps compliant shared caches correct even if they ignore it.
+  reply.header("Cache-Control", "no-store");
+  reply.header("Vary", "X-RAI-Client-Training-Commands, X-RAI-Client-Training-Session-Commands, X-RAI-Client-Training-Execution-Commands, X-RAI-Client-Training-Session-Distance-Omission");
+  return {
   serverId,
   athleteId,
   datasetEpoch,
@@ -1396,6 +1427,10 @@ app.get("/v1/handshake", async (request): Promise<HandshakeResponse> => ({
   ...(trainingPlanSessionReadAdvertised() ? { trainingPlanSessionContractVersion: 1 } : {}),
   ...(trainingSessionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
     request.headers["x-rai-client-training-session-commands"] === "1" ? { trainingPlanSessionCommandContractVersion: 1 } : {}),
+  ...(trainingSessionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
+    request.headers["x-rai-client-training-session-commands"] === "1" &&
+    request.headers["x-rai-client-training-session-distance-omission"] === "1"
+    ? { trainingPlanSessionDistanceOmissionContractVersion: 1 } : {}),
   ...(trainingExecutionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
     request.headers["x-rai-client-training-execution-commands"] === "1" ? { trainingPlanExecutionCommandContractVersion: 1 } : {}),
   ...(trainingPlanSessionReadAdvertised() ? { trainingPlanUpdateContractVersion: 1 } : {}),
@@ -1424,7 +1459,8 @@ app.get("/v1/handshake", async (request): Promise<HandshakeResponse> => ({
     maxRouteFiles: DIRECT_SYNC_MAX_ROUTE_FILES,
     maxRouteBytes: DIRECT_SYNC_MAX_ROUTE_BYTES
   }
-}));
+  };
+});
 /**
  * 同步覆盖探测（P1-1，2026-10-18 同步诊断）。
  *
@@ -2101,13 +2137,14 @@ const trainingSessionCommands = createTrainingSessionCommandHandlers(new Trainin
     return { fingerprint: `${snapshot.fingerprint}:${version}`, prescription: snapshot.inputs.prescription,
       validate: (state, impact) => validateTrainingSessionSafety(state, impact, { goals: snapshot.goals, ...snapshot.inputs }) };
   }), request => {
-    if (!trainingSessionCommandEnabled || !trainingPlanSessionReadAdvertised() ||
-      !mobileGoalsStore.supportsPublicationOperations || request.headers["x-rai-client-training-session-commands"] !== "1") {
+    if (!trainingSessionCommandEnabled || !mobileGoalsStore.supportsPublicationOperations ||
+      request.headers["x-rai-client-training-session-commands"] !== "1") {
       throw new PlanOperationError("training_session_commands_disabled", "课程编辑尚未启用或未完成合同协商。", 409);
     }
+    assertTrainingPlanSessionReadForCommand("training_session_commands_disabled", "课程编辑尚未启用或未完成合同协商。");
   }, withTrainingPlanGenerationLease);
-app.post("/v1/mobile/training-plan/session-commands/preview", trainingSessionCommands.preview);
-app.post("/v1/mobile/training-plan/session-commands", trainingSessionCommands.submit);
+app.post("/v1/mobile/training-plan/session-commands/preview", trainingSessionCommandRouteOptions(false), trainingSessionCommands.preview);
+app.post("/v1/mobile/training-plan/session-commands", trainingSessionCommandRouteOptions(true), trainingSessionCommands.submit);
 
 // B06: execution association is a separate opt-in capability. Candidate
 // reads and writes share the same negotiated contract; a committed operation
@@ -2125,10 +2162,11 @@ const trainingExecutionService = new TrainingPlanExecutionCommandService(
     workout: (id, day, asOf) => withReadStore(store => store.executionWorkout(id, day, asOf))
   }));
 const trainingExecutionCommands = createTrainingExecutionCommandHandlers(trainingExecutionService, request => {
-    if (!trainingExecutionCommandEnabled || !trainingPlanSessionReadAdvertised() ||
-      !mobileGoalsStore.supportsPublicationOperations || request.headers["x-rai-client-training-execution-commands"] !== "1") {
+    if (!trainingExecutionCommandEnabled || !mobileGoalsStore.supportsPublicationOperations ||
+      request.headers["x-rai-client-training-execution-commands"] !== "1") {
       throw new PlanOperationError("training_execution_commands_disabled", "执行关联尚未启用或未完成合同协商。", 409);
     }
+    assertTrainingPlanSessionReadForCommand("training_execution_commands_disabled", "执行关联尚未启用或未完成合同协商。");
   }, withTrainingPlanGenerationLease);
 app.get<{ Params: { sessionId: string } }>("/v1/mobile/training-plan/sessions/:sessionId/execution-candidates",
   trainingExecutionCommands.candidates);
@@ -2382,6 +2420,14 @@ app.post<{ Body: LockMobileSessionInput }>(
         expectedRevision: request.body.expectedRevision
       });
       if (rejection) throw new PlanOperationError(rejection.code, rejection.message);
+      // schema 2 forbids a locked prescription and an explicit-rest decision on
+      // the same day. Reject the legacy lock explicitly instead of letting the
+      // strict unified reader fail later as an opaque 500.
+      if (unified?.state.schemaVersion === 2 && unified.state.suppressions.some(suppression =>
+        suppression.reason === "explicit_rest" && suppression.localDate === snapshot.today.localDate)) {
+        throw new PlanOperationError("training_session_date_occupied",
+          "今天已指定明确休息，不能同时锁课；请先在课程中取消该休息决定。", 409);
+      }
       if (request.body.action === "lock" && snapshot.lock.present) {
         return mobileGoalsStore.read(planPrescription());
       }

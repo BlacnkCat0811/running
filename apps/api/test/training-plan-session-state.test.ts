@@ -36,7 +36,10 @@ test("B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/over
     s => s.suppressions[0].sessionId = "unowned",
     s => s.weekPlan.push(s.weekPlan[0]),
     s => s.weekPlan[0].distanceKm = 9,
-    s => s.sessions[0].availableAt = "2026-10-25T03:10:00Z"
+    s => s.sessions[0].availableAt = "2026-10-25T03:10:00Z",
+    // P2.12: a day cannot be both an explicit rest decision and a locked course.
+    s => { s.lockedSession = { localDate: "2026-10-30", session: { kind: "easy", distanceKm: 5 },
+      verdictTone: "green", lockedAt: "2026-10-25T03:00:00.000Z" }; }
   ];
   for (const corrupt of corruptions) { const state = structuredClone(fixture.payload2); corrupt(state); assert.throws(() => parseTrainingPlanState(state)); }
 });

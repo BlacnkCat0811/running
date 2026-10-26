@@ -11,7 +11,7 @@ import { assessWorkoutExecution, type CoachExecutionWorkout } from "./coach-exec
 import { parseTrainingPlanState, type TrainingPlanSessionState } from "./training-plan-store.js";
 import { isValidLocalDate } from "./local-date.js";
 import { sessionId, sessionRevision, TrainingPlanSessionStateError } from "./training-plan-session-state.js";
-import { lifecycleForAssessment, pageExecutionCandidates, resolveExecutionRange, shiftLocalDate, type ExecutionFact } from "./training-plan-execution-match.js";
+import { factsInRange, lifecycleForAssessment, pageExecutionCandidates, resolveExecutionRange, shiftLocalDate, type ExecutionFact } from "./training-plan-execution-match.js";
 import type { TrainingPlanExecutionRow } from "./training-plan-execution-repository.js";
 import { internalErrorLogDetail } from "./training-plan-commands.js";
 
@@ -20,6 +20,7 @@ const invalid = (message: string): never => { throw new PlanOperationError("trai
 const conflict = (code: string, message: string): never => { throw new PlanOperationError(code, message, 409); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
+class ReconciliationNoChange extends Error {}
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -108,6 +109,19 @@ export class TrainingPlanExecutionCommandService {
     if (!session) throw new PlanOperationError("training_session_not_found", "当前实例中找不到该课程。", 404);
     return session;
   }
+  /**
+   * Execution-side reads/commands must reject a course that the current plan has
+   * already replaced or cancelled. A superseded course keeps `lifecycle=pending`
+   * in policy for history, so lookup by ID alone would let a stale client claim or
+   * skip a course that no longer owns its date.
+   */
+  private executableSession(state: TrainingPlanSessionState, id: string): TrainingPlanSession {
+    const session = this.sessionOf(state, id);
+    if (session.supersededBySessionId !== null || session.lifecycle === "cancelled") {
+      conflict("training_session_not_editable", "已被替换或取消的课程不能执行关联。");
+    }
+    return session;
+  }
   private executionOf(id: string): TrainingPlanExecutionRow | null {
     return this.store.trainingPlanExecution(this.scope(), id);
   }
@@ -117,6 +131,14 @@ export class TrainingPlanExecutionCommandService {
       conflict("training_execution_revision_conflict", "关联已变化，请重新读取课程后重试。");
     }
     return current;
+  }
+
+  private assertExecutionAuthority(state: TrainingPlanSessionState, action: TrainingPlanExecutionDraft["action"]): void {
+    // Correct creates a new claim even when it replaces a historical link.
+    // Retract only withdraws a saved claim and never grants execution authority.
+    if (action !== "retract" && (state.runState !== "active" || state.sourceStatus === "ended")) {
+      conflict("training_execution_not_active", "计划已暂停或结束，不能确认、纠正或跳过执行；仍可撤回历史关联。");
+    }
   }
 
   replay(request: TrainingPlanExecutionCommandRequest): TrainingPlanClosedLoopCommandResponse | null {
@@ -136,14 +158,15 @@ export class TrainingPlanExecutionCommandService {
     if (row?.state.schemaVersion !== 2) return conflict("training_session_contract_unsupported", "当前数据域尚未完成课程身份迁移。");
     const state = row.state as TrainingPlanSessionState;
     if (state.planInstanceId !== query.planInstanceId) conflict("training_plan_instance_mismatch", "计划实例已变化，请重读。");
-    const session = this.sessionOf(state, sessionIdValue);
+    const session = this.executableSession(state, sessionIdValue);
     let range;
     try {
       range = resolveExecutionRange(session.prescription.localDate, query.rangeStart, query.rangeEnd);
     } catch (error) {
       return invalid(error instanceof Error ? error.message : "候选范围非法。");
     }
-    const page = pageExecutionCandidates({ facts: this.facts().candidates(range.rangeStart, range.rangeEnd), range, cursor: query.cursor ?? null });
+    const page = pageExecutionCandidates({ facts: this.facts().candidates(range.rangeStart, range.rangeEnd), range,
+      scope: this.scope(), cursor: query.cursor ?? null });
     const current = this.executionOf(sessionIdValue);
     const candidates: TrainingPlanExecutionCandidate[] = page.candidates.map(candidate => {
       const claim = this.store.trainingPlanExecutionForRun(this.scope(), candidate.trainingSessionId);
@@ -173,6 +196,12 @@ export class TrainingPlanExecutionCommandService {
       segments: [], signalIntervals: [], evidenceRef: { source: "workout", id: candidate.trainingSessionId,
         observedAt: candidate.startedAt, availableAt: new Date(this.now()).toISOString(), revisionOrHash: candidate.sourceFactDigest } };
     const workout = facts.workout(candidate.trainingSessionId, prescription.prescription, new Date(this.now()).toISOString()) ?? fallback;
+    if (workout.id !== candidate.trainingSessionId || workout.startedAt !== candidate.startedAt ||
+        workout.endedAt !== candidate.endedAt || workout.distanceMeters !== candidate.distanceMeters ||
+        workout.durationSeconds !== candidate.durationSeconds || workout.evidenceRef.id !== candidate.trainingSessionId ||
+        workout.evidenceRef.revisionOrHash !== candidate.sourceFactDigest) {
+      conflict("training_execution_source_changed", "候选与执行评价的事实身份或摘要不一致，请重新读取。");
+    }
     const hash = prescriptionDigest(prescription.prescription.kind, prescription.prescription.structure ?? null);
     const assessment = assessWorkoutExecution({ asOf: new Date(this.now()).toISOString(),
       prescription: { day: prescription.prescription, revision: prescription.sessionRevision, createdAt: prescription.availableAt,
@@ -214,12 +243,27 @@ export class TrainingPlanExecutionCommandService {
     const request = parseTrainingExecutionRequest(raw);
     const replay = this.replay(request);
     if (replay !== null) return replay;
-    const needsFacts = request.draft.action === "confirm" || request.draft.action === "correct";
+    const needsFacts = request.draft.action !== "retract";
     const facts = needsFacts ? this.facts() : null;
     return new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, request, () => {
       const current = this.current(request);
-      const fingerprint = facts?.fingerprint() ?? "";
-      const session = this.sessionOf(current.state, request.sessionId);
+      this.assertExecutionAuthority(current.state, request.draft.action);
+      // Skip takes its fingerprint after the pending/link guards below, so an
+      // already completed course keeps the existing rejection semantics.
+      const fingerprint = request.draft.action === "skip" ? "" : facts?.fingerprint() ?? "";
+      if (request.draft.action === "confirm" || request.draft.action === "correct") {
+        const assertUnchanged = () => {
+          if (facts!.fingerprint() !== fingerprint) {
+            conflict("training_execution_source_changed", "执行评价或提交前训练事实发生变化，请重新读取候选。");
+          }
+        };
+        // Also covers Correct's no-change result and the operation receipt.
+        this.store.beforePublicationCommit(assertUnchanged);
+      }
+      const draft = request.draft as TrainingPlanExecutionDraft;
+      const linksExecution = draft.action !== "retract";
+      const session = linksExecution ? this.executableSession(current.state, request.sessionId)
+        : this.sessionOf(current.state, request.sessionId);
       if (session.sessionRevision !== request.sessionRevision) {
         conflict("training_session_revision_conflict", "课程已变化，请重新读取。");
       }
@@ -227,8 +271,7 @@ export class TrainingPlanExecutionCommandService {
       const executionRevision = (currentExecution?.execution.executionRevision ?? 0) + 1;
       const now = new Date(this.now()).toISOString();
       const state = structuredClone(current.state);
-      const target = this.sessionOf(state, request.sessionId);
-      const draft = request.draft as TrainingPlanExecutionDraft;
+      const target = linksExecution ? this.executableSession(state, request.sessionId) : this.sessionOf(state, request.sessionId);
       let nextExecution: TrainingPlanSessionExecution | null = currentExecution?.execution ?? null;
       const reason = `execution:${draft.action}`;
       let lifecycleChanged = false;
@@ -240,6 +283,25 @@ export class TrainingPlanExecutionCommandService {
         if (currentExecution?.execution.association === "confirmed") {
           conflict("training_execution_link_conflict", "已确认实际训练的课程不能跳过；请先撤回关联。");
         }
+        const skipFacts = facts!;
+        const before = skipFacts.fingerprint();
+        // Same unpaginated default ±2-day window as the candidate page. A wider
+        // user search must not silently redefine the server's Skip eligibility.
+        const range = resolveExecutionRange(target.prescription.localDate);
+        const candidates = factsInRange(skipFacts.candidates(range.rangeStart, range.rangeEnd), range);
+        const assertUnchanged = () => {
+          if (skipFacts.fingerprint() !== before) {
+            conflict("training_execution_source_changed", "跳过提交前训练事实发生变化，请刷新候选后重试。");
+          }
+        };
+        assertUnchanged();
+        if (candidates.length > 0) {
+          conflict("training_execution_candidates_present", "课程候选窗口内已有实际跑步，不能跳过；请刷新候选并确认关联。");
+        }
+        // Runs after state/history/operation-result writes, immediately before
+        // the control COMMIT. The HTTP owner holds the shared facts lease until
+        // publish returns; no supported main-DB writer can enter this gap.
+        this.store.beforePublicationCommit(assertUnchanged);
         target.lifecycle = "skipped";
         target.sessionRevision += 1;
         target.availableAt = now;
@@ -277,17 +339,21 @@ export class TrainingPlanExecutionCommandService {
             currentExecution?.execution.association !== "invalidated" && currentExecution?.execution.association !== "pending_confirmation") {
           conflict("training_execution_link_conflict", "当前没有可纠正的关联；首次关联请使用确认。");
         }
+        if (facts === null) conflict("training_execution_source_changed", "执行事实不可读。");
+        // Always re-read the live candidate and verify the source digest before a
+        // no-op may be reported: a deleted/corrected source fact must surface as
+        // source_changed, not as "nothing to change".
+        const candidate = this.findCandidate(facts!, target, draft);
+        if (facts!.fingerprint() !== fingerprint) conflict("training_execution_source_changed", "读取候选后训练事实发生变化，请重试。");
         if (draft.action === "correct" && currentExecution?.execution.association === "confirmed" &&
             currentExecution.execution.trainingSessionId === draft.trainingSessionId &&
             currentExecution.execution.sourceFactDigest === draft.sourceFactDigest) {
           return this.response(request, current, target, currentExecution.execution, "no_change", warnings);
         }
-        if (facts === null) conflict("training_execution_source_changed", "执行事实不可读。");
-        const candidate = this.findCandidate(facts!, target, draft);
-        if (facts!.fingerprint() !== fingerprint) conflict("training_execution_source_changed", "读取候选后训练事实发生变化，请重试。");
         const prescription = this.frozenPrescription(state, target, candidate.startedAt);
         if (prescription === null) conflict("training_execution_source_changed", "开跑前没有已发布生效的课程修订，不能把事后编辑的课当作当时处方。");
         const assessment = this.assessment(facts!, prescription!, candidate);
+        if (facts!.fingerprint() !== fingerprint) conflict("training_execution_source_changed", "读取执行评价后训练事实发生变化，请重试。");
         const lifecycle = lifecycleForAssessment(assessment);
         nextExecution = { sessionId: target.sessionId, executionRevision, association: "confirmed",
           trainingSessionId: candidate.trainingSessionId, sourceFactDigest: candidate.sourceFactDigest,
@@ -339,6 +405,7 @@ export class TrainingPlanExecutionCommandService {
       .filter(execution => execution.association === "confirmed");
     if (current.length === 0) return { changed: 0 };
     const facts = this.facts();
+    const factsBefore = facts.fingerprint();
     const stale: Array<{ execution: TrainingPlanSessionExecution; session: TrainingPlanSession }> = [];
     for (const execution of current) {
       const session = state.sessions.find(item => item.sessionId === execution.sessionId);
@@ -353,18 +420,34 @@ export class TrainingPlanExecutionCommandService {
       if (live !== undefined && live.sourceFactDigest === execution.sourceFactDigest) continue;
       stale.push({ execution, session });
     }
+    if (facts.fingerprint() !== factsBefore) {
+      conflict("training_execution_source_changed", "预扫描执行事实期间数据发生变化，请重试。");
+    }
     if (stale.length === 0) return { changed: 0 };
-    const operationId = `reconcile-${digest({ contract: "rai-training-execution-reconcile-v1", scope: this.identity(),
+    // v2 must not replay a legacy no-change tombstone; old receipts stay immutable.
+    const operationId = `reconcile-${digest({ contract: "rai-training-execution-reconcile-v2", scope: this.identity(),
       stateRevision: row.revision,
       executions: stale.map(item => ({ sessionId: item.session.sessionId, executionRevision: item.execution.executionRevision,
         trainingSessionId: item.execution.trainingSessionId, sourceFactDigest: item.execution.sourceFactDigest })) }).slice(0, 40)}`;
-    return new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, {
+    const publish = () => new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, {
       operationId, operationScope: this.identity() }, () => {
       const latest = this.store.trainingPlanStateRow(this.scope());
       if (latest === null || latest.state.schemaVersion !== 2) {
         throw new PlanOperationError("training_session_contract_unsupported", "当前数据域尚未完成课程身份迁移。", 409);
       }
       const latestState = latest.state as TrainingPlanSessionState;
+      this.assertExecutionAuthority(latestState, "confirm");
+      if (latestState.planInstanceId !== state.planInstanceId || latest.revision !== row.revision) {
+        conflict("training_state_revision_conflict", "核对期间计划状态已变化，请重试。");
+      }
+      // Facts can be updated concurrently between the cheap pre-scan and this
+      // transaction. Re-read every candidate here and only invalidate a link that
+      // is still stale now; a recovered fact must not be marked invalidated.
+      this.store.beforePublicationCommit(() => {
+        if (facts.fingerprint() !== factsBefore) {
+          conflict("training_execution_source_changed", "核对结果提交前训练事实发生变化，请重试。");
+        }
+      });
       const now = new Date(this.now()).toISOString();
       const next = structuredClone(latestState);
       let changed = 0;
@@ -374,6 +457,14 @@ export class TrainingPlanExecutionCommandService {
             execution.execution.sourceFactDigest !== item.execution.sourceFactDigest) continue;
         const session = next.sessions.find(value => value.sessionId === item.session.sessionId);
         if (!session) continue;
+        let range;
+        try {
+          range = resolveExecutionRange(session.prescription.localDate,
+            shiftLocalDate(session.prescription.localDate, -15), shiftLocalDate(session.prescription.localDate, 15));
+        } catch { continue; }
+        const live = facts.candidates(range.rangeStart, range.rangeEnd)
+          .find(fact => fact.trainingSessionId === execution.execution.trainingSessionId);
+        if (live !== undefined && live.sourceFactDigest === execution.execution.sourceFactDigest) continue;
         const executionRevision = execution.execution.executionRevision + 1;
         const invalidated: TrainingPlanSessionExecution = { ...execution.execution, executionRevision,
           association: "invalidated", reasonCodes: [...new Set([...execution.execution.reasonCodes, "execution_source_changed"])],
@@ -386,12 +477,22 @@ export class TrainingPlanExecutionCommandService {
         this.store.appendTrainingPlanExecution(this.scope(), next.planInstanceId, invalidated, "reconcile:source_changed");
         changed += 1;
       }
-      if (changed === 0) return { changed: 0 };
+      if (facts.fingerprint() !== factsBefore) {
+        throw new PlanOperationError("training_execution_source_changed", "核对执行事实期间数据发生变化，请重试。", 409);
+      }
+      // A transiently recovered source must not persist changed:0 under this
+      // deterministic key and mask a later invalidation of the same old claim.
+      if (changed === 0) throw new ReconciliationNoChange();
       parseTrainingPlanState(next);
       this.store.commitTrainingPlanCommandState({ scope: this.scope(), expectedRevision: latest.revision,
         state: { ...next, goalsRevision: latestState.goalsRevision }, eventType: "execution:source_changed" });
       return { changed };
     });
+    try { return publish(); }
+    catch (error) {
+      if (error instanceof ReconciliationNoChange) return { changed: 0 };
+      throw error;
+    }
   }
 
   private response(request: TrainingPlanExecutionCommandRequest, row: { state: TrainingPlanSessionState; revision: number },
@@ -415,9 +516,10 @@ export function createTrainingExecutionCommandHandlers(service: TrainingPlanExec
       const replay = service.replay(body);
       if (replay !== null) return replay;
       admit(request);
-      // Retract/skip are metadata-only: they remain available while a sync holds
-      // the facts lease, and must not be blocked by an import in progress.
-      return body.draft.action === "retract" || body.draft.action === "skip"
+      // Skip must hold the same mutation lease as fact writers across candidate
+      // validation and the entire control publication (including COMMIT).
+      // Retract uses saved identity and remains metadata-only.
+      return body.draft.action === "retract"
         ? await service.submit(body) : await withFactsLease(async () => service.submit(body));
     } catch (error) {
       if (error instanceof PlanOperationError) return reply.code(error.statusCode).send({ code: error.code, message: error.message });
@@ -448,5 +550,6 @@ export function createTrainingExecutionCommandHandlers(service: TrainingPlanExec
       return reply.code(503).send({ code: "training_session_storage_unavailable", message: "执行候选暂不可用，请稍后重试。" });
     }
   };
-  return { candidates, submit: handle, reconcile: () => service.reconcileSourceChanges() };
+  return { candidates, submit: handle,
+    reconcile: () => withFactsLease(async () => service.reconcileSourceChanges()) };
 }

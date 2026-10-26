@@ -174,3 +174,32 @@ test("B02/T22/T23: schema 3 and its ledger entry roll back together; SQLite busy
     assert.equal(applySessionIdentityMigration(f.db, scope, report.sourceDigest, 1).status, "applied");
   } finally { f.close(); }
 });
+
+
+test("D-03: identity migration and historical replay retain all nine legacy steps", () => {
+  const f = seed();
+  try {
+    const day = { localDate: "2026-10-28", kind: "easy" as const, distanceKm: 0.9, reason: "legacy nine-step course",
+      structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: Array.from({ length: 9 }, () => ({
+        purpose: "work" as const, goal: { type: "distance" as const, meters: 100 }, alert: null })) }] } };
+    const goals = f.goals.write({ weekPlan: [day] }, { preserveWeekPlan: true });
+    const row = f.store.read(scope)!;
+    f.store.commitState({ scope, expectedRevision: row.revision, state: {
+      ...f.state, weekPlan: [day], lockedSession: null, goalsRevision: goals.revision }, eventType: "fixture:legacy-nine-steps" });
+    const before = snapshot(f.db);
+    const report = inspectSessionIdentityMigration(f.db, scope);
+    assert.deepEqual(snapshot(f.db), before, "dry-run preserves historical JSON and allocates nothing");
+    const history = f.db.prepare("SELECT * FROM mobile_training_state_history ORDER BY revision").all();
+    const migrated = applySessionIdentityMigration(f.db, scope, report.sourceDigest, report.existingRevision);
+    const current = f.store.read(scope)!;
+    assert.equal(current.state.schemaVersion, 2);
+    if (current.state.schemaVersion !== 2) throw new Error("schema 2 required");
+    assert.deepEqual(current.state.sessions[0]!.prescription, day);
+    const repo = new TrainingPlanSessionRepository(f.db);
+    assert.deepEqual(repo.get(scope, migrated.planInstanceId!, current.state.sessions[0]!.sessionId, 1)!.session.prescription, day);
+    assert.deepEqual(f.db.prepare("SELECT * FROM mobile_training_state_history ORDER BY revision").all().slice(0, history.length), history);
+    const after = snapshot(f.db);
+    assert.equal(applySessionIdentityMigration(f.db, scope, report.sourceDigest, report.existingRevision).status, "replayed");
+    assert.deepEqual(snapshot(f.db), after);
+  } finally { f.close(); }
+});

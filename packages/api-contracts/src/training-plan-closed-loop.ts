@@ -11,6 +11,7 @@ import type {
 export const TRAINING_PLAN_CLOSED_LOOP_CONTRACT = {
   sessions: { version: 1, capability: "trainingPlanSessionContractVersion", header: "X-RAI-Training-Sessions" },
   sessionCommands: { version: 1, capability: "trainingPlanSessionCommandContractVersion", header: "X-RAI-Client-Training-Session-Commands" },
+  sessionDistanceOmission: { version: 1, capability: "trainingPlanSessionDistanceOmissionContractVersion", header: "X-RAI-Client-Training-Session-Distance-Omission" },
   executionCommands: { version: 1, capability: "trainingPlanExecutionCommandContractVersion", header: "X-RAI-Client-Training-Execution-Commands" },
   updates: { version: 1, capability: "trainingPlanUpdateContractVersion", header: "X-RAI-Training-Updates" },
   routes: {
@@ -76,7 +77,8 @@ export interface TrainingPlanSessionsView {
   executions?: TrainingPlanSessionExecution[];
 }
 
-/** Omission keeps a field; reason:null clears it. Structure targets clear via alert:null. */
+/** Omission keeps a field, except distance is remeasured when kind/structure changes.
+ * reason:null clears it. Structure targets clear via alert:null. */
 export interface TrainingPlanSessionPatch {
   kind?: Exclude<MobileSessionKind, "rest">;
   distanceKm?: number | null;
@@ -88,8 +90,10 @@ type ExistingSession = { sessionId: string; sessionRevision: number };
 export type TrainingPlanSessionDraft =
   | (ExistingSession & { action: "move"; localDate: string })
   | (ExistingSession & { action: "edit"; patch: TrainingPlanSessionPatch })
-  | { action: "add"; prescription: Omit<MobilePlannedDay, "kind" | "structure"> & {
-      kind: Exclude<MobileSessionKind, "rest">; structure: MobileSessionStructure } }
+  | { action: "add"; prescription: Omit<MobilePlannedDay, "kind" | "structure" | "distanceKm"> & {
+      kind: Exclude<MobileSessionKind, "rest">; structure: MobileSessionStructure;
+      /** Omitted: server derives distance (null for pure time). Explicit values are checked. */
+      distanceKm?: number | null } }
   | (ExistingSession & { action: "cancel" })
   | { action: "set_rest"; localDate: string }
   | (ExistingSession & { action: "unlock" });
@@ -214,6 +218,7 @@ export const TRAINING_PLAN_CLOSED_LOOP_ERRORS = {
   training_session_contract_required: 422,
   training_session_commands_disabled: 409,
   training_execution_commands_disabled: 409,
+  training_execution_not_active: 409,
   training_session_command_invalid: 422,
   training_scope_mismatch: 409,
   training_plan_instance_mismatch: 409,
@@ -226,6 +231,7 @@ export const TRAINING_PLAN_CLOSED_LOOP_ERRORS = {
   training_session_not_editable: 409,
   training_session_not_found: 404,
   training_execution_source_changed: 409,
+  training_execution_candidates_present: 409,
   training_execution_link_conflict: 409,
   training_session_safety_rejected: 422,
   training_session_storage_unavailable: 503

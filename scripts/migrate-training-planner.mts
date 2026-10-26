@@ -265,7 +265,8 @@ function main(argv: string[]): number {
       releaseControlLock?.();
     }
   } catch (error) {
-    if (error instanceof TrainingPlanSessionMigrationError) return emitFailure(error.code, error.message, null);
+    if (error instanceof TrainingPlanSessionMigrationError) return emitFailure(error.code, error.message,
+      error.conflicts.length > 0 ? { conflicts: error.conflicts } : null);
     if (error instanceof CliFailure) return emitFailure(error.code, error.message, null);
     return emitFailure("internal_error", error instanceof Error ? error.message : String(error), null);
   }

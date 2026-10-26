@@ -1928,14 +1928,17 @@ export class RaiReadStore {
       ORDER BY s.anchor_start_at,s.id`).all(`${rangeStart}T00:00:00+08:00`, `${shiftCoachDate(rangeEnd, 1)}T00:00:00+08:00`) as
       Array<{ id: string; startedAt: string; endedAt: string; distanceKm: number | null;
         durationSeconds: number | null; updatedAt: string }>;
-    return rows.filter(row => row.distanceKm !== null && row.distanceKm > 0 && row.durationSeconds !== null && row.durationSeconds > 0)
-      .map(row => ({ trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
+    // Dose is evidence for assessment, not an eligibility filter. A real run
+    // with unknown (null) or zero distance/duration must remain available for
+    // completed + unknown assessment; only the status/workout/activity filters
+    // above decide whether it is a candidate at all.
+    return rows.map(row => ({ trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
+      distanceMeters: row.distanceKm === null ? null : Math.round(row.distanceKm * 1000),
+      durationSeconds: row.durationSeconds,
+      sourceFactDigest: executionFactDigest({
+        trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
         distanceMeters: row.distanceKm === null ? null : Math.round(row.distanceKm * 1000),
-        durationSeconds: row.durationSeconds,
-        sourceFactDigest: executionFactDigest({
-          trainingSessionId: row.id, startedAt: row.startedAt, endedAt: row.endedAt,
-          distanceMeters: row.distanceKm === null ? null : Math.round(row.distanceKm * 1000),
-          durationSeconds: row.durationSeconds, updatedAt: row.updatedAt }) }));
+        durationSeconds: row.durationSeconds, updatedAt: row.updatedAt }) }));
   }
 
   /**
@@ -1974,6 +1977,9 @@ export class RaiReadStore {
     return this.inReadSnapshot(() => {
       const session = this.seriesRepository.sessionForSeries(id);
       if (!session) return null;
+      const fact = this.executionCandidateFacts(coachLocalDate(session.startedAt), coachLocalDate(session.startedAt))
+        .find(value => value.trainingSessionId === id);
+      if (!fact) return null;
       const updated = this.database.prepare("SELECT updated_at FROM training_sessions WHERE id=?").get(id) as
         { updated_at: string } | undefined;
       const availableAt = updated && Number.isFinite(Date.parse(updated.updated_at))
@@ -1997,16 +2003,14 @@ export class RaiReadStore {
       }
       const steps = day.structure ? (day.structure.warmup ? 1 : 0) + (day.structure.cooldown ? 1 : 0) +
         day.structure.blocks.reduce((sum: number, block) => sum + block.iterations * block.steps.length, 0) : 0;
-      return { id, startedAt: session.startedAt, endedAt: session.endedAt, availableAt,
-        distanceMeters: session.distanceKm === null ? null : Math.round(session.distanceKm * 1000),
-        durationSeconds: (Date.parse(session.endedAt) - Date.parse(session.startedAt)) / 1000,
+      return { id, startedAt: fact.startedAt, endedAt: fact.endedAt, availableAt,
+        distanceMeters: fact.distanceMeters, durationSeconds: fact.durationSeconds,
         evidenceLevel: series.hasMeasuredWorkoutSteps === true ? "measured_steps"
           : series.segmentPlan ? "reconstructed_segments" : "summary_only",
         measuredStepsComplete: series.hasMeasuredWorkoutSteps === true && steps > 0 && series.segments.length === steps,
         segments: series.segments, signalIntervals,
         evidenceRef: { source: "workout", id, observedAt: session.startedAt,
-          availableAt: availableAt ?? asOf, revisionOrHash: digest({ id, startedAt: session.startedAt,
-            endedAt: session.endedAt, distanceKm: session.distanceKm }) } };
+          availableAt: availableAt ?? asOf, revisionOrHash: fact.sourceFactDigest } };
     });
   }
 

@@ -279,6 +279,14 @@ final class ExecutionProtocol: URLProtocol, @unchecked Sendable {
         check(invalidatedView.statusTitle == "关联已失效" && !invalidatedView.claimsCompletion &&
               invalidatedView.reasonTexts.isEmpty, "an invalidated association keeps history but withdraws the current completion")
 
+        check(TrainingPlanExecutionPolicy.permitsNewExecution(runState: "active", sourceStatus: "active"),
+              "EXEC-01: active plan permits new execution")
+        for status in ["paused", "ended"] {
+            check(!TrainingPlanExecutionPolicy.permitsNewExecution(runState: "paused", sourceStatus: status),
+                  "EXEC-01: stopped plan prohibits Confirm/Correct/Skip")
+            check(TrainingPlanExecutionPolicy.canRetract(execution(association: "confirmed")),
+                  "EXEC-01: historical Retract remains available without new authorization")
+        }
         // MARK: - Candidate selection / eligibility
 
         check(TrainingPlanExecutionPolicy.preferredCandidateSelection(decodedPage.candidates) == nil,
@@ -291,6 +299,8 @@ final class ExecutionProtocol: URLProtocol, @unchecked Sendable {
               "candidate action copy distinguishes confirm, correct and re-link")
         check(TrainingPlanExecutionPolicy.canSkip(session: session(), execution: nil, hasCandidates: false),
               "a pending course with no candidate may be explicitly skipped")
+        check(!TrainingPlanExecutionPolicy.canSkip(session: session(), execution: nil, hasCandidates: nil),
+              "an unread candidate page disables skip instead of pretending there are no runs")
         check(!TrainingPlanExecutionPolicy.canSkip(session: session(), execution: nil, hasCandidates: true),
               "an executed candidate blocks skip even before confirmation")
         check(!TrainingPlanExecutionPolicy.canSkip(session: session(lifecycle: "completed"), execution: nil, hasCandidates: false),
@@ -314,11 +324,90 @@ final class ExecutionProtocol: URLProtocol, @unchecked Sendable {
               !TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 5, incomingPlanInstanceId: "new-plan",
             existingStateRevision: 5, existingPlanInstanceId: "plan"),
               "an old GET cannot roll back state revision or swap a plan instance at the same revision")
+        check(!TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 4, incomingPlanInstanceId: nil,
+            existingStateRevision: 5, existingPlanInstanceId: "plan") &&
+              TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 5, incomingPlanInstanceId: nil,
+            existingStateRevision: 5, existingPlanInstanceId: "plan") &&
+              !TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 4, incomingPlanInstanceId: nil,
+            existingStateRevision: 5, existingPlanInstanceId: nil) &&
+              TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 5, incomingPlanInstanceId: nil,
+            existingStateRevision: 5, existingPlanInstanceId: nil) &&
+              !TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 5, incomingPlanInstanceId: "plan",
+            existingStateRevision: 5, existingPlanInstanceId: nil) &&
+              TrainingPlanExecutionPolicy.acceptsSnapshot(incomingStateRevision: 6, incomingPlanInstanceId: "plan",
+            existingStateRevision: 5, existingPlanInstanceId: nil),
+              "an identity-less old server cannot overwrite a newer snapshot; a first identity-bearing snapshot needs a strictly newer revision")
+        let stalePage = TrainingPlanExecutionPolicy.candidatePageMismatch(candidateResponse(stateRevision: 6),
+            planInstanceId: "plan", sessionId: "session", sessionRevision: 3,
+            executionRevision: 2, stateRevision: 7)
+        check(stalePage?.contains("计划状态已变化") == true &&
+              TrainingPlanExecutionPolicy.candidatePageMismatch(candidateResponse(),
+                planInstanceId: "plan", sessionId: "session", sessionRevision: 3,
+                executionRevision: 2, stateRevision: 7) == nil &&
+              TrainingPlanExecutionPolicy.candidatePageMismatch(candidateResponse(sessionRevision: 4),
+                planInstanceId: "plan", sessionId: "session", sessionRevision: 3,
+                executionRevision: 2, stateRevision: 7)?.contains("课程修订") == true &&
+              TrainingPlanExecutionPolicy.candidatePageMismatch(candidateResponse(executionRevision: 3),
+                planInstanceId: "plan", sessionId: "session", sessionRevision: 3,
+                executionRevision: 2, stateRevision: 7)?.contains("执行修订") == true,
+              "skip/confirm candidates must match the current state, session and execution revisions")
+        check(TrainingPlanExecutionPolicy.actionFailureMessage("confirm").contains("未能保存关联") &&
+              TrainingPlanExecutionPolicy.actionFailureMessage("retract").contains("未能撤回关联") &&
+              TrainingPlanExecutionPolicy.actionFailureMessage("skip").contains("未能跳过课程"),
+              "failed confirm/retract/skip actions always have user-visible copy")
         check(TrainingPlanExecutionPolicy.serverErrorMessage("training_execution_source_changed")?.contains("源训练记录已变化") == true &&
               TrainingPlanExecutionPolicy.serverErrorMessage("training_execution_link_conflict")?.contains("已关联其他课程") == true &&
               TrainingPlanExecutionPolicy.serverErrorMessage("training_execution_revision_conflict")?.contains("执行修订已变化") == true &&
               TrainingPlanExecutionPolicy.serverErrorMessage("unknown_code") == nil,
               "source-change and link-conflict errors have readable Chinese copy")
+        check(TrainingPlanExecutionPolicy.reasonTexts(["execution_retracted", "execution_source_changed"])
+                == ["已撤回关联", "源训练已更正"],
+              "retracted and corrected execution reason codes have Chinese mappings")
+        check(TrainingPlanExecutionPolicy.durationText(3_725) == "1小时2分" &&
+              TrainingPlanExecutionPolicy.durationText(59) == "59秒" &&
+              TrainingPlanExecutionPolicy.durationText(0) == "0秒",
+              "normal durations keep their existing readable format")
+        check(TrainingPlanExecutionPolicy.durationText(-1) == "未知" &&
+              TrainingPlanExecutionPolicy.durationText(.infinity) == "未知" &&
+              TrainingPlanExecutionPolicy.durationText(.nan) == "未知" &&
+              TrainingPlanExecutionPolicy.durationText(1e300) == "超过 7 天" &&
+              TrainingPlanExecutionPolicy.durationText(Double.greatestFiniteMagnitude) == "超过 7 天",
+              "an arbitrary finite Double never traps Int(value.rounded())")
+        let listSessions = [
+            session(lifecycle: "completed", date: "2026-10-26", id: "done"),
+            session(lifecycle: "cancelled", date: "2026-10-29", id: "cancelled"),
+            session(lifecycle: "pending", date: "2026-10-27", id: "past"),
+            session(lifecycle: "pending", date: "2026-10-28", id: "today"),
+            TrainingPlanSessionsView.Session(planInstanceId: "plan", sessionId: "old", sessionRevision: 1,
+                prescription: .init(localDate: "2026-10-25", kind: "easy", distanceKm: 5, structure: nil, reason: nil),
+                recommendation: nil, userOverride: nil, protection: "automatic", lifecycle: "pending",
+                availableAt: "2026-10-25T02:00:00.000Z", supersededBySessionId: "today")
+        ]
+        let visible = TrainingPlanExecutionPolicy.visibleSessions(listSessions)
+        check(visible.map(\.sessionId) == ["done", "past", "today", "cancelled"],
+              "finished and past sessions stay visible (only superseded identities are hidden), sorted by date")
+        check(TrainingPlanExecutionPolicy.sessionListState(session: listSessions[0], businessDate: "2026-10-28").isReadOnly &&
+              TrainingPlanExecutionPolicy.sessionListState(session: listSessions[1], businessDate: "2026-10-28").isReadOnly &&
+              TrainingPlanExecutionPolicy.sessionListState(session: listSessions[2], businessDate: "2026-10-28").isReadOnly &&
+              !TrainingPlanExecutionPolicy.sessionListState(session: listSessions[3], businessDate: "2026-10-28").isReadOnly,
+              "completed/cancelled/past rows are read-only while today's pending row remains editable")
+        check(TrainingPlanExecutionPolicy.sessionListState(session: listSessions[0], businessDate: "2026-10-28")
+                .caption.contains("查看记录") &&
+              !TrainingPlanExecutionPolicy.sessionListState(session: listSessions[0], businessDate: "2026-10-28")
+                .caption.contains("调整") &&
+              TrainingPlanExecutionPolicy.sessionListState(session: listSessions[2], businessDate: "2026-10-28")
+                .caption.contains("过去课程") &&
+              TrainingPlanExecutionPolicy.sessionListState(session: listSessions[3], businessDate: "2026-10-28")
+                .caption.contains("点按查看"),
+              "read-only rows say 查看记录 and never promise 调整; an editable automatic row stays a view action")
+        let protectedToday = TrainingPlanSessionsView.Session(planInstanceId: "plan", sessionId: "protected",
+            sessionRevision: 1,
+            prescription: .init(localDate: "2026-10-28", kind: "easy", distanceKm: 5, structure: nil, reason: nil),
+            recommendation: nil, userOverride: nil, protection: "user_protected", lifecycle: "pending",
+            availableAt: "2026-10-25T02:00:00.000Z", supersededBySessionId: nil)
+        check(TrainingPlanExecutionPolicy.sessionListState(session: protectedToday, businessDate: "2026-10-28")
+                .caption.contains("查看/调整"),
+              "an editable user-protected row keeps the adjust action")
         let history = TrainingPlanExecutionPolicy.historyRows(
             sessions: [session(lifecycle: "completed", id: "session-a"),
                        session(lifecycle: "pending", date: "2026-10-29", id: "session-b")],

@@ -339,3 +339,13 @@ test("B03/S01-02: refresh failure on a new session history write rolls the whole
     assert.deepEqual(f.goals.read(), goalsBefore);
   } finally { f.close(); }
 });
+
+test("P2.12: resolver fails closed on explicit rest + locked session on the same day", () => {
+  const state = base();
+  const invalid = { ...structuredClone(state), lockedSession: {
+    localDate: "2026-10-30", session: { kind: "easy", distanceKm: 5 },
+    verdictTone: "green", lockedAt: AVAILABLE_AT
+  } } as unknown as TrainingPlanSessionState;
+  assert.throws(() => resolveTrainingPlanSessions({ state: invalid, businessDate: BUSINESS_DATE, availableAt: AVAILABLE_AT,
+    generatedDays: [day("2026-10-30", "easy", 5)] }), /explicit rest and locked session share a date/);
+});

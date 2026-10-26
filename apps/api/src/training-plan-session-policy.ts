@@ -4,7 +4,7 @@ import type { MobilePlannedDay, TrainingPlanSession, TrainingPlanSessionExecutio
 
 import { isValidLocalDate } from "./local-date.js";
 import { digest } from "./plan-digest.js";
-import { parseSessionPrescription, TrainingPlanSessionStateError } from "./training-plan-session-state.js";
+import { assertTrainingPlanLockedRestInvariant, parseSessionPrescription, TrainingPlanSessionStateError } from "./training-plan-session-state.js";
 import type { TrainingPlanSessionState, TrainingPlanState } from "./training-plan-store.js";
 
 /**
@@ -92,6 +92,10 @@ function assertInput(input: ResolveTrainingPlanSessionsInput): void {
     if (dates.has(parsed.localDate)) throw new TrainingPlanSessionStateError(`resolver: duplicate generated date ${parsed.localDate}`);
     dates.add(parsed.localDate);
   }
+  // Fail closed on a state the strict reader also rejects: a locked prescription
+  // and an explicit rest decision must never claim the same day (the budget would
+  // reserve the locked course while the plan materializes rest).
+  assertTrainingPlanLockedRestInvariant(input.state);
 }
 
 /**
@@ -314,6 +318,7 @@ export function resolveTrainingPlanSessions(input: ResolveTrainingPlanSessionsIn
 export function trainingPlanProtectedDays(state: TrainingPlanState | null,
   executions: readonly TrainingPlanSessionExecution[] = []): MobilePlannedDay[] {
   if (state === null || state.schemaVersion !== 2) return [];
+  assertTrainingPlanLockedRestInvariant(state);
   const executionSessionIds = new Set(executions.map(execution => execution.sessionId));
   const days = state.sessions.filter(activeSession).filter(session => session.protection === "user_protected" ||
     session.lifecycle !== "pending" || executionSessionIds.has(session.sessionId)).map(session => structuredClone(session.prescription));

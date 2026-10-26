@@ -27,6 +27,7 @@ struct RaiHandshake: Codable, Equatable {
     /// B01 仅冻结协议与精确能力判定；服务端不宣告，无编辑/自动排期入口。
     var trainingPlanSessionContractVersion: Int? = nil
     var trainingPlanSessionCommandContractVersion: Int? = nil
+    var trainingPlanSessionDistanceOmissionContractVersion: Int? = nil
     var trainingPlanExecutionCommandContractVersion: Int? = nil
     var trainingPlanUpdateContractVersion: Int? = nil
     var planPublicationContractVersion: Int? = nil
@@ -61,6 +62,7 @@ struct RaiHandshake: Codable, Equatable {
         guard syncProtocolCompatible, apiVersion == "v1",
               trainingPlanContractVersion == nil, trainingPlanCommandContractVersion == nil,
               trainingPlanSessionContractVersion == nil, trainingPlanSessionCommandContractVersion == nil,
+              trainingPlanSessionDistanceOmissionContractVersion == nil,
               trainingPlanExecutionCommandContractVersion == nil, trainingPlanUpdateContractVersion == nil else { return false }
         guard planSnapshotContractVersion == nil || planSnapshotContractVersion == 1,
               planPublicationContractVersion == nil || planPublicationContractVersion == 1,
@@ -88,6 +90,10 @@ struct RaiHandshake: Codable, Equatable {
 
     var trainingPlanExecutionCommandsSupported: Bool {
         trainingPlanSessionsSupported && planPublicationContractVersion == 1 && trainingPlanExecutionCommandContractVersion == 1
+    }
+
+    var trainingPlanSessionDistanceOmissionSupported: Bool {
+        trainingPlanSessionCommandsSupported && trainingPlanSessionDistanceOmissionContractVersion == 1
     }
 
     var trainingPlanUpdatesSupported: Bool {
@@ -2591,6 +2597,7 @@ struct NativeWorkoutExport: Codable {
 
 /// Session editing is a separate negotiated contract. Nil patch fields are kept
 /// unless their explicit update flag is set; clearing reason encodes JSON null.
+/// Omitted distance is remeasured by the server when kind/structure changes.
 struct TrainingPlanSessionPatch: Encodable, Equatable {
     var kind: String? = nil
     var distanceKm: Double? = nil
@@ -2642,18 +2649,43 @@ private struct TrainingSessionWireStructure: Encodable {
 enum TrainingPlanSessionDraft: Encodable, Equatable {
     case move(sessionId: String, sessionRevision: Int, localDate: String)
     case edit(sessionId: String, sessionRevision: Int, patch: TrainingPlanSessionPatch)
-    case add(MobilePlannedDay)
+    case add(MobilePlannedDay, deriveDistance: Bool = false)
     case cancel(sessionId: String, sessionRevision: Int)
     case setRest(localDate: String)
     case unlock(sessionId: String, sessionRevision: Int)
+    var requiresDistanceOmission: Bool {
+        switch self {
+        case let .add(_, deriveDistance): return deriveDistance
+        case let .edit(_, _, patch): return !patch.updatesDistance && (patch.kind != nil || patch.structure != nil)
+        default: return false
+        }
+    }
+
+    /// Recovery queries committed operations regardless of current capability.
+    /// Only a notFound result may replay, using the exact original bytes.
+    static func payloadRequiresDistanceOmission(_ payload: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+              let draft = object["draft"] as? [String: Any], let action = draft["action"] as? String else { return true }
+        if action == "add" {
+            guard let prescription = draft["prescription"] as? [String: Any] else { return true }
+            return prescription["distanceKm"] == nil
+        }
+        if action == "edit" {
+            guard let patch = draft["patch"] as? [String: Any] else { return true }
+            return patch["distanceKm"] == nil && (patch["kind"] != nil || patch["structure"] != nil)
+        }
+        return !["move", "cancel", "set_rest", "unlock"].contains(action)
+    }
     enum CodingKeys: String, CodingKey { case action, sessionId, sessionRevision, localDate, patch, prescription }
     private struct Prescription: Encodable {
         let value: MobilePlannedDay
+        let deriveDistance: Bool
         enum CodingKeys: String, CodingKey { case localDate, kind, distanceKm, structure, reason }
         func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(value.localDate, forKey: .localDate); try c.encode(value.kind, forKey: .kind)
-            try c.encode(value.distanceKm, forKey: .distanceKm); try c.encode(value.reason, forKey: .reason)
+            if !deriveDistance { try c.encode(value.distanceKm, forKey: .distanceKm) }
+            try c.encode(value.reason, forKey: .reason)
             try c.encode(value.structure.map { TrainingSessionWireStructure(value: $0) }, forKey: .structure)
         }
     }
@@ -2665,7 +2697,9 @@ enum TrainingPlanSessionDraft: Encodable, Equatable {
         switch self {
         case let .move(id, revision, date): try existing("move", id, revision); try c.encode(date, forKey: .localDate)
         case let .edit(id, revision, patch): try existing("edit", id, revision); try c.encode(patch, forKey: .patch)
-        case let .add(day): try c.encode("add", forKey: .action); try c.encode(Prescription(value: day), forKey: .prescription)
+        case let .add(day, deriveDistance):
+            try c.encode("add", forKey: .action)
+            try c.encode(Prescription(value: day, deriveDistance: deriveDistance), forKey: .prescription)
         case let .cancel(id, revision): try existing("cancel", id, revision)
         case let .setRest(date): try c.encode("set_rest", forKey: .action); try c.encode(date, forKey: .localDate)
         case let .unlock(id, revision): try existing("unlock", id, revision)

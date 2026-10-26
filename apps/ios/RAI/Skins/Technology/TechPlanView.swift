@@ -480,9 +480,8 @@ private struct TechUnifiedTrainingView: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("课程与实际", systemImage: "calendar.badge.clock").font(.subheadline.weight(.medium))
             if let entities = native.trainingPlanStore.unified?.sessions {
-                let visible = entities.sessions
-                    .filter { $0.supersededBySessionId == nil }
-                    .sorted { $0.prescription.localDate < $1.prescription.localDate }
+                let listBusinessDate = native.trainingPlanStore.unified?.businessDate ?? ""
+                let visible = TrainingPlanExecutionPolicy.visibleSessions(entities.sessions)
                 if visible.isEmpty {
                     Text("当前服务没有返回稳定课程身份；只读展示已发布的安排。")
                         .font(.caption2).fixedSize(horizontal: false, vertical: true)
@@ -491,14 +490,19 @@ private struct TechUnifiedTrainingView: View {
                     let execution = entities.executions?.first { $0.sessionId == session.sessionId }
                     let review = TrainingPlanExecutionPolicy.review(session: session, execution: execution,
                         executionsKnown: entities.executions != nil)
+                    let listState = TrainingPlanExecutionPolicy.sessionListState(
+                        session: session, businessDate: listBusinessDate)
                     Button {
                         sessionEditorTarget = .init(session: session)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("\(session.prescription.localDate) · \(nativeSessionName(session.prescription.kind)) · \(nativeKilometers(session.prescription.distanceKm))")
-                                Text(session.protection == "user_protected" ? "用户保护 · 点按查看/调整" : "自动安排 · 点按查看")
+                                Text(listState.caption)
                                     .font(.caption)
+                                    .accessibilityIdentifier(listState.isReadOnly
+                                        ? "training.session.readonly.\(session.sessionId)"
+                                        : "training.session.editable.\(session.sessionId)")
                             }
                             Spacer(minLength: 8)
                             Text(review.statusTitle).font(.caption2.weight(.semibold))

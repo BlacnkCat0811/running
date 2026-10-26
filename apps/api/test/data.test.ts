@@ -721,3 +721,40 @@ test("B08/S04-01: record-only raw generation and canonical updated_at rewrites d
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("B06: candidate facts retain real runs with null or zero dose for completed + unknown assessment", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-execution-facts-dose-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  store.close();
+  const writer = new DatabaseSync(databasePath);
+  try {
+    // Three real runs with unknown/zero dose: null distance, zero distance and
+    // zero duration. None may disappear from candidate reads. (`duration_seconds`
+    // is NOT NULL in the current main schema, but the read type keeps null for
+    // forward compatibility; the mapping no longer filters either value.)
+    writer.prepare("UPDATE training_sessions SET anchor_distance_km=NULL WHERE id='api_session_6'").run();
+    writer.prepare("UPDATE training_sessions SET anchor_distance_km=0 WHERE id='api_session_5'").run();
+    writer.prepare("UPDATE workouts SET duration_seconds=0 WHERE id='api_workout_7'").run();
+  } finally {
+    writer.close();
+  }
+  const read = new RaiReadStore(databasePath);
+  try {
+    const once = read.executionCandidateFacts("2025-01-01", "2025-01-31");
+    const twice = read.executionCandidateFacts("2025-01-01", "2025-01-31");
+    assert.equal(once.length, 8, "dose null/zero is evidence, not an eligibility filter");
+    assert.deepEqual(once, twice, "the candidate set and digests stay stable across reads");
+    const nullDistance = once.find(fact => fact.trainingSessionId === "api_session_6")!;
+    assert.equal(nullDistance.distanceMeters, null);
+    assert.equal(nullDistance.durationSeconds, 1800);
+    const zeroDistance = once.find(fact => fact.trainingSessionId === "api_session_5")!;
+    assert.equal(zeroDistance.distanceMeters, 0);
+    const zeroDuration = once.find(fact => fact.trainingSessionId === "api_session_7")!;
+    assert.equal(zeroDuration.durationSeconds, 0);
+    assert.ok(once.every(fact => /^[a-f0-9]{64}$/.test(fact.sourceFactDigest)));
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -290,13 +290,16 @@ async function measureCandidateSeries(factory, businessDate, planInstanceId, ran
 
 async function measureInputKey(factory, businessDate) {
   const compute = context => {
+    // Start the timer before every digest input is assembled. B09 reports this
+    // path as "input key", so excluding config/override/execution digest work
+    // would understate the actual cost of the identity we publish.
+    const started = performance.now();
     const row = context.goals.currentTrainingPlan();
     const state = row.state;
     const executions = context.goals.trainingPlanExecutions(scopeKey, state.planInstanceId);
     const configDigest = trainingPlanConfigDigest(state);
     const overridesDigest = trainingPlanOverridesDigest(state);
     const executionDigest = trainingPlanExecutionDigest(executions);
-    const started = performance.now();
     const { facts, analysis } = context.read.trainingPlanInputFacts(businessDate);
     const key = trainingPlanDesiredInputKey({ scope, businessDate, facts, analysis, configDigest,
       overridesDigest, executionDigest, policyHash: state.coachLoop?.policyHash ?? null });

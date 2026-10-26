@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { digest } from "../src/plan-digest.js";
+import { PlanOperationError } from "../src/plan-publication.js";
 import {
-  executionFactDigest, factsInRange, lifecycleForAssessment, pageExecutionCandidates, parseExecutionCursor,
-  resolveExecutionRange, shiftLocalDate, type ExecutionFact
+  ExecutionCursorError, executionCandidateFactsDigest, executionFactDigest, factsInRange,
+  lifecycleForAssessment, pageExecutionCandidates, parseExecutionCursor, resolveExecutionRange,
+  shiftLocalDate, type ExecutionFact
 } from "../src/training-plan-execution-match.js";
 
 const fact = (id: string, startedAt: string): ExecutionFact => ({ trainingSessionId: id, startedAt,
@@ -35,16 +37,46 @@ test("B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is no
   const facts = Array.from({ length: 60 }, (_, index) => fact(`run-${String(index).padStart(2, "0")}`,
     new Date(Date.parse("2026-10-28T00:00:00.000Z") + index * 60_000).toISOString()));
   const range = resolveExecutionRange("2026-10-28");
-  const first = pageExecutionCandidates({ facts, range });
+  const scope = "scope-a";
+  const first = pageExecutionCandidates({ facts, range, scope });
   assert.equal(first.candidates.length, 50);
   assert.ok(first.nextCursor);
-  const second = pageExecutionCandidates({ facts, range, cursor: first.nextCursor });
+  const second = pageExecutionCandidates({ facts, range, scope, cursor: first.nextCursor });
   assert.equal(second.candidates.length, 10);
   assert.equal(second.nextCursor, null);
   assert.equal(new Set([...first.candidates, ...second.candidates].map(item => item.trainingSessionId)).size, 60);
-  const cursor = parseExecutionCursor(first.nextCursor!);
+  const cursor = parseExecutionCursor(first.nextCursor!, {
+    scope, range, factsDigest: executionCandidateFactsDigest(facts, range)
+  });
   assert.equal(cursor.trainingSessionId, first.candidates.at(-1)!.trainingSessionId);
-  assert.throws(() => parseExecutionCursor("not-a-cursor"), /invalid/);
+});
+
+test("B06/S03-02: cursor is bound to contract scope, range and the candidate fact set", () => {
+  const facts = Array.from({ length: 3 }, (_, index) => fact(`run-${index}`,
+    new Date(Date.parse("2026-10-28T00:00:00.000Z") + index * 60_000).toISOString()));
+  const range = resolveExecutionRange("2026-10-28");
+  const scope = "scope-a";
+  const first = pageExecutionCandidates({ facts, range, scope, limit: 1 });
+  assert.ok(first.nextCursor);
+  const cursor = first.nextCursor!;
+  const assertCursorError = (fn: () => unknown, label: string) => {
+    assert.throws(fn, (error: unknown) => error instanceof ExecutionCursorError &&
+      error instanceof PlanOperationError && error.code === "training_session_command_invalid" &&
+      error.statusCode === 422, label);
+  };
+  assertCursorError(() => pageExecutionCandidates({ facts, range, scope: "scope-b", cursor }), "cross-scope cursor");
+  const wider = resolveExecutionRange("2026-10-28", "2026-10-27", "2026-10-29");
+  assertCursorError(() => pageExecutionCandidates({ facts, range: wider, scope, cursor }), "cross-range cursor");
+  const changed = facts.map((item, index) => index === 0 ? { ...item, distanceMeters: 8_100 } : item);
+  assertCursorError(() => pageExecutionCandidates({ facts: changed, range, scope, cursor }), "changed facts");
+  assertCursorError(() => pageExecutionCandidates({ facts, range, scope, cursor: "%%%%" }), "illegal base64");
+  assertCursorError(() => pageExecutionCandidates({ facts, range, scope, cursor: "not-a-cursor" }), "malformed payload");
+  assertCursorError(() => pageExecutionCandidates({ facts, range, scope: "", cursor }), "missing scope context");
+  const wrongVersion = Buffer.from(JSON.stringify({ contract: "rai-training-plan-execution-cursor-v1", version: 999,
+    scope, rangeStart: range.rangeStart, rangeEnd: range.rangeEnd, factsDigest: executionCandidateFactsDigest(facts, range),
+    startedAt: first.candidates[0]!.startedAt, trainingSessionId: first.candidates[0]!.trainingSessionId
+  }), "utf8").toString("base64url");
+  assertCursorError(() => parseExecutionCursor(wrongVersion), "wrong contract version");
 });
 
 test("B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial", () => {

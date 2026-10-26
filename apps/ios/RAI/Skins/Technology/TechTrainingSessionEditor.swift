@@ -16,6 +16,8 @@ struct TechTrainingSessionEditor: View {
     @State private var blocks: [EditorBlock] = []
     @State private var warmup: EditorStep?
     @State private var cooldown: EditorStep?
+    @State private var originalSession: TrainingPlanSessionsView.Session?
+    @State private var editorIdentity: TrainingPlanSessionEditorPolicy.DraftIdentity?
     @State private var initialized = false
     @State private var localMessage: String?
     private enum InputField: Hashable { case date, distance, reason, amount(UUID), lower(UUID), upper(UUID) }
@@ -62,28 +64,61 @@ struct TechTrainingSessionEditor: View {
         return native.trainingPlanStore.unified?.sessions?.sessions.first { $0.sessionId == session.sessionId && $0.planInstanceId == session.planInstanceId }
     }
     private var draft: TrainingPlanSessionDraft? {
-        if session != nil && (currentSession == nil || currentSession?.lifecycle != "pending" || currentSession?.supersededBySessionId != nil) { return nil }
-        // A changed version invalidates the old preview. It can only be used by
-        // a NEW preview and explicit confirmation; no old candidate is rebased.
-        let id = session?.sessionId ?? "", revision = currentSession?.sessionRevision ?? 0
+        guard let editorIdentity, editorIdentity.issue(in: native.trainingPlanStore.unified) == nil else { return nil }
+        let id = editorIdentity.sessionId ?? "", revision = editorIdentity.sessionRevision ?? 0
         switch action {
         case "move": return session == nil ? nil : .move(sessionId: id, sessionRevision: revision, localDate: date)
         case "cancel": return session == nil ? nil : .cancel(sessionId: id, sessionRevision: revision)
         case "unlock": return session == nil ? nil : .unlock(sessionId: id, sessionRevision: revision)
         case "set_rest": return .setRest(localDate: date)
         default:
-            guard let km = Double(distance), km > 0, !blocks.isEmpty else { return nil }
-            let values = blocks.compactMap { block -> MobileIntervalBlock? in
-                let steps = block.steps.compactMap { $0.value() }
-                guard steps.count == block.steps.count, !steps.isEmpty else { return nil }
-                return .init(iterations: block.iterations, steps: steps)
+            guard let structure = currentStructure else { return nil }
+            let distanceKm: Double?, updatesDistance: Bool
+            switch distanceResolution(structure) {
+            case let .value(value): distanceKm = value; updatesDistance = true
+            case .serverMeasured: distanceKm = nil; updatesDistance = false
+            case .failure: return nil
             }
-            guard values.count == blocks.count, warmup == nil || warmup?.value() != nil,
-                  cooldown == nil || cooldown?.value() != nil else { return nil }
-            let structure = MobileSessionStructure(warmup: warmup?.value(), blocks: values, cooldown: cooldown?.value())
-            if action == "add" { return .add(.init(localDate: date, kind: kind, distanceKm: km, structure: structure, reason: reason.isEmpty ? nil : reason)) }
-            return .edit(sessionId: id, sessionRevision: revision, patch: .init(kind: kind, distanceKm: km,
-                updatesDistance: true, structure: structure, reason: reason.isEmpty ? nil : reason, updatesReason: true))
+            if action == "add" {
+                return .add(.init(localDate: date, kind: kind, distanceKm: distanceKm,
+                    structure: structure, reason: reason.isEmpty ? nil : reason), deriveDistance: !updatesDistance)
+            }
+            return .edit(sessionId: id, sessionRevision: revision, patch: .init(kind: kind, distanceKm: distanceKm,
+                updatesDistance: updatesDistance, structure: structure, reason: reason.isEmpty ? nil : reason, updatesReason: true))
+        }
+    }
+    private func distanceResolution(_ structure: MobileSessionStructure) -> TrainingPlanSessionEditorPolicy.DistanceResolution {
+        TrainingPlanSessionEditorPolicy.compatibleDistance(
+            TrainingPlanSessionEditorPolicy.resolveDistance(distance, structure: structure,
+                original: originalSession?.prescription, kind: kind),
+            omissionSupported: native.handshake?.trainingPlanSessionDistanceOmissionSupported == true,
+            original: originalSession?.prescription, structure: structure, kind: kind)
+    }
+    private var currentStructure: MobileSessionStructure? {
+        guard !blocks.isEmpty else { return nil }
+        let values = blocks.compactMap { block -> MobileIntervalBlock? in
+            let steps = block.steps.compactMap { $0.value() }
+            guard steps.count == block.steps.count, !steps.isEmpty else { return nil }
+            return .init(iterations: block.iterations, steps: steps)
+        }
+        guard values.count == blocks.count, warmup == nil || warmup?.value() != nil,
+              cooldown == nil || cooldown?.value() != nil else { return nil }
+        return MobileSessionStructure(warmup: warmup?.value(), blocks: values, cooldown: cooldown?.value())
+    }
+    private var draftIssue: String? {
+        guard let editorIdentity else { return "请先读取训练安排。" }
+        if let issue = editorIdentity.issue(in: native.trainingPlanStore.unified) { return issue }
+        switch action {
+        case "add", "edit":
+            guard let structure = currentStructure else {
+                return "请填写完整的分段剂量；纯时间课程也需要明确的时间剂量。"
+            }
+            if case let .failure(message) = distanceResolution(structure) {
+                return message
+            }
+            return nil
+        default:
+            return nil
         }
     }
     var body: some View {
@@ -113,6 +148,11 @@ struct TechTrainingSessionEditor: View {
             }
             .onAppear { initialize() }
             .onChange(of: draft) { _, _ in native.trainingPlanPublisher.cancelPreview(); localMessage = nil }
+            .onChange(of: TrainingPlanSessionEditorPolicy.structureDistance(currentStructure)) { _, measurement in
+                // Mixed courses have no editable total field. Discard stale
+                // input from a previous distance-only draft before hiding it.
+                if measurement == .mixed { distance = "" }
+            }
             .onDisappear { native.trainingPlanPublisher.cancelPreview() }
             .onChange(of: native.feedbackSessionID) { _, _ in dismiss() }
         }
@@ -148,16 +188,20 @@ struct TechTrainingSessionEditor: View {
                             Text("轻松").tag("easy"); Text("恢复").tag("recovery"); Text("节奏").tag("tempo")
                             Text("间歇").tag("interval"); Text("长距离").tag("long_run")
                         }
-                        TextField("总距离（公里）", text: $distance).keyboardType(.decimalPad).focused($focusedField, equals: .distance)
+                        if TrainingPlanSessionEditorPolicy.structureDistance(currentStructure) == .mixed {
+                            Text("总距离由服务端按完整分段计算，请在预览中确认。").font(.footnote)
+                        } else if TrainingPlanSessionEditorPolicy.structureDistance(currentStructure) != .none {
+                            TextField("总距离（公里）", text: $distance).keyboardType(.decimalPad).focused($focusedField, equals: .distance)
+                        }
                         TextField("说明（留空清除）", text: $reason, axis: .vertical).focused($focusedField, equals: .reason)
-                        Text("总距离须与下面的分段剂量一致。配速填写秒/公里；心率填写次/分钟。目标留空的一侧表示不限制。").font(.footnote)
+                        Text("新建或调整纯时间课程不填写总距离；时间与距离混合课程由服务端测量。原样编辑保留历史距离，纯距离课程总量须与分段一致。配速填写秒/公里；心率填写次/分钟。目标留空的一侧表示不限制。").font(.footnote)
                     }
     }
     @ViewBuilder private var doseSections: some View {
                     if warmup != nil { Section("热身") { stepFields(Binding(get: { warmup! }, set: { warmup = $0 })) } }
                     ForEach($blocks) { $block in
                         Section("训练段") {
-                            Stepper("重复 \(block.iterations) 次", value: $block.iterations, in: 1...20)
+                            Stepper("重复 \(block.iterations) 次", value: $block.iterations, in: 1...TrainingPlanSessionEditorPolicy.maximumBlockIterations)
                             ForEach($block.steps) { $step in stepFields($step) }
                         }
                     }
@@ -167,15 +211,17 @@ struct TechTrainingSessionEditor: View {
                 Section {
                     Button("预览调整") {
                         focusedField = nil
-                        guard let draft else { localMessage = "请检查日期、距离和分段剂量。"; return }
-                        Task { _ = await native.previewTrainingSession(draft) }
+                        guard let draft, let editorIdentity else { localMessage = draftIssue ?? "请检查日期、距离和分段剂量。"; return }
+                        Task { _ = await native.previewTrainingSession(draft, editorIdentity: editorIdentity) }
                     }
                     .disabled(!native.canEditTrainingSessions || draft == nil)
                     .accessibilityIdentifier("training.session.preview")
                     previewContent
-                    Button("重新读取当前状态") { Task { _ = await native.refreshUnifiedTrainingPlan() } }
+                    Button("重新读取并重建草稿") {
+                        Task { if await native.refreshUnifiedTrainingPlan() { initialize(reload: true) } }
+                    }
                         .disabled(native.isPlanBusy || native.isOffline)
-                    Text("重读保留当前草稿；状态变化后需要重新预览和确认。").font(.footnote)
+                    Text("后台刷新不会改写草稿。重新读取会用最新课程重建表单，请重新编辑、预览和确认。").font(.footnote)
                     if session != nil && (currentSession == nil || currentSession?.lifecycle != "pending" || currentSession?.supersededBySessionId != nil) {
                         Text("当前课程已结束、取消或被替换，不能继续修改；草稿仍可查看。").font(.footnote)
                     }
@@ -184,10 +230,11 @@ struct TechTrainingSessionEditor: View {
                     }
                     if let message = native.trainingPlanPublisher.message { Text(message).font(.footnote).fixedSize(horizontal: false, vertical: true) }
                     if let localMessage { Text(localMessage).font(.footnote) }
+                    if let draftIssue { Text(draftIssue).font(.footnote).accessibilityIdentifier("training.session.draft-issue") }
                 }
     }
     @ViewBuilder private var previewContent: some View {
-        if let preview = native.trainingPlanPublisher.sessionPreview, let draft,
+        if let preview = native.trainingPlanPublisher.sessionPreview, let draft, let editorIdentity,
            native.trainingPlanPublisher.matchesSessionPreview(draft) {
                         if let before = preview.impact.before {
                             sessionSummary("原课程", session: before)
@@ -200,7 +247,7 @@ struct TechTrainingSessionEditor: View {
                         ForEach(preview.impact.suppressions, id: \.localDate) { item in Text("\(item.localDate)：\(item.reason == "explicit_rest" ? "指定休息" : "不自动补课")") }
                         if preview.impact.deviceWithdrawalRequired { Label("已有设备排期需先撤回再重新下发。", systemImage: "applewatch") }
                         ForEach(preview.impact.warnings, id: \.self) { Text($0).font(.footnote) }
-                        Button("确认保存") { Task { if await native.confirmTrainingSession(draft) { dismiss() } } }
+                        Button("确认保存") { Task { if await native.confirmTrainingSession(draft, editorIdentity: editorIdentity) { dismiss() } } }
                             .disabled(!native.canEditTrainingSessions).accessibilityIdentifier("training.session.save")
         }
     }
@@ -235,15 +282,28 @@ struct TechTrainingSessionEditor: View {
             TextField("目标上限", text: step.upper).keyboardType(.numberPad).focused($focusedField, equals: .upper(step.wrappedValue.id))
         }
     }
-    private func initialize() {
-        guard !initialized else { return }; initialized = true
-        date = session?.prescription.localDate ?? initialDate
+    private func initialize(reload: Bool = false) {
+        guard !initialized || reload, let snapshot = native.trainingPlanStore.unified,
+              let sessions = snapshot.sessions else { return }
+        let source = reload ? currentSession : session
+        guard session == nil || source != nil else {
+            localMessage = "课程已不在当前计划中，请关闭并重新打开。"
+            return
+        }
+        initialized = true
+        originalSession = source
+        editorIdentity = .init(scope: snapshot.scope, planInstanceId: source?.planInstanceId ?? sessions.planInstanceId,
+            stateRevision: snapshot.stateRevision, sessionId: source?.sessionId, sessionRevision: source?.sessionRevision)
+        native.trainingPlanPublisher.cancelPreview(); localMessage = nil
+        date = source?.prescription.localDate ?? initialDate
         action = session == nil ? "add" : "move"
-        kind = session?.prescription.kind ?? "easy"
-        distance = String(format: "%.1f", session?.prescription.distanceKm ?? 5)
-        reason = session?.prescription.reason ?? ""
-        let structure = session?.prescription.structure ?? MobileSessionStructure(warmup: nil,
-            blocks: [.init(iterations: 1, steps: [.init(purpose: "work", goal: .distance(meters: (session?.prescription.distanceKm ?? 5) * 1000), alert: nil)])], cooldown: nil)
+        kind = source?.prescription.kind ?? "easy"
+        reason = source?.prescription.reason ?? ""
+        // Never invent a 5 km structure for a missing dose. The blank structure
+        // contains one open work step, which the editor rejects until the user
+        // chooses an explicit distance or time dose.
+        let structure = source?.prescription.structure ?? TrainingPlanSessionEditorPolicy.blankStructure()
+        distance = TrainingPlanSessionEditorPolicy.distanceText(source?.prescription.distanceKm)
         warmup = structure.warmup.map(EditorStep.init); cooldown = structure.cooldown.map(EditorStep.init)
         blocks = structure.blocks.map { EditorBlock(iterations: $0.iterations, steps: $0.steps.map(EditorStep.init)) }
     }

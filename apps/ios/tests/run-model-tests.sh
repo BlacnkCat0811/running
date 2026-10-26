@@ -37,6 +37,7 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanWatchSyncCoordinator.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift apps/ios/RAI/TrainingPlanStore.swift \
   apps/ios/RAI/TrainingPlanExecutionPolicy.swift apps/ios/RAI/TrainingPlanPublisher.swift \
+  apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift \
   apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/PlanMutationDisposition.swift apps/ios/RAI/SyncPresentationPolicy.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
@@ -56,6 +57,14 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/tests/TrainingPlanPublisherRegression.swift \
   -o "$tmp/training-plan-publisher-tests"
 "$tmp/training-plan-publisher-tests"
+# P2.10: session editor distance rules. A time-only structure must be able to
+# send distanceKm:null, while a distance structure needs an exactly matching
+# total. The same compile unit pins the absence of a fabricated 5 km default.
+xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift \
+  apps/ios/tests/TrainingPlanSessionEditorRegression.swift \
+  -o "$tmp/training-plan-session-editor-tests"
+"$tmp/training-plan-session-editor-tests"
 # B07 execution association: DTO/state-machine/candidate/assessment/journal gates.
 # The publisher is compiled with its pure policy so a broken pending-row replay,
 # a session/execution watermark or a "pending confirmation == completed" wording

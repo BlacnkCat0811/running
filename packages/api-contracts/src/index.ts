@@ -194,6 +194,8 @@ export interface HandshakeResponse {
   /** B01 registered only; B02+ may advertise exact version 1 after acceptance. */
   trainingPlanSessionContractVersion?: number;
   trainingPlanSessionCommandContractVersion?: number;
+  /** Exact opt-in 1: add/edit may omit distance for server measurement. */
+  trainingPlanSessionDistanceOmissionContractVersion?: number;
   trainingPlanExecutionCommandContractVersion?: number;
   trainingPlanUpdateContractVersion?: number;
   /** Opt-in coach-loop aggregate/commands; legacy plan DTOs retain their meaning. */

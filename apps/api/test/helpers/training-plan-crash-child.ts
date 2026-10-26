@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
@@ -152,8 +152,14 @@ async function main() {
       const operation = f.database.prepare("SELECT result_json FROM mobile_plan_operations WHERE operation_id=?")
         .get(common.operationId) as { result_json: string } | undefined;
       assert.ok(operation, "all business writes and the durable operation precede COMMIT");
-      writeFileSync(join(root, "checkpoint.json"), JSON.stringify({ point, inTransaction: f.database.isTransaction,
+      // Publish the checkpoint atomically: the parent polls existsSync() and
+      // reads immediately, so a partially written file would intermittently
+      // fail with "Unexpected end of JSON input" under I/O load.
+      const checkpointPath = join(root, "checkpoint.json");
+      const checkpointTemporary = `${checkpointPath}.${process.pid}.tmp`;
+      writeFileSync(checkpointTemporary, JSON.stringify({ point, inTransaction: f.database.isTransaction,
         result: JSON.parse(operation.result_json), snapshot: crashSnapshot(f.database) }));
+      renameSync(checkpointTemporary, checkpointPath);
       // Parent waits for this file and sends a real OS signal. A missed kill
       // fails the child, rather than eventually allowing a COMMIT through.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);

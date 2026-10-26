@@ -44,7 +44,7 @@ import {
   type PublicationGuardState
 } from "./publication-guard.js";
 import { TrainingPlanStore, ensureTrainingPlanSchema, type TrainingPlanSessionState, type TrainingPlanState, type TrainingPlanStateRow } from "./training-plan-store.js";
-import { parseSessionPrescription } from "./training-plan-session-state.js";
+import { assertTrainingPlanLockedRestInvariant, parseSessionPrescription, TrainingPlanSessionStateError } from "./training-plan-session-state.js";
 import { ensureTrainingPlanSessionSchema, TrainingPlanSessionRepository } from "./training-plan-session-repository.js";
 import { ensureTrainingPlanExecutionSchema, TrainingPlanExecutionRepository } from "./training-plan-execution-repository.js";
 import { ensureTrainingPlanEvaluationSchema, TrainingPlanEvaluationRepository, type TrainingPlanEvaluation } from "./training-plan-evaluation-repository.js";
@@ -53,6 +53,13 @@ import { trainingPlanContextDigest } from "./training-mode-policy.js";
 import { coachLocalDate } from "./coach-loop-facts.js";
 
 const GOALS_FILE = "mobile-goals.json";
+function assertGoalsLockedRestInvariant(value: unknown): void {
+  try { assertTrainingPlanLockedRestInvariant(value); }
+  catch (error) {
+    if (!(error instanceof TrainingPlanSessionStateError)) throw error;
+    throw new PlanOperationError("training_session_date_occupied", `锁课与明确休息冲突；本次写入未提交。${error.message}`, 409);
+  }
+}
 /** Derived from the shared list so this set cannot drift from the API's enum. */
 const SESSION_KINDS = new Set<MobileSessionKind>(MOBILE_SESSION_KINDS);
 const RACE_DISTANCES = new Set<MobileRaceDistance>(["five_k", "ten_k", "half_marathon"]);
@@ -301,6 +308,7 @@ export class MobileGoalsStore {
   private stagedSessionFields: { sessions: TrainingPlanSessionState["sessions"]; suppressions: TrainingPlanSessionState["suppressions"];
     archivedSessionIds: readonly string[] } | null = null;
   private publicationTransaction = false;
+  private publicationCommitChecks: Array<() => void> = [];
   private readonly filePath: string;
   private readonly controlDatabase: DatabaseSync | null;
   private cached: StoredGoals | null = null;
@@ -617,6 +625,15 @@ export class MobileGoalsStore {
     }
   }
 
+  /** Register a final cross-store check after all business/result writes and owner reconciliation.
+   * The caller must hold the existing main-DB mutation lease through COMMIT:
+   * this control transaction alone cannot prevent a main-library writer.
+   */
+  beforePublicationCommit(check: () => void): void {
+    if (!this.publicationTransaction) throw new Error("Commit checks require a publication transaction");
+    this.publicationCommitChecks.push(check);
+  }
+
   /** Commits the guard marker before the guarded business transaction starts. */
   private beginPublicationMarker(): void {
     const database = this.controlDatabase!;
@@ -655,6 +672,7 @@ export class MobileGoalsStore {
     try {
       const result = fn();
       this.reconcileTrainingPlanOwner();
+      for (const check of this.publicationCommitChecks) check();
       database.exec("COMMIT");
       return result;
     } catch (error) {
@@ -664,6 +682,7 @@ export class MobileGoalsStore {
       throw mapDatabaseBusy(error);
     } finally {
       this.publicationTransaction = false;
+      this.publicationCommitChecks = [];
       this.stagedCoachReceipt = null;
       this.stagedSessionFields = null;
     }
@@ -835,6 +854,11 @@ export class MobileGoalsStore {
   }
 
   private persistGoals(stored: StoredGoals, expectedRevision: number): void {
+    // All legacy locks, commands and coordinator publications pass here. Include
+    // staged owner decisions so the compatibility projection cannot hide a rest.
+    const owner = this.currentTrainingPlan()?.state;
+    const suppressions = this.stagedSessionFields?.suppressions ?? (owner?.schemaVersion === 2 ? owner.suppressions : []);
+    assertGoalsLockedRestInvariant({ ...stored, suppressions });
     if (this.controlDatabase) {
       this.writeControlGoals(stored, expectedRevision);
     } else {
@@ -1293,6 +1317,8 @@ export class MobileGoalsStore {
           database.close();
           throw new Error("mobile-goals.json 迁移失败：revision 无效");
         }
+        try { assertGoalsLockedRestInvariant(parsed); }
+        catch (error) { database.close(); throw error; }
         initial = {
           revision: 0,
           easyDurationFloorFraction: Number.isFinite(Number(parsed.easyDurationFloorFraction)) ? clampFraction(Number(parsed.easyDurationFloorFraction)) : DEFAULT_EASY_DURATION_FLOOR,

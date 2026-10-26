@@ -15,7 +15,7 @@
 #                                   会话探测、健康同步取消、Tech 展示层与对比度）
 #
 # **刻意不含**下面两条，它们需要模拟器或 Pods，不属于"任何一台开发机都能跑"：
-#   - run-visual-tests.sh         需要已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库）
+#   - run-visual-tests.sh         需要专用模拟器；prepare-phase5-fixture.mts 生成隔离合成数据库，不读取个人 var/rai.sqlite
 #   - run-coordinate-sdk-check.sh 需要 `apps/ios/Pods` + 已启动模拟器
 # 这两条依然是手工验收项，见 docs/IOS_NATIVE_RUNBOOK.md。
 #

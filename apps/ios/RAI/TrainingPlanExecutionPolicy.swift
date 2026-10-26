@@ -41,6 +41,10 @@ enum TrainingPlanExecutionPolicy {
     static let evidenceLevels: Set<String> = ["measured_steps", "reconstructed_segments", "summary_only", "none"]
     static let candidateEvidence: Set<String> = ["verified_identity", "needs_confirmation"]
 
+    static func permitsNewExecution(runState: String?, sourceStatus: String?) -> Bool {
+        runState == "active" && sourceStatus != "ended"
+    }
+
     private static let zone = TimeZone(identifier: TrainingPlanUnifiedPolicy.businessTimeZone)
         ?? TimeZone(secondsFromGMT: 8 * 3600) ?? TimeZone.current
 
@@ -241,7 +245,7 @@ enum TrainingPlanExecutionPolicy {
         var lines: [String] = []
         if let candidate = linkedCandidate {
             lines.append("实际：\(dateTime(candidate.startedAt)) → \(dateTime(candidate.endedAt))")
-            lines.append("实际距离/时长：\(distanceMeters(candidate.distanceMeters)) · \(duration(candidate.durationSeconds))")
+            lines.append("实际距离/时长：\(distanceMeters(candidate.distanceMeters)) · \(durationText(candidate.durationSeconds))")
         } else if let assessment = execution?.assessment {
             if let meters = assessment.dose.observedDistanceMeters {
                 lines.append("实际距离：\(distanceMeters(meters))（来自执行评价）")
@@ -249,7 +253,7 @@ enum TrainingPlanExecutionPolicy {
                 lines.append("实际距离：未知")
             }
             if let seconds = assessment.dose.observedWorkSeconds {
-                lines.append("实际工作时段：\(duration(seconds))（来自执行评价）")
+                lines.append("实际工作时段：\(durationText(seconds))（来自执行评价）")
             } else {
                 lines.append("实际时长：未知")
             }
@@ -283,12 +287,50 @@ enum TrainingPlanExecutionPolicy {
         candidates.count == 1 ? candidates[0].trainingSessionId : nil
     }
 
+    /// `hasCandidates: nil` means the candidate page has not been read for this
+    /// session. Unknown must not be treated as "no candidates": skip would then
+    /// silently overwrite a real run the unread page might still show.
     static func canSkip(session: TrainingPlanSessionsView.Session,
                         execution: TrainingPlanSessionExecution?,
-                        hasCandidates: Bool) -> Bool {
-        guard session.lifecycle == "pending", !hasCandidates else { return false }
+                        hasCandidates: Bool?) -> Bool {
+        guard session.lifecycle == "pending", let hasCandidates, !hasCandidates else { return false }
         guard let execution else { return true }
         return execution.association == "unlinked" && execution.trainingSessionId == nil
+    }
+
+    /// The candidate page and the current confirmed snapshot must describe the
+    /// same plan instance, session, execution and state revision before any
+    /// command submits a candidate-derived draft. A stale page means "read
+    /// again", never "the revisions probably still match".
+    static func candidatePageMismatch(_ page: TrainingPlanExecutionCandidatesResponse,
+                                      planInstanceId: String,
+                                      sessionId: String,
+                                      sessionRevision: Int,
+                                      executionRevision: Int,
+                                      stateRevision: Int) -> String? {
+        guard page.contractVersion == 1 else { return "执行候选合同版本已变化，请重新读取。" }
+        guard page.planInstanceId == planInstanceId else { return "执行候选属于其他计划实例，请重新读取。" }
+        guard page.sessionId == sessionId else { return "执行候选属于其他课程，请重新读取。" }
+        guard page.stateRevision == stateRevision else { return "计划状态已变化，请重新读取候选。" }
+        guard page.sessionRevision == sessionRevision else { return "课程修订已变化，请重新读取候选。" }
+        guard page.executionRevision == executionRevision else { return "执行修订已变化，请重新读取候选。" }
+        return nil
+    }
+
+    /// User-visible failure copy for confirm/correct/retract/skip. The buttons
+    /// stay quiet on success because the publisher message owns that state; a
+    /// false return must never look like a no-op.
+    static func actionFailureMessage(_ action: String) -> String {
+        switch action {
+        case "confirm", "correct":
+            return "未能保存关联：候选页或计划状态已变化，请重新读取候选后再试。"
+        case "retract":
+            return "未能撤回关联：执行状态已变化，请重新读取课程与实际后再试。"
+        case "skip":
+            return "未能跳过课程：候选页或计划状态已变化，请重新读取后再试。"
+        default:
+            return "操作未完成，请重新读取课程与实际后再试。"
+        }
     }
 
     static func canRetract(_ execution: TrainingPlanSessionExecution?) -> Bool {
@@ -307,15 +349,63 @@ enum TrainingPlanExecutionPolicy {
 
     /// Newer state wins. A different plan instance is legitimate only with a
     /// strictly newer state revision; an old GET can never roll back a new write.
+    /// When the incoming response has no session view, it carries no instance
+    /// identity at all, so it may only keep or advance the revision — never
+    /// replace a newer snapshot just because the identity is unknown.
     static func acceptsSnapshot(incomingStateRevision: Int,
                                 incomingPlanInstanceId: String?,
                                 existingStateRevision: Int,
                                 existingPlanInstanceId: String?) -> Bool {
-        guard let incomingPlanInstanceId else { return true }
-        guard let existingPlanInstanceId, existingPlanInstanceId != incomingPlanInstanceId else {
+        guard let incomingPlanInstanceId else {
+            return incomingStateRevision >= existingStateRevision
+        }
+        guard let existingPlanInstanceId else {
+            // First identity-bearing snapshot against an identity-less reference:
+            // equal revisions are not enough to prove it is the same plan.
+            return incomingStateRevision > existingStateRevision
+        }
+        if existingPlanInstanceId == incomingPlanInstanceId {
             return incomingStateRevision >= existingStateRevision
         }
         return incomingStateRevision > existingStateRevision
+    }
+
+    // MARK: - Session list presentation
+
+    struct SessionListState: Equatable {
+        /// Completed/partial/skipped/cancelled, superseded, or already past the
+        /// business date: the row may still open history, but it must not
+        /// promise an edit.
+        let isReadOnly: Bool
+        let caption: String
+    }
+
+    /// The list keeps finished and past sessions visible for history; only
+    /// superseded rows are hidden (the replacement is the current identity).
+    static func visibleSessions(_ sessions: [TrainingPlanSessionsView.Session]) -> [TrainingPlanSessionsView.Session] {
+        sessions.filter { $0.supersededBySessionId == nil }
+            .sorted { $0.prescription.localDate < $1.prescription.localDate }
+    }
+
+    static func sessionListState(session: TrainingPlanSessionsView.Session,
+                                 businessDate: String) -> SessionListState {
+        let past = isValidLocalDate(businessDate) && session.prescription.localDate < businessDate
+        let readOnly = session.lifecycle != "pending" || session.supersededBySessionId != nil || past
+        if readOnly {
+            let reason: String
+            if session.supersededBySessionId != nil {
+                reason = "已被替换"
+            } else if session.lifecycle != "pending" {
+                reason = lifecycleText(session.lifecycle)
+            } else {
+                reason = "过去课程"
+            }
+            return .init(isReadOnly: true, caption: "\(reason) · 查看记录")
+        }
+        return .init(isReadOnly: false,
+                     caption: session.protection == "user_protected"
+                        ? "用户保护 · 点按查看/调整"
+                        : "自动安排 · 点按查看")
     }
 
     /// Managed past-session review. Uses the same unknown-vs-unlinked-vs-pending
@@ -342,6 +432,8 @@ enum TrainingPlanExecutionPolicy {
     /// lets the caller fall back to the server's own message instead of hiding it.
     static func serverErrorMessage(_ code: String) -> String? {
         switch code {
+        case "training_execution_candidates_present":
+            return "候选窗口内已有实际跑步，未跳过课程；请刷新候选并确认关联。"
         case "training_execution_source_changed":
             return "源训练记录已变化，当前关联失效；原处方与旧评价保留，请重读后重新确认或撤回。"
         case "training_execution_link_conflict":
@@ -370,6 +462,8 @@ enum TrainingPlanExecutionPolicy {
     static func reasonTexts(_ codes: [String]) -> [String] {
         codes.map { code in
             switch code {
+            case "execution_retracted": return "已撤回关联"
+            case "execution_source_changed": return "源训练已更正"
             case "training_execution_source_changed": return "源事实已变化，当前关联失效"
             case "training_execution_link_conflict": return "该次实际训练已关联其他课程"
             case "training_execution_revision_conflict": return "执行修订已变化，请重读后重试"
@@ -463,9 +557,17 @@ enum TrainingPlanExecutionPolicy {
             : String(format: "%.0f m", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
-    private static func duration(_ value: Double?) -> String {
-        guard let value, value.isFinite else { return "未知" }
-        let total = max(0, Int(value.rounded()))
+    /// A single workout cannot plausibly last longer than seven days. The
+    /// contract caps prescriptions at four hours, but execution samples can be
+    /// longer; the cap is a formatting guard, not a prescription rule. It also
+    /// keeps an arbitrary finite `Double` out of `Int(...)`, which traps when
+    /// the rounded value is outside `Int`'s range.
+    static let maximumDurationSeconds: Double = 7 * 24 * 3600
+
+    static func durationText(_ value: Double?) -> String {
+        guard let value, value.isFinite, value >= 0 else { return "未知" }
+        guard value <= maximumDurationSeconds else { return "超过 7 天" }
+        guard let total = Int(exactly: value.rounded()) else { return "未知" }
         let hours = total / 3600, minutes = (total % 3600) / 60, seconds = total % 60
         if hours > 0 { return "\(hours)小时\(minutes)分" }
         if minutes > 0 { return seconds > 0 ? "\(minutes)分\(seconds)秒" : "\(minutes)分" }
