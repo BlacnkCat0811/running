@@ -1,125 +1,1120 @@
-# Development Scope
+# AGENTS.md — RAI Running Engineering Instructions
 
-## Supported Product
+> 适用范围：RAI Running 整个代码仓库。
+>
+> 本文件是 Codex 和其他代码开发 Agent 的仓库级工程指令。
+>
+> 核心原则：**最小必要修改、事实驱动、保护数据、分级测试、真实验收、避免无关重构。**
 
-This repository develops the native iOS application in `apps/ios` and the
-Node.js API / shared algorithm packages it uses (`apps/api`, `packages/*`).
+---
 
-The browser-based SPA that used to live in `apps/web`, and the macOS platform
-support inside the Xcode project, were retired on 2026-10-17 by product
-decision. See [DECISIONS](docs/DECISIONS.md) D17 and
-[ADR-006](docs/adr/ADR-006-retire-web-and-macos.md). Do not recreate a browser
-client, a WebView shell, or a macOS/desktop target.
+# 1. 项目定位
 
-Native desktop applications and non-iOS mobile applications are out of scope.
-Do not create or modify Electron, Tauri, React Native, Flutter, Android,
-macOS, or Windows client projects unless the user explicitly requests it.
+RAI Running 是一个面向单个用户的原生 iOS 跑步与健康分析系统。
 
-`apps/ios` is the only client. Its production path is SwiftUI native and it
-uses the existing Node.js API for read/write business flows. There is no
-WKWebView path and no macOS destination any more; the API is reached directly
-over HTTPS with a Bearer token. HealthKit read-only sync is authorized: the iOS
-app may request Apple Health read permission, export running-related samples to
-the existing Apple Health ZIP/XML import pipeline, and upload them to the API.
-"Read-only" here refers to **health samples and records**: scheduling workouts
-to Apple Watch through WorkoutKit requires workout-type HealthKit write
-authorization (`NSHealthUpdateUsageDescription`). That authorization covers the
-workout schedule only — the app must not write or modify health samples/records.
-Do not rewrite the TypeScript scoring core on device, and do not add HealthKit
-write of health samples/records, or a standalone Watch/macOS/mobile product
-unless the user explicitly asks. HealthKit background delivery, BGProcessingTask,
-and a background URLSession are authorized for the iOS health sync pipeline
-(2026-09-22 product decision); any further background mechanism still requires
-explicit user request.
+项目目标：
 
-The API keeps every `/v1` route that existed before the retirement, including
-routes that were only consumed by the retired Web SPA (backups, model and
-prediction management, data operations, audit, import administration,
-performance entries, privacy zones). Removing those endpoints is a separate
-product decision, not part of the Web retirement.
+- 可靠读取和同步 Apple Health 数据。
+- 提供跑步训练分析、健康指标分析和长期趋势分析。
+- 提供自适应训练计划与训练执行闭环。
+- 使用服务器进行数据处理、分析和训练计划计算。
+- 保持数据一致性、可恢复性和运行性能。
+- 在现有硬件条件下优化性能，而不是依赖扩容。
+- 保持工程架构简洁、可维护、可测试。
 
-"Still mounted" does not always mean "still callable": two capability groups
-were retired later by their own product decisions and now answer `410 Gone`
-with a stable code (`legacy_surface_retired` or `*_retired`). Do not treat them
-as working features or route new clients to them:
+本项目不是面向多租户的 SaaS 产品。
 
-- the legacy training-plan write surface (`/v1/mobile/goals`, `/v1/mobile/run-coach`,
-  `/v1/mobile/workout-plan/{preview,confirm,generate}`) — replaced by the
-  unified plan v2 endpoints documented in
-  [IOS_NATIVE_API_CONTRACT](docs/IOS_NATIVE_API_CONTRACT.md) (decision D19);
-- backup creation/deletion (`POST /v1/backups`, `DELETE /v1/backups/:name`) —
-  backups are an operator responsibility (decision D18).
+不得为了假设中的海量用户引入不必要的分布式系统、微服务或复杂基础设施。
 
-A stale client must be able to tell `410` from `404`; see
-[DECISIONS](docs/DECISIONS.md) D18/D19 and the retirement matrix in the API contract.
+# 2. 当前技术架构
 
-## Default Verification
+## 2.1 客户端
 
-Choose checks proportionate to the change. For ordinary API / package work:
+- Swift
+- SwiftUI
+- HealthKit
+- WorkoutKit
+- 原生 iOS App
+- HTTPS API 直连
+- Bearer Token 身份验证
 
-- `npm run typecheck`
-- `npm test` — on a multi-core or busy host prefer `RAI_TEST_CONCURRENCY=2 npm test`
-  (see the `scripts/run-tests.mjs` header: the default concurrency is the host's
-  parallelism, and the 5 s / 30 s wall-clock budgets in the heavy suites can fail
-  spuriously under load). A release record must state the concurrency used.
-- `npm run check:docs` when README, AGENTS, or anything under `docs/` changes
-- `npm run check:acceptance-matrix` when tests or `docs/ALGORITHM.md` change
-- `npm run smoke:api` when server startup or `deploy/` changes
+`apps/ios` 是唯一受支持的客户端。
 
-For iOS work under `apps/ios`, use:
+不允许擅自新增：
 
-- `npm run test:ios` — type-checks every iOS source and runs the pure-logic
-  regressions, including the cross-platform `apps/ios/tests/check-*.py` source
-  gates in the aggregate chain (gates excluded by design run only through their
-  explicit manual entry). On a host without Xcode it skips loudly ("no iOS
-  source was checked") instead of passing quietly. The pre-commit hook runs it
-  whenever paths under `apps/ios/` are staged.
-- `npm run check:ios-gates` — runs the cross-platform source gates directly
-  (no Xcode needed, so it works on Windows/Linux too). It also fails when a
-  non-excluded gate is not referenced by any `apps/ios/tests/run-*.sh`
-  ("judgement exists ≠ judgement executes"). The pre-commit hook runs it when
-  `apps/ios`, `packages/api-contracts`, or `packages/contracts` changes.
-- Simulator-bound acceptance (`apps/ios/tests/run-visual-tests.sh`) and the AMap
-  coordinate cross-check stay manual; they need a booted Simulator and, for the
-  former, `var/rai.sqlite`.
+- Web SPA
+- React / Vite Web 客户端
+- WKWebView 应用外壳
+- Electron / Tauri
+- Android 客户端
+- React Native / Flutter
+- macOS 桌面客户端
+- Windows 客户端
+- 独立 Apple Watch App
 
-For `deploy/` template changes, `npm test` covers the text-contract tests
-(`deploy-cloud`, `deploy-n100`, `deploy-upgrade`); `nginx -t` and
-`systemctl daemon-reload` belong to the server runbook
-([operations](docs/OPERATIONS.md)).
+现有项目可以通过 WorkoutKit 与 Apple Watch 训练排程能力集成，但不得因此擅自创建新的 Watch App Target。不得新增独立 Watch/macOS/mobile 产品；原生桌面应用和非 iOS 移动应用均超出范围，不得创建或修改上述客户端项目，除非用户明确请求。
 
-## Retired Surfaces
+产品范围依据：
 
-Do not reintroduce any of the following without a new explicit product decision:
+- `docs/DECISIONS.md`
+- `docs/adr/ADR-006-retire-web-and-macos.md`
 
-- `apps/web`, React/Vite/Vitest/Playwright, `npm run build`, `test:e2e:*`,
-  `scripts/check-web-build.mjs`, or a `@rai/web` workspace.
-- The macOS destination in `apps/ios/RAI.xcodeproj`, `AppWebView.swift`, the
-  `#if os(macOS)` branches, or any WebKit import under `apps/ios/RAI/`.
-- A browser fallback served by the API: the API has no static file hosting.
-- `RAI_WEB_PORT` / `RAI_ALLOW_LAN_DEV`: local device debugging now starts the
-  API only (`npm run dev:device`) and requires a dev `RAI_API_TOKEN`.
+## 2.2 后端
 
-## Cross-Platform Command Rules
+- Node.js
+- TypeScript
+- Fastify
+- SQLite
+- 服务端运动分析与训练算法
+- Python 离线模型训练
+- 现有 ONNX 推理及回退机制
 
-Official environments are macOS development/iOS builds and Linux production/backend CI.
-Windows is no longer a supported CI platform (2026-10-25); existing portable
-wrappers and platform-specific regression cases remain. Every npm script must
-still behave identically under cmd, PowerShell and bash. Three hard rules, checked
-by `npm run check:scripts` (also wired into `.githooks/pre-commit`):
+主要代码目录：
 
-- npm script bodies may only use `&&`, a plain command, or `node xxx.mjs`.
-  Never `;`, `$?`, `$VAR`, `VAR=x cmd`, `test`, `[ ]`, `uname`, or a glob `*`
-  that needs shell expansion.
-- Platform detection lives inside the script: `process.platform` in Node,
-  `uname -s` in bash. A host that cannot run the check must skip loudly
-  ("no iOS source was checked") and exit 0 — never fail, never pass quietly.
-- Prefer `.mjs`; keep `.sh` only for what must run on macOS. Invoke shell
-  scripts as `bash <path>`, never `./x.sh` (Windows git does not record `+x`).
-  Never use WSL or Git Bash to imitate macOS: `xcodebuild`, CocoaPods and the
-  Simulator run on macOS only.
+- `apps/api`
+- `packages/*`
+- `research`
 
-Do not rely on filename case: Windows and macOS are both case-insensitive, so a
-mismatch stays silent on both ends. `.gitattributes` pins `*.sh`, `*.py`,
-`*.swift` and `*.pbxproj` to LF; verify with `git ls-files --eol` (`i/lf w/lf`)
-instead of assuming.
+不得未经明确授权：
+
+- 将 SQLite 迁移至 PostgreSQL。
+- 将 Node.js / TypeScript 全量替换为 Python。
+- 引入 Redis、Kafka 或其他常驻中间件。
+- 将现有单体后端拆分成微服务。
+- 创建额外的生产数据库实例。
+- 引入第二套常驻分析或重算系统。
+
+## 2.3 生产部署
+
+当前生产环境为 Linux 云服务器，资源约束为：
+
+- 2 vCPU
+- 2 GB RAM
+- SQLite
+- 单机部署
+
+默认优化方向：
+
+1. 消除不必要的事件循环阻塞。
+2. 优化 SQLite 查询、索引和事务。
+3. 控制内存峰值和并发数量。
+4. 优化后台任务执行方式。
+5. 减少重复解析和重复计算。
+6. 保持现有部署简单可靠。
+
+不得以增加服务器硬件作为默认解决方案。
+
+## 2.4 已退役的 Web/macOS 面
+
+2026-10-17 的 D17 / ADR-006 已退役浏览器 SPA 与 macOS 平台；未经新的产品决定不得恢复：
+
+- `apps/web`、React/Vite/Vitest/Playwright、`npm run build`、`test:e2e:*`、`scripts/check-web-build.mjs`、`@rai/web` workspace。
+- `apps/ios/RAI.xcodeproj` 的 macOS destination、`AppWebView.swift`、任何 `#if os(macOS)` 分支、`apps/ios/RAI/` 下的任何 WebKit import。
+- API 的浏览器 fallback 或静态文件托管；API 不托管静态文件。
+- `RAI_WEB_PORT`、`RAI_ALLOW_LAN_DEV`；本地设备调试只启动 API（`npm run dev:device`），并且需要开发用 `RAI_API_TOKEN`。
+
+# 3. 指令与事实优先级
+
+执行任务时按以下顺序处理：
+
+1. 用户在当前任务中的明确要求。
+2. 本文件及适用的目录级 AGENTS.md。
+3. 当前有效的架构和产品决策文档。
+4. 当前源码、测试和接口合同。
+5. 历史文档与旧实现记录。
+
+如果文档与源码不一致：
+
+- 不得直接假设文档正确。
+- 不得直接假设当前源码行为合理。
+- 必须明确指出差异。
+- 通过代码、测试和提交记录确定现状。
+- 对产品级矛盾，不得擅自决定新的产品方向。
+
+涉及历史决策时，优先阅读：
+
+- `docs/DECISIONS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/ALGORITHM.md`
+- `docs/DATA_PIPELINE.md`
+- `docs/OPERATIONS.md`
+- `docs/IOS_NATIVE_API_CONTRACT.md`
+
+不能将过期审计报告直接当作现行规范。
+
+# 4. Agent 工作模式
+
+每次任务开始前，先确定任务属于哪一种模式。
+
+## 4.1 AUDIT — 只读审计
+
+适用于：
+
+- 完整工程审查
+- 架构审查
+- 未提交改动审查
+- 性能分析
+- 数据流分析
+- 测试体系审查
+- 历史兼容代码识别
+- 死代码与冗余代码分析
+
+规则：
+
+- 不修改源码。
+- 不修改配置。
+- 不修改文档。
+- 不运行数据库迁移。
+- 不修改生产环境。
+- 不清理文件。
+- 不创建 Git 提交。
+- 不推送远程仓库。
+
+允许执行必要的只读检查。
+
+如需运行测试，应优先使用隔离环境和临时数据。
+
+输出必须包括：
+
+- 已确认事实。
+- 相关文件和代码位置。
+- 复现或验证证据。
+- 风险等级。
+- 影响范围。
+- 建议修复方式。
+- 尚未验证的内容。
+
+不得把推测描述为已确认的缺陷。
+
+## 4.2 PLAN — 方案设计
+
+适用于架构调整、复杂功能、数据库优化、测试基础设施升级等任务。
+
+要求：
+
+1. 检查当前实现。
+2. 确认现有约束。
+3. 识别受影响模块。
+4. 提出最小可实施方案。
+5. 列出预计修改文件。
+6. 明确风险和回滚方式。
+7. 定义测试与验收标准。
+
+用户仅要求方案时，不得自行实施。
+
+## 4.3 IMPLEMENT — 代码实施
+
+用户明确要求实施后，可以修改授权范围内的文件。
+
+执行顺序：
+
+1. 检查 Git 工作区状态。
+2. 阅读相关 AGENTS.md 和合同文档。
+3. 确定最小修改范围。
+4. 检查现有实现和测试。
+5. 实施修改。
+6. 运行分级测试。
+7. 审查最终 Diff。
+8. 输出结果和剩余风险。
+
+未经明确授权不得：
+
+- 推送 GitHub。
+- 部署生产环境。
+- 修改生产数据库。
+- 删除真实用户数据。
+- 批量清理未跟踪文件。
+- 修改无关模块。
+- 覆盖其他开发任务的未提交改动。
+
+## 4.4 REVIEW — 变更审查
+
+审查重点：
+
+- 业务正确性。
+- 数据安全。
+- 兼容性。
+- 并发和事务。
+- API 合同。
+- 测试充分性。
+- 性能回退。
+- 不必要的复杂度。
+
+优先报告可证实的问题，不输出没有证据的泛泛建议。
+
+# 5. 修改范围与工程原则
+
+## 5.1 最小修改原则
+
+只修改实现当前任务所必需的代码。
+
+禁止借一次小修改：
+
+- 顺便重构整个模块。
+- 批量调整代码格式。
+- 重新设计无关接口。
+- 批量重命名公共 API。
+- 删除历史兼容代码。
+- 修改无关算法。
+- 替换现有基础设施。
+
+如果发现其他问题，应记录，不应自动扩大任务范围。
+
+## 5.2 保留业务功能
+
+除非用户明确提出：
+
+- 不删除现有功能。
+- 不改变现有 API 语义。
+- 不改变训练算法的业务规则。
+- 不改变已发布的数据合同。
+- 不改变现有 UI 的核心业务流程。
+
+重构应优先保持外部可观察行为不变。
+
+## 5.3 不引入重复实现
+
+优先复用已有模块和公共函数。
+
+避免：
+
+- 两套训练计划状态。
+- 两套训练负荷计算。
+- 两套训练阶段判断。
+- 多个互相独立的数据事实来源。
+- 同一业务规则在 iOS 与服务器分别实现。
+- 为新功能永久保留并行的旧实现。
+
+新实现替代旧实现时，应明确迁移和退役边界。
+
+## 5.4 不随意升级依赖
+
+不得仅因为发现新版本就批量升级依赖。
+
+依赖变更必须说明：
+
+- 必要性。
+- 兼容性。
+- 安全影响。
+- 构建影响。
+- 测试结果。
+
+# 6. 测试执行总原则
+
+RAI 已拥有大量自动化测试。
+
+**禁止将每次代码修改后的默认流程设置为无条件执行全部测试。**
+
+应根据变更范围和风险选择测试。
+
+同时：
+
+**禁止将局部测试通过宣称为全量测试通过。**
+
+任何增量测试都不能取代必要的完整回归。
+
+# 7. 四级测试制度
+
+## L1 — 极速定向测试
+
+触发：
+
+每次完成一组代码修改。
+
+目标：
+
+快速验证直接修改的行为。
+
+执行范围：
+
+- 修改文件对应的测试。
+- 直接依赖该文件的关键测试。
+- 与当前缺陷复现直接相关的测试。
+
+对于现有 Node.js 测试，可使用：
+
+`node --import tsx --test <明确存在的测试文件路径>`
+
+要求：
+
+- 明确指定测试文件。
+- 先确认文件存在。
+- 不使用空测试列表。
+- 不把没有执行测试当作成功。
+
+优先选择耗时较短的相关测试。
+
+## L2 — 影响范围测试
+
+触发：
+
+完成一个开发任务后。
+
+覆盖：
+
+- 修改模块。
+- 上游和下游依赖。
+- 相关 API 合同。
+- 关键跨模块不变量。
+
+应根据实际导入关系、运行时调用和业务风险判断测试范围。
+
+不能仅通过文件名匹配决定范围。
+
+当前仓库尚未确认存在正式的增量测试选择命令。
+
+在增量测试基础设施真正实现并通过验收之前：
+
+- 使用现有测试命令和明确的测试文件列表。
+- 不调用不存在的 `test:changed` 或 `test:affected` 脚本。
+- 不能可靠识别影响范围时，扩大测试范围。
+- 高风险修改需要升级至 L3 或 L4。
+
+未来新增增量测试执行器时，必须保留当前全量测试发现及防漏跑机制。
+
+## L3 — 模块回归测试
+
+触发：
+
+- 模块开发完成。
+- 修复跨模块问题。
+- 修改重要业务合同。
+- 进行较大范围重构。
+
+典型模块：
+
+- 训练计划 V2。
+- HealthKit 同步。
+- SQLite 存储。
+- 数据导入与发布。
+- 运动分析算法。
+- API DTO。
+
+必须运行相关模块的完整有效测试集合，而不是只运行新增加的测试。
+
+## L4 — 完整回归测试
+
+触发：
+
+- PR 合并 main 前的完整验证。
+- 发布前验收。
+- 核心架构变更。
+- 关键数据库兼容性变更。
+- 测试选择器自身变更。
+- 定期完整回归。
+
+现有后端完整测试入口：
+
+`npm test`
+
+现有综合验证入口：
+
+`npm run test:all`
+
+注意：
+
+`test:all` 包含多个测试领域，不能在未检查运行环境及具体脚本前，假设它等价于所有 iOS 真机验收。
+
+完整回归失败不得通过缩小断言、隐藏失败、增加无依据的超时或强制忽略退出码来绕过。
+
+# 8. 测试选择的风险规则
+
+## 8.1 普通修改
+
+仅修改单一纯函数且依赖边界清晰：
+
+- L1
+- L2
+
+必要时运行类型检查。
+
+## 8.2 训练计划修改
+
+必须考虑：
+
+- 自动计划生成。
+- 手动调整。
+- 手动修改保护。
+- 计划刷新。
+- 计划版本。
+- 状态修订。
+- 幂等操作。
+- 发布一致性。
+- 执行授权。
+- 训练完成回执。
+- 训练负荷关联。
+- 暂停与恢复。
+
+至少运行相应的 L2/L3 测试。
+
+若改变核心训练计划合同或发布语义，应升级至 L4。
+
+## 8.3 SQLite 修改
+
+必须考虑：
+
+- Migration。
+- 历史数据库兼容。
+- Schema。
+- 事务提交。
+- WAL 与锁行为。
+- 原子发布。
+- 并发访问。
+- 回滚和恢复。
+- 数据身份与版本。
+
+不得修改已经冻结的历史迁移校验值来掩盖不兼容。
+
+涉及数据库核心结构时，应执行完整数据库回归。
+
+## 8.4 数据同步修改
+
+必须考虑：
+
+- HealthKit 增量游标。
+- 上传幂等。
+- 数据去重。
+- 导入事务。
+- 分析任务状态。
+- 事实与派生数据边界。
+- 回执。
+- 发布指针。
+- 失败恢复。
+- 取消和重试。
+- 跨运行时一致性。
+
+修改同步或发布核心路径时必须扩大测试范围。
+
+## 8.5 共享基础模块修改
+
+包括但不限于：
+
+- `packages/contracts`
+- `packages/api-contracts`
+- 共享数据模型。
+- 核心数据库适配。
+- 通用身份计算。
+- 核心训练算法依赖。
+
+不得仅以修改行数较少为理由缩小测试范围。
+
+## 8.6 测试基础设施修改
+
+修改以下内容时：
+
+- `scripts/run-tests.mjs`
+- 测试发现规则。
+- 测试筛选器。
+- 测试分片。
+- 测试 Fixture。
+- GitHub Actions。
+- 测试跳过机制。
+
+必须确认：
+
+1. 所有应发现的测试仍可发现。
+2. 未出现空测试通过。
+3. 测试失败仍返回失败退出码。
+4. 增量选择不会静默漏选关键测试。
+5. 全量测试执行路径仍然有效。
+
+测试选择器的优化不得降低原有防漏跑保障。
+
+# 9. 测试性能与稳定性
+
+RAI 的 Node.js 测试执行器为：
+
+`scripts/run-tests.mjs`
+
+当前测试执行器支持：
+
+`RAI_TEST_CONCURRENCY`
+
+在多核或繁忙环境中，可以使用较低并发，例如：
+
+`RAI_TEST_CONCURRENCY=2 npm test`
+
+并发数不是越高越好。
+
+部分重测试包含真实墙钟等待，过高并发可能导致超时失败。
+
+禁止通过盲目提高并发数宣称测试性能优化成功。
+
+优化时应区分：
+
+- 测试文件发现耗时。
+- 测试初始化耗时。
+- SQLite 临时数据库创建耗时。
+- 真实执行耗时。
+- 资源竞争。
+- 环境抖动。
+- 测试本身的性能回归。
+
+不得为了获得绿色结果而：
+
+- 删除有效测试。
+- 削弱断言。
+- 静默跳过失败测试。
+- 擅自增大业务超时预算。
+- 用 `|| true` 掩盖失败。
+- 把非零退出码改成零。
+
+# 10. GitHub CI 规范
+
+当前 CI 入口：
+
+`.github/workflows/ci.yml`
+
+现有 CI 包含：
+
+- Node.js / TypeScript 验证。
+- 后端测试。
+- iOS 验证与编译。
+- Rust 验证。
+- Python 测试。
+- API 启动检查。
+- 工程边界与文档检查。
+
+在 CI 分级改造完成前，现有有效门禁继续生效。
+
+不得仅因为本文件采用 L1–L4 分级制度，就假设 GitHub Actions 已实现相应拆分。
+
+未来 CI 目标：
+
+### Fast CI
+
+负责快速反馈：
+
+- TypeScript 检查。
+- 受影响测试。
+- 核心冒烟测试。
+- 必要的静态检查。
+
+### Full CI
+
+负责完整回归：
+
+- 全部后端测试。
+- 数据库集成测试。
+- 核心业务回归。
+- Python 等相关领域验证。
+- 必要的生产启动合同。
+
+### iOS CI
+
+负责：
+
+- Xcode 编译。
+- Swift 源码验证。
+- iOS 纯逻辑回归。
+- 跨平台源代码门禁。
+- 可以稳定自动化的 iOS 测试。
+
+具体拆分必须以当前有效工作流为基础。
+
+禁止：
+
+- 无理由删除现有门禁。
+- 将失败检查改成非阻塞来获得绿灯。
+- 在合并前省略必要的 Full CI。
+- 把取消、跳过或未执行当成测试通过。
+- 使用生产数据库作为 CI Fixture。
+
+GitHub CI 与 AGENTS.md 应保持一致，但实际执行结果以 CI 日志为准。
+
+### 本地默认验证命令
+
+以下命令是按变更范围执行的默认入口，不能替代 §7 的 L1–L4 分级或 CI；实际结果以真实执行日志为准：
+
+- 普通 API / package 修改：`npm run typecheck`；`npm test`。多核或繁忙主机使用 `RAI_TEST_CONCURRENCY=2 npm test`；发布记录必须写明实际并发配置。
+- `README.md`、`AGENTS.md` 或 `docs/` 修改：`npm run check:docs`；同时按影响运行 `npm run check:doc-refs`。
+- 测试或 `docs/ALGORITHM.md` 修改：`npm run check:acceptance-matrix`。
+- 服务端启动或 `deploy/` 修改：`npm run smoke:api`。`deploy/` 模板的文本合同测试由 `npm test` 覆盖（`deploy-cloud`、`deploy-n100`、`deploy-upgrade`）；`nginx -t` 与 `systemctl daemon-reload` 属于服务器 runbook。
+- iOS 修改：`npm run test:ios`（iOS 源码类型检查与纯逻辑回归）和 `npm run check:ios-gates`（跨平台源码门禁，含孤儿门禁检查）。
+
+# 11. iOS 开发与验证
+
+## 11.1 iOS 功能边界
+
+iOS 负责：
+
+- SwiftUI 展示。
+- 本地状态。
+- HealthKit 授权与读取。
+- HealthKit 数据导出。
+- API 请求。
+- 训练执行交互。
+- WorkoutKit 排程集成。
+
+服务器负责：
+
+- 运动分析。
+- 健康评分。
+- 训练负荷。
+- 恢复与准备度。
+- 训练计划规则。
+- 训练数据的主要业务计算。
+
+不得在 Swift 中重新实现一套与服务器并行的核心训练评分算法。
+
+## 11.2 HealthKit 权限边界
+
+HealthKit 健康样本与健康记录只读。iOS 可以申请 Apple Health 读权限，导出跑步相关样本，并通过现有的 Apple Health ZIP/XML 导入链路上传到 API；不得写入或修改健康事实。
+
+不得写入或修改：
+
+- HKQuantitySample。
+- HKWorkout。
+- 其他健康事实样本与记录。
+
+WorkoutKit 训练排程所需的 workout 类型 HealthKit 写授权属于已确定的例外（`NSHealthUpdateUsageDescription`，见 `WorkoutKitBridge` 的 `WorkoutScheduler.requestAuthorization()`）。该授权仅用于训练排程，不意味着允许写入健康事实。
+
+已授权的后台同步机制包括：
+
+- HealthKit background delivery。
+- BGProcessingTask。
+- Background URLSession。
+
+以上后台机制依据 2026-09-22 产品决定授权；新增其他后台机制仍需要用户明确请求。
+
+## 11.3 iOS 测试
+
+现有入口：
+
+- `npm run test:ios`
+- `npm run check:ios-gates`
+
+`test:ios` 包括 iOS 源码类型检查和纯逻辑回归，并运行 `apps/ios/tests/check-*.py` 跨平台源码门禁；设计上排除的 gate 只通过显式手工入口运行。pre-commit 在 `apps/ios/` 有 staged 变更时运行它。
+
+在缺少 macOS/Xcode 的环境中，相关检查必须明确跳过，并打印 `本次没有检查任何 iOS 源码`（对应英文 `no iOS source was checked`）后 exit 0；不能静默通过。
+
+**跳过不等于通过。**
+
+如果本次没有真正检查 Swift 源码，验收报告必须写明：
+
+`NOT VERIFIED — iOS source checks were not executed`
+
+不得记录为 iOS 测试全部通过。
+
+当前 pre-commit 对 iOS 未验证提交设有显式认账机制。
+
+不得擅自通过 `--no-verify` 或自动设置 `RAI_IOS_UNVERIFIED=1` 绕过门禁。
+
+`check:ios-gates` 直接运行跨平台源码门禁（无需 Xcode，Windows/Linux 也可运行），并在任何未被排除的 `check-*.py` 没有被 `apps/ios/tests/run-*.sh` 引用时失败（“判据存在 ≠ 判据执行”）。pre-commit 在 `apps/ios`、`packages/api-contracts` 或 `packages/contracts` 变更时运行它。
+
+模拟器验收与真机验收必须区分。Simulator-bound acceptance（`apps/ios/tests/run-visual-tests.sh`）和 AMap 坐标交叉检查保持手工执行；前者需要已启动的 Simulator，并且需要 `var/rai.sqlite`。
+
+涉及 HealthKit 权限、真实同步、后台执行和设备交互的功能，不能仅凭静态检查或模拟器通过就宣称真机验收成功。
+
+# 12. 训练计划 V2 保护规则
+
+训练计划 V2 是当前核心业务能力。
+
+产品采用统一的有效训练计划，不建立两套彼此独立的自动计划与手动计划。
+
+规则：
+
+1. 自动生成是计划基础。
+2. 用户可以手动调整允许修改的课程或日期。
+3. 手动修改必须遵守现行锁定和执行保护规则。
+4. 智能刷新不得无依据覆盖受保护的人工修改。
+5. 暂停、恢复和结束必须遵守状态合同。
+6. 执行授权必须来自有效执行状态。
+7. 训练完成回执必须保持幂等。
+8. 不得将计划投影当作执行授权。
+9. 不得绕过修订检查或发布事务。
+10. 手表同步与服务器计划状态必须明确区分。
+
+具体以：
+
+`docs/IOS_NATIVE_API_CONTRACT.md`
+
+及现有训练计划 V2 源码和测试为准。
+
+已退役的训练计划写入接口不得作为新功能入口。
+
+现有保留挂载但退役的 API 应继续按照合同返回对应的 `410 Gone` 和稳定错误码。
+
+不得将 410 当成 404，也不得自动回退至旧写入协议。
+
+不得恢复已退役的 LLM 排课路径。
+
+# 13. SQLite 与数据一致性
+
+SQLite 是当前明确选择的数据库。
+
+禁止未经授权：
+
+- 替换数据库引擎。
+- 引入额外生产写者。
+- 进行大规模 Schema 重构。
+- 修改历史迁移以适配当前代码。
+- 绕过现有原子发布机制。
+
+必须保护：
+
+- 原始健康事实。
+- 路线数据。
+- 导入账本。
+- 导入与执行回执。
+- 派生分析结果。
+- 发布指针。
+- 身份与版本信息。
+
+**数据已保存不等于分析已完成。**
+
+导入流程和分析/重算流程应保持明确边界。
+
+任何优化不得把两个状态合并成一个模糊的成功状态。
+
+分析失败不得造成事实数据丢失或半发布。
+
+SQLite 相关测试只能使用明确隔离的测试数据库。
+
+不得连接或修改生产数据库。
+
+# 14. 算法开发规则
+
+当前核心分析和规则计算位于 TypeScript 服务端。
+
+Python 主要用于既有离线模型训练与评估流程。
+
+不得：
+
+- 为同一评分建立第二套长期并行算法。
+- 将未知数据强制转换为正常值。
+- 用伪造指标填补缺失数据。
+- 将恢复指标隐式写入不应受其影响的评分维度。
+- 将规则政策常量宣称为 Garmin 或其他厂商的私有算法。
+- 修改算法语义但不更新对应合同和测试。
+
+算法修改需要：
+
+1. 明确原行为。
+2. 明确新行为。
+3. 列出输入输出变化。
+4. 检查历史数据兼容性。
+5. 更新相应测试。
+6. 必要时进行固定事实回放。
+7. 记录潜在评分或预测漂移。
+
+模型、训练、激活和推理之间的版本与证据边界必须保留。
+
+不得恢复生产常驻 shadow 全量双跑。
+
+# 15. API 与兼容性
+
+API 必须遵守现有合同。
+
+修改接口时需要检查：
+
+- 请求 Schema。
+- 响应 DTO。
+- 状态码。
+- 稳定错误码。
+- 版本字段。
+- 幂等语义。
+- 鉴权。
+- iOS 调用方。
+- 相关合同测试。
+
+不得因为 Web 客户端已经退役，就批量删除以前由 Web 使用的 `/v1` API。API 必须保留退役前存在的全部 `/v1` 路由，包括 36 条此前只有 Web 在用的端点（备份、模型/预测管理、数据运维、审计、导入管理、手工成绩、隐私区）；`/v1/performance` 是运维遥测端点，尤其不得误删。删除这些端点必须作为独立产品决策，并同步修改 `server-runtime`/`schemas`/OpenAPI 断言，不能按 Web 清理名义批量删除。
+
+“保留挂载”不等于“旧协议可用”。以下退役能力必须继续按合同返回 `410 Gone` 和稳定错误码：
+
+- 旧训练计划写面：`/v1/mobile/goals`（GET/PUT）、`/v1/mobile/run-coach`（GET/POST）、`/v1/mobile/workout-plan/{preview,confirm,generate}`（POST），共 5 条路径 / 7 个操作；一律 `410` + `legacy_surface_retired`（带 `replacement`），旧实现不可达。
+- 备份创建/删除：`POST /v1/backups` = `410 backup_creation_retired`，`DELETE /v1/backups/:name` = `410 backup_deletion_retired`，两者都不碰任何文件。`GET /v1/backups`、`GET /v1/backups/:name` 与 `POST /v1/backups/:name/restore` 保留；常规一致性备份是外部运维责任。
+
+旧客户端必须能区分 `410` 与 `404`；不得把 `410` 当成 `404`，不得自动回退至旧写入协议，不得让新客户端调用、重新挂接或恢复退役接口。退役优先于托管数据域的 `409`。完整矩阵见 `docs/IOS_NATIVE_API_CONTRACT.md` §4 与 `docs/DECISIONS.md` D18/D19。
+
+不得擅自新增不兼容字段或改变错误语义。
+
+# 16. 工程债务与历史代码
+
+工程债务处理必须以证据为基础。
+
+可以识别：
+
+- 死代码。
+- 重复实现。
+- 已废弃兼容层。
+- 无调用入口。
+- 过期脚本。
+- 冗余适配器。
+- 无效依赖。
+- 长期不使用的模块。
+
+但：
+
+**识别到疑似死代码，不代表可以立即删除。**
+
+删除前必须确认：
+
+1. 无生产调用。
+2. 无动态调用。
+3. 无测试或工具依赖。
+4. 无数据迁移依赖。
+5. 无历史协议兼容责任。
+6. 无部署或运维入口。
+7. 删除后完整测试可通过。
+
+涉及对外可观察行为时，必须单独审批。
+
+不要在功能开发任务中顺手进行大规模工程债务清理。
+
+# 17. 跨平台规则
+
+官方环境：
+
+- macOS：开发及 iOS 构建。
+- Linux：后端 CI 和生产运行。
+
+Windows 不作为当前正式 CI 平台（2026-10-25）；现有跨平台包装器和平台特定回归用例仍保留。
+
+但现有脚本可移植性约束仍然有效。
+
+即使 Windows 不是正式 CI 平台，根 `package.json` 和所有 workspace 的每个 npm script 仍必须在 cmd、PowerShell 与 bash 下行为一致。npm scripts 必须遵守 `npm run check:scripts`（同时接入 `.githooks/pre-commit`）的三条硬规则：
+
+1. npm script 正文只允许 `&&`、纯命令或 `node xxx.mjs`。禁止 `;`、`$?`、`$VAR`/`$(…)`、`VAR=x cmd`、`test`、`[ ]`、`uname`，以及依赖 shell 展开的 `*`。
+2. 平台判定必须在脚本内部：Node 用 `process.platform`，bash 用 `uname -s`。不能运行检查的 host 必须明确打印跳过原因并 exit 0——绝不能失败，也不能静默通过。
+3. 优先 `.mjs`；只在必须于 macOS 运行的地方保留 `.sh`。`.sh` 一律用 `bash <path>` 调用，不写 `./x.sh`（Windows git 默认不记录 `+x`）。不得用 WSL 或 Git Bash 冒充 macOS；`xcodebuild`、CocoaPods 和 Simulator 只在 macOS 运行。
+
+不得依赖文件名大小写：Windows 与 macOS 都是大小写不敏感，错误的大小写会在两端静默通过。`.gitattributes` 固定 `*.sh`、`*.py`、`*.swift` 和 `*.pbxproj` 为 LF；使用 `git ls-files --eol`（`i/lf w/lf`）验证，不能假设。
+
+macOS 专用验证必须明确声明运行环境；不得用 Windows、WSL 或 Linux 测试结果冒充 macOS Xcode 验证。
+
+# 18. Git 工作区与提交规范
+
+执行任何代码修改任务前：
+
+- 检查 `git status`。
+- 识别已有未提交改动。
+- 确认当前分支。
+- 识别任务相关的改动范围。
+
+不得覆盖其他任务的未提交修改。
+
+未经明确授权：
+
+- 不执行 `git reset --hard`。
+- 不执行破坏性的 `git clean`。
+- 不强制推送。
+- 不修改远程分支。
+- 不删除用户生成的证据文件。
+- 不自动提交。
+- 不自动部署。
+
+发现大量未跟踪文件时，先分类报告。
+
+不得因为文件位于 `deliverables/`、测试结果目录或临时目录，就直接假设可以删除。
+
+修改完成后检查：
+
+- 意外文件。
+- 无关格式变更。
+- 调试代码。
+- 临时日志。
+- 生成文件。
+- 敏感信息。
+- 大文件。
+- 不必要的新增依赖。
+
+# 19. 隐私与敏感数据
+
+真实用户健康数据属于敏感信息。
+
+不得将以下内容提交到仓库：
+
+- 真实 Apple Health XML。
+- 真实 GPX 轨迹。
+- 真实健康 SQLite 数据库。
+- API Token。
+- 生产密钥。
+- 真实数据库备份。
+- 包含隐私数据的调试日志。
+
+测试使用合成数据、脱敏数据或明确允许的隔离 Fixture。
+
+分享卡片的隐私区裁剪必须遵守服务端隐私保护合同。
+
+客户端不得获得按合同应被裁剪掉的隐私坐标。
+
+不得为了方便调试降低鉴权或隐私保护要求。
+
+# 20. 文档维护规则
+
+文档必须描述真实实现。
+
+不允许：
+
+- 将计划中的功能写成已经完成。
+- 将测试通过写成真机验收通过。
+- 将历史实现写成现行架构。
+- 为每次修复重复创建一份永久规范。
+- 批量生成无维护价值的文档。
+
+遵守“一主题一份现行文档”的原则。
+
+修改文档后根据影响运行：
+
+- `npm run check:docs`
+- `npm run check:doc-refs`
+- `npm run check:acceptance-matrix`
+
+其中验收矩阵检查应在相关测试或算法合同变更时重点执行。
+
+文档修改不得为了通过检查而删除仍然有效的约束。
+
+# 21. 性能优化规范
+
+不得将“感觉更快”作为性能验收依据。
+
+性能优化必须尽可能提供：
+
+- 修改前基线。
+- 修改后结果。
+- 运行环境。
+- 输入数据规模。
+- CPU / 内存约束。
+- 并发配置。
+- 测量方法。
+- 正确性测试。
+- 回退风险。
+
+重点关注：
+
+- Node.js 事件循环长时间阻塞。
+- SQLite 查询计划。
+- 数据库事务范围。
+- 批量写入。
+- 重复序列化。
+- 导入队列。
+- 分析任务调度。
+- 内存峰值。
+- iOS 主线程阻塞。
+- SwiftUI 不必要的渲染和昂贵视觉效果。
+
+不能为了缩短处理耗时而破坏事务、幂等性或发布一致性。
+
+# 22. 工作完成标准
+
+Codex 不得仅以“代码已经修改”为任务完成依据。
+
+完成实施任务时必须检查：
+
+1. 需求是否满足。
+2. 修改是否局限于授权范围。
+3. 现有功能是否保持。
+4. 测试是否真实执行。
+5. 是否有失败或跳过。
+6. 是否引入兼容风险。
+7. 文档是否需要同步。
+8. 是否遗留待验证事项。
+9. 是否存在未提交或无关改动。
+
+如果环境不支持某项验证，应说明限制。
+
+不允许虚构：
+
+- 测试结果。
+- 编译结果。
+- 性能数据。
+- GitHub CI 状态。
+- 真机测试结果。
+- 部署成功状态。
+
+# 23. 任务完成报告格式
+
+每次 IMPLEMENT 任务结束时，按以下格式输出：
+
+## 任务结果
+
+说明完成内容和是否达到目标。
+
+## 修改文件
+
+列出实际修改文件以及修改目的。
+
+## 验证结果
+
+| 检查项目 | 结果 | 说明 |
+|---|---|---|
+| 类型检查 | PASS / FAIL / NOT RUN | 实际命令 |
+| L1 定向测试 | PASS / FAIL / NOT RUN | 文件和数量 |
+| L2 影响测试 | PASS / FAIL / NOT RUN | 范围和数量 |
+| L3 模块回归 | PASS / FAIL / NOT RUN | 模块 |
+| L4 全量测试 | PASS / FAIL / NOT RUN | 实际执行情况 |
+| iOS 验证 | PASS / FAIL / SKIPPED / NOT RUN | 编译和测试边界 |
+| GitHub CI | PASS / FAIL / NOT CHECKED | 实际状态 |
+
+## 测试统计
+
+- 实际执行测试数量：
+- 通过：
+- 失败：
+- 跳过：
+- 总耗时：
+- 使用的并发配置：
+- 未覆盖范围：
+
+只报告实际可确认的数字。
+
+## 风险与剩余事项
+
+列出：
+
+- 已知风险。
+- 未验证事项。
+- 兼容性风险。
+- 是否需要完整回归。
+- 是否满足提交或合并条件。
+
+不要把局部测试的 PASS 等同于整体发布就绪。
+
+# 24. Agent 行为约束
+
+以下行为禁止：
+
+- 未阅读相关代码就大范围重构。
+- 未经授权扩大功能范围。
+- 为了测试通过改变业务预期。
+- 静默删除失败测试。
+- 静默跳过关键门禁。
+- 将错误修复变成架构重写。
+- 在缺少证据时宣称没有风险。
+- 反复重试同一失败命令却不分析原因。
+- 未检查已有实现就新增重复模块。
+- 自动清理可能包含用户数据的文件。
+- 自动修改生产配置。
+- 将理论推断冒充实测结果。
+
+优先使用现有实现、明确合同和可重复验证的工具。
+
+当任务的必要前提不满足时，报告阻塞原因和已经完成的部分，不伪造完成状态。
+
+# 25. 最终工程原则
+
+RAI Running 的长期工程原则：
+
+**Correctness > Data Integrity > Reliability > Maintainability > Performance > Convenience**
+
+上述排序并不意味着性能不重要，而是性能优化不得以破坏正确性和数据完整性为代价。
+
+开发目标：
+
+- 保留可靠的数据事实来源。
+- 保持服务器计算架构。
+- 保持 SQLite。
+- 保持原生 iOS。
+- 保持训练计划统一状态。
+- 保持增量同步。
+- 保持双车道导入边界。
+- 保持原子发布。
+- 保持完整测试能力。
+- 持续减少无效计算与技术债务。
+
+每次修改都应让项目更可靠、更清晰、更容易维护，而不是仅让当前任务表面通过。
+
+---
+
+**本文件约束所有后续工程任务。涉及架构、数据合同或产品范围的重大修改，必须先确认现有决策及实际实现，不得由 Agent 自行改变项目方向。**
