@@ -304,8 +304,14 @@ struct TechTrainingSessionEditor: View {
         // chooses an explicit distance or time dose.
         let structure = source?.prescription.structure ?? TrainingPlanSessionEditorPolicy.blankStructure()
         distance = TrainingPlanSessionEditorPolicy.distanceText(source?.prescription.distanceKm)
-        warmup = structure.warmup.map(EditorStep.init); cooldown = structure.cooldown.map(EditorStep.init)
-        blocks = structure.blocks.map { EditorBlock(iterations: $0.iterations, steps: $0.steps.map(EditorStep.init)) }
+        warmup = structure.warmup.map { EditorStep($0) }
+        cooldown = structure.cooldown.map { EditorStep($0) }
+        blocks = structure.blocks.map { block in
+            EditorBlock(
+                iterations: block.iterations,
+                steps: block.steps.map { EditorStep($0) }
+            )
+        }
     }
 }
 #endif
