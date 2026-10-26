@@ -517,6 +517,43 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
         let identityLoaded = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
         check(identityLoaded && identityStore.unifiedIsCurrent && identityStore.unified?.sessions?.sessions.first?.sessionRevision == 3,
               "B02 Store accepts the negotiated stable session revision")
+        // B08: the update extension is only accepted after exact negotiation and
+        // when the same response still carries the session view it belongs to.
+        var updateWire = identitiesWire
+        updateWire["update"] = ["contractVersion": 1,
+            "facts": ["status": "stored", "identity": "facts-1"],
+            "analysis": ["status": "ready", "identity": "analysis-1"],
+            "association": ["status": "current", "identity": "execution-1"],
+            "plan": ["status": "current", "desiredInputKey": "input-1", "publishedInputKey": "input-1",
+                     "evaluatedInputKey": "input-1", "evaluatedStateRevision": 7, "reasonCodes": []]]
+        let updateJSON = String(decoding: try JSONSerialization.data(withJSONObject: updateWire), as: UTF8.self)
+        var updateHandshake = identitiesHandshake
+        updateHandshake.trainingPlanUpdateContractVersion = 1
+        PlanStoreProtocol.handler = { request in
+            precondition(request.value(forHTTPHeaderField: "X-RAI-Training-Updates") == "1")
+            return (200, updateJSON, 0)
+        }
+        let updateLoaded = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: updateHandshake, isValid: { true })
+        check(updateLoaded && identityStore.unified?.update?.contractVersion == 1 &&
+              identityStore.unified?.update?.plan.publishedInputKey == "input-1" &&
+              identityStore.unified?.sessions != nil,
+              "B08 Store accepts an exactly negotiated update view beside the session view")
+        let unnegotiatedStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: identityClock)
+        PlanStoreProtocol.handler = { _ in (200, updateJSON, 0) }
+        let unnegotiatedUpdate = await unnegotiatedStore.refreshUnifiedPlan(
+            baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(!unnegotiatedUpdate && unnegotiatedStore.unified == nil,
+              "B08 an update view returned without negotiation is rejected, not ignored")
+        var updateWithoutSessions = updateWire
+        updateWithoutSessions.removeValue(forKey: "sessions")
+        let updateWithoutSessionsJSON = String(
+            decoding: try JSONSerialization.data(withJSONObject: updateWithoutSessions), as: UTF8.self)
+        let noSessionsStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: identityClock)
+        PlanStoreProtocol.handler = { _ in (200, updateWithoutSessionsJSON, 0) }
+        let noSessionsUpdate = await noSessionsStore.refreshUnifiedPlan(
+            baseURL: base, token: "", handshake: updateHandshake, isValid: { true })
+        check(!noSessionsUpdate && noSessionsStore.unified == nil,
+              "B08 an update view without the session view is rejected instead of attributed to no instance")
         let identityCached = TrainingPlanStore(cache: cache, api: api, scope: identityScope, now: identityClock)
         identityCached.loadCache()
         check(identityCached.unified == identityStore.unified && !identityCached.unifiedIsCurrent && identityCached.executablePlan == nil,

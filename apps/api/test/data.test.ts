@@ -9,6 +9,7 @@ import { RaiApplicationService } from "@rai/application";
 import { RaiDatabase, type SqliteSeriesReadRepository } from "@rai/storage-sqlite";
 
 import { RaiReadStore, recentWeeklyKm } from "../src/data.js";
+import { trainingPlanDesiredInputKey } from "../src/training-plan-input-identity.js";
 
 test("recent weekly volume uses four complete calendar weeks without dropping empty weeks", () => {
   const today = "2026-10-05";
@@ -673,6 +674,50 @@ test("PR5 C3：软删的训练从**事实侧**汇总里消失，数字等于删�
     }
   } finally {
     store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+test("B08/S04-01: record-only raw generation and canonical updated_at rewrites do not move the desired input key", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-input-identity-record-only-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  store.close();
+  const businessDate = "2025-01-22";
+  const readInput = () => {
+    const read = new RaiReadStore(databasePath);
+    try { return read.trainingPlanInputFacts(businessDate); } finally { read.close(); }
+  };
+  const inputKey = (input: ReturnType<typeof readInput>) => trainingPlanDesiredInputKey({
+    scope: { serverId: "s", athleteId: "a", datasetEpoch: "e" }, businessDate,
+    facts: input.facts, analysis: input.analysis, configDigest: "config", overridesDigest: "overrides",
+    executionDigest: "executions", policyHash: null
+  });
+  try {
+    const before = readInput();
+    const beforeKey = inputKey(before);
+    const writer = new DatabaseSync(databasePath);
+    try {
+      writer.prepare("UPDATE import_generations SET raw_generation=raw_generation+1 WHERE singleton=1").run();
+      writer.prepare("UPDATE training_sessions SET updated_at='2030-01-01T00:00:00.000Z'").run();
+    } finally {
+      writer.close();
+    }
+    const recordOnly = readInput();
+    assert.notEqual(recordOnly.analysis.factsGeneration, before.analysis.factsGeneration,
+      "the fixture must actually exercise a changed raw import generation");
+    assert.ok(recordOnly.facts.every(fact => fact.updatedAt === "2030-01-01T00:00:00.000Z"),
+      "the fixture must actually exercise rewritten storage timestamps");
+    assert.equal(inputKey(recordOnly), beforeKey,
+      "record-only generation/timestamp churn is not a content change");
+
+    const contentWriter = new DatabaseSync(databasePath);
+    try {
+      contentWriter.prepare("UPDATE training_sessions SET anchor_distance_km=6 WHERE id='api_session_0'").run();
+    } finally {
+      contentWriter.close();
+    }
+    assert.notEqual(inputKey(readInput()), beforeKey, "a corrected semantic fact changes the key");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

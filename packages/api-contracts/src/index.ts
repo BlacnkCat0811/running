@@ -2217,6 +2217,12 @@ export interface TrainingPlanStateResponseV2 {
   };
   /** B02 compatible read. Sent only for explicit session extension negotiation. */
   sessions?: import("./training-plan-closed-loop.js").TrainingPlanSessionsView;
+  /**
+   * B08 four-stage update read. Sent only with exact session + update extension
+   * negotiation; absence means the update state is unknown, never "current" and
+   * never "nothing pending".
+   */
+  update?: import("./training-plan-closed-loop.js").TrainingPlanUpdateView;
 }
 
 // ---------------------------------------------------------------------------

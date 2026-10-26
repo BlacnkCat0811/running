@@ -100,7 +100,8 @@ payload schema 2 时，顶层可选 `sessions` 返回稳定实例/课程/修订�
 schema 1 或未知课程扩展版本返回 `409 training_session_contract_unsupported`，不隐式升级、不分配 ID。
 B03/G1 起 handshake 只在已完成该受控迁移且 owner-ready 的 scope 宣告 `trainingPlanSessionContractVersion: 1`；
 它仍是只读扩展，不授权课程写、执行关联或自动发布。
-该扩展带 `Vary: X-RAI-Training-Contract, X-RAI-Training-Sessions`；缺少扩展头不返回新字段。
+v2 响应统一带 `Vary: X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates`；
+缺少对应扩展头不返回该扩展字段，Vary 同时区分未请求、精确版本和未知版本。
 扩展只在 unified read 2 下解释，v1 路径保持原合同。B04 的课程写仅在
 `RAI_TRAINING_PLAN_SESSION_COMMAND_MODE=validation`、临时隔离 runtime/两库、loopback、schema 2/owner-ready、
 持久 publication 支持和请求头 `X-RAI-Client-Training-Session-Commands: 1` 同时满足时宣告/准入；
@@ -127,6 +128,9 @@ B07 起 iOS 按 `trainingPlanExecutionCommandContractVersion == 1`（同时要�
 B08 起同一读在同时发送 `X-RAI-Training-Updates: 1` 时增加可选 `update`：facts/analysis/association/plan 四阶段各自带证据，
 `plan.status` 由持久 `publishedInputKey` 和评估游标派生；自动发布关闭时可为 `blocked` 并带 `auto_publish_disabled`，
 不是“计划已更新”。更新读 GET 零写，不触发分析或发布。
+更新扩展必须与精确课程读头同时协商；缺位表示更新状态未知。未知更新版本、缺少课程协商、
+schema 1 或服务端未提供更新读能力均返回 `409 training_update_contract_unsupported`。
+iOS 拒绝未经协商的 update、缺少 sessions 的 update、未知阶段和超出快照修订的评估水位。
 
 ## 3. 统一训练计划 v2
 
@@ -140,7 +144,9 @@ B08 起同一读在同时发送 `X-RAI-Training-Updates: 1` 时增加可选 `upd
 | `2` | v2 统一投影（本节的 `TrainingPlanStateResponseV2`） |
 | 其它值 | `409 training_contract_unsupported`；**不回退 v1** |
 
-- v2 响应必带 `Vary: X-RAI-Training-Contract`，且永远 `Cache-Control: no-store`。
+- v2 响应必带 `Vary: X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates`，
+  包括未请求扩展及扩展协商失败的响应；v1 和未知统一读版本带 `Vary: X-RAI-Training-Contract`。
+  所有这些读响应均带 `Cache-Control: no-store`。
 - 服务端**不迁移、不发布、不写入**；状态未迁移时 `409 training_plan_not_migrated`；
   统一状态损坏/业务日期不可解析时 `503 training_plan_state_unavailable` / `training_plan_state_invalid`。
 - 业务日期只有一个来源（Asia/Shanghai 自然日），`businessDate` 由服务端给出。

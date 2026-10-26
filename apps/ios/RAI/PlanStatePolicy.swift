@@ -323,6 +323,15 @@ enum TrainingPlanUnifiedValidationError: Error, LocalizedError, Equatable {
     case invalidDays(String)
     case unknownValue(field: String, value: String)
     case inconsistentRaceMode(String)
+    /// A `update` extension arrived without the exact update negotiation that
+    /// authorizes it. An unrequested extension is not extra data to ignore:
+    /// it is a server/client contract mismatch.
+    case unexpectedUpdateExtension
+    /// The update stage view is only meaningful beside the exact session view;
+    /// one without the other cannot be attributed to an instance.
+    case updateRequiresSessions
+    /// The four-stage update view contradicts itself (stage status or watermark).
+    case invalidUpdate(String)
 
     var errorDescription: String? {
         switch self {
@@ -340,6 +349,12 @@ enum TrainingPlanUnifiedValidationError: Error, LocalizedError, Equatable {
             return "统一训练状态的 \(field) 取值 \(value) 本版本无法判定。"
         case let .inconsistentRaceMode(reason):
             return "统一训练状态的比赛模式自相矛盾：\(reason)。"
+        case .unexpectedUpdateExtension:
+            return "服务端返回了未协商的训练更新扩展；不能忽略或把它当成已更新。"
+        case .updateRequiresSessions:
+            return "训练更新扩展缺少课程身份视图，无法绑定计划实例。"
+        case let .invalidUpdate(reason):
+            return "训练更新扩展不可信：\(reason)。"
         }
     }
 }
@@ -404,11 +419,16 @@ enum TrainingPlanUnifiedPolicy {
     }
 
     /// 接受一份 v2 快照之前的全部校验。抛出即拒绝，调用方必须回到"未确认"状态。
+    ///
+    /// - Parameter updateNegotiated: 本次请求同时带了精确的课程读头和
+    ///   `X-RAI-Training-Updates: 1`。只有协商过的响应才允许携带 `update`
+    ///   扩展；未协商却出现的扩展按合同冲突拒绝，不能静默忽略。
     static func validate(
         _ snapshot: TrainingPlanStateResponseV2,
         identity: PlanReceiptScope?,
         minimumGoalsRevision: Int,
-        now: Date
+        now: Date,
+        updateNegotiated: Bool = false
     ) throws {
         guard snapshot.contractVersion == 2 else {
             throw TrainingPlanUnifiedValidationError.unsupportedContractVersion(snapshot.contractVersion)
@@ -514,6 +534,66 @@ enum TrainingPlanUnifiedPolicy {
                       suppression.sessionId.map({ ids.contains($0) }) ?? (suppression.reason == "explicit_rest"),
                       suppression.reason != "explicit_rest" || !activeDates.contains(suppression.localDate) else {
                     throw TrainingPlanUnifiedValidationError.invalidDays("课程日期抑制不可信")
+                }
+            }
+        }
+        // B08 update extension: absence is "unknown", never "nothing pending".
+        // When present it must be authorized by the same request's exact
+        // negotiation and attributable to the same session view / instance.
+        if let update = snapshot.update {
+            guard updateNegotiated else {
+                throw TrainingPlanUnifiedValidationError.unexpectedUpdateExtension
+            }
+            guard snapshot.sessions != nil else {
+                throw TrainingPlanUnifiedValidationError.updateRequiresSessions
+            }
+            guard update.contractVersion == 1 else {
+                throw TrainingPlanUnifiedValidationError.unknownValue(
+                    field: "update.contractVersion", value: "\(update.contractVersion)")
+            }
+            guard ["pending", "stored", "failed"].contains(update.facts.status) else {
+                throw TrainingPlanUnifiedValidationError.invalidUpdate("facts.status 未知")
+            }
+            guard ["pending", "ready", "failed"].contains(update.analysis.status) else {
+                throw TrainingPlanUnifiedValidationError.invalidUpdate("analysis.status 未知")
+            }
+            guard ["pending", "current", "blocked"].contains(update.association.status) else {
+                throw TrainingPlanUnifiedValidationError.invalidUpdate("association.status 未知")
+            }
+            guard ["pending", "current", "blocked"].contains(update.plan.status) else {
+                throw TrainingPlanUnifiedValidationError.invalidUpdate("plan.status 未知")
+            }
+            for (label, key) in [
+                ("desiredInputKey", update.plan.desiredInputKey),
+                ("publishedInputKey", update.plan.publishedInputKey),
+                ("evaluatedInputKey", update.plan.evaluatedInputKey)
+            ] {
+                if let key, key.isEmpty {
+                    throw TrainingPlanUnifiedValidationError.invalidUpdate("\(label) 为空")
+                }
+            }
+            if let evaluated = update.plan.evaluatedStateRevision {
+                guard evaluated >= 0, evaluated <= snapshot.stateRevision else {
+                    throw TrainingPlanUnifiedValidationError.invalidUpdate(
+                        "evaluatedStateRevision \(evaluated) 超过 stateRevision \(snapshot.stateRevision)")
+                }
+                guard update.plan.evaluatedInputKey != nil else {
+                    throw TrainingPlanUnifiedValidationError.invalidUpdate(
+                        "evaluatedStateRevision 缺少 evaluatedInputKey")
+                }
+            } else if update.plan.evaluatedInputKey != nil {
+                throw TrainingPlanUnifiedValidationError.invalidUpdate(
+                    "evaluatedInputKey 缺少 evaluatedStateRevision")
+            }
+            if update.plan.status == "current" {
+                let publishedCurrent = update.plan.desiredInputKey != nil &&
+                    update.plan.publishedInputKey == update.plan.desiredInputKey
+                let evaluatedCurrent = update.plan.desiredInputKey != nil &&
+                    update.plan.evaluatedInputKey == update.plan.desiredInputKey &&
+                    update.plan.evaluatedStateRevision == snapshot.stateRevision
+                guard publishedCurrent || evaluatedCurrent else {
+                    throw TrainingPlanUnifiedValidationError.invalidUpdate(
+                        "status=current 但 published/evaluated 输入键都不是当前输入")
                 }
             }
         }

@@ -29,22 +29,30 @@ const key = (input: Partial<Parameters<typeof trainingPlanDesiredInputKey>[0]> =
   executionDigest: trainingPlanExecutionDigest([]), policyHash: null, ...input
 });
 
-test("B08/S04-01: the same inputs and a later wall clock produce the same key; output revisions are excluded", () => {
+test("B08/S04-01: the same inputs under an advancing wall clock produce the same key; output revisions are excluded", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-25T00:00:00.000Z") });
   const first = key();
+  const firstClock = Date.now();
+  t.mock.timers.tick(1_500);
+  assert.equal(Date.now(), firstClock + 1_500, "the test must actually advance wall-clock time");
   const second = key();
   assert.equal(first, second);
   assert.equal(key({ configDigest: digest({ different: "clock" }) }) === first, false);
   assert.equal(first, digest({ contract: TRAINING_PLAN_INPUT_CONTRACT, scope, businessDate: "2026-10-25",
-    facts: trainingPlanFactsDigest([fact("run-1")]), analysis, config: trainingPlanConfigDigest(state()),
-    overrides: trainingPlanOverridesDigest(state()), executions: trainingPlanExecutionDigest([]), policyHash: null }));
+    facts: trainingPlanFactsDigest([fact("run-1")]),
+    analysis: { releaseId: "release-1", analysisStatus: "published", dependencyGeneration: "7" },
+    config: trainingPlanConfigDigest(state()), overrides: trainingPlanOverridesDigest(state()),
+    executions: trainingPlanExecutionDigest([]), policyHash: null }));
 });
 
-test("B08/S04-01: relevant facts, corrected runs, a new analysis release, config/override/execution changes move the key", () => {
+test("B08/S04-01: semantic fact/release/config/override/execution changes move the key", () => {
   const base = key();
-  assert.notEqual(key({ facts: [fact("run-1", "2026-10-26T00:00:00.000Z")] }), base, "a corrected run changes updated_at");
+  assert.notEqual(key({ facts: [{ ...fact("run-1"), distanceMeters: 8_100 }] }), base, "corrected fact content");
   assert.notEqual(key({ facts: [fact("run-1"), fact("run-2")] }), base, "a new run enters the window");
   assert.notEqual(key({ analysis: { ...analysis, releaseId: "release-2" } }), base, "a new published release");
   assert.notEqual(key({ analysis: { ...analysis, analysisStatus: "failed" } }), base, "analysis status is part of the input");
+  assert.notEqual(key({ analysis: { ...analysis, dependencyGeneration: "8" } }), base,
+    "the analysis dependency generation is part of the published release identity");
   assert.notEqual(key({ configDigest: digest({ changed: true }) }), base);
   assert.notEqual(key({ overridesDigest: digest({ changed: true }) }), base);
   const execution: TrainingPlanSessionExecution = { sessionId: "session-1", executionRevision: 1,
@@ -53,9 +61,23 @@ test("B08/S04-01: relevant facts, corrected runs, a new analysis release, config
   assert.notEqual(key({ executionDigest: trainingPlanExecutionDigest([execution]) }), base);
 });
 
+test("B08/S04-01: raw import generation and updated_at are not content identity", () => {
+  const base = key();
+  assert.equal(key({ facts: [fact("run-1", "2026-10-26T12:34:56.789Z")] }), base,
+    "canonicalize may rewrite updated_at without changing the fact");
+  assert.equal(key({ analysis: { ...analysis, factsGeneration: "999" } }), base,
+    "a record-only batch increments raw_generation but publishes no new content");
+  assert.equal(key({ analysis: { ...analysis, dependencyGeneration: null } }),
+    key({ analysis: { ...analysis, dependencyGeneration: "0" } }),
+    "absent generation table and materialized zero dependency mean the same no-dependency state");
+  assert.equal(trainingPlanFactsDigest([fact("run-1", "2026-10-30T00:00:00.000Z")]),
+    trainingPlanFactsDigest([fact("run-1")]), "facts digest ignores storage bookkeeping");
+});
+
 test("B08/S04-01: record-only updates and unrelated record fields do not enter the facts digest", () => {
   const first = trainingPlanFactsDigest([fact("run-1")]);
-  assert.equal(trainingPlanFactsDigest([fact("run-1")]), first, "no wall clock in the facts digest");
+  assert.equal(trainingPlanFactsDigest([fact("run-1", "2026-10-26T00:00:00.000Z")]), first,
+    "updated_at is storage bookkeeping, not fact content");
   assert.notEqual(trainingPlanFactsDigest([{ ...fact("run-1"), distanceMeters: 8100 }]), first);
   assert.equal(trainingPlanAnalysisReady(analysis), true);
   assert.equal(trainingPlanAnalysisReady({ ...analysis, analysisStatus: "queued" }), false);

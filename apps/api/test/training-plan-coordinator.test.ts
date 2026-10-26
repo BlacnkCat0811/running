@@ -59,6 +59,29 @@ test("刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要
   assert.deepEqual(refreshDecision(row({ weekPlan: [] }), BUSINESS_DATE), { needed: true, reason: "business_date_changed" });
 });
 
+test("B08/S04-01/03: analysis pending blocks every reason that would otherwise publish", () => {
+  const v2 = (publishedInputKey: string | null): TrainingPlanStateRow => {
+    const base = row({}, 5);
+    return { ...base, state: { ...(base.state as TrainingPlanLegacyState), schemaVersion: 2, migrationVersion: 2,
+      planInstanceId: "plan-1", sessions: [], suppressions: [], publishedInputKey } as unknown as TrainingPlanState };
+  };
+  const pending = { inputKey: "input-2", analysisReady: false };
+  const ready = { inputKey: "input-2", analysisReady: true };
+  const cases = [
+    { reason: "plan_missing", row: row({ planContextDigest: null }) },
+    { reason: "config_changed", row: row({ raceGoal: { id: "goal-1", date: "2026-12-06", distanceKm: 10,
+      goal: "finish", targetTimeSeconds: null } }) },
+    { reason: "business_date_changed", row: row({ weekPlan: [] }) },
+    { reason: "input_changed", row: v2("input-1") }
+  ] as const;
+  for (const item of cases) {
+    assert.deepEqual(refreshDecision(item.row, BUSINESS_DATE, pending),
+      { needed: false, reason: "analysis_pending" }, `${item.reason} must retain the old plan while analysis is pending`);
+    assert.deepEqual(refreshDecision(item.row, BUSINESS_DATE, ready),
+      { needed: true, reason: item.reason }, `${item.reason} still publishes after analysis becomes ready`);
+  }
+});
+
 test("七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息", () => {
   // The product decision keeps the existing bounded trigger: a partial week is
   // still "current" (the page labels missing days as not generated), so this test

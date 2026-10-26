@@ -28,21 +28,51 @@ export interface TrainingPlanInputFact {
   endedAt: string;
   distanceMeters: number | null;
   durationSeconds: number | null;
+  /**
+   * Storage bookkeeping only. `canonicalizeRunningWorkouts` may rewrite this
+   * column for an otherwise unchanged fact, so it must never enter an input
+   * key. Kept on the read model for diagnostics and compatibility; it is not
+   * semantic fact content.
+   */
   updatedAt: string;
 }
 
 export interface TrainingPlanAnalysisIdentity {
   releaseId: string | null;
   analysisStatus: string;
+  /**
+   * Raw import generation. It advances for every batch (including record-only
+   * batches) and is exposed only for the update view; it is not content
+   * identity and is deliberately omitted from the desired input key.
+   */
   factsGeneration: string | null;
+  /** Analysis dependency generation; changes only when this batch affects analysis input. */
   dependencyGeneration: string | null;
 }
 
+/** Digest the semantic fact content only; storage timestamps and batch counters are not inputs. */
 export function trainingPlanFactsDigest(facts: readonly TrainingPlanInputFact[]): string {
   return digest([...facts].sort((left, right) => left.startedAt.localeCompare(right.startedAt) ||
     left.trainingSessionId.localeCompare(right.trainingSessionId))
     .map(fact => ({ id: fact.trainingSessionId, start: fact.startedAt, end: fact.endedAt,
-      meters: fact.distanceMeters, seconds: fact.durationSeconds, updated: fact.updatedAt })));
+      meters: fact.distanceMeters, seconds: fact.durationSeconds })));
+}
+
+/**
+ * The analysis fields the generator actually consumes. `releaseId` identifies
+ * the published artifact; `dependencyGeneration` identifies the analysis-input
+ * generation it belongs to. `factsGeneration` is the raw batch counter and is
+ * intentionally excluded.
+ *
+ * The read view reports `dependencyGeneration:null` while generation counters
+ * are absent and `"0"` once a record-only batch has materialized the zero
+ * dependency. Both mean "no analysis dependency" and must not change the key.
+ */
+function trainingPlanAnalysisInputIdentity(analysis: TrainingPlanAnalysisIdentity): {
+  releaseId: string | null; analysisStatus: string; dependencyGeneration: string;
+} {
+  return { releaseId: analysis.releaseId, analysisStatus: analysis.analysisStatus,
+    dependencyGeneration: analysis.dependencyGeneration ?? "0" };
 }
 
 /** Configuration the generator actually consumes; `evaluatedAt` is an output clock. */
@@ -110,7 +140,8 @@ export function trainingPlanDesiredInputKey(input: {
   return digest({ contract: TRAINING_PLAN_INPUT_CONTRACT,
     scope: { serverId: input.scope.serverId, athleteId: input.scope.athleteId, datasetEpoch: input.scope.datasetEpoch },
     businessDate: input.businessDate, facts: trainingPlanFactsDigest(input.facts),
-    analysis: input.analysis, config: input.configDigest, overrides: input.overridesDigest,
+    analysis: trainingPlanAnalysisInputIdentity(input.analysis), config: input.configDigest,
+    overrides: input.overridesDigest,
     executions: input.executionDigest, policyHash: input.policyHash });
 }
 

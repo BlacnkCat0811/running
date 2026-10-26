@@ -42,6 +42,14 @@ export function refreshDecision(row: TrainingPlanStateRow | null, businessDate: 
   if (row === null) return { needed: false, reason: "not_migrated" };
   const state = row.state;
   if (state.runState !== "active") return { needed: false, reason: "paused" };
+  // Analysis readiness gates every publish reason, not only input_changed.
+  // A plan_missing/config_changed/business_date_changed decision based on
+  // configuration or calendar drift must still wait for the published analysis
+  // release that will supply the current facts. Publishing the old projection
+  // here would consume unanalysed input and make the update view lie about it.
+  if (desired !== undefined && desired !== null && !desired.analysisReady) {
+    return { needed: false, reason: "analysis_pending" };
+  }
   if (state.planContextDigest === null) return { needed: true, reason: "plan_missing" };
   const contextDigest = trainingPlanContextDigest({ raceGoal: state.raceGoal, runState: state.runState });
   if (state.planContextDigest !== contextDigest) return { needed: true, reason: "config_changed" };
@@ -49,10 +57,9 @@ export function refreshDecision(row: TrainingPlanStateRow | null, businessDate: 
   const coversToday = (state.weekPlan ?? []).some((day) => day.localDate >= businessDate && day.localDate <= windowEnd);
   if (!coversToday) return { needed: true, reason: "business_date_changed" };
   if (desired !== undefined && desired !== null) {
-    // A newer run that is not analysed yet must not be consumed as if it were
-    // current. The old publication stays readable and the update view explains
-    // the pending stage; a new release will trigger the next tick.
-    if (!desired.analysisReady) return { needed: false, reason: "analysis_pending" };
+    // Readiness was checked above. A durable evaluation for this exact input
+    // and state revision is enough to certify that the current publication has
+    // already consumed it, even if the stored key predates this evaluation.
     const alreadyChecked = evaluation !== undefined && evaluation !== null &&
       evaluation.inputKey === desired.inputKey && evaluation.stateRevision === row.revision;
     const publishedInputKey = state.schemaVersion === 2 ? state.publishedInputKey : null;

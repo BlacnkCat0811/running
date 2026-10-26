@@ -151,7 +151,8 @@ test("路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 4
       headers: { "x-rai-training-contract": "2" } });
     assert.equal(v2.statusCode, 200);
     assert.equal(v2.headers["cache-control"], "no-store");
-    assert.equal(v2.headers["vary"], "X-RAI-Training-Contract");
+    assert.equal(v2.headers["vary"],
+      "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
     const body = v2.json() as TrainingPlanStateResponseV2;
     assert.equal(body.contractVersion, 2);
     assert.equal(body.scope.athleteId, "athlete");
@@ -170,6 +171,34 @@ test("路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 4
     assert.equal(unsupported.statusCode, 409);
     assert.equal((unsupported.json() as { code: string }).code, "training_contract_unsupported");
     assert.equal(legacyCalls, 1, "an unknown contract must not be downgraded to v1");
+  } finally {
+    await app.close();
+  }
+});
+
+test("路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖", async () => {
+  const app = Fastify({ logger: false });
+  const row = stateRow({ schemaVersion: 2, migrationVersion: 2, planInstanceId: "plan-1",
+    sessions: [], suppressions: [], publishedInputKey: null } as never);
+  app.get("/v1/mobile/training-plan-state", createTrainingPlanStateRoute({
+    identity,
+    businessDate: () => "2026-10-20",
+    readUnifiedState: () => row,
+    readGoalsRevision: () => 7,
+    readUpdate: () => ({ contractVersion: 1,
+      facts: { status: "stored", identity: "12" }, analysis: { status: "ready", identity: "release-1" },
+      association: { status: "current", identity: null }, plan: { status: "current", desiredInputKey: "k",
+        publishedInputKey: "k", evaluatedInputKey: "k", evaluatedStateRevision: row.revision, reasonCodes: [] } }),
+    legacy: () => { throw new Error("v2 request must not use legacy path"); }
+  }));
+  try {
+    const response = await app.inject({ method: "GET", url: "/v1/mobile/training-plan-state",
+      headers: { "x-rai-training-contract": "2", "x-rai-training-sessions": "1", "x-rai-training-updates": "1" } });
+    assert.equal(response.statusCode, 200, response.body);
+    const vary = String(response.headers["vary"] ?? "").split(",").map(value => value.trim());
+    assert.deepEqual(vary, ["X-RAI-Training-Contract", "X-RAI-Training-Sessions", "X-RAI-Training-Updates"]);
+    const body = response.json() as TrainingPlanStateResponseV2;
+    assert.equal(body.update?.contractVersion, 1);
   } finally {
     await app.close();
   }

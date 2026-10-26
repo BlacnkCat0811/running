@@ -309,7 +309,11 @@ final class TrainingPlanStore {
                 value,
                 identity: handshake.map { .init(serverId: $0.serverId, athleteId: $0.athleteId, datasetEpoch: $0.datasetEpoch) },
                 minimumGoalsRevision: minimumRevision,
-                now: now()
+                now: now(),
+                // Only the exact negotiated response may carry the update
+                // extension. The policy rejects an unrequested one rather than
+                // ignoring it, and also requires the session view beside it.
+                updateNegotiated: expectsUpdates
             )
             // B07: never let an older GET roll back a just-confirmed execution or
             // swap in a different plan instance at the same/lower state revision.

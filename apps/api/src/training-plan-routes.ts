@@ -179,8 +179,15 @@ export function createTrainingPlanStateRoute(deps: TrainingPlanStateRouteDeps) {
         message: `训练读合同只支持 1 或 ${TRAINING_PLAN_CONTRACT_VERSION}；收到 ${JSON.stringify(requested.raw)}。`
       });
     }
-    if (requested.version === 1) return deps.legacy(request, reply);
-    reply.header("Vary", "X-RAI-Training-Contract");
+    if (requested.version === 1) {
+      reply.header("Vary", "X-RAI-Training-Contract");
+      return deps.legacy(request, reply);
+    }
+    // Every v2 representation depends on the presence/value of both optional
+    // negotiation headers. Declaring all three once here prevents the old
+    // sessions branch from overwriting a three-value Vary with two values and
+    // lets a shared cache distinguish "no extension" from "extension asked".
+    reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
     const scope = deps.identity();
     const scopeKey = JSON.stringify([scope.serverId, scope.athleteId, scope.datasetEpoch]);
     let row: TrainingPlanStateRow | null;
@@ -202,19 +209,13 @@ export function createTrainingPlanStateRoute(deps: TrainingPlanStateRouteDeps) {
     }
     const sessionsHeader = request.headers["x-rai-training-sessions"];
     const updatesHeader = request.headers["x-rai-training-updates"];
-    if (updatesHeader !== undefined) {
-      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
-    }
     if (updatesHeader !== undefined && updatesHeader !== "1") {
-      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
       return reply.code(409).send({ code: "training_update_contract_unsupported", message: "计划更新阶段读扩展版本不支持。" });
     }
     if (updatesHeader === "1" && (sessionsHeader !== "1" || row.state.schemaVersion !== 2 || deps.readUpdate === undefined)) {
-      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions, X-RAI-Training-Updates");
       return reply.code(409).send({ code: "training_update_contract_unsupported", message: "计划更新阶段读扩展需要精确的课程读协商。" });
     }
     if (sessionsHeader !== undefined) {
-      reply.header("Vary", "X-RAI-Training-Contract, X-RAI-Training-Sessions");
       if (sessionsHeader !== "1" || row.state.schemaVersion !== 2) {
         return reply.code(409).send({ code: "training_session_contract_unsupported", message: "课程身份读扩展尚未迁移或版本不支持。" });
       }
