@@ -1,0 +1,294 @@
+ M .gitignore
+ M AGENTS.md
+ M apps/api/src/data.ts
+ M apps/api/src/mobile-goals.ts
+ M apps/api/src/schemas.ts
+ M apps/api/src/server.ts
+ M apps/api/src/session-structure.ts
+ M apps/api/src/training-plan-coordinator.ts
+ M apps/api/src/training-plan-execution-commands.ts
+ M apps/api/src/training-plan-execution-match.ts
+ M apps/api/src/training-plan-input-identity.ts
+ M apps/api/src/training-plan-routes.ts
+ M apps/api/src/training-plan-session-commands.ts
+ M apps/api/src/training-plan-session-migration.ts
+ M apps/api/src/training-plan-session-policy.ts
+ M apps/api/src/training-plan-session-state.ts
+ M apps/api/src/training-plan-store.ts
+ M apps/api/test/data.test.ts
+ M apps/api/test/direct-sync-handshake-capability.test.ts
+ M apps/api/test/helpers/training-plan-crash-child.ts
+ M apps/api/test/phase5-training-plan.test.ts
+ M apps/api/test/schemas.test.ts
+ M apps/api/test/session-structure.test.ts
+ M apps/api/test/training-plan-coordinator.test.ts
+ M apps/api/test/training-plan-execution-commands.test.ts
+ M apps/api/test/training-plan-execution-match.test.ts
+ M apps/api/test/training-plan-input-identity.test.ts
+ M apps/api/test/training-plan-session-commands.test.ts
+ M apps/api/test/training-plan-session-migration.test.ts
+ M apps/api/test/training-plan-session-policy.test.ts
+ M apps/api/test/training-plan-session-state.test.ts
+ M apps/api/test/training-plan-v2-route.test.ts
+ M apps/ios/RAI/APIClient.swift
+ M apps/ios/RAI/APIModels.swift
+ M apps/ios/RAI/NativeAppModel.swift
+ M apps/ios/RAI/PlanStatePolicy.swift
+ M apps/ios/RAI/Skins/Technology/TechPlanView.swift
+ M apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift
+ M apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
+ M apps/ios/RAI/TrainingPlanExecutionPolicy.swift
+ M apps/ios/RAI/TrainingPlanStore.swift
+ M apps/ios/tests/ModelRegression.swift
+ M apps/ios/tests/TrainingPlanExecutionRegression.swift
+ M apps/ios/tests/TrainingPlanStoreRegression.swift
+ M apps/ios/tests/TrainingPlanV2Regression.swift
+ M apps/ios/tests/run-model-tests.sh
+ M docs/OPERATIONS.md
+ M docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
+ M packages/api-contracts/src/handshake-registry.ts
+ M packages/api-contracts/src/index.ts
+ M packages/api-contracts/src/training-plan-closed-loop.ts
+ M scripts/bench-training-plan-closed-loop.mjs
+ M scripts/migrate-training-planner.mts
+?? apps/api/src/training-plan-state-audit.ts
+?? apps/api/test/training-plan-execution-cursor-errors.test.ts
+?? apps/api/test/training-plan-history-compatibility.test.ts
+?? apps/api/test/training-plan-state-audit.test.ts
+?? apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
+?? apps/ios/tests/TrainingPlanSessionEditorRegression.swift
+?? apps/ios/tests/fixtures/training-session-distance-v1.json
+?? deliverables/training-plan-v2-a01-2026-10-26/REPORT.md
+?? deliverables/training-plan-v2-a01-2026-10-26/acceptance.log
+?? deliverables/training-plan-v2-a01-2026-10-26/before-fix-red.log
+?? deliverables/training-plan-v2-a01-2026-10-26/doc-refs.log
+?? deliverables/training-plan-v2-a01-2026-10-26/docs.log
+?? deliverables/training-plan-v2-a01-2026-10-26/l1.log
+?? deliverables/training-plan-v2-a01-2026-10-26/l2-files.json
+?? deliverables/training-plan-v2-a01-2026-10-26/l2_initial.log
+?? deliverables/training-plan-v2-a01-2026-10-26/l3-files.json
+?? deliverables/training-plan-v2-a01-2026-10-26/l3.log
+?? deliverables/training-plan-v2-a01-2026-10-26/single-writer.log
+?? deliverables/training-plan-v2-a01-2026-10-26/typecheck.log
+?? deliverables/training-plan-v2-a01-2026-10-26/verification.json
+?? deliverables/training-plan-v2-a01-2026-10-26/workspace-before-sha256.json
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/D01_D02.diff
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/acceptance-matrix.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/doc-refs.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/docs.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/ios-gates.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/ios-initial.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/ios-result.json
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/ios-source-check-interrupted.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/ios.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/l1-ios.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/l1-server.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/l2-server.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/l3-files.json
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/l3-server.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/node-results.json
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/red-ios.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/red-openapi.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/red-server.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck-initial.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck.log
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/validation-commands.json
+?? deliverables/training-plan-v2-d01-d02-2026-10-26/workspace-preservation.json
+?? deliverables/training-plan-v2-d03-2026-10-26/D03.patch
+?? deliverables/training-plan-v2-d03-2026-10-26/REPORT.md
+?? deliverables/training-plan-v2-d03-2026-10-26/acceptance.json
+?? deliverables/training-plan-v2-d03-2026-10-26/acceptance.log
+?? deliverables/training-plan-v2-d03-2026-10-26/doc-refs.json
+?? deliverables/training-plan-v2-d03-2026-10-26/doc-refs.log
+?? deliverables/training-plan-v2-d03-2026-10-26/docs.json
+?? deliverables/training-plan-v2-d03-2026-10-26/docs.log
+?? deliverables/training-plan-v2-d03-2026-10-26/ios-gates.json
+?? deliverables/training-plan-v2-d03-2026-10-26/ios-gates.log
+?? deliverables/training-plan-v2-d03-2026-10-26/ios.json
+?? deliverables/training-plan-v2-d03-2026-10-26/ios.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l1-expanded.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l1-expanded.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l1-final.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l1-final.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l1-first.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l1-first.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l1.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l1.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l2-final.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l2-final.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l2.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l2.log
+?? deliverables/training-plan-v2-d03-2026-10-26/l3-files.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l3.json
+?? deliverables/training-plan-v2-d03-2026-10-26/l3.log
+?? deliverables/training-plan-v2-d03-2026-10-26/red-node.json
+?? deliverables/training-plan-v2-d03-2026-10-26/red-node.log
+?? deliverables/training-plan-v2-d03-2026-10-26/red-swift.json
+?? deliverables/training-plan-v2-d03-2026-10-26/red-swift.log
+?? deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.json
+?? deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.log
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-baseline.log
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.json
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.log
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-first-failure.json
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-first-failure.log
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-red-tests.json
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck-red-tests.log
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck.json
+?? deliverables/training-plan-v2-d03-2026-10-26/typecheck.log
+?? deliverables/training-plan-v2-d03-2026-10-26/validation-summary.json
+?? deliverables/training-plan-v2-d03-2026-10-26/workspace-preservation.json
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.draft.txt
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/RedSkipRegression.swift
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/SkipRegression.swift
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/acceptance-matrix.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/src/mobile-goals.ts
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/src/training-plan-execution-commands.ts
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/test/training-plan-execution-commands.test.ts
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/NativeAppModel.swift
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/TrainingPlanExecutionPolicy.swift
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/tests/ModelRegression.swift
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md.txt
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/before/packages/api-contracts/src/training-plan-closed-loop.ts
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/changed-files.json
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/doc-refs.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/docs.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/final-source-sha256.json
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/initial-status.txt
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/ios-gates.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/ios-result.json
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l1-api.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-command.sh
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-final.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-targeted.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l2-api.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l3-api.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/l3-related.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/node-results.json
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/prior-phase-preservation.json
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/red-api.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-final.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-repro.sh
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-targeted.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/single-writer.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/stage.diff
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios-final.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/typecheck.log
+?? deliverables/training-plan-v2-i01-p03-2026-10-26/verification-manifest.json
+?? deliverables/training-plan-v2-p1-2026-10-26/P1.patch
+?? deliverables/training-plan-v2-p1-2026-10-26/REPORT.md
+?? deliverables/training-plan-v2-p1-2026-10-26/SHA256SUMS.json
+?? deliverables/training-plan-v2-p1-2026-10-26/a01-green.json
+?? deliverables/training-plan-v2-p1-2026-10-26/a01-green.log
+?? deliverables/training-plan-v2-p1-2026-10-26/a01-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/a01-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/acceptance.json
+?? deliverables/training-plan-v2-p1-2026-10-26/acceptance.log
+?? deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.json
+?? deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.log
+?? deliverables/training-plan-v2-p1-2026-10-26/compat01-green.json
+?? deliverables/training-plan-v2-p1-2026-10-26/compat01-green.log
+?? deliverables/training-plan-v2-p1-2026-10-26/compat01-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/compat01-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/diff-check-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/diff-check-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/diff-check.json
+?? deliverables/training-plan-v2-p1-2026-10-26/diff-check.log
+?? deliverables/training-plan-v2-p1-2026-10-26/diff-sealed.json
+?? deliverables/training-plan-v2-p1-2026-10-26/diff-sealed.log
+?? deliverables/training-plan-v2-p1-2026-10-26/doc01-green.json
+?? deliverables/training-plan-v2-p1-2026-10-26/doc01-green.log
+?? deliverables/training-plan-v2-p1-2026-10-26/doc01-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/doc01-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/doc01-refs.json
+?? deliverables/training-plan-v2-p1-2026-10-26/doc01-refs.log
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.json
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.log
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-final-report.json
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-final-report.log
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-sealed.json
+?? deliverables/training-plan-v2-p1-2026-10-26/docs-sealed.log
+?? deliverables/training-plan-v2-p1-2026-10-26/edit01-green.json
+?? deliverables/training-plan-v2-p1-2026-10-26/edit01-green.log
+?? deliverables/training-plan-v2-p1-2026-10-26/edit01-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/edit01-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/environment.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec01-green.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec01-green.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec01-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec01-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec0203-green.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec0203-green.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-prescan-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-prescan-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-red.json
+?? deliverables/training-plan-v2-p1-2026-10-26/exec03-red.log
+?? deliverables/training-plan-v2-p1-2026-10-26/ios-gates.json
+?? deliverables/training-plan-v2-p1-2026-10-26/ios-gates.log
+?? deliverables/training-plan-v2-p1-2026-10-26/ios.json
+?? deliverables/training-plan-v2-p1-2026-10-26/ios.log
+?? deliverables/training-plan-v2-p1-2026-10-26/l3-files.json
+?? deliverables/training-plan-v2-p1-2026-10-26/l3-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/l3-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/l3.json
+?? deliverables/training-plan-v2-p1-2026-10-26/l3.log
+?? deliverables/training-plan-v2-p1-2026-10-26/model-targeted.json
+?? deliverables/training-plan-v2-p1-2026-10-26/model-targeted.log
+?? deliverables/training-plan-v2-p1-2026-10-26/model-targeted.sh
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.json
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.log
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-final-report.json
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-final-report.log
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-sealed.json
+?? deliverables/training-plan-v2-p1-2026-10-26/refs-sealed.log
+?? deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/rollback-check.json
+?? deliverables/training-plan-v2-p1-2026-10-26/rollback-check.log
+?? deliverables/training-plan-v2-p1-2026-10-26/rollback-sealed.json
+?? deliverables/training-plan-v2-p1-2026-10-26/rollback-sealed.log
+?? deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.json
+?? deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.log
+?? deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/single-writer.json
+?? deliverables/training-plan-v2-p1-2026-10-26/single-writer.log
+?? deliverables/training-plan-v2-p1-2026-10-26/source-locations.json
+?? deliverables/training-plan-v2-p1-2026-10-26/swift-editor.sh
+?? deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.json
+?? deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.log
+?? deliverables/training-plan-v2-p1-2026-10-26/task-files.json
+?? deliverables/training-plan-v2-p1-2026-10-26/test-summary.json
+?? deliverables/training-plan-v2-p1-2026-10-26/typecheck-final.json
+?? deliverables/training-plan-v2-p1-2026-10-26/typecheck-final.log
+?? deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.json
+?? deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.log
+?? deliverables/training-plan-v2-p1-2026-10-26/typecheck.json
+?? deliverables/training-plan-v2-p1-2026-10-26/typecheck.log
+?? deliverables/training-plan-v2-p1-2026-10-26/workspace-baseline.json
+?? deliverables/training-plan-v2-p1-2026-10-26/workspace-preservation.json
+?? scripts/audit-training-plan-state.mts

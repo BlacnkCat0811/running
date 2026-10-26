@@ -1,0 +1,55 @@
+PASS: a structure with no distance goal is recognised as purely time-based
+PASS: an empty distance on a time-only structure encodes distanceKm:null
+PASS: a stale display distance cannot turn a time-only structure into a fake 5 km prescription
+PASS: block iterations multiply the structure's integer-meter distance
+PASS: a consistent total distance is accepted and normalised from the structure
+PASS: integer-meter comparison tolerates floating display noise, not a real mismatch
+PASS: a displayed total below the structure's metres is rejected
+PASS: a distance structure cannot be saved with an empty distance
+PASS: a non-numeric distance is rejected instead of silently becoming zero
+PASS: mixed dose is not mislabelled as its 4,200 m distance-step subtotal
+PASS: D-02: a server-measured mixed total can reach preview
+PASS: a mixed draft can ask the server to measure without inventing a total
+PASS: mixed draft rejects invalid explicit distance: 0
+PASS: mixed draft rejects invalid explicit distance: -1
+PASS: mixed draft rejects invalid explicit distance: NaN
+PASS: mixed draft rejects invalid explicit distance: infinity
+PASS: mixed draft rejects invalid explicit distance: abc
+PASS: mixed draft rejects invalid explicit distance: 80.001
+PASS: a legacy structure-less prescription is not misread as time-only
+PASS: the editor starts without a fabricated 5 km dose; the blank open step must be filled by the user
+PASS: the blank/open structure cannot silently become a 5 km prescription
+PASS: legacy open steps stay readable but cannot back a new editable dose
+PASS: the editor seeds 8.05 km losslessly, and the seeded text matches the 8,050 m structure
+PASS: whole kilometres omit the decimal part
+PASS: a whole-kilometre display value resolves against its 8,000 m structure
+PASS: distance text keeps the minimal exact fraction and treats absent/invalid values as empty
+PASS: a single step is capped at the server's MAX_STEP_METERS=100000
+PASS: shared easy: editor measurement authority matches server contract
+PASS: shared easy: patch encodes omission distinctly from null
+PASS: shared easy: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared interval: editor measurement authority matches server contract
+PASS: shared interval: patch encodes omission distinctly from null
+PASS: shared interval: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared tempo: editor measurement authority matches server contract
+PASS: shared tempo: patch encodes omission distinctly from null
+PASS: shared tempo: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared distance-only: editor measurement authority matches server contract
+PASS: shared distance-only: persisted total is not rounded or invented
+PASS: shared distance-only: patch encodes omission distinctly from null
+PASS: shared distance-only: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared time-only: editor measurement authority matches server contract
+PASS: shared time-only: persisted total is not rounded or invented
+PASS: shared time-only: patch encodes omission distinctly from null
+PASS: pure time has explicit null distance
+PASS: shared time-only: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared mixed: editor measurement authority matches server contract
+PASS: shared mixed: patch encodes omission distinctly from null
+PASS: shared mixed: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared mixed baseline includes time-step distance; native code does not reproduce its pace model
+PASS: shared historical-distance-only: editor measurement authority matches server contract
+PASS: shared historical-distance-only: persisted total is not rounded or invented
+PASS: shared historical-distance-only: patch encodes omission distinctly from null
+PASS: shared historical-distance-only: add can delegate to the server without encoding a fake null/zero distance
+PASS: changed distance structure cannot reuse historical rounded total
+TrainingPlanSessionEditor regression: 54 checks passed

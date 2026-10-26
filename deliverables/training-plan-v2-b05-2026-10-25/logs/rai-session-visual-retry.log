@@ -1,0 +1,77 @@
+Export determinism (live): 7 checks, 0 failed
+  ok   shipped: <MetadataEntry> 按键升序输出
+  ok   shipped: HKIndoorWorkout 被跳过（与修复前一致）
+  ok   shipped: HKMetadataKeySyncIdentifier 被跳过（与修复前一致）
+  ok   shipped: 输出条目数为 4（跳过 2 个保留键后）
+  ok   shipped: 同进程内两次调用字节一致
+  ok   shipped: 三次独立启动的 <MetadataEntry> 字节完全一致
+  ok   self-check: 去掉 .sorted() 后跨进程顺序确实会变（证明本门禁不是空转）
+(node:71552) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Authenticated synthetic fixture ready; v2 refresh committed; legacy 410 and unauthenticated 401 verified.
+Exported 62 attachments for: Phase5Acceptance/testSessionEditorMovePreviewSaveAndRestart():
+File: CD7527AD-5F31-4A1D-A1A9-9FF34F5DC284.txt, suggested name: "session-move-restart-accessibility_0_5C758E5F-F520-472E-97F9-398C61BA5EB7.txt"
+File: 08EF36A0-1228-4658-80A2-9FEF7E00C614.png, suggested name: "session-move-restart_0_4D2C4E3B-23D9-484A-AD3E-DE6E2B20732C.png"
+File: F946A47C-C298-4E01-810B-573FDF8BC6D8, suggested name: "UI Snapshot 2026-10-25 at 03.29.11 下午"
+File: 50A44712-CFF8-4CF7-9112-8CA6CD9EBD51, suggested name: "Synthesized Event 2026-10-25 at 03.29.12 下午"
+File: 0515A5C5-442D-4DD0-9D2E-95A01A6FD37D, suggested name: "UI Snapshot 2026-10-25 at 03.29.07 下午"
+File: 30C9D6EE-C7F4-4498-9C9A-1590C6D3B38F, suggested name: "Synthesized Event 2026-10-25 at 03.29.08 下午"
+File: 4B7797B1-A0B1-4F86-9D9E-1675653F8BFE, suggested name: "UI Snapshot 2026-10-25 at 03.29.03 下午"
+File: 11DC295F-DAEC-491A-83DD-E8BCCA3B1E46, suggested name: "Synthesized Event 2026-10-25 at 03.29.03 下午"
+File: 7A99D59B-DCFE-4E9D-B562-C49584EEB1E9, suggested name: "UI Snapshot 2026-10-25 at 03.28.57 下午"
+File: E5590675-2507-471B-89ED-E44AD75D130C, suggested name: "Synthesized Event 2026-10-25 at 03.28.57 下午"
+File: FA15C88D-8D76-4EBF-9D41-9B075D64991C, suggested name: "UI Snapshot 2026-10-25 at 03.28.54 下午"
+File: ADA2B3BA-8B1B-4E0C-9CDB-1B5BAA6DB5CC, suggested name: "Synthesized Event 2026-10-25 at 03.28.55 下午"
+File: BC5D0908-EECD-4D07-9113-00711FA3D7BE, suggested name: "UI Snapshot 2026-10-25 at 03.28.50 下午"
+File: CA6B2E07-186D-44D6-8AFF-F43A2A40D8C4, suggested name: "Synthesized Event 2026-10-25 at 03.28.51 下午"
+File: 5DCD95BB-39C3-4F0E-950D-2F08C7FF695F, suggested name: "UI Snapshot 2026-10-25 at 03.28.46 下午"
+File: 828C3CC8-4BFC-4E1F-A065-890941FB692A, suggested name: "Synthesized Event 2026-10-25 at 03.28.47 下午"
+File: 65173384-E626-4627-8EC4-5E3563C2C2FC, suggested name: "UI Snapshot 2026-10-25 at 03.28.42 下午"
+File: 5D3A2379-41E7-4885-B8A4-86B079B25841, suggested name: "Synthesized Event 2026-10-25 at 03.28.43 下午"
+File: 432424A2-719B-473B-BD14-CA5380F4E365, suggested name: "UI Snapshot 2026-10-25 at 03.28.38 下午"
+File: A65E09F7-DA50-4C1F-84D8-A3037C393EF4, suggested name: "Synthesized Event 2026-10-25 at 03.28.39 下午"
+File: D0EFCFF8-2C53-438C-A8A4-2610D5FACF69, suggested name: "UI Snapshot 2026-10-25 at 03.28.36 下午"
+File: C2BA2ED1-50BC-41C5-BB17-3D469F1D58F2, suggested name: "Synthesized Event 2026-10-25 at 03.28.36 下午"
+File: 7F73AF22-8904-46CB-98C4-C5CFFDFA4235, suggested name: "UI Snapshot 2026-10-25 at 03.28.33 下午"
+File: BB93EA79-73E7-42EA-BDE1-55C0C20765BE, suggested name: "Synthesized Event 2026-10-25 at 03.28.34 下午"
+File: 949D8540-540F-48B8-B2CD-8371D25C1097.txt, suggested name: "session-move-saved-accessibility_0_443B840C-3388-4C24-A025-DF52FF368FAD.txt"
+File: D20C3A08-DD75-4478-B689-FE6594E60522.png, suggested name: "session-move-saved_0_DF5CBCD4-BE55-4758-BFF6-88BEBCE4055D.png"
+File: 3740DA16-82AB-4462-8C86-3E72B7044F5F.txt, suggested name: "Debug description for `"已保存并刷新。" StaticText`_0_FC2FA513-279B-460E-9653-D9CF4CD0CC79.txt"
+File: ABB3590C-F12E-48CB-BC22-1A1420DB84F9, suggested name: "UI Snapshot 2026-10-25 at 03.28.13 下午"
+File: 8D58BA95-7CF3-4DBB-8A86-E73702BAC974, suggested name: "Synthesized Event 2026-10-25 at 03.28.13 下午"
+File: 9FB45397-C562-470B-BE6E-ABB81F546CFC, suggested name: "UI Snapshot 2026-10-25 at 03.28.09 下午"
+File: F479C873-B985-4FA0-A2E9-8643B1395E72, suggested name: "Synthesized Event 2026-10-25 at 03.28.10 下午"
+File: D346EF52-C0A9-42CC-9FC2-81A05F4503A4, suggested name: "UI Snapshot 2026-10-25 at 03.28.05 下午"
+File: 4E0C5765-3D1A-46B0-ABF8-ED46480EB30C, suggested name: "Synthesized Event 2026-10-25 at 03.28.06 下午"
+File: ED3F93AD-C72C-4A72-8222-5E4F97153E52, suggested name: "UI Snapshot 2026-10-25 at 03.28.02 下午"
+File: 5FC1F2B9-722E-4726-B92D-0CA4205936FC, suggested name: "Synthesized Event 2026-10-25 at 03.28.02 下午"
+File: 732DB1C8-11DE-4DB3-AD11-8842B51FAD55, suggested name: "UI Snapshot 2026-10-25 at 03.27.58 下午"
+File: ED130047-0284-4637-96BC-47E8B1941772, suggested name: "Synthesized Event 2026-10-25 at 03.27.59 下午"
+File: 40BF9E19-9284-4E79-BC7B-24028355F7E3, suggested name: "UI Snapshot 2026-10-25 at 03.27.53 下午"
+File: EBABA551-1CBB-452E-A014-03B917FAAE0F, suggested name: "Synthesized Event 2026-10-25 at 03.27.53 下午"
+File: 4F592521-087F-4E77-B4C0-019145C95BED.txt, suggested name: "session-move-preview-accessibility_0_23FB2409-4A12-4378-A634-C40B869DEC90.txt"
+File: C379D96F-0E8A-46B1-B787-FF5AD7A24752.png, suggested name: "session-move-preview_0_598C1ABE-80E3-4670-A024-975767DF8169.png"
+File: B6CA9869-E5B5-4C1F-8938-5C0DC95129EC, suggested name: "UI Snapshot 2026-10-25 at 03.27.42 下午"
+File: E2BC6875-EFE9-4292-BD36-DAD76BC0EA8F, suggested name: "Synthesized Event 2026-10-25 at 03.27.43 下午"
+File: E27F6FC4-56EC-419B-80E6-E360DBE749D8, suggested name: "UI Snapshot 2026-10-25 at 03.27.37 下午"
+File: DD1C9645-C6D8-4815-8783-811A1ABFFB1B, suggested name: "Synthesized Event 2026-10-25 at 03.27.37 下午"
+File: 67F1515F-C430-4667-ACBC-F28A2EBA001B, suggested name: "UI Snapshot 2026-10-25 at 03.27.32 下午"
+File: 5E94EB77-68EE-45C3-A207-F6D7EC16D1F2, suggested name: "Synthesized Event 2026-10-25 at 03.27.32 下午"
+File: 3B26E3FF-08F5-4A5C-80AB-058C11D88EBA, suggested name: "UI Snapshot 2026-10-25 at 03.27.25 下午"
+File: ADCFB121-07F8-4143-9A6E-05315946E83E, suggested name: "Synthesized Event 2026-10-25 at 03.27.26 下午"
+File: 0E088561-E5EB-4488-9A03-7EA933BB85D4, suggested name: "UI Snapshot 2026-10-25 at 03.27.21 下午"
+File: 9CC897B1-42CB-43C0-9B8D-D62CDC6E1953, suggested name: "Synthesized Event 2026-10-25 at 03.27.22 下午"
+File: 0FC2D5DC-4232-466F-9BE5-2E7D9BD3E925, suggested name: "UI Snapshot 2026-10-25 at 03.27.16 下午"
+File: 8912A4CE-B1CA-4239-8345-926D5B06C645, suggested name: "Synthesized Event 2026-10-25 at 03.27.17 下午"
+File: 096F102C-D9D0-4DB5-B477-C3FB4D5E948A, suggested name: "Synthesized Event 2026-10-25 at 03.27.13 下午"
+File: DE5C5BF1-3172-46A6-B363-9C6AC25A10B8, suggested name: "Synthesized Event 2026-10-25 at 03.27.09 下午"
+File: 16666018-DD74-4A2F-9D8A-1CC8CD3CB39C, suggested name: "Synthesized Event 2026-10-25 at 03.27.05 下午"
+File: 36C49BCF-3333-47F6-A046-7BE558F8BB21, suggested name: "Synthesized Event 2026-10-25 at 03.27.00 下午"
+File: A8BEB20A-D7BD-4033-8BA5-2D6042F55150, suggested name: "Synthesized Event 2026-10-25 at 03.26.56 下午"
+File: 92139162-A734-46B4-A9DF-9FE329603861, suggested name: "Synthesized Event 2026-10-25 at 03.26.50 下午"
+File: EA0A9316-380D-4F65-B967-B33B28B05B49, suggested name: "Synthesized Event 2026-10-25 at 03.26.47 下午"
+File: 1A316F66-FF78-4FAB-A2CB-9578BD99D970, suggested name: "Synthesized Event 2026-10-25 at 03.26.44 下午"
+File: C69D8FD9-FBD4-480C-946C-0D1472840B6E.mp4, suggested name: "Screen Recording 2026-10-25 at 03.26.26 下午.mp4"
+
+Generated manifest file with attachment details: /tmp/rai-training-session-visual-retry/attachments/manifest.json
+Review screenshots and test failures in: /tmp/rai-training-session-visual-retry

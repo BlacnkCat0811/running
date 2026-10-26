@@ -1,0 +1,218 @@
+TAP version 13
+# (node:19317) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v2 receipts are stored with a canonical UUID and UTC instant, and either spelling addresses them
+ok 1 - v2 receipts are stored with a canonical UUID and UTC instant, and either spelling addresses them
+  ---
+  duration_ms: 57.20003
+  type: 'test'
+  ...
+# Subtest: an equivalent spelling is the same entry, not a second row
+ok 2 - an equivalent spelling is the same entry, not a second row
+  ---
+  duration_ms: 30.951285
+  type: 'test'
+  ...
+# Subtest: a withdrawal spelled differently still deactivates the entry, for both spellings
+ok 3 - a withdrawal spelled differently still deactivates the entry, for both spellings
+  ---
+  duration_ms: 32.261481
+  type: 'test'
+  ...
+# Subtest: unparsable identity is refused with a diagnosable 422 instead of being stored raw
+ok 4 - unparsable identity is refused with a diagnosable 422 instead of being stored raw
+  ---
+  duration_ms: 28.510245
+  type: 'test'
+  ...
+# Subtest: the idempotency key is unique per dataset, not globally
+ok 5 - the idempotency key is unique per dataset, not globally
+  ---
+  duration_ms: 38.595548
+  type: 'test'
+  ...
+# Subtest: the same UUID/instant/event on another day is a conflict, not a silent repeat
+ok 6 - the same UUID/instant/event on another day is a conflict, not a silent repeat
+  ---
+  duration_ms: 43.247781
+  type: 'test'
+  ...
+# Subtest: publication transactions bracket the guard marker and roll back both spans
+ok 7 - publication transactions bracket the guard marker and roll back both spans
+  ---
+  duration_ms: 57.803817
+  type: 'test'
+  ...
+# Subtest: a publication's own guard marker is hidden from reads inside its transaction and cleared after
+ok 8 - a publication's own guard marker is hidden from reads inside its transaction and cleared after
+  ---
+  duration_ms: 38.27227
+  type: 'test'
+  ...
+# Subtest: a control-less store runs the transaction directly and reports an empty guard
+ok 9 - a control-less store runs the transaction directly and reports an empty guard
+  ---
+  duration_ms: 0.971546
+  type: 'test'
+  ...
+# Subtest: publicationOperation takes the guard on a new operation and leaves replay untouched
+ok 10 - publicationOperation takes the guard on a new operation and leaves replay untouched
+  ---
+  duration_ms: 49.453508
+  type: 'test'
+  ...
+# Subtest: control-database contention is a retryable 503 database_busy, not a 500 or a five-second stall
+ok 11 - control-database contention is a retryable 503 database_busy, not a 500 or a five-second stall
+  ---
+  duration_ms: 4183.850064
+  type: 'test'
+  ...
+# Subtest: an existing control database is migrated in place: canonical payload, derived columns, per-scope index
+ok 12 - an existing control database is migrated in place: canonical payload, derived columns, per-scope index
+  ---
+  duration_ms: 51.781289
+  type: 'test'
+  ...
+# Subtest: v2 receipts without an identity never fall back to byte identity
+ok 13 - v2 receipts without an identity never fall back to byte identity
+  ---
+  duration_ms: 26.063244
+  type: 'test'
+  ...
+# (node:19318) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: control-schema migration 2 is appended after version 1 and keeps legacy rows readable
+ok 14 - control-schema migration 2 is appended after version 1 and keeps legacy rows readable
+  ---
+  duration_ms: 804.411496
+  type: 'test'
+  ...
+# Subtest: apply writes state, one history row and one audit row together, and read returns the same state
+ok 15 - apply writes state, one history row and one audit row together, and read returns the same state
+  ---
+  duration_ms: 107.726377
+  type: 'test'
+  ...
+# Subtest: replaying the same source digest is a no-op; a different digest is an explicit conflict
+ok 16 - replaying the same source digest is a no-op; a different digest is an explicit conflict
+  ---
+  duration_ms: 58.075711
+  type: 'test'
+  ...
+# Subtest: CAS conflict on a concurrent revision is detected and does not overwrite
+ok 17 - CAS conflict on a concurrent revision is detected and does not overwrite
+  ---
+  duration_ms: 49.579988
+  type: 'test'
+  ...
+# Subtest: state validation fails closed on unknown schemaVersion, non-canonical scope and ended/active state
+ok 18 - state validation fails closed on unknown schemaVersion, non-canonical scope and ended/active state
+  ---
+  duration_ms: 48.557861
+  type: 'test'
+  ...
+# Subtest: a pre-existing public race goal is preserved into the state (F04 data half)
+ok 19 - a pre-existing public race goal is preserved into the state (F04 data half)
+  ---
+  duration_ms: 45.314207
+  type: 'test'
+  ...
+# Subtest: an ended coach loop is stored as paused/ended and its all-rest window is not recorded as intent
+ok 20 - an ended coach loop is stored as paused/ended and its all-rest window is not recorded as intent
+  ---
+  duration_ms: 37.111768
+  type: 'test'
+  ...
+# Subtest: conflicting legacy sources are reported as conflicts and refused without writing
+ok 21 - conflicting legacy sources are reported as conflicts and refused without writing
+  ---
+  duration_ms: 602.035852
+  type: 'test'
+  ...
+# Subtest: CLI dry-run writes nothing and delegates the derived mode to training-mode-policy
+ok 22 - CLI dry-run writes nothing and delegates the derived mode to training-mode-policy
+  ---
+  duration_ms: 597.640017
+  type: 'test'
+  ...
+# Subtest: CLI apply requires the dry-run digest, writes once, replays idempotently and rejects a mismatch
+ok 23 - CLI apply requires the dry-run digest, writes once, replays idempotently and rejects a mismatch
+  ---
+  duration_ms: 3188.462192
+  type: 'test'
+  ...
+# Subtest: store refuses a schema-less database instead of creating tables implicitly
+ok 24 - store refuses a schema-less database instead of creating tables implicitly
+  ---
+  duration_ms: 13.273901
+  type: 'test'
+  ...
+# (node:19377) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:19377) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: B02/T24/T26: dry-run allocates nothing; controlled apply maps all 1001 scoped revisions without guessing continuity
+ok 25 - B02/T24/T26: dry-run allocates nothing; controlled apply maps all 1001 scoped revisions without guessing continuity
+  ---
+  duration_ms: 1773.017797
+  type: 'test'
+  ...
+# Subtest: B02/T24/T25: stale digest/CAS, source duplicates, unknown payload and owner disagreement refuse without writes
+ok 26 - B02/T24/T25: stale digest/CAS, source duplicates, unknown payload and owner disagreement refuse without writes
+  ---
+  duration_ms: 49.244548
+  type: 'test'
+  ...
+# Subtest: B02/T22/T24: each new migration write point and COMMIT failure rolls back schema/ID mapping/state/audit together
+ok 27 - B02/T22/T24: each new migration write point and COMMIT failure rolls back schema/ID mapping/state/audit together
+  ---
+  duration_ms: 170.474332
+  type: 'test'
+  ...
+# Subtest: B02/T24: CLI session mode is read-only by default, enforces digest/lock, applies once and never opens the health DB
+ok 28 - B02/T24: CLI session mode is read-only by default, enforces digest/lock, applies once and never opens the health DB
+  ---
+  duration_ms: 3174.572963
+  type: 'test'
+  ...
+# Subtest: B02/T22/T23: schema 3 and its ledger entry roll back together; SQLite busy never starts a partial upgrade
+ok 29 - B02/T22/T23: schema 3 and its ledger entry roll back together; SQLite busy never starts a partial upgrade
+  ---
+  duration_ms: 45.7329
+  type: 'test'
+  ...
+# (node:19389) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:19389) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/override/null/structure fields without normalization
+ok 30 - B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/override/null/structure fields without normalization
+  ---
+  duration_ms: 36.610815
+  type: 'test'
+  ...
+# Subtest: B02/T26: stable identity and frozen prescriptions survive moving/editing and 1000 newer whole-plan revisions
+ok 31 - B02/T26: stable identity and frozen prescriptions survive moving/editing and 1000 newer whole-plan revisions
+  ---
+  duration_ms: 3061.567855
+  type: 'test'
+  ...
+# Subtest: B02/T22: course history failure rolls back state, history, projection and operation result in the existing publication transaction
+ok 32 - B02/T22: course history failure rolls back state, history, projection and operation result in the existing publication transaction
+  ---
+  duration_ms: 37.020159
+  type: 'test'
+  ...
+# Subtest: B02/T25: exact session read negotiation is zero-write and older wire stays identical
+ok 33 - B02/T25: exact session read negotiation is zero-write and older wire stays identical
+  ---
+  duration_ms: 162.243782
+  type: 'test'
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 33
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11162.083091

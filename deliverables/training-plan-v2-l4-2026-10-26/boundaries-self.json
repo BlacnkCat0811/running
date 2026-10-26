@@ -1,0 +1,14 @@
+{
+  "name": "boundaries-self",
+  "argv": [
+    "npm",
+    "run",
+    "check:package-boundaries",
+    "--",
+    "--self-test"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997646.330962,
+  "durationSeconds": 0.9249279499053955,
+  "exitCode": 0
+}

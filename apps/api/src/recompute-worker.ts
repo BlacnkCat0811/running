@@ -75,7 +75,9 @@ export class RecomputeWorker {
   constructor(
     private readonly databasePath: string,
     private readonly onDatabaseError: (error: unknown) => void = () => {},
-    private readonly admission?: TaskAdmission
+    private readonly admission?: TaskAdmission,
+    /** B08 accelerator only: the durable evaluation cursor still owns recovery. */
+    private readonly onRoundComplete?: (outcome: { ran: boolean; requeued: boolean }) => void
   ) {}
 
   get isRunning(): boolean {
@@ -194,6 +196,12 @@ export class RecomputeWorker {
         }
         this.lastRunRequeued = outcome.requeued;
         if (outcome.ran) this.consecutiveFailures = 0;
+        // Notification is an accelerator, never a requirement: a lost callback is
+        // recovered by the startup/periodic input-difference tick.
+        if (outcome.ran) {
+          try { this.onRoundComplete?.({ ran: outcome.ran, requeued: outcome.requeued }); }
+          catch (error) { process.stderr.write(`Recompute round callback failed: ${error instanceof Error ? error.message : String(error)}\n`); }
+        }
         if (!outcome.ran) break;
         // 被重排的任务不要立刻重跑：退避一轮，让持有许可的那些写先走完。
         if (outcome.requeued) { this.scheduled = true; break; }

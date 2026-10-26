@@ -1,0 +1,14 @@
+{
+  "baselineFiles": 2651,
+  "unchangedFiles": 2651,
+  "changed": [],
+  "missing": [],
+  "newNonIgnoredFiles": [],
+  "removedNonIgnoredFiles": [],
+  "statusUnchanged": true,
+  "HEADUnchanged": true,
+  "diffCheckExitCode": 0,
+  "originalIOSandPodsFilesChecked": 495,
+  "originalIOSandPodsChanged": [],
+  "indexDiffEmpty": true
+}

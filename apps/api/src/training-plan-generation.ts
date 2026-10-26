@@ -16,6 +16,9 @@ export function trainingPlanGenerationDeps<Snapshot extends { fingerprint: strin
   dataVersion: () => string;
   generate: (snapshot: Snapshot, state: TrainingPlanState) => Promise<Omit<PreparedTrainingPlan, "fingerprint">>;
   tryAcquire: () => (() => void) | null;
+  /** B08: input identity of the publication, evaluated at commit time. */
+  evaluation?: (state: TrainingPlanState) => { inputKey: string; businessDate: string;
+    policyHash: string | null; executionDigest: string } | null;
 }): TrainingPlanRefreshDeps {
   // Capture the physical database/version before reading inputs. Sampling after
   // await would attach a new fact version to a plan made from old facts.
@@ -30,6 +33,7 @@ export function trainingPlanGenerationDeps<Snapshot extends { fingerprint: strin
     return { snapshot, fingerprint: `${snapshot.fingerprint}:${version}` };
   };
   return {
+    ...(deps.evaluation === undefined ? {} : { evaluation: deps.evaluation }),
     fingerprint: () => capture().fingerprint,
     prepare: async state => {
       assertTrainingFactsReady(deps.publicationReady);

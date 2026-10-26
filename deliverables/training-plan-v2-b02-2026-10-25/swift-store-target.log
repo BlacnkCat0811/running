@@ -1,0 +1,67 @@
+PASS: Store alone accepts a complete identity-bound seven-day snapshot
+PASS: cached aggregates remain reference-only and do not authorize offline scheduling
+PASS: complete empty execution domain is distinct from read failure
+PASS: Store rejects unsafe aggregate identity as a snapshot validation failure without mixing old execution
+PASS: Store rejects unsafe aggregate coherence as a snapshot validation failure without mixing old execution
+PASS: Store rejects unsafe aggregate windowStart as a snapshot validation failure without mixing old execution
+PASS: Store rejects unsafe aggregate windowEnd as a snapshot validation failure without mixing old execution
+PASS: Store rejects unsafe aggregate duplicate as a snapshot validation failure without mixing old execution
+PASS: Store rejects unsafe aggregate non-real-date as a snapshot validation failure without mixing old execution
+PASS: Store rejects unsafe aggregate length as a snapshot validation failure without mixing old execution
+PASS: security-field rejection records a distinct snapshot_validation_failed diagnostic
+PASS: late aggregate cannot undo a durable acknowledged mutation
+PASS: same prescription revision can receive a new server facts token
+PASS: cancelled reads cannot leave an executable current snapshot or stuck spinner
+PASS: Store rejects a late read after its identity scope changes
+PASS: higher snapshot capability fails closed without a legacy downgrade
+PASS: a server Retry-After hint wins over the local backoff schedule
+PASS: a tiny/zero server hint is floored at 0.1s instead of busy-looping
+PASS: a long server hint is capped at 5s
+PASS: without a hint the local 150/300ms schedule is used
+PASS: the retry schedule is exhausted after its entries
+PASS: new snapshot contract retries 503 plan_snapshot_changed twice with the local fallback schedule
+PASS: snapshot retry is bounded (initial + 2), then reports a reachable-server failure
+PASS: cancelling during snapshot backoff abandons the retry instead of issuing another read
+PASS: 503 + Retry-After: 1 is retried after the server hint, not the local schedule
+PASS: 503 without Retry-After falls back to the default 150/300ms local schedule
+PASS: an HTTP-date Retry-After is ignored and the local schedule is used
+PASS: an aborted retry wait stops the read loop instead of issuing another request
+PASS: legacy three-GET refresh is current only when today/window/timezone are locally coherent
+PASS: legacy snapshot rejects previous-day instead of marking an unverified window current
+PASS: legacy snapshot rejects window-length instead of marking an unverified window current
+PASS: legacy snapshot rejects duplicate-day instead of marking an unverified window current
+PASS: legacy snapshot rejects timezone instead of marking an unverified window current
+PASS: legacy per-key cache paths keep their cachedAt instead of losing the cache time
+PASS: offline cache wording states when the snapshot was cached
+PASS: legacy timeout is not retried: one three-GET attempt, no backoff, not reachable
+PASS: legacy offline is not retried: one three-GET attempt, no backoff, not reachable
+PASS: legacy 503 + Retry-After: 1 backs off by the server hint before the single reread
+PASS: legacy 503 without Retry-After backs off on the default 150/300ms schedule
+PASS: legacy retries are bounded (initial + 2), then report a reachable-server failure
+PASS: an aborted legacy retry wait stops the read loop instead of issuing another request
+PASS: AC0-12 native v1 reads exact published today, never exports future outlook
+PASS: AC0-13 native retains independent S20/H26 and real extension authority
+PASS: old today/fitness projections cannot reappear after explicit conversion
+PASS: offline new-contract cache is reference-only
+PASS: new client fails closed for identity
+PASS: new client fails closed for facts
+PASS: new client fails closed for token
+PASS: new client fails closed for duplicate
+PASS: new client fails closed for paused
+PASS: new client fails closed for authorization
+PASS: new client fails closed for missing-authorization
+PASS: new client fails closed for timezone
+PASS: new client fails closed for today-mismatch
+PASS: AC4-12/AC0-21 server rollback never downgrades an opted-in plan
+PASS: unknown future coach contract is not guessed
+PASS: AC5-01/02 feedback skips encode explicit null, not missing/normal or duplicate RPE
+PASS: unlimited daily preferences explicitly clear race without smuggling lifecycle state
+PASS: feedback intent is durably saved before network
+PASS: clearing presentation cache cannot erase unknown-result feedback operation
+PASS: B02 Store accepts the negotiated stable session revision
+PASS: B02 real SQLite cache retains complete identity/override/suppression but remains reference-only after restart
+PASS: B02 identities cannot cross the cache scope
+PASS: B02 missing negotiated identities do not overwrite the retained reference with an empty extension
+TrainingPlanStore regression: 64 checks passed
+
+EXIT_CODE=0

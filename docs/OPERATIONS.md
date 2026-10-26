@@ -200,6 +200,83 @@ node --import tsx scripts/migrate-training-planner.mts \
   --apply --expect-source-digest <dry-run 输出的 sha256>
 ```
 
+### A-01 历史锁课/休息冲突：离线检测与修复边界
+
+先取得**独立、一致的控制库副本**，在副本上运行；不能在活动 WAL 数据库上只复制主文件。
+本工具没有默认数据库路径，不读取生产环境变量，不连接服务器、不初始化 schema，没有 apply 模式：
+
+```bash
+node --import tsx scripts/audit-training-plan-state.mts \
+  --control-db-copy /absolute/offline/rai-control.sqlite
+```
+
+工具以 SQLite `readOnly` 连接和一个读事务扫描 `mobile_training_state` 与
+`mobile_training_state_history` 的全部 scope/revision，支持 payload schema 1/2。
+它分别报告同日 `lockedSession + explicit_rest` 和跑课 `lockedSession + weekPlan rest`，
+输出受影响 scope 数、来源表、revision、schema、日期、锁定类型及可解析的时间字段，不输出课程/健康 payload。
+当前行与历史行分别计入 `snapshots`；`affectedScopes` 对 scope 去重。无 scope 的
+`mobile_goals_history` 不归属到任何 epoch，也不在该计数内；本工具不验证迁移审计 digest、课程身份历史或 owner 一致性。
+退出 0 仅表示本次扫描无冲突且无读取/结构问题；不完整审计返回 `complete:false` 和 `affectedScopes:null`，不能解读为零冲突。
+缺文件、缺表/列、非法 JSON、未知 schema、
+无冲突但严格解析失败均退出 1 并输出 `issues`。存在冲突的行仅提取冲突，不宣称其余字段有效。
+
+身份迁移 inspect/apply 在严格读取前检查本 scope 的当前状态、全部统一历史及当前 goals 投影。
+发现冲突返回 `session_migration_locked_rest_conflict` 和带来源/revision/日期的 `conflicts`，
+不会报告 ready；apply 在分配身份、DDL、写入和审计前拒绝，事务回滚。合法历史状态继续使用原迁移。
+运行时保留严格读取；统一 store、resolver、legacy goals 写入及 owner 发布均拒绝跑课锁定与休息冲突。
+旧系统合法的“锁定休息本身 + 同日 weekPlan rest”可读写并可确定性迁移：保留完整锁定及原历史行，
+仅在该锁定日期不另建重复的 `explicit_rest`；其他休息日照常物化。审计、inspect、apply 共用相同冲突分类。
+任何锁定与既有 `explicit_rest` 共存仍拒绝；跑课锁定与同日 weekPlan rest 仍须离线意图核查，失败零写入。
+
+**独立修复方案（尚未实现、不得据此执行生产修复）：**
+
+1. 保存一致副本、文件哈希及受限访问的原始状态证据；先审计所有相关 scope 与历史 revision，
+   再只读核对 goals 投影、操作/发布回执及迁移审计。不得只处理当前行而遗漏会阻断身份迁移的旧快照。
+2. 为每个冲突形成明确的用户意图裁决。`lockedAt` 在当前 HTTP 锁课入口取服务器时间，
+   但 legacy normalizer 对缺失时间会补当前时间，历史存储本身不能证明来源或时钟可信。
+   schema 2 `availableAt` 表示该版本可用时间；schema 1 → 2 迁移的休息时间取整个快照的
+   `changed_at`，并不证明该日休息是最后一次操作。两者不能直接比较后自动选择。
+   时间相同、缺失、解析失败、来源不明或回执矛盾均保留为 unresolved，要求人工核实。
+3. 后续专用工具必须先产出可审阅 manifest：scope、预期 revision、来源/结果 digest、逐日裁决、
+   证据来源、操作者与理由。不允许凭单字段决定；任何 unresolved 均禁止 apply。
+   还须单独设计旧历史、冻结课程和 migration audit digest 的关联处理，保留原始字节证据及旧身份映射，
+   不得直接改旧 digest 使校验变绿。本阶段没有实现该修复协议。
+4. 经独立授权后的 apply 必须停写、持控制库 publication lock，在一个 `BEGIN IMMEDIATE` 中重核
+   revision/digest，按 manifest 修复并写入完整审计，严格解析并验证 owner/身份/审计一致性后提交。
+   任一步失败全部回滚。先在副本验证每个写点/COMMIT 失败回滚、重放幂等及迁移 Preflight，再讨论生产窗口。
+
+A-01 代码测试通过不代表真实生产数据兼容性已验证；在隔离生产副本审计、未决意图裁决和必要的后续修复完成前，
+不得据此签收生产迁移或开启训练计划 V2 写能力。
+
+## 训练计划 V2 写能力：部署时启用
+
+2026-10-25 用户决定：**先不开启，等部署最新版本时再开启**（[D22](DECISIONS.md#d22-训练计划-v2-写能力准备生产模式实际启用随最新版本部署2026-10-25)）。
+仓库模板保持 `disabled`；以下是部署时的配置值，不代表线上已生效。G5/G6 未签收项须继续如实记录。
+
+```dotenv
+RAI_TRAINING_PLAN_COMMAND_MODE=production
+RAI_TRAINING_PLAN_SESSION_COMMAND_MODE=production
+RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE=production
+RAI_TRAINING_PLAN_AUTO_PUBLISH_MODE=production
+```
+
+四项相互独立；手动写入不隐式打开自动发布。`production` 启动要求非空 `RAI_API_TOKEN` 及显式
+`RAI_RUNTIME_ROOT`、`RAI_DATABASE`、`RAI_CONTROL_DATABASE`，缺失时在打开数据库之前拒绝。
+`validation` 仍只能用于临时隔离库和 loopback，不能用它代替生产模式。
+
+部署时先核对实际 scope、数据库/代码身份和备份闭包，按上节做控制库 dry-run；课程编辑和关联需要 unified payload schema 2，
+必要时用同一 CLI 的 `--session-identities` 先 dry-run，再于停服窗口携准确 sourceDigest apply。
+控制库 DDL 5 与 payload schema 2 是不同版本，禁止手改版本号或用新空库替代迁移。
+
+完成兼容版本部署和实际迁移后，再在权威服务环境文件逐项启用并重启。核对握手需要携相应精确协商头：
+配置命令 `X-RAI-Client-Training-Commands: 2`、课程编辑 `X-RAI-Client-Training-Session-Commands: 1`、
+执行关联 `X-RAI-Client-Training-Execution-Commands: 1`；无协商头的握手不应宣告对应写能力。
+课程/关联需 schema 2、owner-ready 和 publication 支持；只读能力出现不证明写入已经启用。
+自动发布核对四阶段更新与已评估输入键，不以同步 receipt 成功替代计划已更新。
+
+关闭时将对应模式改回 `disabled` 并重启；已有课程/覆盖/冻结历史及原 operation 查询/重放保留。
+不要回退到不能识别新增 schema 的旧二进制，不恢复退役 goals/run-coach/preview 写面，不通过删除健康库回滚改课。
+
 ## 导入、重算与事实回填
 
 首选 iOS App 的「同步健康」（HealthKit 导出 → ZIP/直连批次）。**API 运行期只有两条导入车道**：`data-only`（严格白名单+基线合同戳）在前、`direct-sync`（统一接收器）在后；两条都不合格时以 `ImportLaneRefusal` **终态失败**（稳定 failureCode），不回退候选库、不做文件换库。[架构](ARCHITECTURE.md)与[数据管线](DATA_PIPELINE.md)描述同一事实。

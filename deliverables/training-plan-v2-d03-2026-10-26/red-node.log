@@ -1,0 +1,153 @@
+TAP version 13
+# (node:6348) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D-03: direct add 8 steps accepted
+ok 1 - D-03: direct add 8 steps accepted
+  ---
+  duration_ms: 119.985677
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 8 steps accepted
+ok 2 - D-03: direct edit 8 steps accepted
+  ---
+  duration_ms: 70.441111
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 9 steps rejected
+not ok 3 - D-03: direct add 9 steps rejected
+  ---
+  duration_ms: 43.166691
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:38868'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:698:16)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-03: direct edit 9 steps rejected
+not ok 4 - D-03: direct edit 9 steps rejected
+  ---
+  duration_ms: 49.545218
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:38868'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:698:16)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-03: direct add 8 blocks accepted
+ok 5 - D-03: direct add 8 blocks accepted
+  ---
+  duration_ms: 61.047995
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 8 blocks accepted
+ok 6 - D-03: direct edit 8 blocks accepted
+  ---
+  duration_ms: 61.397623
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 9 blocks rejected
+ok 7 - D-03: direct add 9 blocks rejected
+  ---
+  duration_ms: 74.722115
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 9 blocks rejected
+ok 8 - D-03: direct edit 9 blocks rejected
+  ---
+  duration_ms: 41.172418
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 20 iterations accepted
+ok 9 - D-03: direct add 20 iterations accepted
+  ---
+  duration_ms: 58.982717
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 20 iterations accepted
+ok 10 - D-03: direct edit 20 iterations accepted
+  ---
+  duration_ms: 49.701462
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 21 iterations rejected
+ok 11 - D-03: direct add 21 iterations rejected
+  ---
+  duration_ms: 32.936409
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 21 iterations rejected
+ok 12 - D-03: direct edit 21 iterations rejected
+  ---
+  duration_ms: 35.47402
+  type: 'test'
+  ...
+# Subtest: D-03: API preview/submit reject nine steps without writes
+not ok 13 - D-03: API preview/submit reject nine steps without writes
+  ---
+  duration_ms: 192.739439
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:39955'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"contractVersion":1,"operationScope":{"serverId":"synthetic-server","athleteId":"synthetic-athlete","datasetEpoch":"synthetic-epoch"},"expectedStateRevision":2,"planInstanceId":"synthetic-plan","draft":{"action":"add","prescription":{"localDate":"2026-10-29","kind":"easy","structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null}]}]},"reason":null}},"candidateId":"eyJwcmV2aWV3ZWRBdCI6IjIwMjYtMTAtMjVUMDM6MDA6MDAuMDAwWiIsImV4cGlyZXNBdCI6IjIwMjYtMTAtMjVUMDM6MDI6MDAuMDAwWiIsIm5ld1Nlc3Npb25JZCI6InNlc3Npb24tZjk5ZjNhNzMtZmY1MS00ZGUyLTkyNWItZDFhNzQ3YTE0YjYxIiwiaW5wdXRLZXkiOiI4ZTkyMzYzMTI1NzliNzgyMDk4MDE3NWY4OTc0YzNkMjExNTJiMjFlZTFmY2ZmNWEwYjU3MzI5NTdmYTJkYThmIn0.7dac3d24ab16df82e3ead603f2f09468e18330e100fd20a0acb6eccb4891308b","expiresAt":"2026-10-25T03:02:00.000Z","inputKey":"8e9236312579b7820980175f8974c3d21152b21ee1fcff5a0b5732957fa2da8f","impact":{"before":null,"after":{"planInstanceId":"synthetic-plan","sessionId":"session-f99f3a73-ff51-4de2-925b-d1a747a14b61","sessionRevision":1,"prescription":{"distanceKm":0.9,"localDate":"2026-10-29","kind":"easy","structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":{"action":"add","prescription":{"distanceKm":0.9,"localDate":"2026-10-29","kind":"easy","structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null},{"purpose":"work","goal":{"type":"distance","meters":100},"alert":null}]}]},"reason":null},"availableAt":"2026-10-25T03:00:00.000Z"},"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null},"affectedDates":["2026-10-29"],"suppressions":[],"deviceWithdrawalRequired":false,"warnings":["保存课程不会自动更新设备排期；如有已排期内容，需先撤回再重新下发。"]}}
+    
+    200 !== 422
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 422
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:716:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-03: persisted nine-step courses remain lossless; metadata edits survive, dose edits require legal replacement
+not ok 14 - D-03: persisted nine-step courses remain lossless; metadata edits survive, dose edits require legal replacement
+  ---
+  duration_ms: 125.548518
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:40982'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:739:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 10
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2064.761432

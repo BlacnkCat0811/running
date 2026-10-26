@@ -45,6 +45,14 @@ test("真实 /v1/handshake 宣告 factsAnalysisContractVersion=1，且既有能�
     await waitForApi(child, url, () => output);
     const response = await fetch(`${url}/v1/handshake`);
     assert.equal(response.status, 200, await response.clone().text());
+    assert.equal(response.headers.get("cache-control"), "no-store",
+      "capability negotiation must never be cached across clients");
+    const vary = response.headers.get("vary") ?? "";
+    for (const header of ["X-RAI-Client-Training-Commands", "X-RAI-Client-Training-Session-Commands",
+      "X-RAI-Client-Training-Execution-Commands"]) {
+      assert.match(vary, new RegExp(header.toLowerCase(), "i"),
+        `handshake Vary must include the request header that changes ${header}`);
+    }
     const handshake = await response.json() as HandshakeResponse;
 
     assert.equal(handshake.factsAnalysisContractVersion, 1,

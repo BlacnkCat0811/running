@@ -6,6 +6,16 @@
 
 ## 1. 当前证据（2026-10-25）
 
+- [训练计划 V2 最终本地交付](training-plan-v2-final-2026-10-26/REPORT.md)：隔离 worktree、本地提交序列、
+  Swift Actor 警告最小修复、精选证据 allowlist 与最终内容身份；**仅本地分支，未推送、未创建 PR、未启用生产写能力**。
+- [训练计划 V2 最终 L4 与完整 App 构建](training-plan-v2-l4-2026-10-26/REPORT.md)：331 个 Node 测试文件、
+  Python/Rust/iOS 门禁、generic Simulator 与 Device App 构建的真实结果；Actor 修复前的 3 条警告保留在原始证据中。
+- [A-01 历史状态兼容修复](training-plan-v2-a01-2026-10-26/REPORT.md)、
+  [D-01/D-02 距离合同](training-plan-v2-d01-d02-2026-10-26/REPORT.md)、
+  [I-01/P-03 Skip 闭环](training-plan-v2-i01-p03-2026-10-26/REPORT.md)、
+  [D-03 课程结构合同](training-plan-v2-d03-2026-10-26/REPORT.md)、
+  [P1 集中收敛](training-plan-v2-p1-2026-10-26/REPORT.md)：各轮最终报告与精选红测/绿测、补丁和哈希。
+
 - [GitHub CI 审计与修复](ci-audit-2026-10-25/README.md)：真实运行失败基线、Linux/macOS/iOS 覆盖、Windows Job 退役与本机验证；新修订未推送时不宣称远端通过。
 
 - [阶段 6 性能基线与容量模型](phase6-performance-2026-10-24/PHASE6_REPORT.md)：

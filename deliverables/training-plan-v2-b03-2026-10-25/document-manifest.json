@@ -1,0 +1,12 @@
+{
+  "documents": {
+    "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md": "a860bfdb68f27c432986948d5acb38cb89091ab3fc04489fc0c4c7af4d9a140f",
+    "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md": "251f888ca16d4d45339ecd5f726ac837fd3405c545edec3106338187862bfff7",
+    "docs/IOS_NATIVE_API_CONTRACT.md": "f239356cf8998198f09a7f6b500c87b223ad35e1045e6567cdb623c0c5dcf38b",
+    "docs/RUN_COACH.md": "95c4b7c70430c98899971d205371d764e46efcd260a55b2f82b6cb3ac3074925",
+    "docs/DECISIONS.md": "88aace75c5efc0b88a2f04bd1a6799403ca498d0e1d40a9f8dafc28ba26b4cba",
+    "README.md": "a9f94c31fee26f02f7987cacfc66bc40a001a65f222c8d568b00777ccd6062fd",
+    "packages/api-contracts/src/handshake-registry.ts": "b4cd97b703d95e1a8eed394f5a4f1d1d11b8261232311a98193919fedf12fe1e"
+  },
+  "note": "Docs are not part of the source freeze; hashes record exactly what this batch changed or retained. handshake-registry is in the source freeze and listed here only for review convenience."
+}

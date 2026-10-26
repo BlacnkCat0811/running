@@ -1,0 +1,22 @@
+
+> rai-running-intelligence@0.1.0 check:package-boundaries
+> node scripts/check-package-boundaries.mjs
+
+包边界：16 个包 / 31 条 src 边；禁线 4 条
+包边界检查通过。
+        1.16 real         0.35 user         0.26 sys
+            49905664  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               25400  page reclaims
+                   8  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   1  voluntary context switches
+                 829  involuntary context switches
+            19091456  peak memory footprint

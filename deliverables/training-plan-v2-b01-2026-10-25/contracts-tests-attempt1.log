@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: handshake registry covers exactly every HandshakeResponse key
+ok 1 - handshake registry covers exactly every HandshakeResponse key
+  ---
+  duration_ms: 10.107593
+  type: 'test'
+  ...
+# Subtest: every registration states semantics, precondition, consumer and old-server behaviour
+ok 2 - every registration states semantics, precondition, consumer and old-server behaviour
+  ---
+  duration_ms: 0.387448
+  type: 'test'
+  ...
+# Subtest: deferred capabilities are explicit and mirrored where the contract says
+ok 3 - deferred capabilities are explicit and mirrored where the contract says
+  ---
+  duration_ms: 1.228655
+  type: 'test'
+  ...
+# node:internal/modules/run_main:123
+#     triggerUncaughtException(
+#     ^
+# Error [TransformError]: Transform failed with 1 error:
+# /Users/ta/running/apps/api/test/training-plan-closed-loop-contract.test.ts:70:14: ERROR: Expected ";" but found "TrainingPlanSessionCommandRequest"
+#     at failureErrorWithLog (/Users/ta/running/node_modules/tsx/node_modules/esbuild/lib/main.js:1748:15)
+#     at /Users/ta/running/node_modules/tsx/node_modules/esbuild/lib/main.js:1017:50
+#     at responseCallbacks.<computed> (/Users/ta/running/node_modules/tsx/node_modules/esbuild/lib/main.js:884:9)
+#     at handleIncomingPacket (/Users/ta/running/node_modules/tsx/node_modules/esbuild/lib/main.js:939:12)
+#     at Socket.readFromStdout (/Users/ta/running/node_modules/tsx/node_modules/esbuild/lib/main.js:862:7)
+#     at Socket.emit (node:events:519:28)
+#     at addChunk (node:internal/streams/readable:561:12)
+#     at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+#     at Readable.push (node:internal/streams/readable:392:5)
+#     at Pipe.onStreamRead (node:internal/stream_base_commons:189:23)
+# Node.js v22.23.2
+# Subtest: apps/api/test/training-plan-closed-loop-contract.test.ts
+not ok 2 - apps/api/test/training-plan-closed-loop-contract.test.ts
+  ---
+  duration_ms: 992.674272
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-closed-loop-contract.test.ts:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1017.5493
+
+EXIT_CODE=1

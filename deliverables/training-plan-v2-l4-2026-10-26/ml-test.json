@@ -1,0 +1,15 @@
+{
+  "name": "ml-test",
+  "argv": [
+    "npm",
+    "run",
+    "ml:test"
+  ],
+  "envOverrides": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_ADDOPTS": "-o cache_dir=/tmp/rai-v2-l4-20261026-vczzvoi8/pytest-cache"
+  },
+  "startedEpoch": 1792998919.5823948,
+  "durationSeconds": 15.881115198135376,
+  "exitCode": 0
+}

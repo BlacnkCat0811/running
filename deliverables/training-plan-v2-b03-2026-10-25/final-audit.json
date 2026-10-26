@@ -1,0 +1,65 @@
+{
+  "batch": "B03",
+  "date": "2026-10-25",
+  "status": "accepted",
+  "tasks": {
+    "S01-02": "accepted",
+    "S01-04": "accepted"
+  },
+  "gates": {
+    "G0": "signed (B01)",
+    "G1": "signed (B03)",
+    "G2": "not_started",
+    "G3": "not_started",
+    "G4": "not_started",
+    "G5": "not_started",
+    "G6": "not_started",
+    "G7": "not_started"
+  },
+  "codeIdentity": {
+    "head": "1b6a10b4769526b2930090e79860d2f93cc50318",
+    "branch": "main",
+    "dirty": true,
+    "baseline": "B02 accepted frozen source identity (1002 files)",
+    "currentSourceFiles": 1006,
+    "changedFiles": 9,
+    "addedFiles": 4,
+    "removedFiles": 0,
+    "sourceDriftOutsideManifest": 0
+  },
+  "checks": {
+    "typecheck": "PASS",
+    "fullBackend": "PASS 2654 tests / 2651 pass / 0 fail / 3 skipped, concurrency 2",
+    "b03Policy": "PASS 13/13",
+    "runtimeProtection": "PASS 1/1",
+    "sessionRegression": "PASS 9/9",
+    "apiTargeted": "PASS 48/48",
+    "iosAggregate": "PASS",
+    "apiSmoke": "PASS",
+    "docs": "PASS 109 docs / 825 links / 0 problems",
+    "gates": "PASS",
+    "planLineRefs": "0 out-of-range/blank; content drift not baselined"
+  },
+  "notExecuted": [
+    "Linux 2C2G",
+    "Simulator UI",
+    "iPhone 12 Pro Max",
+    "physical Watch",
+    "cross-build rollback",
+    "production migration/enable/deploy",
+    "GitHub CI"
+  ],
+  "openItems": [
+    "H05 pre-unified unscoped history remains unattributed",
+    "C01 edit/association sides remain for later gates",
+    "B04-B11 not started",
+    "production write capability disabled"
+  ],
+  "capability": {
+    "trainingPlanSessionContractVersion": 1,
+    "trainingPlanSessionCommandContractVersion": null,
+    "trainingPlanExecutionCommandContractVersion": null,
+    "trainingPlanUpdateContractVersion": null
+  },
+  "generatedAtUTC": "2026-10-25T06:41:55.346492+00:00"
+}

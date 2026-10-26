@@ -17,9 +17,12 @@ import { digest } from "./plan-digest.js";
 import { normalizeRunCoachPlan } from "./run-coach-policy.js";
 import { normalizeSessionStructure } from "./session-structure.js";
 import { validateRaceGoal, type RaceGoal, type RunState } from "./training-mode-policy.js";
+import { assertTrainingPlanLockedRestInvariant, trainingPlanLockedRestConflicts, parseSessionPrescription, parseTrainingPlanSessionFields, sessionKeys,
+  TrainingPlanSessionStateError, type TrainingPlanSessionFields } from "./training-plan-session-state.js";
+import { TrainingPlanSessionRepository } from "./training-plan-session-repository.js";
 
 /**
- * PR3 first slice: the unified control-database training state and its migration.
+ * Unified control-database training state and its controlled data migrations.
  *
  * This module owns three things and deliberately nothing else:
  *
@@ -38,17 +41,19 @@ import { validateRaceGoal, type RaceGoal, type RunState } from "./training-mode-
  * `raceGoal` + the business date, so a stored copy could drift from the goal it
  * was derived from; this state keeps only the inputs (race goal, run state).
  *
- * Not in this slice: no HTTP route, no command reducer, no coordination with the
- * live server, no rewriting of the legacy rows. The migration is add-only: the
- * `mobile_goals` row and every coach-loop receipt stay byte-identical and readable.
+ * B02 reads schema 1 and 2 explicitly. Session history joins every schema 2 CAS;
+ * identity allocation/backfill lives in training-plan-session-migration.ts and
+ * requires an explicit offline apply. Ordinary reads never allocate identities.
+ * Legacy migration evidence and immutable receipts stay byte-identical.
  */
 
 // ---------------------------------------------------------------------------
 // Versions and scope identity
 // ---------------------------------------------------------------------------
 
-/** Wire format of `mobile_training_state.payload_json`. Unknown values fail closed. */
+/** Legacy creation format. Ordinary generation stays on schema 1 until B03/G1. */
 export const TRAINING_PLAN_STATE_SCHEMA_VERSION = 1 as const;
+export const TRAINING_PLAN_SESSION_STATE_SCHEMA_VERSION = 2 as const;
 
 /**
  * Derivation version of the **data** migration (not the control-schema version).
@@ -134,8 +139,7 @@ export interface TrainingPlanCoachLoopRef {
  * hand-edited payload, which is what makes "ending the loop releases the managed
  * semantics" a storage invariant rather than a caller promise.
  */
-export interface TrainingPlanState {
-  schemaVersion: typeof TRAINING_PLAN_STATE_SCHEMA_VERSION;
+interface TrainingPlanStateBase {
   migrationVersion: number;
   source: TrainingPlanSource;
   sourceStatus: TrainingPlanSourceStatus;
@@ -158,6 +162,10 @@ export interface TrainingPlanState {
   planContextDigest: string | null;
   migratedAt: string;
 }
+
+export interface TrainingPlanLegacyState extends TrainingPlanStateBase { schemaVersion: 1 }
+export interface TrainingPlanSessionState extends TrainingPlanStateBase, TrainingPlanSessionFields { schemaVersion: 2 }
+export type TrainingPlanState = TrainingPlanLegacyState | TrainingPlanSessionState;
 
 export interface TrainingPlanStateRow {
   scope: string;
@@ -410,9 +418,14 @@ function collectCoachLoopRef(value: unknown, path: string): Collected<TrainingPl
  */
 export function parseTrainingPlanState(value: unknown): TrainingPlanState {
   if (!isRecord(value)) throw new TrainingPlanStateError("training plan state must be a JSON object");
-  if (value.schemaVersion !== TRAINING_PLAN_STATE_SCHEMA_VERSION) {
+  try { assertTrainingPlanLockedRestInvariant(value); }
+  catch (error) { throw new TrainingPlanStateError(error instanceof Error ? error.message : "training_plan_locked_rest_conflict"); }
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
     throw new TrainingPlanStateError(
-      `unknown training plan state schemaVersion ${JSON.stringify(value.schemaVersion)}; expected ${TRAINING_PLAN_STATE_SCHEMA_VERSION}`);
+      `unknown training plan state schemaVersion ${JSON.stringify(value.schemaVersion)}; expected 1 or 2`);
+  }
+  if (value.schemaVersion === 1 && ["planInstanceId", "sessions", "suppressions", "publishedInputKey"].some(key => Object.hasOwn(value, key))) {
+    throw new TrainingPlanStateError("schema 1 cannot carry session identity fields; refusing lossy normalization");
   }
   const problems: string[] = [];
   const migrationVersion = value.migrationVersion;
@@ -448,7 +461,22 @@ export function parseTrainingPlanState(value: unknown): TrainingPlanState {
 
   const raceGoal = collectRaceGoal(value.raceGoal ?? null, "raceGoal");
   const legacyRaceTarget = collectRaceTarget(value.legacyRaceTarget ?? null, "legacyRaceTarget");
-  const weekPlan = collectWeekPlan(value.weekPlan ?? [], "weekPlan");
+  let weekPlan: Collected<MobilePlannedDay[]>;
+  try {
+    weekPlan = value.schemaVersion === 2
+      ? Array.isArray(value.weekPlan) ? { value: value.weekPlan.map(day => parseSessionPrescription(day)), problems: [] }
+        : { value: null, problems: ["schema 2 weekPlan must be an array"] }
+      : collectWeekPlan(value.weekPlan ?? [], "weekPlan");
+    if (value.schemaVersion === 2) {
+      sessionKeys(value, ["schemaVersion", "migrationVersion", "source", "sourceStatus", "sourceDigest", "runState", "raceGoal",
+        "preferencesComplete", "legacyRaceTarget", "weekPlan", "lockedSession", "runCoach", "coachLoop", "goalsRevision",
+        "planContextDigest", "migratedAt", "planInstanceId", "sessions", "suppressions", "publishedInputKey"], "state");
+      const dates = weekPlan.value?.map(day => day.localDate) ?? [];
+      if (new Set(dates).size !== dates.length) throw new TrainingPlanSessionStateError("duplicate weekPlan date");
+    }
+  } catch (error) {
+    throw new TrainingPlanStateError(error instanceof Error ? error.message : String(error));
+  }
   const lockedSession = collectLockedSession(value.lockedSession ?? null, "lockedSession");
   const runCoach = collectRunCoachPlan(value.runCoach ?? null, "runCoach");
   const coachLoop = collectCoachLoopRef(value.coachLoop ?? null, "coachLoop");
@@ -466,8 +494,8 @@ export function parseTrainingPlanState(value: unknown): TrainingPlanState {
   }
 
   if (problems.length > 0) throw new TrainingPlanStateError(problems.join("; "));
-  return {
-    schemaVersion: TRAINING_PLAN_STATE_SCHEMA_VERSION,
+  const base: TrainingPlanLegacyState = {
+    schemaVersion: 1,
     migrationVersion: migrationVersion as number,
     source: source as TrainingPlanSource,
     sourceStatus: sourceStatus as TrainingPlanSourceStatus,
@@ -484,6 +512,12 @@ export function parseTrainingPlanState(value: unknown): TrainingPlanState {
     planContextDigest: planContextDigest as string | null,
     migratedAt: value.migratedAt as string
   };
+  if (value.schemaVersion === 1) return base;
+  try {
+    return { ...base, schemaVersion: 2, ...parseTrainingPlanSessionFields(value, base.weekPlan) };
+  } catch (error) {
+    throw new TrainingPlanStateError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -560,7 +594,15 @@ export class TrainingPlanStore {
   /** The unified state for `scope`, or `null` when the scope has not been migrated. */
   read(scope: string): TrainingPlanStateRow | null {
     const parsedScope = parseTrainingPlanScopeKey(scope);
-    return readTrainingPlanStateRow(this.database, trainingPlanScopeKey(parsedScope));
+    const row = readTrainingPlanStateRow(this.database, trainingPlanScopeKey(parsedScope));
+    if (row?.state.schemaVersion === 2) {
+      const history = new TrainingPlanSessionRepository(this.database);
+      for (const session of row.state.sessions) {
+        const frozen = history.get(row.scope, session.planInstanceId, session.sessionId, session.sessionRevision);
+        if (!frozen || digest(frozen.session) !== digest(session)) throw new TrainingPlanStateError("current session has no matching frozen history");
+      }
+    }
+    return row;
   }
 
   /**
@@ -609,7 +651,7 @@ export class TrainingPlanStore {
           }
           const replayed = parseAuditPayload(audit.payload_json);
           this.database.exec("ROLLBACK");
-          return { status: "replayed", revision: replayed.revision, state: replayed.state, updatedAt: replayed.state.migratedAt };
+          return { status: "replayed", revision: replayed.revision, state: replayed.state, updatedAt: audit.created_at };
         }
         this.database.exec("ROLLBACK");
         return {
@@ -618,6 +660,10 @@ export class TrainingPlanStore {
           currentRevision: current?.revision ?? null,
           currentSourceDigest: audit.source_digest
         };
+      }
+
+      if (state.schemaVersion === 2) {
+        throw new TrainingPlanStateError("session identities require the controlled session identity migration");
       }
 
       if (current !== null) {
@@ -688,7 +734,8 @@ export class TrainingPlanStore {
     expectedRevision: number;
     state: TrainingPlanState;
     eventType: string;
-  }, options: { inTransaction?: boolean } = {}): { revision: number; updatedAt: string } {
+  }, options: { inTransaction?: boolean; sessionMigration?: boolean; archivedSessionIds?: readonly string[];
+    archiveBefore?: string } = {}): { revision: number; updatedAt: string } {
     const scope = trainingPlanScopeKey(parseTrainingPlanScopeKey(input.scope));
     const state = parseTrainingPlanState(input.state);
     if (!isNonEmptyString(input.eventType)) throw new TrainingPlanStateError("eventType is required");
@@ -700,6 +747,46 @@ export class TrainingPlanStore {
     const ownTransaction = options.inTransaction !== true;
     if (ownTransaction) this.database.exec("BEGIN IMMEDIATE");
     try {
+      const current = this.read(scope);
+      if (current?.state.schemaVersion === 2) {
+        if (state.schemaVersion !== 2) throw new TrainingPlanStateError("session state cannot be downgraded to schema 1");
+        if (state.planInstanceId !== current.state.planInstanceId) throw new TrainingPlanStateError("instance replacement requires an explicit preview contract");
+        const archived = new Set(options.archivedSessionIds ?? []);
+        if (archived.size !== (options.archivedSessionIds ?? []).length) throw new TrainingPlanStateError("duplicate archived session id");
+        const archiveBefore = options.archiveBefore ?? "9999-12-31";
+        if (!isValidLocalDate(archiveBefore)) throw new TrainingPlanStateError("archiveBefore must be a real date");
+        for (const previous of current.state.sessions) {
+          const next = state.sessions.find(session => session.sessionId === previous.sessionId);
+          if (!next) {
+            if (!archived.has(previous.sessionId)) {
+              throw new TrainingPlanStateError("session identity cannot be silently removed");
+            }
+            // Controlled archive: an automatic, still-pending course may be
+            // replanned away at any date; any other course may leave the current
+            // payload only after its business date has passed. Its frozen revisions
+            // remain in mobile_training_session_history either way.
+            if (!(previous.protection === "automatic" && previous.lifecycle === "pending") &&
+                previous.prescription.localDate >= archiveBefore) {
+              throw new TrainingPlanStateError("protected/executed session cannot be archived before its business date");
+            }
+            continue;
+          }
+          if (archived.has(previous.sessionId)) throw new TrainingPlanStateError("archived session id is still present");
+          if (next.sessionRevision < previous.sessionRevision || next.sessionRevision > previous.sessionRevision + 1) {
+            throw new TrainingPlanStateError("session revisions cannot regress or skip");
+          }
+          if (next.sessionRevision === previous.sessionRevision && digest(next) !== digest(previous)) {
+            throw new TrainingPlanStateError("immutable session revision collision");
+          }
+        }
+        for (const id of archived) {
+          if (!current.state.sessions.some(session => session.sessionId === id)) {
+            throw new TrainingPlanStateError("archived session id is not part of the current state");
+          }
+        }
+      } else if (state.schemaVersion === 2 && options.sessionMigration !== true) {
+        throw new TrainingPlanStateError("session identities require the controlled data migration");
+      }
       const updated = this.database.prepare(
         "UPDATE mobile_training_state SET revision = ?, payload_json = ?, updated_at = ? WHERE scope = ? AND revision = ?")
         .run(revision, JSON.stringify(state), updatedAt, scope, input.expectedRevision);
@@ -720,6 +807,10 @@ export class TrainingPlanStore {
     this.database.prepare(
       "INSERT INTO mobile_training_state_history(scope, revision, event_type, payload_json, changed_at) VALUES (?, ?, ?, ?, ?)")
       .run(scope, revision, eventType, JSON.stringify(state), changedAt);
+    if (state.schemaVersion === 2) {
+      const sessions = new TrainingPlanSessionRepository(this.database);
+      for (const session of state.sessions) sessions.append(scope, revision, session);
+    }
   }
 
   private insertAudit(scope: string, migrationVersion: number, sourceDigest: string,
@@ -816,6 +907,7 @@ function parseJsonOrNull(value: string): unknown {
 // ---------------------------------------------------------------------------
 
 export type TrainingPlanMigrationConflictCode =
+  | "locked_rest_conflict"
   | "invalid_goals_payload"
   | "invalid_race_target"
   | "invalid_coach_loop_receipt"
@@ -1109,6 +1201,9 @@ export function classifyTrainingPlanMigration(input: {
       conflicts.push({ code: "invalid_goals_payload", detail: collected.problems.join("; ") });
     } else {
       goals = collected.value;
+      for (const conflict of trainingPlanLockedRestConflicts(goals).filter(value => value.lockedKind !== "rest")) {
+        conflicts.push({ code: "locked_rest_conflict", detail: `${conflict.kind}: ${conflict.localDate}; offline intent review required` });
+      }
     }
   }
 

@@ -1,0 +1,7 @@
+run_at=2026-10-25T19:58:26+0800
+
+> rai-running-intelligence@0.1.0 check:scripts
+> node scripts/check-npm-scripts-portable.mjs
+
+✅ npm script 跨平台语法检查通过：18 个 package.json / 117 条 script。
+exit=0

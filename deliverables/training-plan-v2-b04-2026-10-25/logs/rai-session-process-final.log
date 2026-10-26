@@ -1,0 +1,18 @@
+TAP version 13
+# (node:83653) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B04/T21: two OS processes race the same course revision; exactly one atomic move commits
+ok 1 - B04/T21: two OS processes race the same course revision; exactly one atomic move commits
+  ---
+  duration_ms: 3011.825683
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6545.078173

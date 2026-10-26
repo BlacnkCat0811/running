@@ -36,7 +36,8 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
   apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanWatchSyncCoordinator.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift apps/ios/RAI/TrainingPlanStore.swift \
-  apps/ios/RAI/TrainingPlanPublisher.swift \
+  apps/ios/RAI/TrainingPlanExecutionPolicy.swift apps/ios/RAI/TrainingPlanPublisher.swift \
+  apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift \
   apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/PlanMutationDisposition.swift apps/ios/RAI/SyncPresentationPolicy.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
@@ -47,13 +48,32 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
 # 这些判定一旦写错，编译和全量类型检查都不会红，而用户看到的是"今天休息"。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
   apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/UserDataNoticePolicy.swift \
+  apps/ios/RAI/TrainingPlanExecutionPolicy.swift \
   apps/ios/tests/TrainingPlanV2Regression.swift -o "$tmp/training-plan-v2-tests"
 "$tmp/training-plan-v2-tests"
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
   apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/UserDataNoticePolicy.swift \
-  apps/ios/RAI/TrainingPlanPublisher.swift apps/ios/tests/TrainingPlanPublisherRegression.swift \
+  apps/ios/RAI/TrainingPlanExecutionPolicy.swift apps/ios/RAI/TrainingPlanPublisher.swift \
+  apps/ios/tests/TrainingPlanPublisherRegression.swift \
   -o "$tmp/training-plan-publisher-tests"
 "$tmp/training-plan-publisher-tests"
+# P2.10: session editor distance rules. A time-only structure must be able to
+# send distanceKm:null, while a distance structure needs an exactly matching
+# total. The same compile unit pins the absence of a fabricated 5 km default.
+xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift \
+  apps/ios/tests/TrainingPlanSessionEditorRegression.swift \
+  -o "$tmp/training-plan-session-editor-tests"
+"$tmp/training-plan-session-editor-tests"
+# B07 execution association: DTO/state-machine/candidate/assessment/journal gates.
+# The publisher is compiled with its pure policy so a broken pending-row replay,
+# a session/execution watermark or a "pending confirmation == completed" wording
+# regression fails here rather than only on a Simulator tap-through.
+xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
+  apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/UserDataNoticePolicy.swift \
+  apps/ios/RAI/TrainingPlanExecutionPolicy.swift apps/ios/RAI/TrainingPlanPublisher.swift \
+  apps/ios/tests/TrainingPlanExecutionRegression.swift -o "$tmp/training-plan-execution-tests"
+"$tmp/training-plan-execution-tests"
 bash apps/ios/tests/run-plan-watch-tests.sh
 bash apps/ios/tests/run-training-plan-store-tests.sh
 bash apps/ios/tests/run-user-experience-tests.sh
@@ -79,6 +99,7 @@ xcrun swiftc "${swiftc_flags[@]}" "$tmp/CoordinateConversion.swift" \
 xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor \
   apps/ios/RAI/APIModels.swift apps/ios/RAI/WorkoutPlanMapper.swift \
   apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanStatePolicy.swift \
+  apps/ios/RAI/TrainingPlanExecutionPolicy.swift \
   apps/ios/RAI/PlanWatchScheduling.swift apps/ios/RAI/UserDataNoticePolicy.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift \
   apps/ios/tests/WorkoutPlanMapperRegression.swift -o "$tmp/workout-plan-tests"

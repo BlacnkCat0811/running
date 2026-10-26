@@ -1,0 +1,298 @@
+{
+  "startedAt": "2026-10-25T11:55:31.618Z",
+  "finishedAt": "2026-10-25T11:56:18.227Z",
+  "node": "v22.23.2",
+  "sqlite": "3.51.3",
+  "platform": "darwin",
+  "release": "25.6.0",
+  "arch": "x64",
+  "cpuModel": "AMD Ryzen 5 3600X 6-Core Processor             ",
+  "cpuCount": 6,
+  "totalMemBytes": 17179869184,
+  "freeMemBytesAtStart": 4403769344,
+  "loadAverage": [
+    22.7255859375,
+    20.9482421875,
+    20.09912109375
+  ],
+  "sampleConcurrency": 1,
+  "sampling": {
+    "getV2": "cold n=10 fresh context, hot n=30 same context",
+    "candidates": "cold n=10, hot n=30",
+    "inputKey": "cold n=10, hot n=30"
+  },
+  "scenarios": {
+    "empty": {
+      "label": "empty",
+      "businessDate": "2026-10-25",
+      "mainRows": {
+        "health_records": 0,
+        "canonical_nights": 0,
+        "canonical_hrv_days": 0,
+        "workouts": 0,
+        "training_sessions": 0,
+        "workout_statistics": 0
+      },
+      "totalMainRows": 0,
+      "controlSessions": 24,
+      "dbBytes": 1249280,
+      "getV2": {
+        "cold": {
+          "n": 10,
+          "p50": 87.779,
+          "p95": 150.576,
+          "p99": 150.576,
+          "max": 150.576,
+          "mean": 95.06
+        },
+        "hot": {
+          "n": 30,
+          "p50": 80.742,
+          "p95": 140.321,
+          "p99": 148.15,
+          "max": 148.15,
+          "mean": 87.447
+        }
+      },
+      "http": {
+        "cold": {
+          "n": 1,
+          "p50": 204.137,
+          "p95": 204.137,
+          "p99": 204.137,
+          "max": 204.137,
+          "mean": 204.137
+        },
+        "hot": {
+          "n": 30,
+          "p50": 183.692,
+          "p95": 248.223,
+          "p99": 257.547,
+          "max": 257.547,
+          "mean": 191.381
+        }
+      },
+      "candidates": {
+        "plus_minus_2d": {
+          "cold": {
+            "n": 10,
+            "p50": 30.199,
+            "p95": 36.682,
+            "p99": 36.682,
+            "max": 36.682,
+            "mean": 31.558
+          },
+          "hot": {
+            "n": 30,
+            "p50": 30.838,
+            "p95": 50.221,
+            "p99": 51.888,
+            "max": 51.888,
+            "mean": 34.376
+          }
+        },
+        "31d": {
+          "cold": {
+            "n": 10,
+            "p50": 30.883,
+            "p95": 42.481,
+            "p99": 42.481,
+            "max": 42.481,
+            "mean": 33.14
+          },
+          "hot": {
+            "n": 30,
+            "p50": 27.136,
+            "p95": 37.098,
+            "p99": 39.336,
+            "max": 39.336,
+            "mean": 28.305
+          }
+        },
+        "50_per_page": {
+          "cold": {
+            "n": 10,
+            "p50": 31.087,
+            "p95": 52.875,
+            "p99": 52.875,
+            "max": 52.875,
+            "mean": 36.174
+          },
+          "hot": {
+            "n": 30,
+            "p50": 27.393,
+            "p95": 54.209,
+            "p99": 69.986,
+            "max": 69.986,
+            "mean": 30.867
+          }
+        }
+      },
+      "inputKey": {
+        "cold": {
+          "n": 10,
+          "p50": 5.641,
+          "p95": 7.085,
+          "p99": 7.085,
+          "max": 7.085,
+          "mean": 5.591
+        },
+        "hot": {
+          "n": 30,
+          "p50": 0.913,
+          "p95": 4.544,
+          "p99": 13.768,
+          "max": 13.768,
+          "mean": 1.578
+        },
+        "factsInWindow": 0,
+        "keyLength": 64
+      }
+    },
+    "scale": {
+      "label": "scale",
+      "businessDate": "2026-10-25",
+      "mainRows": {
+        "health_records": 40600,
+        "canonical_nights": 400,
+        "canonical_hrv_days": 400,
+        "workouts": 400,
+        "training_sessions": 400,
+        "workout_statistics": 800
+      },
+      "totalMainRows": 43000,
+      "controlSessions": 24,
+      "dbBytes": 20467712,
+      "getV2": {
+        "cold": {
+          "n": 10,
+          "p50": 70.495,
+          "p95": 76.754,
+          "p99": 76.754,
+          "max": 76.754,
+          "mean": 70.512
+        },
+        "hot": {
+          "n": 30,
+          "p50": 67.522,
+          "p95": 336.641,
+          "p99": 882.228,
+          "max": 882.228,
+          "mean": 103.064
+        }
+      },
+      "http": {
+        "cold": {
+          "n": 1,
+          "p50": 340.258,
+          "p95": 340.258,
+          "p99": 340.258,
+          "max": 340.258,
+          "mean": 340.258
+        },
+        "hot": {
+          "n": 30,
+          "p50": 239.089,
+          "p95": 378.575,
+          "p99": 417.206,
+          "max": 417.206,
+          "mean": 264.869
+        }
+      },
+      "candidates": {
+        "plus_minus_2d": {
+          "cold": {
+            "n": 10,
+            "p50": 44.359,
+            "p95": 98.139,
+            "p99": 98.139,
+            "max": 98.139,
+            "mean": 52.423
+          },
+          "hot": {
+            "n": 30,
+            "p50": 38.998,
+            "p95": 80.076,
+            "p99": 96.958,
+            "max": 96.958,
+            "mean": 43.186
+          }
+        },
+        "31d": {
+          "cold": {
+            "n": 10,
+            "p50": 42.957,
+            "p95": 110.931,
+            "p99": 110.931,
+            "max": 110.931,
+            "mean": 51.827
+          },
+          "hot": {
+            "n": 30,
+            "p50": 34.3,
+            "p95": 44.2,
+            "p99": 47.189,
+            "max": 47.189,
+            "mean": 36.166
+          }
+        },
+        "50_per_page": {
+          "cold": {
+            "n": 10,
+            "p50": 35.267,
+            "p95": 47.063,
+            "p99": 47.063,
+            "max": 47.063,
+            "mean": 38.595
+          },
+          "hot": {
+            "n": 30,
+            "p50": 32.916,
+            "p95": 49.79,
+            "p99": 57.188,
+            "max": 57.188,
+            "mean": 34.734
+          },
+          "returned": 50
+        }
+      },
+      "inputKey": {
+        "cold": {
+          "n": 10,
+          "p50": 8.215,
+          "p95": 10.937,
+          "p99": 10.937,
+          "max": 10.937,
+          "mean": 8.14
+        },
+        "hot": {
+          "n": 30,
+          "p50": 3.167,
+          "p95": 7.293,
+          "p99": 17.038,
+          "max": 17.038,
+          "mean": 4.063
+        },
+        "factsInWindow": 211,
+        "keyLength": 64
+      }
+    }
+  },
+  "loadAverageEnd": [
+    14.61376953125,
+    19.06689453125,
+    19.44970703125
+  ],
+  "process": {
+    "userCpuMs": 17264.3,
+    "systemCpuMs": 2666.4,
+    "rssBytesBefore": 118398976,
+    "memory": {
+      "rss": 179597312,
+      "heapTotal": 87478272,
+      "heapUsed": 46772520,
+      "external": 7220796,
+      "arrayBuffers": 2999232
+    }
+  }
+}

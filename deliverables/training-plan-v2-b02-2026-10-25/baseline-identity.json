@@ -1,0 +1,13 @@
+{
+  "head": "1b6a10b4769526b2930090e79860d2f93cc50318",
+  "status": "M README.md\n M apps/api/src/server.ts\n M apps/api/test/phase5-training-plan.test.ts\n M apps/ios/RAI/APIModels.swift\n M apps/ios/tests/TrainingPlanV2Regression.swift\n M docs/DECISIONS.md\n M docs/IOS_NATIVE_API_CONTRACT.md\n M docs/RUN_COACH.md\n M packages/api-contracts/src/handshake-registry.ts\n M packages/api-contracts/src/index.ts\n?? apps/api/test/training-plan-closed-loop-contract.test.ts\n?? apps/ios/tests/fixtures/training-plan-closed-loop.json\n?? deliverables/training-plan-v2-b01-2026-10-25/\n?? docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md\n?? docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md\n?? packages/api-contracts/src/training-plan-closed-loop.ts",
+  "platform": "macOS-26.6.2-x86_64-i386-64bit",
+  "startedAtUTC": "2026-10-25T03:09:55.183698+00:00",
+  "sourceHashes": {
+    "apps/api/src/training-plan-store.ts": "e94fecb7e08f1bf42f969b29a59bc08a73a9b72662ef7053369048cf18058bde",
+    "apps/api/src/mobile-goals.ts": "c844715282fd0f983ee72da652cd78963b9f71bc07aeadf75c0bacc68fdad521",
+    "scripts/migrate-training-planner.mts": "892f02de491f71415c997d2ae4b8a52a6230e30f6f606ee757c2104b2702eab9",
+    "apps/ios/RAI/APIModels.swift": "d3efb4ce2ac74066cf4daeab379dcf8303f5d6d459e3cd8e04461dcaec48412c",
+    "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md": "608e09fa2bd1fd1e4fb49fdc6d76cf9059b219272b40d162a2a31c6d60418338"
+  }
+}

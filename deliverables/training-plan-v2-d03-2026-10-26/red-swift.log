@@ -1,0 +1,2 @@
+editor/TrainingPlanSessionEditorRegression.swift:10: Precondition failed: D-03: nine steps cannot reach preview
+bash: line 1:  6344 Illegal instruction: 4  "$tmp/editor"

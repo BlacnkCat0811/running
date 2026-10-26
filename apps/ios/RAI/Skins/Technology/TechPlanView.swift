@@ -26,6 +26,11 @@ private struct TechUnifiedTrainingView: View {
     @State private var showingPreferences = false
     @State private var showingLock = false
     @State private var showingCommands = false
+    private struct SessionEditorTarget: Identifiable {
+        let session: TrainingPlanSessionsView.Session?
+        var id: String { session?.sessionId ?? "new-session" }
+    }
+    @State private var sessionEditorTarget: SessionEditorTarget?
 
     private var state: TrainingPlanUnifiedView { native.trainingPlanUnifiedView }
     private var businessDate: String? {
@@ -42,6 +47,7 @@ private struct TechUnifiedTrainingView: View {
                 if native.handshake?.trainingPlanContractVersion == 2 || native.hasPendingPlanPublication {
                     commandPanel
                 }
+                if native.trainingPlanStore.unified?.update != nil { updatePanel }
                 if !state.weekDays.isEmpty { weekPanel }
                 reviewPanel
                 TechCoachLoopSection(context: .page)
@@ -85,7 +91,61 @@ private struct TechUnifiedTrainingView: View {
         }
         .sheet(isPresented: $showingLock) { TechLockSheet() }
         .sheet(isPresented: $showingCommands) { TechTrainingCommandSheet() }
-        .onChange(of: native.feedbackSessionID) { _, _ in showingPreferences = false; showingLock = false; showingCommands = false }
+        .sheet(item: $sessionEditorTarget) { target in
+            TechTrainingSessionEditor(session: target.session, initialDate: businessDate ?? "")
+        }
+        .onChange(of: native.feedbackSessionID) { _, _ in showingPreferences = false; showingLock = false; showingCommands = false; sessionEditorTarget = nil }
+    }
+
+    /// B08 four-stage status. It reports facts/analysis/association/plan
+    /// separately and never turns "sync succeeded" into "plan updated".
+    @ViewBuilder
+    private var updatePanel: some View {
+        if let update = native.trainingPlanStore.unified?.update {
+            TechPanel(tint: update.plan.status == "current" ? TechColor.success : TechColor.yellow,
+                      fill: update.plan.status == "current" ? TechColor.mint : TechColor.paleYellow) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(updateTitle(update)).font(.subheadline.weight(.semibold))
+                    Text("事实：" + stageText(update.facts.status) + " · 分析：" + stageText(update.analysis.status) +
+                         " · 关联：" + stageText(update.association.status)).font(.caption).foregroundStyle(TechColor.muted)
+                    if !update.plan.reasonCodes.isEmpty {
+                        Text(reasonText(update.plan.reasonCodes)).font(.caption2).foregroundStyle(TechColor.coral)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("更新状态只描述计划是否已消费最新输入；训练记录同步成功不等于计划已更新。")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityIdentifier("training.update.status")
+        }
+    }
+    private func updateTitle(_ update: TrainingPlanUpdateView) -> String {
+        switch update.plan.status {
+        case "current": return "计划已反映最新输入"
+        case "blocked": return "计划更新暂不可用"
+        default: return "计划等待更新"
+        }
+    }
+    private func stageText(_ status: String) -> String {
+        switch status {
+        case "stored", "ready", "current": return "已就绪"
+        case "failed", "blocked": return "失败"
+        case "pending": return "等待中"
+        default: return status
+        }
+    }
+    private func reasonText(_ codes: [String]) -> String {
+        codes.map { code in
+            switch code {
+            case "auto_publish_disabled": return "自动发布尚未启用（需后续发布授权）"
+            case "analysis_pending": return "等待分析发布"
+            case "input_changed": return "有新输入，等待重算"
+            case "training_paused": return "训练已暂停或结束"
+            case "execution_invalidated": return "执行关联已失效，需重新核对"
+            default: return code
+            }
+        }.joined(separator: "；")
     }
 
     private var commandPanel: some View {
@@ -295,7 +355,43 @@ private struct TechUnifiedTrainingView: View {
 
     private var reviewPanel: some View {
         Group {
-            if let businessDate {
+            if let businessDate, let identities = native.trainingPlanStore.unified?.sessions {
+                let rows = TrainingPlanExecutionPolicy.historyRows(sessions: identities.sessions,
+                    executions: identities.executions, businessDate: businessDate)
+                if !rows.isEmpty {
+                    TechPanel {
+                        VStack(alignment: .leading, spacing: 8) {
+                            TechSectionHeader(title: "执行回顾", trailing: "计划 / 关联 / 评价分开")
+                            ForEach(rows) { row in
+                                Button {
+                                    sessionEditorTarget = .init(session: identities.sessions.first { $0.sessionId == row.sessionId })
+                                } label: {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("\(nativeWeekday(row.localDate)) · \(nativeDay(row.localDate))")
+                                                .font(.caption.weight(.semibold))
+                                            Text(nativeSessionName(row.kind)).font(.caption)
+                                        }
+                                        Spacer(minLength: 8)
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            Text(row.statusTitle).font(.caption2.weight(.semibold))
+                                                .foregroundStyle(row.tone == .positive ? TechColor.success :
+                                                    row.tone == .warning ? TechColor.yellow :
+                                                    row.tone == .danger ? TechColor.coral : TechColor.muted)
+                                            Text(row.detail).font(.caption2).foregroundStyle(TechColor.muted)
+                                                .multilineTextAlignment(.trailing)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("training.execution.review.\(row.sessionId)")
+                                .padding(.vertical, 3)
+                            }
+                        }
+                    }
+                }
+            } else if let businessDate {
                 let rows = TrainingPlanUnifiedPolicy.weekReview(
                     from: native.planPresentation.today?.weekPlan ?? [], businessDate: businessDate)
                 if !rows.isEmpty {
@@ -378,21 +474,64 @@ private struct TechUnifiedTrainingView: View {
 
     // MARK: - 手动覆盖 / 提示
 
-    /// 阶段 5（D20.2）：v2 现有四动作与 refresh 不表达“逐日手动课表”，
-    /// 因此这里保持只读说明，不把 refresh 冒充“保存我编辑的逐日课表”。
-    /// 旧服务器页面（TechRunCoachView）仍按自己的旧协议工作，不在本页。
-    /// 若以后要恢复编辑，必须先交付 §4.2 的独立原子合同扩展。
+    /// The exact session capability opens the native editor. Older servers keep
+    /// the read-only explanation; no legacy manual-plan write is reactivated.
     private var manualPlanEntry: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label("手动课表与本周安排", systemImage: "calendar.badge.clock")
-                .font(.subheadline.weight(.medium))
-            Text("该编辑方式尚未适配当前服务；本版只展示服务端已发布的安排。")
-                .font(.caption2)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            Label("课程与实际", systemImage: "calendar.badge.clock").font(.subheadline.weight(.medium))
+            if let entities = native.trainingPlanStore.unified?.sessions {
+                let listBusinessDate = native.trainingPlanStore.unified?.businessDate ?? ""
+                let visible = TrainingPlanExecutionPolicy.visibleSessions(entities.sessions)
+                if visible.isEmpty {
+                    Text("当前服务没有返回稳定课程身份；只读展示已发布的安排。")
+                        .font(.caption2).fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(visible, id: \.sessionId) { session in
+                    let execution = entities.executions?.first { $0.sessionId == session.sessionId }
+                    let review = TrainingPlanExecutionPolicy.review(session: session, execution: execution,
+                        executionsKnown: entities.executions != nil)
+                    let listState = TrainingPlanExecutionPolicy.sessionListState(
+                        session: session, businessDate: listBusinessDate)
+                    Button {
+                        sessionEditorTarget = .init(session: session)
+                    } label: {
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(session.prescription.localDate) · \(nativeSessionName(session.prescription.kind)) · \(nativeKilometers(session.prescription.distanceKm))")
+                                Text(listState.caption)
+                                    .font(.caption)
+                                    .accessibilityIdentifier(listState.isReadOnly
+                                        ? "training.session.readonly.\(session.sessionId)"
+                                        : "training.session.editable.\(session.sessionId)")
+                            }
+                            Spacer(minLength: 8)
+                            Text(review.statusTitle).font(.caption2.weight(.semibold))
+                                .foregroundStyle(review.tone == .positive ? TechColor.success :
+                                    review.tone == .warning ? TechColor.yellow :
+                                    review.tone == .danger ? TechColor.coral : TechColor.muted)
+                                .multilineTextAlignment(.trailing)
+                        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("training.session.edit.\(session.sessionId)")
+                }
+                if native.handshake?.trainingPlanSessionCommandsSupported == true {
+                    Button("新增课程 / 指定休息") { sessionEditorTarget = .init(session: nil) }
+                        .disabled(!native.canEditTrainingSessions).accessibilityIdentifier("training.session.add")
+                }
+                if native.handshake?.trainingPlanExecutionCommandsSupported != true {
+                    Text("当前服务未启用执行关联：可查看计划与执行评价，但不会拉取候选、确认、纠错或跳过。")
+                        .font(.caption2).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("training.execution.readonly")
+                }
+            } else {
+                Text("该服务端尚未提供稳定课程身份；该编辑方式尚未适配当前服务，本版只展示服务端已发布的安排，不把缺失当成空历史。")
+                    .font(.caption2).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("training.manual-plan.retired")
+            }
         }
         .foregroundStyle(TechColor.muted)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .accessibilityIdentifier("training.manual-plan.retired")
     }
 
     private var notices: some View {

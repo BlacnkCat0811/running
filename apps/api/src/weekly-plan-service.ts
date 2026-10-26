@@ -1,4 +1,4 @@
-import { runCoachSessionTargets } from "./run-coach-policy.js";
+import { runCoachSessionTargets, runCoachWeekday } from "./run-coach-policy.js";
 import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileTodayResponse } from "@rai/api-contracts";
 
 import { plannedDayNumbers, type CoachZonePrescription } from "./mobile-coach.js";
@@ -7,6 +7,7 @@ import { applyRacePlanPolicy, validateWeeklyPlan, weeklyPlanVolumeCeiling } from
 import { preRaceActivationFor } from "./pre-race-activation.js";
 import { buildCompleteCoachWeekPlan, enforceAutomaticSessionDose, fitCompleteSessionsToBudget } from "./coach-complete-plan.js";
 import { applyUnsupportedRacePlanPolicy } from "./race-plan-policy.js";
+import type { TrainingPlanGenerationPreferences } from "./training-plan-preferences.js";
 
 export const WEEKLY_PLAN_DAYS = 7;
 
@@ -130,6 +131,10 @@ export async function generateWeeklyPlan(args: {
    * proposed days.
    */
   allocateCompleteDoses?: boolean;
+  /** B03/S01-04: saved migration preferences actually consumed by generation. */
+  preferences?: Pick<TrainingPlanGenerationPreferences, "runningDays" | "longRunDays" | "targetType"> | null;
+  /** Whole-course protected prescriptions; budget is spent before new automatic days. */
+  protectedDays?: readonly MobilePlannedDay[];
 }): Promise<WeeklyPlanGenerationResult> {
   const generatedAt = (args.now ?? new Date()).toISOString();
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
@@ -180,12 +185,16 @@ function splitNaturalWeeks(dates: string[], periodEnd: string): string[][] {
 }
 
 export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
-  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm" | "automaticDosePolicy" | "allocateCompleteDoses">,
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm" | "automaticDosePolicy" | "allocateCompleteDoses" | "preferences" | "protectedDays">,
   warnings: string[] = [],
   counters?: WeeklyPlanConstraintCounters): MobilePlannedDay[] {
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
   const replacementDates = new Set(allowedDates);
+  const protectedByDate = new Map((args.protectedDays ?? []).map(day => [day.localDate, day]));
+  const runnable = (date: string): boolean => args.preferences?.runningDays === null ||
+    args.preferences?.runningDays === undefined || args.preferences.runningDays.includes(runCoachWeekday(date));
+  const generationDates = allowedDates.filter(date => runnable(date) && !protectedByDate.has(date));
   const segments = splitNaturalWeeks(allowedDates, args.today.week.periodEnd);
 
   /**
@@ -207,9 +216,18 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
     const weekStart = periodizationWeekStart(dates[0]!);
     const retained = (args.goals.weekPlan ?? []).filter(day => day.localDate >= args.today.today.localDate &&
       periodizationWeekStart(day.localDate) === weekStart && !replacementDates.has(day.localDate));
+    // B03: whole-course protected days inside this window are obligations before
+    // any new automatic day. They are not replaced by the candidate and must spend
+    // the same natural-week budget (km and quality slots) as ordinary retained days.
+    const protectedInWeek = [...protectedByDate.values()].filter(day => replacementDates.has(day.localDate) &&
+      periodizationWeekStart(day.localDate) === weekStart && day.kind !== "rest" &&
+      !(protectedToday && day.localDate === args.today.today.localDate));
     const retainedKm = retained.reduce((sum, day) => sum +
-      (plannedDayNumbers(day.kind, day.structure, day.distanceKm, args.prescription).distanceKm ?? 0), 0);
-    const retainedQuality = retained.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length;
+      (plannedDayNumbers(day.kind, day.structure, day.distanceKm, args.prescription).distanceKm ?? 0), 0) +
+      protectedInWeek.reduce((sum, day) => sum +
+        (plannedDayNumbers(day.kind, day.structure, day.distanceKm, args.prescription).distanceKm ?? 0), 0);
+    const retainedQuality = retained.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length +
+      protectedInWeek.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length;
     const ceilingKm = Math.min(weeklyPlanVolumeCeiling(args.weeklyVolumeBaselineKm, index === 0 ? args.previousWeekDistanceKm : null),
       phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY);
     const remainingKm = Math.max(0, ceilingKm - retainedKm - (index === 0 ? args.today.week.distanceKm + reservedKm : 0));
@@ -219,7 +237,7 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
   });
   for (const budget of budgets) {
     if (budget.retainedKm > 0 || budget.retainedQuality > 0) {
-      warnings.push(`${budget.weekStart} 自然周已为窗口外保留课表预留 ${budget.retainedKm.toFixed(1)} km、${budget.retainedQuality} 堂质量课。`);
+      warnings.push(`${budget.weekStart} 自然周已为窗口外保留课表/用户保护课预留 ${budget.retainedKm.toFixed(1)} km、${budget.retainedQuality} 堂质量课。`);
     }
   }
 
@@ -231,7 +249,8 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
         // Today's protected session (an actual run, a lock, or a preserved draft) is
         // not re-planned: it is already deducted from the budget, so allocating a
         // session for it would waste one complete dose that then gets filtered out.
-        allowedDates: budget.protectedToday ? budget.dates.filter(date => date !== args.today.today.localDate) : budget.dates,
+        allowedDates: budget.dates.filter(date => generationDates.includes(date) &&
+          !(budget.protectedToday && date === args.today.today.localDate)),
         prescription: args.prescription,
         weeklyDistanceKm: budget.remainingKm,
         qualitySessionCap: budget.qualityCap,
@@ -244,15 +263,24 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
   const safe = applyUnsupportedRacePlanPolicy(
     applyRacePlanPolicy(allocated, args.goals.raceTarget, args.weeklyVolumeBaselineKm, args.prescription, warnings),
     args.goals.runCoach?.raceDate, args.goals.raceTarget != null, warnings);
-  const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
-    { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
+  const complete = allowedDates.map(localDate => protectedByDate.get(localDate) ??
+    (!runnable(localDate) ? { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "非可跑步日。" }
+      : safe.find(day => day.localDate === localDate) ??
+        { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" }));
   return budgets.flatMap((budget, index) => {
     const days = complete.filter(day => budget.dates.includes(day.localDate));
     if (!days.length) return [];
-    const adjustable = days.filter(day => !(budget.protectedToday && day.localDate === args.today.today.localDate));
+    // A protected course is never an "adjustable" candidate: it is removed from
+    // the validator's input and added back byte-for-byte after validation.
+    const protectedHere = days.filter(day => protectedByDate.has(day.localDate));
+    const adjustable = days.filter(day => !protectedByDate.has(day.localDate) &&
+      !(budget.protectedToday && day.localDate === args.today.today.localDate));
+    const withProtected = (generated: MobilePlannedDay[]): MobilePlannedDay[] =>
+      [...generated, ...protectedHere].sort((left, right) => left.localDate.localeCompare(right.localDate));
     if (budget.remainingKm <= 0) {
       warnings.push("自然周剩余预算已用完，未完成日期不再追加训练。");
-      return adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null, reason: "本自然周预算已用完。" }));
+      return withProtected(adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null,
+        reason: "本自然周预算已用完。" })));
     }
     const validation = { allowedDates, prescription: args.prescription,
       weeklyDistanceKm: budget.remainingKm, volumeCeilingKm: budget.remainingKm, qualitySessionCap: budget.qualityCap,
@@ -280,20 +308,20 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
           counters.clampedCount += checked.clamped.length;
         }
         warnings.push(...checked.rejected, ...checked.clamped);
-        if (JSON.stringify(current) === JSON.stringify(checked.days)) return checked.days;
+        if (JSON.stringify(current) === JSON.stringify(checked.days)) return withProtected(checked.days);
         current = checked.days;
       }
       warnings.push("完整课最终约束未稳定，保守返回休息。");
-      return current.map(day => ({ ...day, kind: "rest" as const, structure: null, distanceKm: null,
-        reason: "no_feasible_safe_plan：最终完整剂量校验未稳定。" }));
+      return withProtected(current.map(day => ({ ...day, kind: "rest" as const, structure: null, distanceKm: null,
+        reason: "no_feasible_safe_plan：最终完整剂量校验未稳定。" })));
     }
-    return result.days;
-  }).map(day => runCoachSessionTargets(day, args.goals.runCoach, args.prescription))
-    .map(day => args.automaticDosePolicy ? enforceAutomaticSessionDose(day, args.prescription, warnings) : day)
+    return withProtected(result.days);
+  }).map(day => protectedByDate.has(day.localDate) ? day : runCoachSessionTargets(day, args.preferences ?? args.goals.runCoach, args.prescription))
+    .map(day => protectedByDate.has(day.localDate) || !args.automaticDosePolicy ? day : enforceAutomaticSessionDose(day, args.prescription, warnings))
     // G01-B (signed 2026-10-20): a taper-forced rest day may become a short
     // activation session. This runs last, after the ordinary dose gate, because it
     // is an explicit policy exception — not a loosening of the 1800 s rule.
-    .map(day => preRaceActivationFor(day, {
+    .map(day => protectedByDate.has(day.localDate) ? day : preRaceActivationFor(day, {
       raceTarget: args.goals.raceTarget,
       prescription: args.prescription,
       weeklyVolumeBaselineKm: args.weeklyVolumeBaselineKm

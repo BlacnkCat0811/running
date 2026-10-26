@@ -8,7 +8,7 @@ trap 'rm -rf "$tmp"' EXIT
 # 这类诊断只得到 warning，而在 Swift 6 语言模式下是 error。开闸时两个编译单元
 # 0 warning；引入新 warning ⇒ 当场红。
 xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-version 5 -default-isolation MainActor \
-  apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
+  apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/TrainingPlanExecutionPolicy.swift \
   apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/PlanReceiptMatcher.swift \
   apps/ios/RAI/UserDataNoticePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift \
@@ -18,7 +18,7 @@ xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-versi
 # PR6：训练上下文 + 撤回先于下发协议 + 回执准入的纯逻辑回归。单独一个编译单元，
 # 因为它有自己的 @main（同一模块不能有两个 @main）。
 xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-version 5 -default-isolation MainActor \
-  apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
+  apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/TrainingPlanExecutionPolicy.swift \
   apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/PlanReceiptMatcher.swift \
   apps/ios/RAI/UserDataNoticePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
   apps/ios/RAI/PlanScheduleOperationJournal.swift \
@@ -53,7 +53,7 @@ PY
     if [ "$mutant" = wrong-id ]; then matcher="$tmp/$mutant.swift"; else scheduling="$tmp/$mutant.swift"; fi
     # A compile error is NOT a killed behavioral mutant.
     xcrun swiftc -parse-as-library -disable-sandbox -warnings-as-errors -swift-version 5 -default-isolation MainActor \
-      apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
+      apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/TrainingPlanExecutionPolicy.swift \
       apps/ios/RAI/WorkoutPlanMapper.swift "$matcher" apps/ios/RAI/UserDataNoticePolicy.swift "$scheduling" \
       apps/ios/RAI/PlanScheduleOperationJournal.swift \
       apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/PlanWatchSchedulingRegression.swift \

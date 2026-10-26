@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdtempSync, renameSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import type { CoachLoopRuntimeResponse, TrainingPlanStateResponseV2 } from "@rai/api-contracts";
+import { TRAINING_PLAN_CLOSED_LOOP_CONTRACT, trainingPlanClosedLoopSupport } from "@rai/api-contracts";
 import { MobileGoalsStore } from "../src/mobile-goals.js";
 import { coachLocalDate } from "../src/coach-loop-facts.js";
+import { applySessionIdentityMigration, inspectSessionIdentityMigration } from "../src/training-plan-session-migration.js";
 
 import { posixOnlyReason } from "./posix-only.js";
 
@@ -36,15 +38,19 @@ const DATABASE_MOVE_ONLY = posixOnlyReason(
 const token = "synthetic-phase5-api-token";
 const scope = { serverId: "phase5-validation", athleteId: "athlete_1", datasetEpoch: "phase5-synthetic" };
 const key = JSON.stringify([scope.serverId, scope.athleteId, scope.datasetEpoch]);
-async function start(root: string, validation: boolean): Promise<{ child: ChildProcess; url: string }> {
+async function start(root: string, validation: boolean, sessionValidation = false,
+  executionValidation = false, autoPublishValidation = false, mode: "validation" | "production" = "validation"): Promise<{ child: ChildProcess; url: string }> {
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     env: { ...process.env, RAI_RUNTIME_ROOT: root, RAI_DATABASE: join(root, "var/rai.sqlite"),
       RAI_CONTROL_DATABASE: join(root, "var/rai-control.sqlite"), RAI_API_PORT: "0", RAI_API_HOST: "127.0.0.1",
-      RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: token, RAI_SERVER_ID: scope.serverId, RAI_ATHLETE_ID: scope.athleteId,
-      RAI_DATASET_EPOCH: scope.datasetEpoch, RAI_TRAINING_PLAN_COMMAND_MODE: validation ? "validation" : "disabled" },
+      RAI_LOG_LEVEL: process.env.RAI_TEST_LOG_LEVEL ?? "silent", RAI_API_TOKEN: token, RAI_SERVER_ID: scope.serverId, RAI_ATHLETE_ID: scope.athleteId,
+      RAI_DATASET_EPOCH: scope.datasetEpoch, RAI_TRAINING_PLAN_COMMAND_MODE: validation ? mode : "disabled",
+      RAI_TRAINING_PLAN_SESSION_COMMAND_MODE: sessionValidation ? mode : "disabled",
+      RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE: executionValidation ? mode : "disabled",
+      RAI_TRAINING_PLAN_AUTO_PUBLISH_MODE: autoPublishValidation ? mode : "disabled" },
     stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
-  let output = ""; child.stdout!.on("data", data => { output += data; }); child.stderr!.on("data", data => { output += data; });
+  let output = ""; child.stdout!.on("data", data => { output += data; if (process.env.RAI_TEST_LOG_LEVEL) process.stderr.write(data); }); child.stderr!.on("data", data => { output += data; if (process.env.RAI_TEST_LOG_LEVEL) process.stderr.write(data); });
   const port = await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => { child.kill(); reject(new Error(output || "server startup timed out")); }, 60_000);
     child.once("exit", code => { clearTimeout(timer); reject(new Error(`server exited ${code}: ${output}`)); });
@@ -63,11 +69,25 @@ async function stop(child: ChildProcess): Promise<void> {
   await closed; clearTimeout(timer);
 }
 
-function seed(): string {
-  const root = mkdtempSync(join(tmpdir(), "rai-phase5-regression-"));
-  const seeded = spawnSync(process.execPath, ["--import", "tsx", "scripts/prepare-phase5-fixture.mts", root], { encoding: "utf8" });
-  assert.equal(seeded.status, 0, seeded.stdout + seeded.stderr);
-  return root;
+function seed(outsideTemporaryRoot = false): string {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "rai-phase5-regression-"));
+  let relocated: string | undefined;
+  try {
+    const seeded = spawnSync(process.execPath, ["--import", "tsx", "scripts/prepare-phase5-fixture.mts", temporaryRoot], { encoding: "utf8" });
+    assert.equal(seeded.status, 0, seeded.stdout + seeded.stderr);
+    if (!outsideTemporaryRoot) return temporaryRoot;
+    // The fixture generator keeps its temporary-only safety contract. Copy its
+    // closed synthetic databases into a new test-owned directory to exercise a
+    // normal production path; never accept an existing/personal runtime here.
+    relocated = mkdtempSync(join(process.cwd(), ".rai-production-write-test-"));
+    cpSync(temporaryRoot, relocated, { recursive: true });
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    return relocated;
+  } catch (error) {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    if (relocated) rmSync(relocated, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function client(url: string) {
@@ -109,7 +129,8 @@ function client(url: string) {
 }
 
 const controlTables = ["mobile_goals", "mobile_goals_history", "mobile_training_state", "mobile_training_state_history",
-  "mobile_plan_operations", "mobile_coach_loop_receipts", "mobile_plan_pushes"];
+  "mobile_plan_operations", "mobile_coach_loop_receipts", "mobile_plan_pushes", "mobile_training_session_history",
+  "mobile_training_execution", "mobile_training_execution_history", "mobile_training_plan_evaluation"];
 function controlSnapshot(root: string) {
   const db = new DatabaseSync(join(root, "var/rai-control.sqlite"), { readOnly: true });
   try { return controlTables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()); }
@@ -144,6 +165,32 @@ test("real router: first coach enable generates for the retained unified race go
       assert.deepEqual(JSON.parse(String(receipt.payload_json)).settings, reread.settings,
         "the immutable receipt records the configuration used by subsequent reads");
     } finally { control.close(); }
+    // B02: real maintenance upgrade + real server restart. Reads preserve a
+    // positive plan and durable IDs without enabling the still-unaccepted writer.
+    assert.ok(unified.plan.days.some(day => day.kind !== "rest"), "a zero-running fixture cannot prove identity preservation");
+    await stop(server.child); server = undefined;
+    const migrationDb = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try {
+      const migration = inspectSessionIdentityMigration(migrationDb, key);
+      applySessionIdentityMigration(migrationDb, key, migration.sourceDigest, migration.existingRevision);
+    } finally { migrationDb.close(); }
+    server = await start(root, false);
+    const upgraded = client(server.url);
+    const header = { "X-RAI-Training-Contract": "2", "X-RAI-Training-Sessions": "1" };
+    const frozen = controlSnapshot(root);
+    const extended = await upgraded.call("/v1/mobile/training-plan-state", undefined, header);
+    assert.equal(extended.status, 200, JSON.stringify(extended.value));
+    assert.deepEqual(extended.value.plan.days, unified.plan.days);
+    assert.ok(extended.value.sessions.sessions.length > 0);
+    assert.ok(extended.value.sessions.sessions.every((session: any) => session.protection === "user_protected"));
+    assert.equal(extended.value.execution.permitted, false);
+    assert.deepEqual((await upgraded.call("/v1/mobile/training-plan-state", undefined, header)).value.sessions, extended.value.sessions);
+    assert.equal((await upgraded.read()).sessions, undefined, "unnegotiated v2 retains the old wire shape");
+    assert.equal((await upgraded.call("/v1/handshake", undefined, header)).value.trainingPlanSessionContractVersion, 1,
+      "B03/G1 advertises session read only after controlled migration and owner readiness");
+    const unknown = await upgraded.call("/v1/mobile/training-plan-state", undefined, { ...header, "X-RAI-Training-Sessions": "999" });
+    assert.equal(unknown.value.code, "training_session_contract_unsupported");
+    assert.deepEqual(controlSnapshot(root), frozen, "negotiated and ordinary GETs allocate no IDs and write no business rows");
   } finally { if (server) await stop(server.child); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -294,7 +341,7 @@ test("real server startup timer: migrated managed empty window refreshes; paused
       }
       item.before = controlSnapshot(item.root);
     }
-    for (const item of cases) item.server = await start(item.root, true);
+    for (const item of cases) item.server = await start(item.root, true, false, false, true);
     // Cross the production 60-second startup timer, without exporting a special
     // test endpoint or directly calling the coordinator. Hourly timer shares it.
     await new Promise(resolve => setTimeout(resolve, 65_000));
@@ -348,6 +395,21 @@ test("Phase 5: authenticated real router, unified ownership, managed lifecycle, 
     assert.equal((await fetch(server.url + "/v1/handshake")).status, 401);
     assert.equal((await call("/v1/handshake")).value.trainingPlanCommandContractVersion, undefined, "old Apps never receive the command capability");
     assert.equal((await call("/v1/handshake", undefined, { "X-RAI-Client-Training-Commands": "2" })).value.trainingPlanCommandContractVersion, 2);
+    // B01 freezes contracts without advertising new runtime capabilities, even
+    // to a client that asks for all four extensions in the validation server.
+    const extensionHeaders = Object.fromEntries(
+      (["sessions", "sessionCommands", "executionCommands", "updates"] as const)
+        .map(key => [TRAINING_PLAN_CLOSED_LOOP_CONTRACT[key].header, "1"]));
+    const assertClosedLoopDeferred = async () => {
+      const handshake = (await call("/v1/handshake", undefined,
+        { ...extensionHeaders, "X-RAI-Client-Training-Commands": "2" })).value;
+      for (const key of ["sessions", "sessionCommands", "executionCommands", "updates"] as const) {
+        assert.equal(handshake[TRAINING_PLAN_CLOSED_LOOP_CONTRACT[key].capability], undefined, key);
+      }
+      assert.deepEqual(trainingPlanClosedLoopSupport(handshake),
+        { sessions: false, sessionCommands: false, executionCommands: false, updates: false });
+    };
+    await assertClosedLoopDeferred();
     assert.equal((await call("/v1/mobile/goals")).status, 410);
     assert.equal((await call("/v1/nonexistent-phase5")).status, 404);
     const before = await read();
@@ -417,6 +479,7 @@ test("Phase 5: authenticated real router, unified ownership, managed lifecycle, 
     assert.equal(cannotResume.value.code, "training_cannot_resume");
     await stop(server.child); server = await start(root, false);
     assert.equal((await call("/v1/handshake", undefined, { "X-RAI-Client-Training-Commands": "2" })).value.trainingPlanCommandContractVersion, undefined);
+    await assertClosedLoopDeferred();
     assert.deepEqual(await call("/v1/mobile/training-plan/commands", changed.payload), changed.response, "replay remains available after process restart and admission disabled");
     assert.equal((await call("/v1/mobile/training-plan/commands/preview", { contractVersion: 2, operationScope: scope,
       expectedStateRevision: (await read()).stateRevision, action: "clear_race_goal" })).value.code, "training_commands_disabled");
@@ -426,4 +489,417 @@ test("Phase 5: authenticated real router, unified ownership, managed lifecycle, 
     try { control.prepare("DELETE FROM mobile_coach_loop_receipts").run(); } finally { control.close(); }
     assert.equal((await call("/v1/mobile/training-plan-state", undefined, { "X-RAI-Training-Contract": "2" })).status, 409);
   } finally { await stop(server.child); rmSync(root, { recursive: true, force: true }); }
+});
+
+
+for (const mode of ["validation", "production"] as const) {
+test(`B04 real HTTP: independent negotiation, six session actions, safety, restart replay and writer disable/replay (${mode})`, async () => {
+  const root = seed(mode === "production");
+  let server: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    const control = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try { const migration = inspectSessionIdentityMigration(control, key);
+      applySessionIdentityMigration(control, key, migration.sourceDigest, migration.existingRevision);
+    } finally { control.close(); }
+    server = await start(root, false, true, false, false, mode);
+    let api = client(server.url);
+    assert.equal((await fetch(server.url + "/v1/handshake")).status, 401);
+    assert.equal((await fetch(server.url + "/v1/mobile/training-plan/session-commands", {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}"
+    })).status, 401, "write admission never bypasses Bearer authentication");
+    const headers = { "X-RAI-Client-Training-Session-Commands": "1" };
+    const read = async () => (await api.call("/v1/mobile/training-plan-state", undefined,
+      { "X-RAI-Training-Contract": "2", "X-RAI-Training-Sessions": "1" })).value;
+    const today = (await read()).businessDate;
+    const date = (offset: number) => new Date(Date.parse(today + "T00:00:00Z") + offset * 86400000).toISOString().slice(0, 10);
+    const prescription = (offset: number, km: number) => ({ localDate: date(offset), kind: "easy", distanceKm: km,
+      reason: null, structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1,
+        steps: [{ purpose: "work", goal: { type: "distance", meters: km * 1000 }, alert: null }] }] } });
+    const request = async (draft: object) => { const state = await read(); return { contractVersion: 1, operationScope: scope,
+      expectedStateRevision: state.stateRevision, planInstanceId: state.sessions.planInstanceId, draft }; };
+    const save = async (draft: object) => {
+      const input = await request(draft);
+      const preview = await api.call("/v1/mobile/training-plan/session-commands/preview", input, headers);
+      assert.equal(preview.status, 200, JSON.stringify(preview.value));
+      const body = { ...input, operationId: randomUUID(), candidateId: preview.value.candidateId };
+      const response = await api.call("/v1/mobile/training-plan/session-commands", body, headers);
+      assert.equal(response.status, 200, JSON.stringify(response.value)); return { body, response, preview: preview.value };
+    };
+    assert.equal((await api.call("/v1/handshake")).value.trainingPlanSessionCommandContractVersion, undefined);
+    const sessionHandshake = (await api.call("/v1/handshake", undefined, headers)).value;
+    assert.equal(sessionHandshake.trainingPlanSessionCommandContractVersion, 1);
+    assert.equal(sessionHandshake.trainingPlanSessionDistanceOmissionContractVersion, undefined,
+      "COMPAT-01: session command 1 alone does not negotiate omission");
+    const omissionHeaders = { ...headers, "X-RAI-Client-Training-Session-Distance-Omission": "1" };
+    assert.equal((await api.call("/v1/handshake", undefined, omissionHeaders)).value.trainingPlanSessionDistanceOmissionContractVersion, 1,
+      "COMPAT-01: current server explicitly negotiates distance omission");
+    assert.equal((await api.call("/v1/handshake", undefined,
+      { ...headers, "X-RAI-Client-Training-Session-Distance-Omission": "2" })).value.trainingPlanSessionDistanceOmissionContractVersion, undefined);
+
+    assert.equal(sessionHandshake.trainingPlanCommandContractVersion, undefined, "session writes do not require the separate configuration switch");
+    const add = await request({ action: "add", prescription: prescription(2, 2) });
+    assert.equal((await api.call("/v1/mobile/training-plan/session-commands/preview", add)).value.code, "training_session_commands_disabled");
+    const added = await save(add.draft);
+    assert.equal(added.response.value.session.sessionId, added.preview.impact.after.sessionId);
+    let session = added.response.value.session;
+    const existing = () => ({ sessionId: session.sessionId, sessionRevision: session.sessionRevision });
+    const frozen = controlSnapshot(root);
+    const tooMuch = await request({ action: "edit", ...existing(), patch: { distanceKm: 30, structure: prescription(2, 30).structure } });
+    assert.equal((await api.call("/v1/mobile/training-plan/session-commands/preview", tooMuch, headers)).value.code, "training_session_safety_rejected");
+    assert.deepEqual(controlSnapshot(root), frozen);
+    session = (await save({ action: "move", ...existing(), localDate: date(3) })).response.value.session;
+    assert.equal(session.sessionId, added.response.value.session.sessionId);
+    session = (await save({ action: "edit", ...existing(), patch: { distanceKm: 3, structure: prescription(3, 3).structure, reason: null } })).response.value.session;
+    assert.equal(session.prescription.distanceKm, 3);
+    session = (await save({ action: "edit", ...existing(), patch: { kind: "recovery" } })).response.value.session;
+    assert.equal(session.prescription.kind, "recovery");
+    assert.equal(session.prescription.structure.blocks[0].steps[0].goal.meters, 3000);
+    const protectedCourse = structuredClone(session);
+    await stop(server.child); server = undefined;
+    server = await start(root, true, true, false, false, mode); api = client(server.url);
+    for (let pass = 0; pass < 3; pass++) {
+      const current = await read();
+      const refreshed = await api.call("/v1/mobile/training-plan/commands/refresh", { contractVersion: 2,
+        operationId: randomUUID(), operationScope: scope, expectedStateRevision: current.stateRevision });
+      assert.equal(refreshed.status, 200, JSON.stringify(refreshed.value));
+      const after = await read();
+      assert.deepEqual(after.sessions.sessions.find((item: any) => item.sessionId === session.sessionId), protectedCourse,
+        "repeated real refresh preserves the exact edited course, ID and session revision");
+      assert.equal(after.plan.days.find((item: any) => item.localDate === date(2))?.kind, "rest", "the moved source cannot resurrect");
+    }
+    session = (await save({ action: "unlock", ...existing() })).response.value.session;
+    assert.equal(session.protection, "automatic");
+    session = (await save({ action: "cancel", ...existing() })).response.value.session;
+    assert.equal(session.lifecycle, "cancelled");
+    const rest = await save({ action: "set_rest", localDate: date(10) });
+    const finalState = await read();
+    await stop(server.child); server = undefined;
+    server = await start(root, false, false, false, false, mode); api = client(server.url);
+    const before = controlSnapshot(root);
+    assert.deepEqual(await api.call("/v1/mobile/training-plan/session-commands", rest.body, headers), rest.response,
+      "committed replay is available after restart with the writer closed");
+    assert.equal((await read()).sessions.sessions[0].lifecycle, "cancelled");
+    assert.deepEqual((await read()).sessions, finalState.sessions);
+    assert.equal((await api.call("/v1/handshake", undefined, headers)).value.trainingPlanSessionCommandContractVersion, undefined);
+    assert.equal((await api.call("/v1/mobile/training-plan/session-commands/preview", await request({ action: "set_rest", localDate: date(11) }), headers)).value.code,
+      "training_session_commands_disabled");
+    assert.deepEqual(controlSnapshot(root), before);
+  } finally { if (server) await stop(server.child); rmSync(root, { recursive: true, force: true }); }
+});
+}
+
+for (const mode of ["validation", "production"] as const) {
+test(`B06 real HTTP: execution candidates, confirm, unified execution read, replay and retract (${mode})`, async () => {
+  const root = seed(mode === "production");
+  let server: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    const control = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try {
+      const migration = inspectSessionIdentityMigration(control, key);
+      applySessionIdentityMigration(control, key, migration.sourceDigest, migration.existingRevision);
+    } finally { control.close(); }
+    server = await start(root, true, true, true, false, mode);
+    let api = client(server.url);
+    const sessionHeaders = { "X-RAI-Client-Training-Session-Commands": "1" };
+    const executionHeaders = { "X-RAI-Client-Training-Execution-Commands": "1" };
+    const read = async () => (await api.call("/v1/mobile/training-plan-state", undefined,
+      { "X-RAI-Training-Contract": "2", "X-RAI-Training-Sessions": "1" })).value;
+    const today = (await read()).businessDate;
+    const prescription = { localDate: today, kind: "easy", distanceKm: 2, reason: "B06 synthetic",
+      structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1,
+        steps: [{ purpose: "work", goal: { type: "distance", meters: 2000 }, alert: null }] }] } };
+    const addInput = { contractVersion: 1, operationScope: scope, expectedStateRevision: (await read()).stateRevision,
+      planInstanceId: (await read()).sessions.planInstanceId, draft: { action: "add", prescription } };
+    const preview = await api.call("/v1/mobile/training-plan/session-commands/preview", addInput, sessionHeaders);
+    assert.equal(preview.status, 200, JSON.stringify(preview.value));
+    const addBody = { ...addInput, operationId: randomUUID(), candidateId: preview.value.candidateId };
+    const added = await api.call("/v1/mobile/training-plan/session-commands", addBody, sessionHeaders);
+    assert.equal(added.status, 200, JSON.stringify(added.value));
+    const sessionId = added.value.session.sessionId as string;
+    assert.equal(added.value.session.lifecycle, "pending");
+
+    // The synthetic course is published now; the synthetic run happened at
+    // 00:05 today. Age the course's availability so the real frozen-prescription
+    // rule ("published before the run") is exercised instead of bypassed.
+    const agedAt = new Date(Date.parse(today + "T00:00:00Z") - 86400000).toISOString().replace(".000Z", ".000Z");
+    const aged = new Date(Date.parse(`${today}T00:00:00+08:00`) - 86400000).toISOString();
+    const controlWrite = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try {
+      const raw = controlWrite.prepare("SELECT payload_json FROM mobile_training_state WHERE scope=?").get(key) as { payload_json: string };
+      const payload = JSON.parse(raw.payload_json) as any;
+      const course = payload.sessions.find((item: any) => item.sessionId === sessionId);
+      assert.ok(course, "the added course is in the unified state");
+      course.availableAt = aged;
+      controlWrite.prepare("UPDATE mobile_training_state SET payload_json=? WHERE scope=?").run(JSON.stringify(payload), key);
+      const frozen = controlWrite.prepare(`SELECT payload_json FROM mobile_training_session_history
+        WHERE scope=? AND session_id=? AND session_revision=?`).get(key, sessionId, course.sessionRevision) as { payload_json: string };
+      const history = JSON.parse(frozen.payload_json) as any;
+      history.availableAt = aged;
+      controlWrite.prepare(`UPDATE mobile_training_session_history SET payload_json=?, available_at=?
+        WHERE scope=? AND session_id=? AND session_revision=?`).run(JSON.stringify(history), aged, key, sessionId, course.sessionRevision);
+    } finally { controlWrite.close(); }
+    void agedAt;
+
+    const runStart = `${today}T00:05:00+08:00`, runEnd = `${today}T00:50:00+08:00`;
+    const main = new DatabaseSync(join(root, "var/rai.sqlite"));
+    try {
+      main.prepare(`INSERT INTO workouts (id,activity_type,source_name,source_category,start_at,end_at,duration_seconds,
+        metadata_json,raw_attributes_json,is_canonical) VALUES (?,?,?,?,?,?,?,?,?,1)`)
+        .run("b06-workout", "HKWorkoutActivityTypeRunning", "Synthetic Watch", "watchOS", runStart, runEnd, 2700, "{}", "{}");
+      main.prepare(`INSERT INTO training_sessions (id,activity_type,anchor_start_at,anchor_end_at,anchor_distance_km,
+        canonical_workout_id,status) VALUES (?,?,?,?,?,?,'active')`)
+        .run("b06-run", "HKWorkoutActivityTypeRunning", runStart, runEnd, 2.1, "b06-workout");
+    } finally { main.close(); }
+
+    assert.equal((await api.call("/v1/handshake")).value.trainingPlanExecutionCommandContractVersion, undefined);
+    assert.equal((await api.call("/v1/handshake", undefined, executionHeaders)).value.trainingPlanExecutionCommandContractVersion, 1);
+    const candidatePath = `/v1/mobile/training-plan/sessions/${sessionId}/execution-candidates?planInstanceId=${encodeURIComponent((await read()).sessions.planInstanceId)}`;
+    assert.equal((await api.call(candidatePath)).value.code, "training_execution_commands_disabled");
+    const candidates = await api.call(candidatePath, undefined, executionHeaders);
+    assert.equal(candidates.status, 200, JSON.stringify(candidates.value));
+    const candidate = candidates.value.candidates.find((item: any) => item.trainingSessionId === "b06-run");
+    assert.ok(candidate, JSON.stringify(candidates.value));
+    assert.equal(candidate.evidence, "needs_confirmation");
+    assert.equal(candidate.distanceMeters, 2100);
+    assert.equal(candidates.value.executionRevision, 0);
+    const body = { contractVersion: 1, operationId: randomUUID(), operationScope: scope,
+      expectedStateRevision: (await read()).stateRevision, planInstanceId: (await read()).sessions.planInstanceId,
+      sessionId, sessionRevision: added.value.session.sessionRevision, executionRevision: 0,
+      draft: { action: "confirm", trainingSessionId: "b06-run", sourceFactDigest: candidate.sourceFactDigest } };
+    const confirmed = await api.call("/v1/mobile/training-plan/execution-commands", body, executionHeaders);
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmed.value));
+    assert.equal(confirmed.value.execution.association, "confirmed");
+    assert.equal(confirmed.value.execution.assessment.dose.status, "met");
+    assert.equal(confirmed.value.session.lifecycle, "completed");
+    const after = await read();
+    const execution = after.sessions.executions.find((item: any) => item.sessionId === sessionId);
+    assert.ok(execution, "the unified sessions view exposes the current execution");
+    assert.equal(execution.trainingSessionId, "b06-run");
+    assert.equal(execution.assessment.stimulus.status, "not_assessable");
+    const verified = await api.call(candidatePath, undefined, executionHeaders);
+    assert.equal(verified.value.candidates.find((item: any) => item.trainingSessionId === "b06-run").evidence, "verified_identity");
+    assert.equal(verified.value.executionRevision, 1);
+    assert.deepEqual(await api.call("/v1/mobile/training-plan/execution-commands", body, executionHeaders), confirmed,
+      "the durable key replays the original result");
+    const retract = { ...body, operationId: randomUUID(), expectedStateRevision: after.stateRevision,
+      sessionRevision: confirmed.value.session.sessionRevision, executionRevision: 1,
+      draft: { action: "retract", trainingSessionId: "b06-run", sourceFactDigest: candidate.sourceFactDigest } };
+    const retracted = await api.call("/v1/mobile/training-plan/execution-commands", retract, executionHeaders);
+    assert.equal(retracted.status, 200, JSON.stringify(retracted.value));
+    assert.equal(retracted.value.execution.association, "invalidated");
+    assert.equal(retracted.value.session.lifecycle, "pending");
+    const final = await read();
+    assert.equal(final.sessions.executions.find((item: any) => item.sessionId === sessionId).association, "invalidated");
+    const history = new DatabaseSync(join(root, "var/rai-control.sqlite"), { readOnly: true });
+    try {
+      assert.equal((history.prepare("SELECT COUNT(*) AS n FROM mobile_training_execution_history WHERE session_id=?").get(sessionId) as { n: number }).n, 2);
+    } finally { history.close(); }
+    await stop(server.child); server = undefined;
+    server = await start(root, false); api = client(server.url);
+    const closedSnapshot = controlSnapshot(root);
+    assert.deepEqual(await api.call("/v1/mobile/training-plan/execution-commands", body, executionHeaders), confirmed,
+      "closing the production writer preserves the original operation result");
+    assert.equal((await api.call(candidatePath, undefined, executionHeaders)).value.code, "training_execution_commands_disabled");
+    assert.deepEqual(controlSnapshot(root), closedSnapshot, "disabled replay remains read-only");
+  } finally { if (server) await stop(server.child); rmSync(root, { recursive: true, force: true }); }
+});
+}
+
+test("B08 real HTTP: update stages, no-change refresh cursor, GET zero-write and a new fact moving the input identity", async () => {
+  const root = seed();
+  let server: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    const control = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try {
+      const migration = inspectSessionIdentityMigration(control, key);
+      applySessionIdentityMigration(control, key, migration.sourceDigest, migration.existingRevision);
+    } finally { control.close(); }
+    server = await start(root, true, false, false, true);
+    const api = client(server.url);
+    const updateHeaders = { "X-RAI-Training-Contract": "2", "X-RAI-Training-Sessions": "1", "X-RAI-Training-Updates": "1" };
+    const read = async () => (await api.call("/v1/mobile/training-plan-state", undefined, updateHeaders)).value;
+    const handshake = (await api.call("/v1/handshake", undefined, updateHeaders)).value;
+    assert.equal(handshake.trainingPlanUpdateContractVersion, 1);
+    assert.equal((await api.call("/v1/mobile/training-plan-state", undefined,
+      { "X-RAI-Training-Contract": "2" })).value.update, undefined, "update view is never sent unnegotiated");
+    assert.equal((await api.call("/v1/mobile/training-plan-state", undefined,
+      { "X-RAI-Training-Contract": "2", "X-RAI-Training-Updates": "1" })).value.code, "training_update_contract_unsupported");
+    const first = await read();
+    assert.equal(first.update.contractVersion, 1);
+    assert.equal(first.update.facts.status, "pending");
+    assert.equal(first.update.plan.status, "pending");
+    assert.equal(first.update.plan.publishedInputKey, null);
+    const refresh = async (operationId: string) => {
+      const state = await read();
+      return api.call("/v1/mobile/training-plan/commands/refresh", { contractVersion: 2, operationId,
+        operationScope: scope, expectedStateRevision: state.stateRevision });
+    };
+    const changed = await refresh("b08-refresh-1");
+    assert.equal(changed.status, 200, JSON.stringify(changed.value));
+    assert.equal(changed.value.outcome, "changed");
+    const afterFirst = await read();
+    assert.equal(afterFirst.update.plan.status, "current");
+    assert.equal(afterFirst.update.plan.publishedInputKey, afterFirst.update.plan.desiredInputKey);
+    assert.ok(afterFirst.sessions.sessions.length > 0);
+    const frozen = controlSnapshot(root);
+    // Repeated reads (all four stages) are pure: no state, history, operation or cursor writes.
+    for (let pass = 0; pass < 3; pass++) assert.deepEqual(await read(), afterFirst);
+    assert.deepEqual(controlSnapshot(root), frozen);
+
+    const second = await refresh("b08-refresh-2");
+    assert.equal(second.status, 200, JSON.stringify(second.value));
+    assert.equal(second.value.outcome, "no_change", "same inputs do not publish a second content revision");
+    assert.equal(second.value.stateRevision, afterFirst.stateRevision);
+    const afterSecond = await read();
+    assert.equal(afterSecond.stateRevision, afterFirst.stateRevision);
+    assert.equal(afterSecond.update.plan.evaluatedInputKey, afterSecond.update.plan.desiredInputKey);
+
+    // A corrected/added running fact changes the desired key; the published plan
+    // is no longer presented as current until the next publication.
+    const today = afterSecond.businessDate;
+    const main = new DatabaseSync(join(root, "var/rai.sqlite"));
+    try {
+      main.prepare(`INSERT INTO workouts (id,activity_type,source_name,source_category,start_at,end_at,duration_seconds,
+        metadata_json,raw_attributes_json,is_canonical) VALUES (?,?,?,?,?,?,?,?,?,1)`)
+        .run("b08-workout", "HKWorkoutActivityTypeRunning", "Synthetic Watch", "watchOS",
+          `${today}T06:00:00+08:00`, `${today}T06:40:00+08:00`, 2400, "{}", "{}");
+      main.prepare(`INSERT INTO training_sessions (id,activity_type,anchor_start_at,anchor_end_at,anchor_distance_km,
+        canonical_workout_id,status) VALUES (?,?,?,?,?,?,'active')`)
+        .run("b08-run", "HKWorkoutActivityTypeRunning", `${today}T06:00:00+08:00`, `${today}T06:40:00+08:00`, 7, "b08-workout");
+    } finally { main.close(); }
+    const dirty = await read();
+    assert.equal(dirty.update.facts.status, "stored");
+    assert.notEqual(dirty.update.plan.desiredInputKey, dirty.update.plan.publishedInputKey);
+    assert.equal(dirty.update.plan.status, "pending");
+    assert.ok(dirty.update.plan.reasonCodes.includes("input_changed"), JSON.stringify(dirty.update.plan));
+    const third = await refresh("b08-refresh-3");
+    assert.equal(third.status, 200, JSON.stringify(third.value));
+    assert.equal(third.value.outcome, "no_change", "a new easy run changed the input but not the generated content");
+    assert.equal(third.value.stateRevision, afterSecond.stateRevision, "no content revision was fabricated");
+    const afterThird = await read();
+    assert.equal(afterThird.update.plan.status, "current");
+    assert.equal(afterThird.update.plan.evaluatedInputKey, afterThird.update.plan.desiredInputKey);
+    assert.equal(afterThird.update.plan.publishedInputKey, afterSecond.update.plan.publishedInputKey,
+      "content still comes from the last publication that actually changed it");
+  } finally { if (server) await stop(server.child); rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const mode of ["validation", "production"] as const) {
+test(`B08 real server timer: a newly confirmed execution converges to a current evaluation without a manual refresh (${mode})`, async () => {
+  const root = seed(mode === "production");
+  let server: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    const control = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try {
+      const migration = inspectSessionIdentityMigration(control, key);
+      applySessionIdentityMigration(control, key, migration.sourceDigest, migration.existingRevision);
+    } finally { control.close(); }
+    server = await start(root, true, true, true, true, mode);
+    const api = client(server.url);
+    const sessionHeaders = { "X-RAI-Client-Training-Session-Commands": "1" };
+    const executionHeaders = { "X-RAI-Client-Training-Execution-Commands": "1" };
+    const updateHeaders = { "X-RAI-Training-Contract": "2", "X-RAI-Training-Sessions": "1", "X-RAI-Training-Updates": "1" };
+    const read = async () => (await api.call("/v1/mobile/training-plan-state", undefined, updateHeaders)).value;
+    let state = await read();
+    const today = state.businessDate;
+    let course = state.sessions.sessions.find((item: any) => item.prescription.localDate === today && item.lifecycle === "pending");
+    if (!course) {
+      const prescription = { localDate: today, kind: "easy", distanceKm: 2, reason: "B08 auto synthetic",
+        structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1,
+          steps: [{ purpose: "work", goal: { type: "distance", meters: 2000 }, alert: null }] }] } };
+      const draft = { contractVersion: 1, operationScope: scope, expectedStateRevision: state.stateRevision,
+        planInstanceId: state.sessions.planInstanceId, draft: { action: "add", prescription } };
+      const preview = await api.call("/v1/mobile/training-plan/session-commands/preview", draft, sessionHeaders);
+      assert.equal(preview.status, 200, JSON.stringify(preview.value));
+      const saved = await api.call("/v1/mobile/training-plan/session-commands", { ...draft,
+        operationId: randomUUID(), candidateId: preview.value.candidateId }, sessionHeaders);
+      assert.equal(saved.status, 200, JSON.stringify(saved.value));
+      course = saved.value.session; state = await read();
+    }
+    const sessionId = course.sessionId as string;
+    const aged = new Date(Date.parse(`${today}T00:00:00+08:00`) - 86400000).toISOString();
+    const controlWrite = new DatabaseSync(join(root, "var/rai-control.sqlite"));
+    try {
+      const raw = controlWrite.prepare("SELECT payload_json FROM mobile_training_state WHERE scope=?").get(key) as { payload_json: string };
+      const payload = JSON.parse(raw.payload_json) as any;
+      const entry = payload.sessions.find((item: any) => item.sessionId === sessionId);
+      entry.availableAt = aged;
+      controlWrite.prepare("UPDATE mobile_training_state SET payload_json=? WHERE scope=?").run(JSON.stringify(payload), key);
+      const frozen = controlWrite.prepare(`SELECT payload_json FROM mobile_training_session_history
+        WHERE scope=? AND session_id=? AND session_revision=?`).get(key, sessionId, entry.sessionRevision) as { payload_json: string };
+      const history = JSON.parse(frozen.payload_json) as any; history.availableAt = aged;
+      controlWrite.prepare(`UPDATE mobile_training_session_history SET payload_json=?, available_at=?
+        WHERE scope=? AND session_id=? AND session_revision=?`).run(JSON.stringify(history), aged, key, sessionId, entry.sessionRevision);
+    } finally { controlWrite.close(); }
+    // Keep the synthetic run finished even when this test runs before 06:25.
+    const runEndMs = Date.now() - 1000;
+    const runStartMs = Math.max(Date.parse(`${today}T00:00:00+08:00`), runEndMs - 1500000);
+    const runStart = new Date(runStartMs).toISOString(), runEnd = new Date(runEndMs).toISOString();
+    const runDurationSeconds = (runEndMs - runStartMs) / 1000;
+    const main = new DatabaseSync(join(root, "var/rai.sqlite"));
+    try {
+      main.prepare(`INSERT INTO workouts (id,activity_type,source_name,source_category,start_at,end_at,duration_seconds,
+        metadata_json,raw_attributes_json,is_canonical) VALUES (?,?,?,?,?,?,?,?,?,1)`)
+        .run("b08-auto-workout", "HKWorkoutActivityTypeRunning", "Synthetic Watch", "watchOS", runStart, runEnd, runDurationSeconds, "{}", "{}");
+      main.prepare(`INSERT INTO training_sessions (id,activity_type,anchor_start_at,anchor_end_at,anchor_distance_km,
+        canonical_workout_id,status) VALUES (?,?,?,?,?,?,'active')`)
+        .run("b08-auto-run", "HKWorkoutActivityTypeRunning", runStart, runEnd, 2.1, "b08-auto-workout");
+    } finally { main.close(); }
+    const candidatePath = `/v1/mobile/training-plan/sessions/${sessionId}/execution-candidates?planInstanceId=${encodeURIComponent(state.sessions.planInstanceId)}`;
+    const candidates = await api.call(candidatePath, undefined, executionHeaders);
+    assert.equal(candidates.status, 200, JSON.stringify(candidates.value));
+    const candidate = candidates.value.candidates.find((item: any) => item.trainingSessionId === "b08-auto-run");
+    assert.ok(candidate, JSON.stringify(candidates.value));
+    const confirm = await api.call("/v1/mobile/training-plan/execution-commands", { contractVersion: 1,
+      operationId: randomUUID(), operationScope: scope, expectedStateRevision: state.stateRevision,
+      planInstanceId: state.sessions.planInstanceId, sessionId, sessionRevision: state.sessions.sessions.find((item: any) => item.sessionId === sessionId).sessionRevision,
+      executionRevision: 0, draft: { action: "confirm", trainingSessionId: "b08-auto-run", sourceFactDigest: candidate.sourceFactDigest } }, executionHeaders);
+    assert.equal(confirm.status, 200, JSON.stringify(confirm.value));
+    assert.equal(confirm.value.execution.association, "confirmed");
+    // The 60-second startup/periodic convergence tick must notice the new
+    // execution digest and evaluate it without any client refresh.
+    await new Promise(resolve => setTimeout(resolve, 72_000));
+    const converged = await read();
+    assert.ok(converged.update, "the update view is negotiated");
+    assert.equal(converged.update.plan.status, "current", JSON.stringify(converged.update.plan));
+    assert.equal(converged.update.plan.evaluatedInputKey, converged.update.plan.desiredInputKey);
+    assert.equal(converged.sessions.executions.find((item: any) => item.sessionId === sessionId).association, "confirmed");
+  } finally { if (server) await stop(server.child); rmSync(root, { recursive: true, force: true }); }
+});
+}
+
+
+test("production training writes require authentication and explicit database targets before opening any database", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-production-mode-refusal-"));
+  const modeKeys = ["RAI_TRAINING_PLAN_COMMAND_MODE", "RAI_TRAINING_PLAN_SESSION_COMMAND_MODE",
+    "RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE", "RAI_TRAINING_PLAN_AUTO_PUBLISH_MODE"];
+  const baseEnv = { ...process.env, RAI_RUNTIME_ROOT: root, RAI_DATABASE: join(root, "facts.sqlite"),
+    RAI_CONTROL_DATABASE: join(root, "control.sqlite"), RAI_API_PORT: "0", RAI_API_HOST: "127.0.0.1",
+    ...Object.fromEntries(modeKeys.map(name => [name, "disabled"])) };
+  try {
+    for (const name of modeKeys) {
+      const result = spawnSync(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+        env: { ...baseEnv, RAI_API_TOKEN: " ", [name]: "production" }, encoding: "utf8", timeout: 15_000, killSignal: "SIGKILL"
+      });
+      assert.ok(result.status !== null && result.status !== 0, result.stdout + result.stderr);
+      assert.match(result.stderr, /production writes require RAI_API_TOKEN/);
+      assert.deepEqual(readdirSync(root), [], "refusal must precede database/sidecar creation");
+    }
+    const result = spawnSync(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+      env: { ...baseEnv, RAI_API_TOKEN: token, RAI_CONTROL_DATABASE: "", RAI_TRAINING_PLAN_SESSION_COMMAND_MODE: "production" },
+      encoding: "utf8", timeout: 15_000, killSignal: "SIGKILL"
+    });
+    assert.ok(result.status !== null && result.status !== 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /production writes require explicit RAI_RUNTIME_ROOT/);
+    assert.deepEqual(readdirSync(root), []);
+    const mixed = spawnSync(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+      env: { ...baseEnv, RAI_API_TOKEN: token, RAI_TRAINING_PLAN_SESSION_COMMAND_MODE: "production",
+        RAI_TRAINING_PLAN_COMMAND_MODE: "validation", RAI_API_HOST: "0.0.0.0" },
+      encoding: "utf8", timeout: 15_000, killSignal: "SIGKILL"
+    });
+    assert.ok(mixed.status !== null && mixed.status !== 0, mixed.stdout + mixed.stderr);
+    assert.match(mixed.stderr, /validation requires an isolated temporary runtime/,
+      "production must not disable the validation-mode isolation guard");
+    assert.deepEqual(readdirSync(root), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

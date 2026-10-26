@@ -1,0 +1,3 @@
+类型检查 103 个文件（已跳过 3 个仅依赖高德 SDK 的文件）
+error: input file 'apps/ios/RAI/APIModels.swift' was modified during the build
+error: input file 'apps/ios/RAI/APIModels.swift' was modified during the build

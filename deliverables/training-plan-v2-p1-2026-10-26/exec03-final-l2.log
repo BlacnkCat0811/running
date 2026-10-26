@@ -1,0 +1,410 @@
+TAP version 13
+# Subtest: B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+ok 1 - B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+  ---
+  duration_ms: 3.189778
+  type: 'test'
+  ...
+# Subtest: B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+ok 2 - B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+  ---
+  duration_ms: 16.102331
+  type: 'test'
+  ...
+# Subtest: B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+ok 3 - B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+  ---
+  duration_ms: 0.903557
+  type: 'test'
+  ...
+# Subtest: B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+ok 4 - B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+  ---
+  duration_ms: 0.541148
+  type: 'test'
+  ...
+# Subtest: B01: all new error codes and capability headers are documented without declaring runtime support
+ok 5 - B01: all new error codes and capability headers are documented without declaring runtime support
+  ---
+  duration_ms: 3.622427
+  type: 'test'
+  ...
+# Subtest: 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+ok 6 - 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+  ---
+  duration_ms: 21.199736
+  type: 'test'
+  ...
+# Subtest: B08/S04-01/03: analysis pending blocks every reason that would otherwise publish
+ok 7 - B08/S04-01/03: analysis pending blocks every reason that would otherwise publish
+  ---
+  duration_ms: 0.932476
+  type: 'test'
+  ...
+# Subtest: 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+ok 8 - 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+  ---
+  duration_ms: 0.400618
+  type: 'test'
+  ...
+# Subtest: 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+ok 9 - 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+  ---
+  duration_ms: 0.639848
+  type: 'test'
+  ...
+# Subtest: 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+ok 10 - 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+  ---
+  duration_ms: 1.993728
+  type: 'test'
+  ...
+# Subtest: 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+ok 11 - 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+  ---
+  duration_ms: 0.408868
+  type: 'test'
+  ...
+# Subtest: B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats
+ok 12 - B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats
+  ---
+  duration_ms: 2.035092
+  type: 'test'
+  ...
+# Subtest: B08: the automatic operation key changes with the input identity, not only the state revision
+ok 13 - B08: the automatic operation key changes with the input identity, not only the state revision
+  ---
+  duration_ms: 0.292989
+  type: 'test'
+  ...
+# (node:29159) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+ok 14 - B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 241.485071
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+ok 15 - B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 144.146729
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+ok 16 - B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+  ---
+  duration_ms: 75.408903
+  type: 'test'
+  ...
+# Subtest: B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+ok 17 - B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+  ---
+  duration_ms: 81.846939
+  type: 'test'
+  ...
+# Subtest: B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+ok 18 - B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+  ---
+  duration_ms: 108.246941
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+ok 19 - B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+  ---
+  duration_ms: 115.800093
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+ok 20 - B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+  ---
+  duration_ms: 84.033331
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+ok 21 - B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+  ---
+  duration_ms: 69.454794
+  type: 'test'
+  ...
+# Subtest: B06: strict wire parsing rejects malformed execution drafts before any write
+ok 22 - B06: strict wire parsing rejects malformed execution drafts before any write
+  ---
+  duration_ms: 37.555906
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+ok 23 - B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+  ---
+  duration_ms: 91.376638
+  type: 'test'
+  ...
+# Subtest: P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+ok 24 - P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+  ---
+  duration_ms: 159.056284
+  type: 'test'
+  ...
+# Subtest: P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+ok 25 - P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+  ---
+  duration_ms: 69.762677
+  type: 'test'
+  ...
+# Subtest: P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+ok 26 - P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+  ---
+  duration_ms: 62.793464
+  type: 'test'
+  ...
+# Subtest: P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+ok 27 - P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+  ---
+  duration_ms: 132.227333
+  type: 'test'
+  ...
+# Subtest: P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+ok 28 - P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+  ---
+  duration_ms: 268.881389
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+ok 29 - P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+  ---
+  duration_ms: 279.417441
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+ok 30 - P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+  ---
+  duration_ms: 243.582727
+  type: 'test'
+  ...
+# Subtest: P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+ok 31 - P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+  ---
+  duration_ms: 236.612904
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite state failure leaves no Skip or partial operation
+ok 32 - P-03: SQLite state failure leaves no Skip or partial operation
+  ---
+  duration_ms: 222.023782
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite receipt failure leaves no Skip or partial operation
+ok 33 - P-03: SQLite receipt failure leaves no Skip or partial operation
+  ---
+  duration_ms: 245.255116
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite commit failure leaves no Skip or partial operation
+ok 34 - P-03: SQLite commit failure leaves no Skip or partial operation
+  ---
+  duration_ms: 226.629184
+  type: 'test'
+  ...
+# Subtest: P-03: confirmed association and its immutable history survive a stale Skip
+ok 35 - P-03: confirmed association and its immutable history survive a stale Skip
+  ---
+  duration_ms: 243.265194
+  type: 'test'
+  ...
+# Subtest: P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+ok 36 - P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+  ---
+  duration_ms: 282.33027
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new confirm with stable 409 and zero business writes
+ok 37 - EXEC-01: paused rejects new confirm with stable 409 and zero business writes
+  ---
+  duration_ms: 52.338868
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new correct with stable 409 and zero business writes
+ok 38 - EXEC-01: paused rejects new correct with stable 409 and zero business writes
+  ---
+  duration_ms: 78.670671
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new skip with stable 409 and zero business writes
+ok 39 - EXEC-01: paused rejects new skip with stable 409 and zero business writes
+  ---
+  duration_ms: 58.072396
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused permits saved-identity Retract and committed Confirm replay without authorizing execution
+ok 40 - EXEC-01: paused permits saved-identity Retract and committed Confirm replay without authorizing execution
+  ---
+  duration_ms: 89.6094
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new confirm with stable 409 and zero business writes
+ok 41 - EXEC-01: ended rejects new confirm with stable 409 and zero business writes
+  ---
+  duration_ms: 54.511049
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new correct with stable 409 and zero business writes
+ok 42 - EXEC-01: ended rejects new correct with stable 409 and zero business writes
+  ---
+  duration_ms: 74.030738
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new skip with stable 409 and zero business writes
+ok 43 - EXEC-01: ended rejects new skip with stable 409 and zero business writes
+  ---
+  duration_ms: 58.374236
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended permits saved-identity Retract and committed Confirm replay without authorizing execution
+ok 44 - EXEC-01: ended permits saved-identity Retract and committed Confirm replay without authorizing execution
+  ---
+  duration_ms: 76.821617
+  type: 'test'
+  ...
+# Subtest: EXEC-02: confirm detects real fact change at assessment and rolls back all control rows
+ok 45 - EXEC-02: confirm detects real fact change at assessment and rolls back all control rows
+  ---
+  duration_ms: 275.604564
+  type: 'test'
+  ...
+# Subtest: EXEC-02: confirm detects real fact change at receipt and rolls back all control rows
+ok 46 - EXEC-02: confirm detects real fact change at receipt and rolls back all control rows
+  ---
+  duration_ms: 219.6436
+  type: 'test'
+  ...
+# Subtest: EXEC-02: correct detects real fact change at assessment and rolls back all control rows
+ok 47 - EXEC-02: correct detects real fact change at assessment and rolls back all control rows
+  ---
+  duration_ms: 231.491222
+  type: 'test'
+  ...
+# Subtest: EXEC-02: correct detects real fact change at receipt and rolls back all control rows
+ok 48 - EXEC-02: correct detects real fact change at receipt and rolls back all control rows
+  ---
+  duration_ms: 238.181258
+  type: 'test'
+  ...
+# Subtest: EXEC-02: correct detects real fact change at no-change receipt and rolls back all control rows
+ok 49 - EXEC-02: correct detects real fact change at no-change receipt and rolls back all control rows
+  ---
+  duration_ms: 361.246789
+  type: 'test'
+  ...
+# Subtest: EXEC-02: candidate and assessment use the same source identity and recorded duration
+ok 50 - EXEC-02: candidate and assessment use the same source identity and recorded duration
+  ---
+  duration_ms: 327.885577
+  type: 'test'
+  ...
+# Subtest: EXEC-02: id mismatch in workout assessment rejects without partial claim
+ok 51 - EXEC-02: id mismatch in workout assessment rejects without partial claim
+  ---
+  duration_ms: 268.147812
+  type: 'test'
+  ...
+# Subtest: EXEC-02: digest mismatch in workout assessment rejects without partial claim
+ok 52 - EXEC-02: digest mismatch in workout assessment rejects without partial claim
+  ---
+  duration_ms: 256.62566
+  type: 'test'
+  ...
+# Subtest: EXEC-02: distance mismatch in workout assessment rejects without partial claim
+ok 53 - EXEC-02: distance mismatch in workout assessment rejects without partial claim
+  ---
+  duration_ms: 341.310643
+  type: 'test'
+  ...
+# Subtest: EXEC-02: duration mismatch in workout assessment rejects without partial claim
+ok 54 - EXEC-02: duration mismatch in workout assessment rejects without partial claim
+  ---
+  duration_ms: 322.99836
+  type: 'test'
+  ...
+# Subtest: EXEC-03: a fact restored after Reconcile receipt insertion rolls back invalidation and history
+ok 55 - EXEC-03: a fact restored after Reconcile receipt insertion rolls back invalidation and history
+  ---
+  duration_ms: 249.786159
+  type: 'test'
+  ...
+# Subtest: EXEC-03: HTTP Confirm and background Reconcile use one non-nested fact lease through COMMIT
+ok 56 - EXEC-03: HTTP Confirm and background Reconcile use one non-nested fact lease through COMMIT
+  ---
+  duration_ms: 421.738706
+  type: 'test'
+  ...
+# Subtest: EXEC-02/03: an independent CLI process respects the API publication lock, then Reconcile sees its committed fact
+ok 57 - EXEC-02/03: an independent CLI process respects the API publication lock, then Reconcile sees its committed fact
+  ---
+  duration_ms: 1288.471203
+  type: 'test'
+  ...
+# Subtest: EXEC-03: recovery between pre-scan and transaction cannot persist a no-change receipt that masks later deletion
+ok 58 - EXEC-03: recovery between pre-scan and transaction cannot persist a no-change receipt that masks later deletion
+  ---
+  duration_ms: 268.77896
+  type: 'test'
+  ...
+# Subtest: EXEC-03: legacy reconcile no-change receipt remains immutable without blocking a new v2 evaluation
+ok 59 - EXEC-03: legacy reconcile no-change receipt remains immutable without blocking a new v2 evaluation
+  ---
+  duration_ms: 267.361864
+  type: 'test'
+  ...
+# (node:29159) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-02: default window is ±2 natural days; expanded range is capped at 31 days and must contain the course
+ok 60 - B06/S03-02: default window is ±2 natural days; expanded range is capped at 31 days and must contain the course
+  ---
+  duration_ms: 6.910924
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: cross-midnight runs are filtered by startedAt's Shanghai date, not endedAt
+ok 61 - B06/S03-02: cross-midnight runs are filtered by startedAt's Shanghai date, not endedAt
+  ---
+  duration_ms: 23.605673
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is not a write token
+ok 62 - B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is not a write token
+  ---
+  duration_ms: 15.384073
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: cursor is bound to contract scope, range and the candidate fact set
+ok 63 - B06/S03-02: cursor is bound to contract scope, range and the candidate fact set
+  ---
+  duration_ms: 4.006645
+  type: 'test'
+  ...
+# Subtest: B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial
+ok 64 - B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial
+  ---
+  duration_ms: 8.336228
+  type: 'test'
+  ...
+# Subtest: B06: the fact digest changes when the main library corrects or re-imports the run
+ok 65 - B06: the fact digest changes when the main library corrects or re-imports the run
+  ---
+  duration_ms: 1.125227
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: early/late runs stay candidates in the ±2 window and same-day runs are never merged
+ok 66 - B06/S03-02: early/late runs stay candidates in the ±2 window and same-day runs are never merged
+  ---
+  duration_ms: 1.462655
+  type: 'test'
+  ...
+1..66
+# tests 66
+# suites 0
+# pass 66
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12512.927174

@@ -1,0 +1,14 @@
+{
+  "name": "ios",
+  "argv": [
+    "npm",
+    "run",
+    "test:ios"
+  ],
+  "envOverrides": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "startedEpoch": 1792999039.860896,
+  "durationSeconds": 971.3239028453827,
+  "exitCode": 0
+}

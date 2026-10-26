@@ -1,0 +1,2299 @@
+TAP version 13
+# (node:98496) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 41 missing mappings have runnable assertions: 77/78 without explicit compile evidence, not a fake AC8-05 pass
+ok 1 - 41 missing mappings have runnable assertions: 77/78 without explicit compile evidence, not a fake AC8-05 pass
+  ---
+  duration_ms: 132548.195466
+  type: 'test'
+  ...
+# Subtest: AC8-05 only consumes current, intact, complete compiled named mutation results
+ok 2 - AC8-05 only consumes current, intact, complete compiled named mutation results
+  ---
+  duration_ms: 12.522654
+  type: 'test'
+  ...
+# Subtest: release requires the same linked compile artifact before accepting AC8-05
+ok 3 - release requires the same linked compile artifact before accepting AC8-05
+  ---
+  duration_ms: 9.051086
+  type: 'test'
+  ...
+# Subtest: failed/non-deterministic scenario cannot certify its earlier passing assertion
+ok 4 - failed/non-deterministic scenario cannot certify its earlier passing assertion
+  ---
+  duration_ms: 101.540256
+  type: 'test'
+  ...
+# Subtest: C01: the V2 output is a projection of the same decision, not a second computation
+ok 5 - C01: the V2 output is a projection of the same decision, not a second computation
+  ---
+  duration_ms: 5.20649
+  type: 'test'
+  ...
+# Subtest: C01: the projection never reads display text — only tone, codes and triggers
+ok 6 - C01: the projection never reads display text — only tone, codes and triggers
+  ---
+  duration_ms: 2.62275
+  type: 'test'
+  ...
+# Subtest: C01: a day with no stored plan reports action=null instead of stretching the enum
+ok 7 - C01: a day with no stored plan reports action=null instead of stretching the enum
+  ---
+  duration_ms: 1.058836
+  type: 'test'
+  ...
+# Subtest: C01: keeping a stored plan reports keep_plan without re-deriving it
+ok 8 - C01: keeping a stored plan reports keep_plan without re-deriving it
+  ---
+  duration_ms: 2.168922
+  type: 'test'
+  ...
+# Subtest: C01: an insufficient-data verdict maps to collect_evidence, not to a plan action
+ok 9 - C01: an insufficient-data verdict maps to collect_evidence, not to a plan action
+  ---
+  duration_ms: 1.213275
+  type: 'test'
+  ...
+# Subtest: C01: every disposition maps to a declared action, and null is reserved for one case
+ok 10 - C01: every disposition maps to a declared action, and null is reserved for one case
+  ---
+  duration_ms: 0.874437
+  type: 'test'
+  ...
+# Subtest: C01: inputSnapshotIds carry real identities and never an empty placeholder
+ok 11 - C01: inputSnapshotIds carry real identities and never an empty placeholder
+  ---
+  duration_ms: 0.317368
+  type: 'test'
+  ...
+# Subtest: C01: the snapshot entry path is the one that produces the versioned decision
+ok 12 - C01: the snapshot entry path is the one that produces the versioned decision
+  ---
+  duration_ms: 0.687078
+  type: 'test'
+  ...
+# Subtest: C01: a race day with no stored plan still says no plan was stored
+ok 13 - C01: a race day with no stored plan still says no plan was stored
+  ---
+  duration_ms: 0.827177
+  type: 'test'
+  ...
+# Subtest: C01: a budget-exhausted rest is labelled rest, not reduce_duration
+ok 14 - C01: a budget-exhausted rest is labelled rest, not reduce_duration
+  ---
+  duration_ms: 1.958093
+  type: 'test'
+  ...
+# Subtest: C01: evidence insufficiency does not pre-empt the plan outcome
+ok 15 - C01: evidence insufficiency does not pre-empt the plan outcome
+  ---
+  duration_ms: 0.418018
+  type: 'test'
+  ...
+# Subtest: AC2-01/04: observed light running and reconstructed groups cannot certify intervals
+ok 16 - AC2-01/04: observed light running and reconstructed groups cannot certify intervals
+  ---
+  duration_ms: 27.38576
+  type: 'test'
+  ...
+# Subtest: AC2-02/03: no record is unknown; strong dose with no signal stays unconfirmed
+ok 17 - AC2-02/03: no record is unknown; strong dose with no signal stays unconfirmed
+  ---
+  duration_ms: 1.313035
+  type: 'test'
+  ...
+# Subtest: AC2-05: 89.9/90% per-group dose and 79.9/80% signal coverage boundaries are independent
+ok 18 - AC2-05: 89.9/90% per-group dose and 79.9/80% signal coverage boundaries are independent
+  ---
+  duration_ms: 4.329584
+  type: 'test'
+  ...
+# Subtest: AC2-06: recovery run too fast is too hard, never improved completion credit
+ok 19 - AC2-06: recovery run too fast is too hard, never improved completion credit
+  ---
+  duration_ms: 1.181756
+  type: 'test'
+  ...
+# Subtest: AC2-07: one associated run is not combined with another; many obligations cannot reuse a run
+ok 20 - AC2-07: one associated run is not combined with another; many obligations cannot reuse a run
+  ---
+  duration_ms: 2.984749
+  type: 'test'
+  ...
+# Subtest: AC2-08: late training/signals, retracted receipts and after-the-run prescriptions cannot rewrite past evidence
+ok 21 - AC2-08: late training/signals, retracted receipts and after-the-run prescriptions cannot rewrite past evidence
+  ---
+  duration_ms: 2.252352
+  type: 'test'
+  ...
+# Subtest: actual work cannot pool one long group into four reps; missing recoveries and partial steps remain bounded
+ok 22 - actual work cannot pool one long group into four reps; missing recoveries and partial steps remain bounded
+  ---
+  duration_ms: 4.284725
+  type: 'test'
+  ...
+# Subtest: corrupt/overlapping signals cannot fake 80% coverage; interval HR without lag policy does not confirm
+ok 23 - corrupt/overlapping signals cannot fake 80% coverage; interval HR without lag policy does not confirm
+  ---
+  duration_ms: 1.214486
+  type: 'test'
+  ...
+# Subtest: rest is not applicable; input stays immutable and candidate conclusions are deterministic
+ok 24 - rest is not applicable; input stays immutable and candidate conclusions are deterministic
+  ---
+  duration_ms: 2.099022
+  type: 'test'
+  ...
+# Subtest: candidate quality summary preserves observed semantics, unknown denominator and one frozen fact clock
+ok 25 - candidate quality summary preserves observed semantics, unknown denominator and one frozen fact clock
+  ---
+  duration_ms: 1.866183
+  type: 'test'
+  ...
+# Subtest: AC3-07/09: seven dates and all 2187 combinations agree with evaluator-owned oracle twice
+ok 26 - AC3-07/09: seven dates and all 2187 combinations agree with evaluator-owned oracle twice
+  ---
+  duration_ms: 11125.826456
+  type: 'test'
+  ...
+# Subtest: O8 continuation: O2 and O3 cross-week candidate sequences are deterministic and asserted
+ok 27 - O8 continuation: O2 and O3 cross-week candidate sequences are deterministic and asserted
+  ---
+  duration_ms: 109.861845
+  type: 'test'
+  ...
+# Subtest: O8 continuation: feedback, goal-gap and three-distance protection have frozen cross-week traces
+ok 28 - O8 continuation: feedback, goal-gap and three-distance protection have frozen cross-week traces
+  ---
+  duration_ms: 73.40923
+  type: 'test'
+  ...
+# Subtest: O8 generic event adapter keeps future and late facts out of earlier checkpoints
+ok 29 - O8 generic event adapter keeps future and late facts out of earlier checkpoints
+  ---
+  duration_ms: 1.027906
+  type: 'test'
+  ...
+# (node:98578) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: O5 real feedback HTTP command is append-only, CAS/idempotent, reversible and independent of goals/Fitness
+ok 30 - O5 real feedback HTTP command is append-only, CAS/idempotent, reversible and independent of goals/Fitness
+  ---
+  duration_ms: 3281.493279
+  type: 'test'
+  ...
+# Subtest: O6 companion publication leaves sealed bundle untouched and invalidates on facts/model identity
+ok 31 - O6 companion publication leaves sealed bundle untouched and invalidates on facts/model identity
+  ---
+  duration_ms: 4.327015
+  type: 'test'
+  ...
+# Subtest: O5 fact operation rolls back append on failure and rejects reuse for a different request
+ok 32 - O5 fact operation rolls back append on failure and rejects reuse for a different request
+  ---
+  duration_ms: 597.20348
+  type: 'test'
+  ...
+# Subtest: AC6-01/02 candidate: +300/0/-300 seconds, never a success probability or calibrated guarantee
+ok 33 - AC6-01/02 candidate: +300/0/-300 seconds, never a success probability or calibrated guarantee
+  ---
+  duration_ms: 28.3519
+  type: 'test'
+  ...
+# Subtest: AC6-03/04 candidate: time goal changes no source facts; no goal/summary/unsupported distance stay distinct
+ok 34 - AC6-03/04 candidate: time goal changes no source facts; no goal/summary/unsupported distance stay distinct
+  ---
+  duration_ms: 2.139708
+  type: 'test'
+  ...
+# Subtest: AC6-04 candidate: 6/7/8 Shanghai days use dataThrough, not a fresh calculation timestamp
+ok 35 - AC6-04 candidate: 6/7/8 Shanghai days use dataThrough, not a fresh calculation timestamp
+  ---
+  duration_ms: 1.098386
+  type: 'test'
+  ...
+# Subtest: AC6-05/07/08 candidate: every compatibility identity, future availability and scenario is checked
+ok 36 - AC6-05/07/08 candidate: every compatibility identity, future availability and scenario is checked
+  ---
+  duration_ms: 0.886256
+  type: 'test'
+  ...
+# Subtest: AC6-06 candidate helper: repeated reads are pure and deterministic; it does not own a report builder
+ok 37 - AC6-06 candidate helper: repeated reads are pure and deterministic; it does not own a report builder
+  ---
+  duration_ms: 31.126326
+  type: 'test'
+  ...
+# (node:98616) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: AC0-17/21: safety occupancy and withdrawal lookup cannot be truncated by 250 newer unrelated receipts
+ok 38 - AC0-17/21: safety occupancy and withdrawal lookup cannot be truncated by 250 newer unrelated receipts
+  ---
+  duration_ms: 16279.64123
+  type: 'test'
+  ...
+# Subtest: AC0-12/17/21 R22: new receipt registers exact today authorization; retries, pause and withdrawal preserve occupancy
+ok 39 - AC0-12/17/21 R22: new receipt registers exact today authorization; retries, pause and withdrawal preserve occupancy
+  ---
+  duration_ms: 2235.235734
+  type: 'test'
+  ...
+# Subtest: AC0-22/AC3-08: new receipt rejects identity/structure/auth forgeries and rolls back inserted evidence on failure
+ok 40 - AC0-22/AC3-08: new receipt rejects identity/structure/auth forgeries and rolls back inserted evidence on failure
+  ---
+  duration_ms: 1949.688945
+  type: 'test'
+  ...
+# Subtest: AC0-17/21: stale verified device evidence is historical, duplicate schedules are not current, future outlook is not device authority
+ok 41 - AC0-17/21: stale verified device evidence is historical, duplicate schedules are not current, future outlook is not device authority
+  ---
+  duration_ms: 5308.191962
+  type: 'test'
+  ...
+# Subtest: AC0-12/22: HTTP capability/schema refuses unknown receipt versions and concurrent enable loses CAS, not half authorization
+ok 42 - AC0-12/22: HTTP capability/schema refuses unknown receipt versions and concurrent enable loses CAS, not half authorization
+  ---
+  duration_ms: 2748.905
+  type: 'test'
+  ...
+# Subtest: AC0-12: regular courses with null authority/unknown targets use the new HTTP contract without inventing pace or HR
+ok 43 - AC0-12: regular courses with null authority/unknown targets use the new HTTP contract without inventing pace or HR
+  ---
+  duration_ms: 1236.826183
+  type: 'test'
+  ...
+# (node:98662) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: memo key: every field is load-bearing, guard failures never match
+ok 44 - memo key: every field is load-bearing, guard failures never match
+  ---
+  duration_ms: 16.946217
+  type: 'test'
+  ...
+# Subtest: memo class: TTL expiry and key changes invalidate; constant is 1s
+ok 45 - memo class: TTL expiry and key changes invalidate; constant is 1s
+  ---
+  duration_ms: 0.343468
+  type: 'test'
+  ...
+# Subtest: readCached reuses one stable snapshot within the TTL, read() always recomputes
+ok 46 - readCached reuses one stable snapshot within the TTL, read() always recomputes
+  ---
+  duration_ms: 1147.685772
+  type: 'test'
+  ...
+# Subtest: readCached invalidates immediately on main data_version and control writes
+ok 47 - readCached invalidates immediately on main data_version and control writes
+  ---
+  duration_ms: 1165.492925
+  type: 'test'
+  ...
+# Subtest: readCached does not reuse a snapshot after the identity scope changes
+ok 48 - readCached does not reuse a snapshot after the identity scope changes
+  ---
+  duration_ms: 443.072698
+  type: 'test'
+  ...
+# Subtest: readCached fails closed while a publication guard is pending
+ok 49 - readCached fails closed while a publication guard is pending
+  ---
+  duration_ms: 59.091861
+  type: 'test'
+  ...
+# Subtest: without a data_version provider readCached degrades to read()
+ok 50 - without a data_version provider readCached degrades to read()
+  ---
+  duration_ms: 6958.950579
+  type: 'test'
+  ...
+# Subtest: GET /v1/mobile/coach-loop actually serves the memoized snapshot
+ok 51 - GET /v1/mobile/coach-loop actually serves the memoized snapshot
+  ---
+  duration_ms: 1987.209857
+  type: 'test'
+  ...
+# (node:98699) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unsupported-race protection rejects both new and retained long runs in the last two days
+ok 52 - unsupported-race protection rejects both new and retained long runs in the last two days
+  ---
+  duration_ms: 3167.561389
+  type: 'test'
+  ...
+# Subtest: today's locked rest is authoritative with or without a conflicting stored day
+ok 53 - today's locked rest is authoritative with or without a conflicting stored day
+  ---
+  duration_ms: 5234.682712
+  type: 'test'
+  ...
+# Subtest: a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+ok 54 - a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+  ---
+  duration_ms: 8136.4567
+  type: 'test'
+  ...
+# Subtest: locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+ok 55 - locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+  ---
+  duration_ms: 813.728972
+  type: 'test'
+  ...
+# Subtest: frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+ok 56 - frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+  ---
+  duration_ms: 993.293149
+  type: 'test'
+  ...
+# Subtest: HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+ok 57 - HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+  ---
+  duration_ms: 2582.118586
+  type: 'test'
+  ...
+# Subtest: an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+ok 58 - an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+  ---
+  duration_ms: 2313.006408
+  type: 'test'
+  ...
+# Subtest: G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+ok 59 - G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+  ---
+  duration_ms: 671.033988
+  type: 'test'
+  ...
+# (node:98819) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: AC0-13 real control transaction publishes 20+5 extension, GET is readonly, retries do not add sessions
+ok 60 - AC0-13 real control transaction publishes 20+5 extension, GET is readonly, retries do not add sessions
+  ---
+  duration_ms: 3442.998274
+  type: 'test'
+  ...
+# Subtest: AC0-22 failed receipt rolls back goals, stale facts and scope are rejected
+ok 61 - AC0-22 failed receipt rolls back goals, stale facts and scope are rejected
+  ---
+  duration_ms: 249.119182
+  type: 'test'
+  ...
+# Subtest: R20 high load, actual 22+5, completion and pause block unsafe extra training
+ok 62 - R20 high load, actual 22+5, completion and pause block unsafe extra training
+  ---
+  duration_ms: 1243.469513
+  type: 'test'
+  ...
+# Subtest: new HTTP contract negotiates explicit policy and publishes actual extension
+ok 63 - new HTTP contract negotiates explicit policy and publishes actual extension
+  ---
+  duration_ms: 21056.205241
+  type: 'test'
+  ...
+# Subtest: O4 runtime can select a quality course in a complete supported week, not only offline templates
+ok 64 - O4 runtime can select a quality course in a complete supported week, not only offline templates
+  ---
+  duration_ms: 1372.768576
+  type: 'test'
+  ...
+# Subtest: completed extension keeps its rolling count and original stored prescription; expired intentions are not completed
+ok 65 - completed extension keeps its rolling count and original stored prescription; expired intentions are not completed
+  ---
+  duration_ms: 2035.36126
+  type: 'test'
+  ...
+# Subtest: AC3-01/AC0-21: fractional real-world zones are canonical before authorization, so same-facts refresh never manufactures a revision
+ok 66 - AC3-01/AC0-21: fractional real-world zones are canonical before authorization, so same-facts refresh never manufactures a revision
+  ---
+  duration_ms: 2754.87662
+  type: 'test'
+  ...
+# Subtest: F04: a daily-adaptive programme never writes the public race goal, so enable/update/pause/resume/end preserve it
+ok 67 - F04: a daily-adaptive programme never writes the public race goal, so enable/update/pause/resume/end preserve it
+  ---
+  duration_ms: 1488.581935
+  type: 'test'
+  ...
+# Subtest: F07: an ended programme cannot be paused back into a resumable state
+ok 68 - F07: an ended programme cannot be paused back into a resumable state
+  ---
+  duration_ms: 442.698029
+  type: 'test'
+  ...
+# Subtest: F04: a race-mode enable still publishes its declared race and end keeps that published goal
+ok 69 - F04: a race-mode enable still publishes its declared race and end keeps that published goal
+  ---
+  duration_ms: 395.461063
+  type: 'test'
+  ...
+# Subtest: F06: an ended receipt is not managed, end keeps the stored week, and same-key replay stays idempotent
+ok 70 - F06: an ended receipt is not managed, end keeps the stored week, and same-key replay stays idempotent
+  ---
+  duration_ms: 535.638587
+  type: 'test'
+  ...
+# Subtest: F06: the managed predicate fails closed except for an explicit ended receipt
+ok 71 - F06: the managed predicate fails closed except for an explicit ended receipt
+  ---
+  duration_ms: 0.275129
+  type: 'test'
+  ...
+# Subtest: AC0-05: exact duration, fastest distance bound, availability and open goals
+ok 72 - AC0-05: exact duration, fastest distance bound, availability and open goals
+  ---
+  duration_ms: 12.725713
+  type: 'test'
+  ...
+# Subtest: AC0-06/07: cold start is an estimate, padding cannot impersonate work
+ok 73 - AC0-06/07: cold start is an estimate, padding cannot impersonate work
+  ---
+  duration_ms: 0.875137
+  type: 'test'
+  ...
+# Subtest: AC0-13 candidate positive: S stays 20; H is 26; 30-minute cost is 5; GET cannot authorize
+ok 74 - AC0-13 candidate positive: S stays 20; H is 26; 30-minute cost is 5; GET cannot authorize
+  ---
+  duration_ms: 81.638939
+  type: 'test'
+  ...
+# Subtest: AC0-14/16: actual over S is not itself a veto, hard and cross-week limits are
+ok 75 - AC0-14/16: actual over S is not itself a veto, hard and cross-week limits are
+  ---
+  duration_ms: 28.852604
+  type: 'test'
+  ...
+# Subtest: AC0-15/18/19: pre-week anchor is immutable to this week's runs; spike cannot self-justify
+ok 76 - AC0-15/18/19: pre-week anchor is immutable to this week's runs; spike cannot self-justify
+  ---
+  duration_ms: 4.074745
+  type: 'test'
+  ...
+# Subtest: AC0-17 candidate count: completed, cancelled and unresolved device slots retain correct occupancy
+ok 77 - AC0-17 candidate count: completed, cancelled and unresolved device slots retain correct occupancy
+  ---
+  duration_ms: 6.705095
+  type: 'test'
+  ...
+# Subtest: AC0-18/20: no recovery devices required, but explicit evidence/sync/lifecycle restrictions cannot be bypassed
+ok 78 - AC0-18/20: no recovery devices required, but explicit evidence/sync/lifecycle restrictions cannot be bypassed
+  ---
+  duration_ms: 49.838467
+  type: 'test'
+  ...
+# Subtest: AC0-03: automatic regular generator allocates complete sessions, not seven mileage fragments
+ok 79 - AC0-03: automatic regular generator allocates complete sessions, not seven mileage fragments
+  ---
+  duration_ms: 2.47627
+  type: 'test'
+  ...
+# Subtest: O0-B/C partial production chain: S20 with Monday10 keeps complete future doses after final clamping
+ok 80 - O0-B/C partial production chain: S20 with Monday10 keeps complete future doses after final clamping
+  ---
+  duration_ms: 12.240795
+  type: 'test'
+  ...
+# Subtest: AC1-02/04/05: SYN-01 phase is peak; 14-day protection is independent and idempotent
+ok 81 - AC1-02/04/05: SYN-01 phase is peak; 14-day protection is independent and idempotent
+  ---
+  duration_ms: 0.818907
+  type: 'test'
+  ...
+# Subtest: AC1-06 partial: unsupported race metadata keeps the existing two-day compatibility policy, not a fake 14-day distance cap
+ok 82 - AC1-06 partial: unsupported race metadata keeps the existing two-day compatibility policy, not a fake 14-day distance cap
+  ---
+  duration_ms: 0.263439
+  type: 'test'
+  ...
+# Subtest: O2 partial: unobserved quality dates never independently recommend replanning
+ok 83 - O2 partial: unobserved quality dates never independently recommend replanning
+  ---
+  duration_ms: 18.027223
+  type: 'test'
+  ...
+# Subtest: O8: fixed cross-week event streams repeat deterministically; no late-arrival leakage
+ok 84 - O8: fixed cross-week event streams repeat deterministically; no late-arrival leakage
+  ---
+  duration_ms: 638.013159
+  type: 'test'
+  ...
+# Subtest: O8: corrupted identities/unknown arrival and inert future config are not valid certificates
+ok 85 - O8: corrupted identities/unknown arrival and inert future config are not valid certificates
+  ---
+  duration_ms: 52.740545
+  type: 'test'
+  ...
+# (node:98866) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:98866) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: manual writes cannot retain a heuristic provenance; settings-only writes retain their existing audit
+ok 86 - manual writes cannot retain a heuristic provenance; settings-only writes retain their existing audit
+  ---
+  duration_ms: 25.929375
+  type: 'test'
+  ...
+# Subtest: AC0-10 partial: explicit 20-minute manual structure is retained in storage and effective exports, not certified as automatic
+ok 87 - AC0-10 partial: explicit 20-minute manual structure is retained in storage and effective exports, not certified as automatic
+  ---
+  duration_ms: 14403.072729
+  type: 'test'
+  ...
+# Subtest: AC3-02/07: a still-feasible overlap keeps original bytes even when evidence or explanation changes
+ok 88 - AC3-02/07: a still-feasible overlap keeps original bytes even when evidence or explanation changes
+  ---
+  duration_ms: 194.035285
+  type: 'test'
+  ...
+# Subtest: AC3-03: only constrained dates are changed and final rather than pre-clamp content is logged
+ok 89 - AC3-03: only constrained dates are changed and final rather than pre-clamp content is logged
+  ---
+  duration_ms: 4.152595
+  type: 'test'
+  ...
+# Subtest: AC3-04: locked storage is fixed, not a bypass of effective safety
+ok 90 - AC3-04: locked storage is fixed, not a bypass of effective safety
+  ---
+  duration_ms: 1.937833
+  type: 'test'
+  ...
+# Subtest: AC3-05: outside-window saved rows are passed to the one validator and remain stored
+ok 91 - AC3-05: outside-window saved rows are passed to the one validator and remain stored
+  ---
+  duration_ms: 116.68744
+  type: 'test'
+  ...
+# Subtest: AC3-06: unknown previous training never expands the supplied intent/candidate space
+ok 92 - AC3-06: unknown previous training never expands the supplied intent/candidate space
+  ---
+  duration_ms: 16.708279
+  type: 'test'
+  ...
+# Subtest: authorizing identical steps is an execution change, not no_change; automatic rest upgrade needs explicit intent
+ok 93 - authorizing identical steps is an execution change, not no_change; automatic rest upgrade needs explicit intent
+  ---
+  duration_ms: 31.450593
+  type: 'test'
+  ...
+# Subtest: moves count once and duplicate origin candidates cannot duplicate a workout
+ok 94 - moves count once and duplicate origin candidates cannot duplicate a workout
+  ---
+  duration_ms: 2.85807
+  type: 'test'
+  ...
+# Subtest: AC3-09: small-window independent exhaustive oracle agrees with the lexicographic winner
+ok 95 - AC3-09: small-window independent exhaustive oracle agrees with the lexicographic winner
+  ---
+  duration_ms: 36.74229
+  type: 'test'
+  ...
+# Subtest: search exhaustion/mutation cannot publish an unchecked winner; safety outranks stability
+ok 96 - search exhaustion/mutation cannot publish an unchecked winner; safety outranks stability
+  ---
+  duration_ms: 39.34037
+  type: 'test'
+  ...
+# Subtest: closure does not expand stored modifications outside the rolling window; comparator cannot buy safety with preferences
+ok 97 - closure does not expand stored modifications outside the rolling window; comparator cannot buy safety with preferences
+  ---
+  duration_ms: 2.087063
+  type: 'test'
+  ...
+# Subtest: equivalent candidate deduplication is stable under enumeration order, including template metadata
+ok 98 - equivalent candidate deduplication is stable under enumeration order, including template metadata
+  ---
+  duration_ms: 5.216501
+  type: 'test'
+  ...
+# Subtest: AC8-01/04/06: all 78 acceptance IDs are inventoried; missing evidence and human/device gates never pass
+ok 99 - AC8-01/04/06: all 78 acceptance IDs are inventoried; missing evidence and human/device gates never pass
+  ---
+  duration_ms: 4.439834
+  type: 'test'
+  ...
+# Subtest: release audit rejects stale/tampered artifacts and does not equate one passing assertion with full requirement signoff
+ok 100 - release audit rejects stale/tampered artifacts and does not equate one passing assertion with full requirement signoff
+  ---
+  duration_ms: 42.950192
+  type: 'test'
+  ...
+# Subtest: AC5-01 candidate: skipping creates no record and does not invent normal or poor recovery
+ok 101 - AC5-01 candidate: skipping creates no record and does not invent normal or poor recovery
+  ---
+  duration_ms: 27.131949
+  type: 'test'
+  ...
+# Subtest: AC5-02/03 candidate: fixed Shanghai midnight, late availability and post-run comments cannot become tomorrow's pre-run state
+ok 102 - AC5-02/03 candidate: fixed Shanghai midnight, late availability and post-run comments cannot become tomorrow's pre-run state
+  ---
+  duration_ms: 2.241422
+  type: 'test'
+  ...
+# Subtest: AC5-04 candidate: explicit rest/easy requests and discomfort remain separate from device opinions
+ok 103 - AC5-04 candidate: explicit rest/easy requests and discomfort remain separate from device opinions
+  ---
+  duration_ms: 6.112788
+  type: 'test'
+  ...
+# Subtest: AC5-05/06 candidate: RPE remains an existing override reference, not a duplicate feedback value
+ok 104 - AC5-05/06 candidate: RPE remains an existing override reference, not a duplicate feedback value
+  ---
+  duration_ms: 0.983047
+  type: 'test'
+  ...
+# Subtest: AC5-07 candidate: append-only tombstones respect the decision clock and never fill gaps
+ok 105 - AC5-07 candidate: append-only tombstones respect the decision clock and never fill gaps
+  ---
+  duration_ms: 0.918966
+  type: 'test'
+  ...
+# Subtest: O4 templates have actual dose differences, minimum full sessions and mixed fartlek targets
+ok 106 - O4 templates have actual dose differences, minimum full sessions and mixed fartlek targets
+  ---
+  duration_ms: 8.060871
+  type: 'test'
+  ...
+# Subtest: O4 gates prohibit quality without eligibility and extensions are only complete easy
+ok 107 - O4 gates prohibit quality without eligibility and extensions are only complete easy
+  ---
+  duration_ms: 4.850633
+  type: 'test'
+  ...
+# (node:99045) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 六个条件全满足才走直连，且直连的事实范围是 full（2e：登记与消费者都已就位）
+ok 108 - 六个条件全满足才走直连，且直连的事实范围是 full（2e：登记与消费者都已就位）
+  ---
+  duration_ms: 10.517912
+  type: 'test'
+  ...
+# Subtest: 逐条否决：每个条件单独失效都会被点名，且不误判为直连
+ok 109 - 逐条否决：每个条件单独失效都会被点名，且不误判为直连
+  ---
+  duration_ms: 0.362919
+  type: 'test'
+  ...
+# Subtest: 完整快照（preserveAbsent=false）在**任何**其它条件组合下都不会进入直连
+ok 110 - 完整快照（preserveAbsent=false）在**任何**其它条件组合下都不会进入直连
+  ---
+  duration_ms: 0.255879
+  type: 'test'
+  ...
+# Subtest: 直连的增量选项是单一来源：返回值恒为 true，且不接受参数
+ok 111 - 直连的增量选项是单一来源：返回值恒为 true，且不接受参数
+  ---
+  duration_ms: 0.19122
+  type: 'test'
+  ...
+# Subtest: 运行期兜底拦住快照语义字段，包括类型挡不住的展开写法
+ok 112 - 运行期兜底拦住快照语义字段，包括类型挡不住的展开写法
+  ---
+  duration_ms: 0.685508
+  type: 'test'
+  ...
+# Subtest: applyDataOnlyImport 在**读取任何文件之前**先做形状校验
+ok 113 - applyDataOnlyImport 在**读取任何文件之前**先做形状校验
+  ---
+  duration_ms: 0.609537
+  type: 'test'
+  ...
+# Subtest: C01: the raw-reading entry and the snapshot entry reach the same conclusion
+ok 114 - C01: the raw-reading entry and the snapshot entry reach the same conclusion
+  ---
+  duration_ms: 7.902921
+  type: 'test'
+  ...
+# Subtest: C01: the three single-signal fixtures are distinguishable from each other (fixture guard)
+ok 115 - C01: the three single-signal fixtures are distinguishable from each other (fixture guard)
+  ---
+  duration_ms: 0.422748
+  type: 'test'
+  ...
+# Subtest: R01/C01: a snapshot with no evidence cannot be talked into a verdict by smuggled raw readings
+ok 116 - R01/C01: a snapshot with no evidence cannot be talked into a verdict by smuggled raw readings
+  ---
+  duration_ms: 0.431789
+  type: 'test'
+  ...
+# Subtest: R01: a day with no assessable recovery is not assessed, and is not reported as low
+ok 117 - R01: a day with no assessable recovery is not assessed, and is not reported as low
+  ---
+  duration_ms: 0.447548
+  type: 'test'
+  ...
+# (node:99059) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: verdict is green when load and recovery allow a quality session
+ok 118 - verdict is green when load and recovery allow a quality session
+  ---
+  duration_ms: 10.487251
+  type: 'test'
+  ...
+# Subtest: recovery display score is current-day only and uses available comparable components
+ok 119 - recovery display score is current-day only and uses available comparable components
+  ---
+  duration_ms: 0.867996
+  type: 'test'
+  ...
+# Subtest: historical recovery no longer vetoes today's base arrangement
+ok 120 - historical recovery no longer vetoes today's base arrangement
+  ---
+  duration_ms: 0.709177
+  type: 'test'
+  ...
+# Subtest: yesterday's poor recovery is not inherited by today
+ok 121 - yesterday's poor recovery is not inherited by today
+  ---
+  duration_ms: 0.453978
+  type: 'test'
+  ...
+# Subtest: recovery freshness follows its date, independently of training freshness
+ok 122 - recovery freshness follows its date, independently of training freshness
+  ---
+  duration_ms: 1.106356
+  type: 'test'
+  ...
+# Subtest: missing recovery cannot hide high load or consecutive quality warnings
+ok 123 - missing recovery cannot hide high load or consecutive quality warnings
+  ---
+  duration_ms: 0.490088
+  type: 'test'
+  ...
+# Subtest: missing recovery records remove an input instead of adding a warning
+ok 124 - missing recovery records remove an input instead of adding a warning
+  ---
+  duration_ms: 0.411039
+  type: 'test'
+  ...
+# Subtest: high load ratio forces rest/easy
+ok 125 - high load ratio forces rest/easy
+  ---
+  duration_ms: 0.694267
+  type: 'test'
+  ...
+# Subtest: consecutive quality days block another hard session
+ok 126 - consecutive quality days block another hard session
+  ---
+  duration_ms: 0.391659
+  type: 'test'
+  ...
+# Subtest: poor sleep with HRV and RHR together is red
+ok 127 - poor sleep with HRV and RHR together is red
+  ---
+  duration_ms: 0.588368
+  type: 'test'
+  ...
+# Subtest: insufficient calibration stays yellow easy
+ok 128 - insufficient calibration stays yellow easy
+  ---
+  duration_ms: 0.266609
+  type: 'test'
+  ...
+# Subtest: easy run that drifted into threshold is too_hard
+ok 129 - easy run that drifted into threshold is too_hard
+  ---
+  duration_ms: 0.903927
+  type: 'test'
+  ...
+# Subtest: quality days follow session type not automatic stimulus
+ok 130 - quality days follow session type not automatic stimulus
+  ---
+  duration_ms: 0.178189
+  type: 'test'
+  ...
+# Subtest: easy duration floor blocks a green quality window
+ok 131 - easy duration floor blocks a green quality window
+  ---
+  duration_ms: 0.194839
+  type: 'test'
+  ...
+# Subtest: taper does not dump leftover weekly volume into a long run
+ok 132 - taper does not dump leftover weekly volume into a long run
+  ---
+  duration_ms: 18.462292
+  type: 'test'
+  ...
+# Subtest: post-run only uses today's workout
+ok 133 - post-run only uses today's workout
+  ---
+  duration_ms: 0.477858
+  type: 'test'
+  ...
+# Subtest: day phase distinguishes sync, morning, lock and post-run
+ok 134 - day phase distinguishes sync, morning, lock and post-run
+  ---
+  duration_ms: 0.187519
+  type: 'test'
+  ...
+# Subtest: injury flags fire on volume and long-run jumps
+ok 135 - injury flags fire on volume and long-run jumps
+  ---
+  duration_ms: 0.303109
+  type: 'test'
+  ...
+# Subtest: reported distance and duration never contradict the structured prescription
+ok 136 - reported distance and duration never contradict the structured prescription
+  ---
+  duration_ms: 33.691855
+  type: 'test'
+  ...
+# Subtest: interval is prescribed as distance-based 800m repeats with a fatigue cap
+ok 137 - interval is prescribed as distance-based 800m repeats with a fatigue cap
+  ---
+  duration_ms: 1.088476
+  type: 'test'
+  ...
+# Subtest: tempo is prescribed as threshold repeats
+ok 138 - tempo is prescribed as threshold repeats
+  ---
+  duration_ms: 0.272149
+  type: 'test'
+  ...
+# Subtest: easy sessions get a warmup, a single work block and a cooldown
+ok 139 - easy sessions get a warmup, a single work block and a cooldown
+  ---
+  duration_ms: 0.702467
+  type: 'test'
+  ...
+# Subtest: rest days carry no prescription and no structure
+ok 140 - rest days carry no prescription and no structure
+  ---
+  duration_ms: 0.174109
+  type: 'test'
+  ...
+# Subtest: missing zone profile still yields a measurable structure without alerts
+ok 141 - missing zone profile still yields a measurable structure without alerts
+  ---
+  duration_ms: 0.369989
+  type: 'test'
+  ...
+# Subtest: a stored plan day is measured from its structure, never from the hint beside it
+ok 142 - a stored plan day is measured from its structure, never from the hint beside it
+  ---
+  duration_ms: 0.657577
+  type: 'test'
+  ...
+# Subtest: a plan day with no structure is measured from the one its hint builds
+ok 143 - a plan day with no structure is measured from the one its hint builds
+  ---
+  duration_ms: 15.942222
+  type: 'test'
+  ...
+# Subtest: both plan endpoints give a stored day the same distance
+ok 144 - both plan endpoints give a stored day the same distance
+  ---
+  duration_ms: 26.80976
+  type: 'test'
+  ...
+# Subtest: a past prescribed session with no observation reports intent, not rest
+ok 145 - a past prescribed session with no observation reports intent, not rest
+  ---
+  duration_ms: 0.871567
+  type: 'test'
+  ...
+# Subtest: an observed date stays completed/observed and keeps the prescription it replaced
+ok 146 - an observed date stays completed/observed and keeps the prescription it replaced
+  ---
+  duration_ms: 0.725537
+  type: 'test'
+  ...
+# Subtest: a past date with no prescription says it was not planned
+ok 147 - a past date with no prescription says it was not planned
+  ---
+  duration_ms: 1.015956
+  type: 'test'
+  ...
+# Subtest: today and future rows keep their existing projection
+ok 148 - today and future rows keep their existing projection
+  ---
+  duration_ms: 0.485678
+  type: 'test'
+  ...
+# Subtest: a locked snapshot is re-measured, and today's card matches the executable week
+ok 149 - a locked snapshot is re-measured, and today's card matches the executable week
+  ---
+  duration_ms: 0.779017
+  type: 'test'
+  ...
+# Subtest: race card explains default distance and refreshes countdown and taper from the target
+ok 150 - race card explains default distance and refreshes countdown and taper from the target
+  ---
+  duration_ms: 6.420486
+  type: 'test'
+  ...
+# Subtest: race card taper uses the shared 14-day protection window and excludes race day
+ok 151 - race card taper uses the shared 14-day protection window and excludes race day
+  ---
+  duration_ms: 0.360359
+  type: 'test'
+  ...
+# Subtest: a missing night is not assessed and never reads as a low signal
+ok 152 - a missing night is not assessed and never reads as a low signal
+  ---
+  duration_ms: 0.341009
+  type: 'test'
+  ...
+# Subtest: the same poor numbers stop vetoing once they belong to yesterday
+ok 153 - the same poor numbers stop vetoing once they belong to yesterday
+  ---
+  duration_ms: 0.218459
+  type: 'test'
+  ...
+# Subtest: coverage needs a comparable baseline, and a partial day says so
+ok 154 - coverage needs a comparable baseline, and a partial day says so
+  ---
+  duration_ms: 0.697973
+  type: 'test'
+  ...
+# Subtest: the recommendation names its basis and separates a veto from missing evidence
+ok 155 - the recommendation names its basis and separates a veto from missing evidence
+  ---
+  duration_ms: 0.535338
+  type: 'test'
+  ...
+# Subtest: the night that woke today is the one the verdict reads
+ok 156 - the night that woke today is the one the verdict reads
+  ---
+  duration_ms: 0.356479
+  type: 'test'
+  ...
+# Subtest: stored rest and long-run days drive today; red gates still veto training
+ok 157 - stored rest and long-run days drive today; red gates still veto training
+  ---
+  duration_ms: 0.513958
+  type: 'test'
+  ...
+# (node:99061) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: every declared session kind is accepted as a push receipt
+ok 158 - every declared session kind is accepted as a push receipt
+  ---
+  duration_ms: 96.811204
+  type: 'test'
+  ...
+# Subtest: an unknown kind or a non-date is refused with a diagnosable 400
+ok 159 - an unknown kind or a non-date is refused with a diagnosable 400
+  ---
+  duration_ms: 142.827054
+  type: 'test'
+  ...
+# Subtest: a receipt round-trips, stays newest-first, and survives a reopen
+ok 160 - a receipt round-trips, stays newest-first, and survives a reopen
+  ---
+  duration_ms: 154.376581
+  type: 'test'
+  ...
+# Subtest: plan history exposes the revisions a run can be matched against
+ok 161 - plan history exposes the revisions a run can be matched against
+  ---
+  duration_ms: 169.476126
+  type: 'test'
+  ...
+# Subtest: both plan-kind schemas take their enum from the shared list
+ok 162 - both plan-kind schemas take their enum from the shared list
+  ---
+  duration_ms: 0.427248
+  type: 'test'
+  ...
+# Subtest: a cached read still sees this store's own writes
+ok 163 - a cached read still sees this store's own writes
+  ---
+  duration_ms: 88.405344
+  type: 'test'
+  ...
+# Subtest: a cached read still sees another connection's commit
+ok 164 - a cached read still sees another connection's commit
+  ---
+  duration_ms: 104.414805
+  type: 'test'
+  ...
+# Subtest: a cached window matches the query it replaced
+ok 165 - a cached window matches the query it replaced
+  ---
+  duration_ms: 94.281683
+  type: 'test'
+  ...
+# Subtest: system-schedule metadata is additive, idempotent and survives reopen without rewriting legacy receipts
+ok 166 - system-schedule metadata is additive, idempotent and survives reopen without rewriting legacy receipts
+  ---
+  duration_ms: 70.354211
+  type: 'test'
+  ...
+# Subtest: old and new receipt bodies pass public schema; malformed UUID/time cannot claim metadata
+ok 167 - old and new receipt bodies pass public schema; malformed UUID/time cannot claim metadata
+  ---
+  duration_ms: 1139.395102
+  type: 'test'
+  ...
+# Subtest: A3: two completed low weeks recommend a re-draft without claiming anything about the current week
+ok 168 - A3: two completed low weeks recommend a re-draft without claiming anything about the current week
+  ---
+  duration_ms: 16.709763
+  type: 'test'
+  ...
+# Subtest: A3: only one completed low week is not enough; a completed on-track week breaks the streak
+ok 169 - A3: only one completed low week is not enough; a completed on-track week breaks the streak
+  ---
+  duration_ms: 1.365165
+  type: 'test'
+  ...
+# Subtest: prescription digest: TS/Swift shared fixture values (including the half-value boundary)
+ok 170 - prescription digest: TS/Swift shared fixture values (including the half-value boundary)
+  ---
+  duration_ms: 2.131222
+  type: 'test'
+  ...
+# Subtest: prescription number: micro quantization, -0, half values and range guard
+ok 171 - prescription number: micro quantization, -0, half values and range guard
+  ---
+  duration_ms: 0.632978
+  type: 'test'
+  ...
+# Subtest: prescription digest: kind must be an enumeration member, so `|` cannot forge a collision
+ok 172 - prescription digest: kind must be an enumeration member, so `|` cannot forge a collision
+  ---
+  duration_ms: 0.539478
+  type: 'test'
+  ...
+# (node:99169) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: MobileGoalsRevisionConflictError maps to 409 even when a route forgets to catch it
+ok 173 - MobileGoalsRevisionConflictError maps to 409 even when a route forgets to catch it
+  ---
+  duration_ms: 2.165261
+  type: 'test'
+  ...
+# Subtest: POST /v1/mobile/coach-loop maps a stale expectedRevision to 409 with currentRevision
+ok 174 - POST /v1/mobile/coach-loop maps a stale expectedRevision to 409 with currentRevision
+  ---
+  duration_ms: 848.662023
+  type: 'test'
+  ...
+# Subtest: coach_snapshot_changed keeps its 503 code/message instead of being redacted to internal_error
+ok 175 - coach_snapshot_changed keeps its 503 code/message instead of being redacted to internal_error
+  ---
+  duration_ms: 0.406968
+  type: 'test'
+  ...
+# Subtest: transient snapshot conflicts advertise one-second Retry-After (P2-6)
+ok 176 - transient snapshot conflicts advertise one-second Retry-After (P2-6)
+  ---
+  duration_ms: 0.337758
+  type: 'test'
+  ...
+# Subtest: control-database busy keeps a retryable 503 instead of being redacted (P3-8)
+ok 177 - control-database busy keeps a retryable 503 instead of being redacted (P3-8)
+  ---
+  duration_ms: 0.231479
+  type: 'test'
+  ...
+# Subtest: rolling seven days crosses Monday; no record is pending, not missed
+ok 178 - rolling seven days crosses Monday; no record is pending, not missed
+  ---
+  duration_ms: 4.671613
+  type: 'test'
+  ...
+# Subtest: late edits cannot rewrite historical plans; missing history stays unknown
+ok 179 - late edits cannot rewrite historical plans; missing history stays unknown
+  ---
+  duration_ms: 1.063126
+  type: 'test'
+  ...
+# Subtest: uses Shanghai midnight, excludes same-day writes and does not equate rest with completion
+ok 180 - uses Shanghai midnight, excludes same-day writes and does not equate rest with completion
+  ---
+  duration_ms: 0.403649
+  type: 'test'
+  ...
+# Subtest: G01: phase boundaries follow the race distance, and the race week is the last one
+ok 181 - G01: phase boundaries follow the race distance, and the race week is the last one
+  ---
+  duration_ms: 8.998717
+  type: 'test'
+  ...
+# Subtest: G01: taper and race week carry visibly smaller bands than build
+ok 182 - G01: taper and race week carry visibly smaller bands than build
+  ---
+  duration_ms: 0.429959
+  type: 'test'
+  ...
+# Subtest: G01: a race more than 24 weeks out is capped, and a past race produces no skeleton
+ok 183 - G01: a race more than 24 weeks out is capped, and a past race produces no skeleton
+  ---
+  duration_ms: 0.352958
+  type: 'test'
+  ...
+# Subtest: G01: without a race target the coach says so instead of inventing a phase
+ok 184 - G01: without a race target the coach says so instead of inventing a phase
+  ---
+  duration_ms: 0.273939
+  type: 'test'
+  ...
+# Subtest: G01: weeksToRace 23 and 24 include the current week; 25 is the first forward-only skeleton
+ok 185 - G01: weeksToRace 23 and 24 include the current week; 25 is the first forward-only skeleton
+  ---
+  duration_ms: 0.803967
+  type: 'test'
+  ...
+# Subtest: G01: weeklyCapacity keeps the phase (and its trim) at the supported 24-week boundary
+ok 186 - G01: weeklyCapacity keeps the phase (and its trim) at the supported 24-week boundary
+  ---
+  duration_ms: 0.788577
+  type: 'test'
+  ...
+# Subtest: G01: invalid calendar dates are rejected instead of rolled into a neighbouring day
+ok 187 - G01: invalid calendar dates are rejected instead of rolled into a neighbouring day
+  ---
+  duration_ms: 0.723117
+  type: 'test'
+  ...
+# Subtest: G01: a skeleton never reaches into the past
+ok 188 - G01: a skeleton never reaches into the past
+  ---
+  duration_ms: 0.345899
+  type: 'test'
+  ...
+# Subtest: G02: later edits do not rewrite an elapsed week's prescriptions
+ok 189 - G02: later edits do not rewrite an elapsed week's prescriptions
+  ---
+  duration_ms: 1.841784
+  type: 'test'
+  ...
+# Subtest: Monday and midweek plans are counted without rewriting elapsed days
+ok 190 - Monday and midweek plans are counted without rewriting elapsed days
+  ---
+  duration_ms: 2.888689
+  type: 'test'
+  ...
+# Subtest: same-day initial obligations cannot be replaced by later revisions
+ok 191 - same-day initial obligations cannot be replaced by later revisions
+  ---
+  duration_ms: 1.688913
+  type: 'test'
+  ...
+# Subtest: G03: unobserved planned days are unknown, not missed
+ok 192 - G03: unobserved planned days are unknown, not missed
+  ---
+  duration_ms: 1.125736
+  type: 'test'
+  ...
+# Subtest: G03: runs before a midweek plan cannot fulfill its unobserved prescriptions
+ok 193 - G03: runs before a midweek plan cannot fulfill its unobserved prescriptions
+  ---
+  duration_ms: 1.693543
+  type: 'test'
+  ...
+# Subtest: G03: rest-day runs do not inflate adherence and missing rest-day observations are not unknown
+ok 194 - G03: rest-day runs do not inflate adherence and missing rest-day observations are not unknown
+  ---
+  duration_ms: 0.722027
+  type: 'test'
+  ...
+# Subtest: G03: with no plan history the adherence block is explicitly unknown
+ok 195 - G03: with no plan history the adherence block is explicitly unknown
+  ---
+  duration_ms: 0.902337
+  type: 'test'
+  ...
+# Subtest: G03: a week the plan asked nothing for is not 'met'
+ok 196 - G03: a week the plan asked nothing for is not 'met'
+  ---
+  duration_ms: 0.841626
+  type: 'test'
+  ...
+# Subtest: G04: re-plan advice needs two consecutive low weeks and never writes
+ok 197 - G04: re-plan advice needs two consecutive low weeks and never writes
+  ---
+  duration_ms: 1.659374
+  type: 'test'
+  ...
+# Subtest: G04: a plan above the phase band is flagged, not silently trimmed
+ok 198 - G04: a plan above the phase band is flagged, not silently trimmed
+  ---
+  duration_ms: 1.244226
+  type: 'test'
+  ...
+# Subtest: G05: without a race target nothing changes — the same ceiling as before
+ok 199 - G05: without a race target nothing changes — the same ceiling as before
+  ---
+  duration_ms: 0.252049
+  type: 'test'
+  ...
+# Subtest: G05: the current week is the phase the skeleton reports, and null without a race
+ok 200 - G05: the current week is the phase the skeleton reports, and null without a race
+  ---
+  duration_ms: 0.401628
+  type: 'test'
+  ...
+# Subtest: G01: all distances reach peak without shortening taper or build
+ok 201 - G01: all distances reach peak without shortening taper or build
+  ---
+  duration_ms: 0.499958
+  type: 'test'
+  ...
+# Subtest: future quality sessions do not make Monday under-delivered or trigger replanning
+ok 202 - future quality sessions do not make Monday under-delivered or trigger replanning
+  ---
+  duration_ms: 0.490198
+  type: 'test'
+  ...
+# Subtest: unknown weeks break consecutive low-volume observations
+ok 203 - unknown weeks break consecutive low-volume observations
+  ---
+  duration_ms: 3.457497
+  type: 'test'
+  ...
+# (node:99185) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:99185) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: a stable control snapshot is read twice and built once
+ok 204 - a stable control snapshot is read twice and built once
+  ---
+  duration_ms: 31.223304
+  type: 'test'
+  ...
+# Subtest: one control change retries against the newer snapshot and returns its build
+ok 205 - one control change retries against the newer snapshot and returns its build
+  ---
+  duration_ms: 0.605988
+  type: 'test'
+  ...
+# Subtest: a control that keeps changing fails closed after three attempts
+ok 206 - a control that keeps changing fails closed after three attempts
+  ---
+  duration_ms: 0.755017
+  type: 'test'
+  ...
+# Subtest: attempts: 1 builds once and throws without a second attempt
+ok 207 - attempts: 1 builds once and throws without a second attempt
+  ---
+  duration_ms: 2.392331
+  type: 'test'
+  ...
+# Subtest: the attempt budget is clamped to 1..5
+ok 208 - the attempt budget is clamped to 1..5
+  ---
+  duration_ms: 1.915373
+  type: 'test'
+  ...
+# Subtest: G: a publication that starts during the build discards the attempt and rebuilds
+ok 209 - G: a publication that starts during the build discards the attempt and rebuilds
+  ---
+  duration_ms: 0.821767
+  type: 'test'
+  ...
+# Subtest: G: a live publication marker blocks the build and fails closed after three attempts
+ok 210 - G: a live publication marker blocks the build and fails closed after three attempts
+  ---
+  duration_ms: 4.560103
+  type: 'test'
+  ...
+# Subtest: G: a stale pending marker left by a crashed publisher no longer blocks reads
+ok 211 - G: a stale pending marker left by a crashed publisher no longer blocks reads
+  ---
+  duration_ms: 0.504338
+  type: 'test'
+  ...
+# Subtest: P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+ok 212 - P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+  ---
+  duration_ms: 0.524008
+  type: 'test'
+  ...
+# Subtest: P3-02: a guard that starts failing after the build also fails closed
+ok 213 - P3-02: a guard that starts failing after the build also fails closed
+  ---
+  duration_ms: 1.129606
+  type: 'test'
+  ...
+# Subtest: P3-02: a store without any guard still degrades to the digest-only check
+ok 214 - P3-02: a store without any guard still degrades to the digest-only check
+  ---
+  duration_ms: 0.268179
+  type: 'test'
+  ...
+# Subtest: G: optionalPublicationGuard binds a store method and is absent when unsupported
+ok 215 - G: optionalPublicationGuard binds a store method and is absent when unsupported
+  ---
+  duration_ms: 0.528467
+  type: 'test'
+  ...
+# Subtest: read amplification: one successful attempt reads control twice and digests twice
+ok 216 - read amplification: one successful attempt reads control twice and digests twice
+  ---
+  duration_ms: 0.443678
+  type: 'test'
+  ...
+# Subtest: P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+ok 217 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+  ---
+  duration_ms: 7.239304
+  type: 'test'
+  ...
+# Subtest: P2-02: only an inode change counts as a replaced database file
+ok 218 - P2-02: only an inode change counts as a replaced database file
+  ---
+  duration_ms: 0.19137
+  type: 'test'
+  ...
+# Subtest: benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+ok 219 - benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+  ---
+  duration_ms: 20.018036
+  type: 'test'
+  ...
+# readStableSnapshot p50=0.033ms p95=0.079ms (n=200)
+# Subtest: trainingPlanState reads one control pair before and one after the build
+ok 220 - trainingPlanState reads one control pair before and one after the build
+  ---
+  duration_ms: 680.801781
+  type: 'test'
+  ...
+# Subtest: P3-03: planReadGuard never disables itself, even inside the store's own publication
+ok 221 - P3-03: planReadGuard never disables itself, even inside the store's own publication
+  ---
+  duration_ms: 0.350678
+  type: 'test'
+  ...
+# Subtest: P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+ok 222 - P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+  ---
+  duration_ms: 315.525718
+  type: 'test'
+  ...
+# Subtest: P3-15: a publication that keeps changing bounds the cost to attempts x build
+ok 223 - P3-15: a publication that keeps changing bounds the cost to attempts x build
+  ---
+  duration_ms: 10.411183
+  type: 'test'
+  ...
+# 3-attempt fail-closed span: 0.169ms (no sleep by design)
+# (node:99196) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v2 receipts are stored with a canonical UUID and UTC instant, and either spelling addresses them
+ok 224 - v2 receipts are stored with a canonical UUID and UTC instant, and either spelling addresses them
+  ---
+  duration_ms: 70.275081
+  type: 'test'
+  ...
+# Subtest: an equivalent spelling is the same entry, not a second row
+ok 225 - an equivalent spelling is the same entry, not a second row
+  ---
+  duration_ms: 52.843806
+  type: 'test'
+  ...
+# Subtest: a withdrawal spelled differently still deactivates the entry, for both spellings
+ok 226 - a withdrawal spelled differently still deactivates the entry, for both spellings
+  ---
+  duration_ms: 51.902978
+  type: 'test'
+  ...
+# Subtest: unparsable identity is refused with a diagnosable 422 instead of being stored raw
+ok 227 - unparsable identity is refused with a diagnosable 422 instead of being stored raw
+  ---
+  duration_ms: 55.574185
+  type: 'test'
+  ...
+# Subtest: the idempotency key is unique per dataset, not globally
+ok 228 - the idempotency key is unique per dataset, not globally
+  ---
+  duration_ms: 82.041762
+  type: 'test'
+  ...
+# Subtest: the same UUID/instant/event on another day is a conflict, not a silent repeat
+ok 229 - the same UUID/instant/event on another day is a conflict, not a silent repeat
+  ---
+  duration_ms: 95.599443
+  type: 'test'
+  ...
+# Subtest: publication transactions bracket the guard marker and roll back both spans
+ok 230 - publication transactions bracket the guard marker and roll back both spans
+  ---
+  duration_ms: 96.941927
+  type: 'test'
+  ...
+# Subtest: a publication's own guard marker is hidden from reads inside its transaction and cleared after
+ok 231 - a publication's own guard marker is hidden from reads inside its transaction and cleared after
+  ---
+  duration_ms: 50.750713
+  type: 'test'
+  ...
+# Subtest: a control-less store runs the transaction directly and reports an empty guard
+ok 232 - a control-less store runs the transaction directly and reports an empty guard
+  ---
+  duration_ms: 2.182108
+  type: 'test'
+  ...
+# Subtest: publicationOperation takes the guard on a new operation and leaves replay untouched
+ok 233 - publicationOperation takes the guard on a new operation and leaves replay untouched
+  ---
+  duration_ms: 103.579148
+  type: 'test'
+  ...
+# Subtest: control-database contention is a retryable 503 database_busy, not a 500 or a five-second stall
+ok 234 - control-database contention is a retryable 503 database_busy, not a 500 or a five-second stall
+  ---
+  duration_ms: 4240.863304
+  type: 'test'
+  ...
+# Subtest: an existing control database is migrated in place: canonical payload, derived columns, per-scope index
+ok 235 - an existing control database is migrated in place: canonical payload, derived columns, per-scope index
+  ---
+  duration_ms: 46.898157
+  type: 'test'
+  ...
+# Subtest: v2 receipts without an identity never fall back to byte identity
+ok 236 - v2 receipts without an identity never fall back to byte identity
+  ---
+  duration_ms: 32.42784
+  type: 'test'
+  ...
+# (node:99259) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Swift's omitted-nil structure is accepted and canonicalized, not 422/500
+ok 237 - Swift's omitted-nil structure is accepted and canonicalized, not 422/500
+  ---
+  duration_ms: 36.477616
+  type: 'test'
+  ...
+# Subtest: prescriptionDigest tolerates a missing warmup/cooldown key instead of throwing
+ok 238 - prescriptionDigest tolerates a missing warmup/cooldown key instead of throwing
+  ---
+  duration_ms: 0.752437
+  type: 'test'
+  ...
+# Subtest: a digest that does not match the canonical structure is rejected as 422 evidence mismatch
+ok 239 - a digest that does not match the canonical structure is rejected as 422 evidence mismatch
+  ---
+  duration_ms: 1.034586
+  type: 'test'
+  ...
+# Subtest: a receipt for another dataset is rejected as 409 scope mismatch
+ok 240 - a receipt for another dataset is rejected as 409 scope mismatch
+  ---
+  duration_ms: 0.500068
+  type: 'test'
+  ...
+# Subtest: verifiedAt in the future beyond five minutes and unparsable instants are 422
+ok 241 - verifiedAt in the future beyond five minutes and unparsable instants are 422
+  ---
+  duration_ms: 1.208236
+  type: 'test'
+  ...
+# Subtest: a structure with no usable canonical content is rejected instead of storing null
+ok 242 - a structure with no usable canonical content is rejected instead of storing null
+  ---
+  duration_ms: 7.454902
+  type: 'test'
+  ...
+# Subtest: the store persists the canonical structure and deduplicates both wire shapes
+ok 243 - the store persists the canonical structure and deduplicates both wire shapes
+  ---
+  duration_ms: 49.201319
+  type: 'test'
+  ...
+# (node:99288) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: training-plan-state latency: empty vs ~43k-row production approximation (p50/p95, diagnostic)
+ok 244 - training-plan-state latency: empty vs ~43k-row production approximation (p50/p95, diagnostic)
+  ---
+  duration_ms: 7704.336052
+  type: 'test'
+  ...
+# empty db n=20: p50=35.15ms p95=69.24ms
+# ~42600 rows (40k health_records + 400 nights/hrv + 400 workouts/sessions + 800 stats + 200 history) n=20: p50=75.56ms p95=103.65ms
+# Subtest: the build window is the distance's own boundary, and a longer race never builds less
+ok 245 - the build window is the distance's own boundary, and a longer race never builds less
+  ---
+  duration_ms: 5.4805
+  type: 'test'
+  ...
+# Subtest: phase is constant across every natural week it is asked about
+ok 246 - phase is constant across every natural week it is asked about
+  ---
+  duration_ms: 14.576676
+  type: 'test'
+  ...
+# Subtest: race week, past, taper and peak keep the boundaries the §20 skeleton declares
+ok 247 - race week, past, taper and peak keep the boundaries the §20 skeleton declares
+  ---
+  duration_ms: 0.923586
+  type: 'test'
+  ...
+# Subtest: a distance outside the calibrated set has no phase, not an invented one
+ok 248 - a distance outside the calibrated set has no phase, not an invented one
+  ---
+  duration_ms: 0.288519
+  type: 'test'
+  ...
+# (node:99314) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:99314) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: AC1 compatibility read: unsupported two-day quality/long protection applies to the effective layer without rewriting storage
+ok 249 - AC1 compatibility read: unsupported two-day quality/long protection applies to the effective layer without rewriting storage
+  ---
+  duration_ms: 1400.38417
+  type: 'test'
+  ...
+# Subtest: coach setup validates actual dates, distance/time, unique weekdays and long-run subsets
+ok 250 - coach setup validates actual dates, distance/time, unique weekdays and long-run subsets
+  ---
+  duration_ms: 2.974038
+  type: 'test'
+  ...
+# Subtest: coach confidence refuses to render absent evidence as zero and degrades an unsupported distance honestly
+ok 251 - coach confidence refuses to render absent evidence as zero and degrades an unsupported distance honestly
+  ---
+  duration_ms: 624.41725
+  type: 'test'
+  ...
+# Subtest: coach confidence bands a preparation score and never lets uncalibrated evidence claim high
+ok 252 - coach confidence bands a preparation score and never lets uncalibrated evidence claim high
+  ---
+  duration_ms: 1.115076
+  type: 'test'
+  ...
+# Subtest: unplanned coach days use only the current seven-day window
+ok 253 - unplanned coach days use only the current seven-day window
+  ---
+  duration_ms: 381.043276
+  type: 'test'
+  ...
+# Subtest: one weekly budget is published and spent, and matches the band the today page shows
+ok 254 - one weekly budget is published and spent, and matches the band the today page shows
+  ---
+  duration_ms: 1310.417552
+  type: 'test'
+  ...
+# Subtest: when the phase band is the binding constraint it is read from the today page, not recomputed
+ok 255 - when the phase band is the binding constraint it is read from the today page, not recomputed
+  ---
+  duration_ms: 1445.462783
+  type: 'test'
+  ...
+# Subtest: full coach response never fabricates phase lists for fitness or unsupported distances
+ok 256 - full coach response never fabricates phase lists for fitness or unsupported distances
+  ---
+  duration_ms: 1848.751148
+  type: 'test'
+  ...
+# (node:99486) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked
+ok 257 - coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked
+  ---
+  duration_ms: 6178.350729
+  type: 'test'
+  ...
+# Subtest: retired legacy plan routes answer 410 with replacements and never publish
+ok 258 - retired legacy plan routes answer 410 with replacements and never publish
+  ---
+  duration_ms: 4994.053593
+  type: 'test'
+  ...
+# Subtest: restore and deletion reject a committed import whose acknowledgement is still pending
+ok 259 - restore and deletion reject a committed import whose acknowledgement is still pending
+  ---
+  duration_ms: 6496.931446
+  type: 'test'
+  ...
+# Subtest: prediction training reports a missing active ability baseline as a conflict
+ok 260 - prediction training reports a missing active ability baseline as a conflict
+  ---
+  duration_ms: 6080.600115
+  type: 'test'
+  ...
+# Subtest: runtime status includes persisted prediction work and restore recovers recompute jobs
+ok 261 - runtime status includes persisted prediction work and restore recovers recompute jobs
+  ---
+  duration_ms: 8708.211269
+  type: 'test'
+  ...
+# Subtest: HTTP restore remains available when the active database is corrupt at startup
+ok 262 - HTTP restore remains available when the active database is corrupt at startup
+  ---
+  duration_ms: 4798.038335
+  type: 'test'
+  ...
+# Subtest: API quarantines a corrupt runtime state database and still starts
+ok 263 - API quarantines a corrupt runtime state database and still starts
+  ---
+  duration_ms: 4347.155648
+  type: 'test'
+  ...
+# Subtest: restore request fails and keeps the current database when job recovery fails
+ok 264 - restore request fails and keeps the current database when job recovery fails
+  ---
+  duration_ms: 5539.919298
+  type: 'test'
+  ...
+# Subtest: database-backed writes cannot recreate a deleted database
+ok 265 - database-backed writes cannot recreate a deleted database
+  ---
+  duration_ms: 3247.721304
+  type: 'test'
+  ...
+# Subtest: startup foreign-key failure cannot be bypassed by the request hot-open policy
+ok 266 - startup foreign-key failure cannot be bypassed by the request hot-open policy
+  ---
+  duration_ms: 3495.075121
+  type: 'test'
+  ...
+# Subtest: retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream
+ok 267 - retired weekly-planning surfaces answer 410 and never call the legacy LLM upstream
+  ---
+  duration_ms: 3555.18668
+  type: 'test'
+  ...
+# Subtest: startup retires legacy future plans and only preview confirmation enables them again
+ok 268 - startup retires legacy future plans and only preview confirmation enables them again
+  ---
+  duration_ms: 3595.734561
+  type: 'test'
+  ...
+# Subtest: dynamic-port startup reports readiness and workout overrides preserve service result
+ok 269 - dynamic-port startup reports readiness and workout overrides preserve service result
+  ---
+  duration_ms: 14034.676058
+  type: 'test'
+  ...
+# Subtest: upload HTTP errors distinguish limits, invalid archives, and internal I/O failures
+ok 270 - upload HTTP errors distinguish limits, invalid archives, and internal I/O failures
+  ---
+  duration_ms: 9648.600518
+  type: 'test'
+  ...
+# Subtest: scopes sync batch idempotency by dataset epoch
+ok 271 - scopes sync batch idempotency by dataset epoch
+  ---
+  duration_ms: 9576.796753
+  type: 'test'
+  ...
+# Subtest: deletion isolates receipts and rebuilds the same source without restart
+ok 272 - deletion isolates receipts and rebuilds the same source without restart
+  ---
+  duration_ms: 27335.900468
+  type: 'test'
+  ...
+# Subtest: deletion isolates receipts and rebuilds the same source after restart
+ok 273 - deletion isolates receipts and rebuilds the same source after restart
+  ---
+  duration_ms: 31290.205796
+  type: 'test'
+  ...
+# Subtest: restore advances durable dataset scope and reapplies commands instead of replaying stale success
+ok 274 - restore advances durable dataset scope and reapplies commands instead of replaying stale success
+  ---
+  duration_ms: 10799.655777
+  type: 'test'
+  ...
+# Subtest: training-zone HTTP errors expose only typed client failures
+ok 275 - training-zone HTTP errors expose only typed client failures
+  ---
+  duration_ms: 3449.627149
+  type: 'test'
+  ...
+# Subtest: mobile lock confirms a session when today has no recovery record
+ok 276 - mobile lock confirms a session when today has no recovery record
+  ---
+  duration_ms: 3673.304755
+  type: 'test'
+  ...
+# Subtest: every mounted write route is classified, whatever the source looks like
+ok 277 - every mounted write route is classified, whatever the source looks like
+  ---
+  duration_ms: 4042.573144
+  type: 'test'
+  ...
+# Subtest: snapshot capabilities and receipt lifecycle work through the production router
+ok 278 - snapshot capabilities and receipt lifecycle work through the production router
+  ---
+  duration_ms: 3271.341306
+  type: 'test'
+  ...
+# Subtest: P3-01: plan reads fail closed on an in-flight control publication and keep their shape
+ok 279 - P3-01: plan reads fail closed on an in-flight control publication and keep their shape
+  ---
+  duration_ms: 3934.494302
+  type: 'test'
+  ...
+# Subtest: summary export requires token even on a public host and validates its range before reading
+ok 280 - summary export requires token even on a public host and validates its range before reading
+  ---
+  duration_ms: 3230.503037
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=true, anonymousRoutes=unset
+ok 281 - workout route privacy: token=true, anonymousRoutes=unset
+  ---
+  duration_ms: 5700.025318
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=true, anonymousRoutes=1
+ok 282 - workout route privacy: token=true, anonymousRoutes=1
+  ---
+  duration_ms: 13874.937596
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=unset
+ok 283 - workout route privacy: token=false, anonymousRoutes=unset
+  ---
+  duration_ms: 14630.135023
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=0
+ok 284 - workout route privacy: token=false, anonymousRoutes=0
+  ---
+  duration_ms: 14209.857712
+  type: 'test'
+  ...
+# Subtest: workout route privacy: token=false, anonymousRoutes=1
+ok 285 - workout route privacy: token=false, anonymousRoutes=1
+  ---
+  duration_ms: 13960.101007
+  type: 'test'
+  ...
+# Subtest: retired backup endpoints create and delete nothing while the recovery path stays usable
+ok 286 - retired backup endpoints create and delete nothing while the recovery path stays usable
+  ---
+  duration_ms: 2208.336098
+  type: 'test'
+  ...
+# Subtest: retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe
+ok 287 - retired backup routes answer 410 before a database exists and the download is uncacheable and header-safe
+  ---
+  duration_ms: 1746.569775
+  type: 'test'
+  ...
+# Subtest: missing pace edges stay missing rather than becoming one second per km
+ok 288 - missing pace edges stay missing rather than becoming one second per km
+  ---
+  duration_ms: 2.82913
+  type: 'test'
+  ...
+# Subtest: corrupt pace targets are dropped, not clamped into sprint targets
+ok 289 - corrupt pace targets are dropped, not clamped into sprint targets
+  ---
+  duration_ms: 0.513549
+  type: 'test'
+  ...
+# (node:99502) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: retirement preserves today, locks, provenance, historical revisions and push receipts
+ok 290 - retirement preserves today, locks, provenance, historical revisions and push receipts
+  ---
+  duration_ms: 62.880348
+  type: 'test'
+  ...
+# Subtest: migration leaves rule/manual plans and historical-only model plans unchanged
+ok 291 - migration leaves rule/manual plans and historical-only model plans unchanged
+  ---
+  duration_ms: 161.882673
+  type: 'test'
+  ...
+# Subtest: already-retired legacy payloads acquire today's protection once
+ok 292 - already-retired legacy payloads acquire today's protection once
+  ---
+  duration_ms: 88.646394
+  type: 'test'
+  ...
+# Subtest: a today-only legacy plan is protected without opening the future-plan confirmation gate
+ok 293 - a today-only legacy plan is protected without opening the future-plan confirmation gate
+  ---
+  duration_ms: 59.880143
+  type: 'test'
+  ...
+# Subtest: retired future days never reappear as obligations from preserved history
+ok 294 - retired future days never reappear as obligations from preserved history
+  ---
+  duration_ms: 81.928334
+  type: 'test'
+  ...
+# Subtest: failed migration rolls back both current goals and the revision journal
+ok 295 - failed migration rolls back both current goals and the revision journal
+  ---
+  duration_ms: 86.330152
+  type: 'test'
+  ...
+# Subtest: file-only migration backs up the full old plan and persists its pending state
+ok 296 - file-only migration backs up the full old plan and persists its pending state
+  ---
+  duration_ms: 22.586737
+  type: 'test'
+  ...
+# Subtest: only coach confirmation clears pending retirement; settings and locks remain writable
+ok 297 - only coach confirmation clears pending retirement; settings and locks remain writable
+  ---
+  duration_ms: 131.715375
+  type: 'test'
+  ...
+# Subtest: failed confirmation cannot clear the persisted replan gate
+ok 298 - failed confirmation cannot clear the persisted replan gate
+  ---
+  duration_ms: 50.111295
+  type: 'test'
+  ...
+# Subtest: Monday generation never bypasses pending confirmation or overwrites an existing week
+ok 299 - Monday generation never bypasses pending confirmation or overwrites an existing week
+  ---
+  duration_ms: 1.927993
+  type: 'test'
+  ...
+# Subtest: B03/S01-02: a protected course outside the rolling window spends volume and quality slots exactly once
+ok 300 - B03/S01-02: a protected course outside the rolling window spends volume and quality slots exactly once
+  ---
+  duration_ms: 26.820842
+  type: 'test'
+  ...
+# Subtest: automaticDosePolicy is honored instead of silently coerced to true
+ok 301 - automaticDosePolicy is honored instead of silently coerced to true
+  ---
+  duration_ms: 2.068772
+  type: 'test'
+  ...
+# Subtest: generateWeeklyPlan reports the validation counters it actually observed
+ok 302 - generateWeeklyPlan reports the validation counters it actually observed
+  ---
+  duration_ms: 16.22052
+  type: 'test'
+  ...
+# Subtest: constrainUpcomingPlan accumulates rejected days into the caller's counters
+ok 303 - constrainUpcomingPlan accumulates rejected days into the caller's counters
+  ---
+  duration_ms: 0.946766
+  type: 'test'
+  ...
+# (node:99516) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: phase ceiling constrains coach structures and survives read-time validation
+ok 304 - phase ceiling constrains coach structures and survives read-time validation
+  ---
+  duration_ms: 50.222426
+  type: 'test'
+  ...
+# Subtest: base phase caps quality sessions while a rolling window applies next week's own budget
+ok 305 - base phase caps quality sessions while a rolling window applies next week's own budget
+  ---
+  duration_ms: 15.766712
+  type: 'test'
+  ...
+# Subtest: phase long-run limits bind executable single sessions below the weekly ceiling
+ok 306 - phase long-run limits bind executable single sessions below the weekly ceiling
+  ---
+  duration_ms: 7.371924
+  type: 'test'
+  ...
+# Subtest: phase budgets reserve locked sessions and completed volume without rewriting today
+ok 307 - phase budgets reserve locked sessions and completed volume without rewriting today
+  ---
+  duration_ms: 6.020507
+  type: 'test'
+  ...
+# Subtest: generation and reads use the displayed phase band based on actual recent volume
+ok 308 - generation and reads use the displayed phase band based on actual recent volume
+  ---
+  duration_ms: 4.565344
+  type: 'test'
+  ...
+# Subtest: phase volume shrinking preserves the final easy-time floor and is idempotent
+ok 309 - phase volume shrinking preserves the final easy-time floor and is idempotent
+  ---
+  duration_ms: 3.104619
+  type: 'test'
+  ...
+# Subtest: final easy-time repair never enlarges a tiny hard-budget session
+ok 310 - final easy-time repair never enlarges a tiny hard-budget session
+  ---
+  duration_ms: 2.510991
+  type: 'test'
+  ...
+# Subtest: final easy-time repair respects both volume readings across quality-dose boundaries
+ok 311 - final easy-time repair respects both volume readings across quality-dose boundaries
+  ---
+  duration_ms: 65.755938
+  type: 'test'
+  ...
+# Subtest: rolling generation reserves retained next-week distance and quality sessions
+ok 312 - rolling generation reserves retained next-week distance and quality sessions
+  ---
+  duration_ms: 37.380051
+  type: 'test'
+  ...
+# Subtest: retained budgets measure executable structure instead of stale distance hints
+ok 313 - retained budgets measure executable structure instead of stale distance hints
+  ---
+  duration_ms: 4.871922
+  type: 'test'
+  ...
+# Subtest: plan json parsing tolerates code fences and surrounding prose
+ok 314 - plan json parsing tolerates code fences and surrounding prose
+  ---
+  duration_ms: 0.654418
+  type: 'test'
+  ...
+# Subtest: dates outside the allowed window are rejected
+ok 315 - dates outside the allowed window are rejected
+  ---
+  duration_ms: 0.680797
+  type: 'test'
+  ...
+# Subtest: quality sessions beyond the cap are demoted to easy
+ok 316 - quality sessions beyond the cap are demoted to easy
+  ---
+  duration_ms: 0.700118
+  type: 'test'
+  ...
+# Subtest: the easy-time floor demotes the last quality session when intensity dominates
+ok 317 - the easy-time floor demotes the last quality session when intensity dominates
+  ---
+  duration_ms: 1.175946
+  type: 'test'
+  ...
+# Subtest: load and injury flags suppress every quality session
+ok 318 - load and injury flags suppress every quality session
+  ---
+  duration_ms: 0.496798
+  type: 'test'
+  ...
+# Subtest: pace targets faster than the allowed band are pulled back and reps are capped
+ok 319 - pace targets faster than the allowed band are pulled back and reps are capped
+  ---
+  duration_ms: 0.489208
+  type: 'test'
+  ...
+# Subtest: easy heart-rate targets obey the session and step intensity limits
+ok 320 - easy heart-rate targets obey the session and step intensity limits
+  ---
+  duration_ms: 0.445198
+  type: 'test'
+  ...
+# Subtest: recovery heart-rate targets obey the session and step intensity limits
+ok 321 - recovery heart-rate targets obey the session and step intensity limits
+  ---
+  duration_ms: 0.603208
+  type: 'test'
+  ...
+# Subtest: long_run heart-rate targets obey the session and step intensity limits
+ok 322 - long_run heart-rate targets obey the session and step intensity limits
+  ---
+  duration_ms: 0.449908
+  type: 'test'
+  ...
+# Subtest: tempo heart-rate targets obey the session and step intensity limits
+ok 323 - tempo heart-rate targets obey the session and step intensity limits
+  ---
+  duration_ms: 4.386224
+  type: 'test'
+  ...
+# Subtest: interval heart-rate targets obey the session and step intensity limits
+ok 324 - interval heart-rate targets obey the session and step intensity limits
+  ---
+  duration_ms: 0.335439
+  type: 'test'
+  ...
+# Subtest: unknown heart-rate ceilings cannot authorize an unbounded target
+ok 325 - unknown heart-rate ceilings cannot authorize an unbounded target
+  ---
+  duration_ms: 0.535318
+  type: 'test'
+  ...
+# Subtest: manual easy plans cannot bypass injury guards with high heart-rate alerts
+ok 326 - manual easy plans cannot bypass injury guards with high heart-rate alerts
+  ---
+  duration_ms: 0.325639
+  type: 'test'
+  ...
+# Subtest: unknown pace bounds remove alerts on every step and reject the corresponding manual plans
+ok 327 - unknown pace bounds remove alerts on every step and reject the corresponding manual plans
+  ---
+  duration_ms: 1.973063
+  type: 'test'
+  ...
+# Subtest: long-run-only plans cannot abandon the easy-duration floor after all quality sessions are gone
+ok 328 - long-run-only plans cannot abandon the easy-duration floor after all quality sessions are gone
+  ---
+  duration_ms: 9.27602
+  type: 'test'
+  ...
+# Subtest: easy/long-run mixtures retain long runs only when the measured easy floor is met
+ok 329 - easy/long-run mixtures retain long runs only when the measured easy floor is met
+  ---
+  duration_ms: 0.519468
+  type: 'test'
+  ...
+# Subtest: interval repetition ceiling counts all blocks and every work step
+ok 330 - interval repetition ceiling counts all blocks and every work step
+  ---
+  duration_ms: 1.171591
+  type: 'test'
+  ...
+# Subtest: interval structures already below the aggregate ceiling stay intact
+ok 331 - interval structures already below the aggregate ceiling stay intact
+  ---
+  duration_ms: 0.406329
+  type: 'test'
+  ...
+# Subtest: a plan above the weekly ceiling is scaled down
+ok 332 - a plan above the weekly ceiling is scaled down
+  ---
+  duration_ms: 4.435043
+  type: 'test'
+  ...
+# Subtest: a model-supplied structure over the single-day ceiling is rebuilt at the cap
+ok 333 - a model-supplied structure over the single-day ceiling is rebuilt at the cap
+  ---
+  duration_ms: 0.586408
+  type: 'test'
+  ...
+# Subtest: the volume ceiling still holds when interval reps round the week back up
+ok 334 - the volume ceiling still holds when interval reps round the week back up
+  ---
+  duration_ms: 16.50244
+  type: 'test'
+  ...
+# Subtest: malformed structures are dropped and rebuilt from the session kind
+ok 335 - malformed structures are dropped and rebuilt from the session kind
+  ---
+  duration_ms: 0.248789
+  type: 'test'
+  ...
+# Subtest: fallback plan covers the whole window and stays conservative
+ok 336 - fallback plan covers the whole window and stays conservative
+  ---
+  duration_ms: 2.803849
+  type: 'test'
+  ...
+# Subtest: a week too small for quality work stays easy-only and inside the goal
+ok 337 - a week too small for quality work stays easy-only and inside the goal
+  ---
+  duration_ms: 2.8062
+  type: 'test'
+  ...
+# Subtest: the fallback template is held to the ramp ceiling too
+ok 338 - the fallback template is held to the ramp ceiling too
+  ---
+  duration_ms: 2.71316
+  type: 'test'
+  ...
+# Subtest: coach generation is deterministic, structured and has no fallback warning
+ok 339 - coach generation is deterministic, structured and has no fallback warning
+  ---
+  duration_ms: 6.186987
+  type: 'test'
+  ...
+# Subtest: migration previews reserve today's unchanged prescription and quality budget
+ok 340 - migration previews reserve today's unchanged prescription and quality budget
+  ---
+  duration_ms: 1.498654
+  type: 'test'
+  ...
+# Subtest: confirmed migration days remain frozen for regeneration and manual edits
+ok 341 - confirmed migration days remain frozen for regeneration and manual edits
+  ---
+  duration_ms: 1.972773
+  type: 'test'
+  ...
+# Subtest: missing execution imports never increase the coach's prescribed volume
+ok 342 - missing execution imports never increase the coach's prescribed volume
+  ---
+  duration_ms: 11.057749
+  type: 'test'
+  ...
+# Subtest: regeneration reports the days whose stored prescription it replaces
+ok 343 - regeneration reports the days whose stored prescription it replaces
+  ---
+  duration_ms: 1.219955
+  type: 'test'
+  ...
+# Subtest: a plan that scales down keeps interval reps on the coach's 800 m rep
+ok 344 - a plan that scales down keeps interval reps on the coach's 800 m rep
+  ---
+  duration_ms: 0.526918
+  type: 'test'
+  ...
+# Subtest: a model that misreports distance is overruled by the structure it sent
+ok 345 - a model that misreports distance is overruled by the structure it sent
+  ---
+  duration_ms: 0.308049
+  type: 'test'
+  ...
+# Subtest: the ramp ceiling pulls a week back toward last week's volume
+ok 346 - the ramp ceiling pulls a week back toward last week's volume
+  ---
+  duration_ms: 1.498405
+  type: 'test'
+  ...
+# Subtest: a comeback week is not capped by the injury week that preceded it
+ok 347 - a comeback week is not capped by the injury week that preceded it
+  ---
+  duration_ms: 1.417595
+  type: 'test'
+  ...
+# Subtest: the fallback plan measures every day and stays inside the weekly goal
+ok 348 - the fallback plan measures every day and stays inside the weekly goal
+  ---
+  duration_ms: 0.995262
+  type: 'test'
+  ...
+# Subtest: the fallback template never exceeds its own ceiling
+ok 349 - the fallback template never exceeds its own ceiling
+  ---
+  duration_ms: 10.170852
+  type: 'test'
+  ...
+# Subtest: a budget too tight for two sessions is spent on one properly sized session
+ok 350 - a budget too tight for two sessions is spent on one properly sized session
+  ---
+  duration_ms: 0.340289
+  type: 'test'
+  ...
+# Subtest: a goal smaller than one easy session plans rest rather than an over-budget run
+ok 351 - a goal smaller than one easy session plans rest rather than an over-budget run
+  ---
+  duration_ms: 0.757811
+  type: 'test'
+  ...
+# Subtest: a demoted quality session stores a rounded, re-measured distance
+ok 352 - a demoted quality session stores a rounded, re-measured distance
+  ---
+  duration_ms: 0.610718
+  type: 'test'
+  ...
+# Subtest: no single day exceeds the per-day distance ceiling
+ok 353 - no single day exceeds the per-day distance ceiling
+  ---
+  duration_ms: 0.346818
+  type: 'test'
+  ...
+# Subtest: a model structure larger than a day is rebuilt at the cap
+ok 354 - a model structure larger than a day is rebuilt at the cap
+  ---
+  duration_ms: 0.714433
+  type: 'test'
+  ...
+# Subtest: a demoted quality session cannot land above the per-day ceiling
+ok 355 - a demoted quality session cannot land above the per-day ceiling
+  ---
+  duration_ms: 0.576278
+  type: 'test'
+  ...
+# Subtest: a week the budget cannot pay for drops sessions instead of overshooting
+ok 356 - a week the budget cannot pay for drops sessions instead of overshooting
+  ---
+  duration_ms: 7.735832
+  type: 'test'
+  ...
+# Subtest: a quality session the week cannot afford becomes an easy run
+ok 357 - a quality session the week cannot afford becomes an easy run
+  ---
+  duration_ms: 0.590958
+  type: 'test'
+  ...
+# Subtest: the ceiling never hands back a day longer than the one it started with
+ok 358 - the ceiling never hands back a day longer than the one it started with
+  ---
+  duration_ms: 0.791997
+  type: 'test'
+  ...
+# Subtest: a model hint above the per-day cap is reported
+ok 359 - a model hint above the per-day cap is reported
+  ---
+  duration_ms: 0.307239
+  type: 'test'
+  ...
+# Subtest: a week whose structures measure nothing is still bounded by the ceiling
+ok 360 - a week whose structures measure nothing is still bounded by the ceiling
+  ---
+  duration_ms: 6.974444
+  type: 'test'
+  ...
+# Subtest: a quality session too big for the week is demoted once scaling has nothing left
+ok 361 - a quality session too big for the week is demoted once scaling has nothing left
+  ---
+  duration_ms: 0.528348
+  type: 'test'
+  ...
+# Subtest: a day whose structure cannot be sized is rebuilt instead of storing the model's number
+ok 362 - a day whose structure cannot be sized is rebuilt instead of storing the model's number
+  ---
+  duration_ms: 0.292879
+  type: 'test'
+  ...
+# Subtest: a week over the ceiling only in its stored numbers is scaled, not decapitated
+ok 363 - a week over the ceiling only in its stored numbers is scaled, not decapitated
+  ---
+  duration_ms: 1.655394
+  type: 'test'
+  ...
+# Subtest: a week below what the coach can prescribe says so instead of claiming a reduction
+ok 364 - a week below what the coach can prescribe says so instead of claiming a reduction
+  ---
+  duration_ms: 2.263441
+  type: 'test'
+  ...
+# Subtest: fallback plans enforce the same easy-duration floor at every volume budget
+ok 365 - fallback plans enforce the same easy-duration floor at every volume budget
+  ---
+  duration_ms: 57.18199
+  type: 'test'
+  ...
+# Subtest: fallback respects race day and completed natural-week volume across Sunday
+ok 366 - fallback respects race day and completed natural-week volume across Sunday
+  ---
+  duration_ms: 1.296205
+  type: 'test'
+  ...
+# Subtest: G05: a taper week is generated inside the phase band, and says why
+ok 367 - G05: a taper week is generated inside the phase band, and says why
+  ---
+  duration_ms: 12.853052
+  type: 'test'
+  ...
+# Subtest: G06: the ceiling baseline and the observed volume are separately load-bearing
+ok 368 - G06: the ceiling baseline and the observed volume are separately load-bearing
+  ---
+  duration_ms: 2.985369
+  type: 'test'
+  ...
+# Subtest: validates complete finite physiology estimates and ordered race intervals
+ok 369 - validates complete finite physiology estimates and ordered race intervals
+  ---
+  duration_ms: 2.63094
+  type: 'test'
+  ...
+# Subtest: rejects invalid race adjustment and readiness values
+ok 370 - rejects invalid race adjustment and readiness values
+  ---
+  duration_ms: 1.028026
+  type: 'test'
+  ...
+# Subtest: a race prediction cannot claim readiness it never modelled (§11)
+ok 371 - a race prediction cannot claim readiness it never modelled (§11)
+  ---
+  duration_ms: 6.510416
+  type: 'test'
+  ...
+# Subtest: shared race result validation preserves inclusive duration and pace limits
+ok 372 - shared race result validation preserves inclusive duration and pace limits
+  ---
+  duration_ms: 0.297939
+  type: 'test'
+  ...
+# Subtest: shared race result validation rejects non-finite and non-positive inputs
+ok 373 - shared race result validation rejects non-finite and non-positive inputs
+  ---
+  duration_ms: 0.257699
+  type: 'test'
+  ...
+# Subtest: the feature-vector contract rejects NaN/Infinity/dates its previous checks let through
+ok 374 - the feature-vector contract rejects NaN/Infinity/dates its previous checks let through
+  ---
+  duration_ms: 1.700964
+  type: 'test'
+  ...
+1..374
+# tests 374
+# suites 0
+# pass 374
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 448280.094594

@@ -36,12 +36,18 @@ if [ -n "${RAI_VISUAL_DATABASE:-}" ]; then
   echo 'RAI_VISUAL_DATABASE is no longer copied implicitly. Use the synthetic fixture, or prepare a reviewed isolated harness.' >&2
   exit 1
 fi
-node --import tsx scripts/prepare-phase5-fixture.mts "$runtime" > "$out/fixture.json"
+fixture_args=()
+if [ "${RAI_VISUAL_SESSION_COMMANDS:-0}" = "1" ]; then fixture_args+=("--session-identities"); fi
+node --import tsx scripts/prepare-phase5-fixture.mts "$runtime" ${fixture_args[@]+"${fixture_args[@]}"} > "$out/fixture.json"
 export RAI_VISUAL_API_TOKEN="rai-visual-isolated-test-token"
+execution_mode=disabled
+if [ "${RAI_VISUAL_EXECUTION_FACTS:-0}" = "1" ]; then execution_mode=validation; fi
 RAI_RUNTIME_ROOT="$runtime" RAI_DATABASE="$runtime/var/rai.sqlite" \
   RAI_CONTROL_DATABASE="$runtime/var/rai-control.sqlite" RAI_API_PORT=8792 RAI_API_HOST=127.0.0.1 RAI_LOG_LEVEL=warn \
   RAI_SERVER_ID=phase5-validation RAI_ATHLETE_ID=athlete_1 RAI_DATASET_EPOCH=phase5-synthetic \
   RAI_API_TOKEN="$RAI_VISUAL_API_TOKEN" RAI_TRAINING_PLAN_COMMAND_MODE=validation \
+  RAI_TRAINING_PLAN_SESSION_COMMAND_MODE="${RAI_VISUAL_SESSION_COMMANDS_MODE:-disabled}" \
+  RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE="$execution_mode" \
   node --import tsx apps/api/src/server.ts > "$out/api.log" 2>&1 & api_pid=$!
 ready=false
 # Startup includes validation/migration of the isolated database. A real
@@ -88,6 +94,12 @@ call('/v1/mobile/training-plan/commands/refresh', {'contractVersion':2,'operatio
     'operationScope':s['scope'],'expectedStateRevision':s['stateRevision']})
 print('Authenticated synthetic fixture ready; v2 refresh committed; legacy 410 and unauthenticated 401 verified.')
 PYV2
+# Optional B07 execution fixture: insert one synthetic run into the isolated main
+# database and age the course so it was genuinely published before the run.
+if [ "${RAI_VISUAL_EXECUTION_FACTS:-0}" = "1" ]; then
+  RAI_RUNTIME_ROOT="$runtime" python3 apps/ios/tests/prepare-execution-fixture.py
+fi
+
 python3 apps/ios/tests/visual-state-proxy.py > "$out/state-proxy.log" 2>&1 & proxy_pid=$!
 xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl bootstatus "$device" -b > "$out/simulator.log"

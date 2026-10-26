@@ -1,0 +1,38 @@
+{
+  "apps/api/src/training-plan-session-commands.ts": {
+    "sha256": "8a48909bb0aa5b5952981b640c7f2cdeb74cf011a40ee8cc0ca12a57a81b511c",
+    "matchesPriorPhase": true
+  },
+  "apps/api/test/training-plan-session-commands.test.ts": {
+    "sha256": "e7522f2bdcb076fd05eb28d4e63853b0d0cf3b6130b31ebc06bf9b9553848af2",
+    "matchesPriorPhase": true
+  },
+  "apps/ios/RAI/APIModels.swift": {
+    "sha256": "54fe65a4d3d12201819ff8db7b3c09c3d476476caf8db4d38cd8dda7778db92c",
+    "matchesPriorPhase": true
+  },
+  "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift": {
+    "sha256": "389f31725c942d2ecbfab49e97b3d5cdf3312109bd93a83d22bb3bca783f7007",
+    "matchesPriorPhase": true
+  },
+  "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift": {
+    "sha256": "ad08ee5f7f79ba4fc2cecf25d69be97937c24dc2003d4ccb78db77672f94db66",
+    "matchesPriorPhase": true
+  },
+  "apps/ios/tests/TrainingPlanSessionEditorRegression.swift": {
+    "sha256": "49b3701b1cfd8e336070d93660759f56a480c815a2729272ff70402172c5b6a7",
+    "matchesPriorPhase": true
+  },
+  "apps/api/src/schemas.ts": {
+    "sha256": "6b9aa1f213c64ef9d9e4e9e52bbd4c17cce2099fd2b01e9655cd56315a85aafc",
+    "matchesPriorPhase": true
+  },
+  "apps/api/test/schemas.test.ts": {
+    "sha256": "8a9ec2f0273959f839e1e6526f50b5af6ef6989a29f1715a8683e3ce345d8852",
+    "matchesPriorPhase": true
+  },
+  "apps/ios/tests/fixtures/training-session-distance-v1.json": {
+    "sha256": "24667252898aa4c1a237eb3eed2434e3b72624551beadbf76f622499dfa91156",
+    "matchesPriorPhase": true
+  }
+}

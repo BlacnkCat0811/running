@@ -1,0 +1,36 @@
+TAP version 13
+# (node:76321) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B04/T16: completed history cannot be edited, moved, cancelled or unlocked
+ok 1 - B04/T16: completed history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 886.719772
+  type: 'test'
+  ...
+# Subtest: B04/T16: partial history cannot be edited, moved, cancelled or unlocked
+ok 2 - B04/T16: partial history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 277.769741
+  type: 'test'
+  ...
+# Subtest: B04/T16: skipped history cannot be edited, moved, cancelled or unlocked
+ok 3 - B04/T16: skipped history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 594.814394
+  type: 'test'
+  ...
+# Subtest: B04/T16: cancelled history cannot be edited, moved, cancelled or unlocked
+ok 4 - B04/T16: cancelled history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 523.81604
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4974.923989

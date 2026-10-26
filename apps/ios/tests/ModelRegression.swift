@@ -2708,6 +2708,196 @@ final class RequestLog: @unchecked Sendable {
         check(refreshLog.count(method: "GET", path: detailPath) == beforeSettled,
               "a settled workout must not cost a network read per sync generation")
 
+        try await checkExecutionCandidatePagination(api: api) { check($0, $1) }
         print("All model regression checks passed.")
     }
+}
+
+/// Exercise the production model and transport across the 50-row page boundary.
+@MainActor private func checkExecutionCandidatePagination(api: RaiAPIClient, check: (Bool, String) -> Void) async throws {
+    CacheStore.resetScheduleSafety()
+    let session = ServerSession()
+    let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+    let model = NativeAppModel(session: session, api: api, now: { clock })
+    let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+        syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, trainingPlanContractVersion: 2,
+        trainingPlanSessionContractVersion: 1, trainingPlanSessionCommandContractVersion: 1, trainingPlanExecutionCommandContractVersion: 1, planPublicationContractVersion: 1))
+    let legacyState = try PlanTestFixtures.json(PlanTestFixtures.state())
+    var unified = try JSONSerialization.jsonObject(with: Data(PlanTestFixtures.json(PlanTestFixtures.unified()).utf8)) as! [String: Any]
+    let prescription: [String: Any] = ["localDate": "2026-10-09", "kind": "easy", "distanceKm": 8,
+        "structure": NSNull(), "reason": NSNull()]
+    var plan = unified["plan"] as! [String: Any]
+    plan["days"] = [prescription]
+    unified["plan"] = plan
+    unified["sessions"] = ["contractVersion": 1, "planInstanceId": "paging-plan", "sessions": [
+        ["planInstanceId": "paging-plan", "sessionId": "paging-course", "sessionRevision": 1,
+         "prescription": prescription, "recommendation": NSNull(), "userOverride": NSNull(),
+         "protection": "automatic", "lifecycle": "pending", "availableAt": "2026-10-08T00:00:00.000Z",
+         "supersededBySessionId": NSNull()]], "suppressions": [], "publishedInputKey": NSNull(), "executions": []] as [String: Any]
+    let expanded = TrainingPlanExecutionPolicy.expandedRange(sessionDate: "2026-10-09")!
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let start = formatter.date(from: expanded.start + "T00:00:00.000Z")!
+    var rows: [[String: Any]] = []
+    for index in 0..<62 {
+        let started = start.addingTimeInterval(Double(index / 2) * 86_400 + Double(index % 2) * 3_600)
+        rows.append(["trainingSessionId": String(format: "run-%02d", index), "sourceFactDigest": String(repeating: "a", count: 64),
+            "startedAt": formatter.string(from: started), "endedAt": formatter.string(from: started.addingTimeInterval(1_800)),
+            "distanceMeters": 5_000, "durationSeconds": 1_800, "evidence": "needs_confirmation"])
+    }
+    var candidateQueries: [[String: String]] = []
+    var returnWrongRange = false
+    var candidateFailure = false
+    var candidateDelay: Double = 0
+    var commandCount = 0
+    var rejectSkip = true
+    var skipCommitted = false
+    var sessionPreviewRequests = 0
+    var candidateStateRevision = 2
+    var validSkipReason = false
+    let skipRequests = RequestLog()
+    let path = "/v1/mobile/training-plan/sessions/paging-course/execution-candidates"
+    StubProtocol.handler = { request in
+        if request.url!.path == "/v1/handshake" { return (200, capabilities, 0) }
+        if request.url!.path == "/v1/mobile/training-plan-state" {
+            var value = unified
+            value["stateRevision"] = candidateStateRevision
+            if skipCommitted {
+                var sessions = value["sessions"] as! [String: Any]
+                var courses = sessions["sessions"] as! [[String: Any]]
+                courses[0]["lifecycle"] = "skipped"; courses[0]["sessionRevision"] = 2
+                sessions["sessions"] = courses; value["sessions"] = sessions
+            }
+            let response = String(decoding: try! JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+            return (200, request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" ? response : legacyState, 0)
+        }
+        if request.url!.path == "/v1/mobile/training-plan/execution-commands" {
+            commandCount += 1
+            if rejectSkip {
+                return (409, "{\"code\":\"training_execution_candidates_present\",\"message\":\"候选已变化，请刷新\"}", 0)
+            }
+            skipRequests.record(request)
+            let body = try! JSONSerialization.jsonObject(with: skipRequests.lastBody(method: "POST",
+                path: "/v1/mobile/training-plan/execution-commands")!) as! [String: Any]
+            let draft = body["draft"] as! [String: Any]
+            validSkipReason = draft["action"] as? String == "skip" && draft["reason"] as? String == "休息"
+            var course = ((unified["sessions"] as! [String: Any])["sessions"] as! [[String: Any]])[0]
+            course["lifecycle"] = "skipped"; course["sessionRevision"] = 2
+            candidateStateRevision += 1
+            let response: [String: Any] = ["contractVersion": 1, "operationId": body["operationId"]!,
+                "stateRevision": candidateStateRevision, "goalsRevision": 12, "planInstanceId": "paging-plan", "outcome": "changed",
+                "session": course, "execution": NSNull(), "planUpdate": "pending", "warnings": []]
+            skipCommitted = true
+            return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), 0)
+        }
+        if request.url!.path == "/v1/mobile/training-plan/session-commands/preview" {
+            sessionPreviewRequests += 1
+            return (503, "{}", 0)
+        }
+        guard request.url!.path == path else { return (503, "{}", 0) }
+        if candidateFailure { return (503, "{\"message\":\"候选加载失败\"}", 0) }
+        let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+            .compactMap { item in item.value.map { (item.name, $0) } })
+        candidateQueries.append(query)
+        let from = query["rangeStart"] ?? "2026-10-07", through = query["rangeEnd"] ?? "2026-10-11"
+        let visible = rows.filter { row in
+            let date = String((row["startedAt"] as! String).prefix(10))
+            return date >= from && date <= through && (query["cursor"] == nil || (row["trainingSessionId"] as! String) > "run-49")
+        }
+        let response: [String: Any] = ["contractVersion": 1, "scope": ["serverId": "server", "athleteId": "athlete", "datasetEpoch": "epoch"],
+            "stateRevision": candidateStateRevision, "planInstanceId": "paging-plan", "sessionId": "paging-course", "sessionRevision": 1, "executionRevision": 0,
+            "rangeStart": returnWrongRange ? "2026-10-07" : from, "rangeEnd": returnWrongRange ? "2026-10-11" : through,
+            "candidates": Array(visible.prefix(50)), "nextCursor": visible.count > 50 ? "next-page" as Any : NSNull()]
+        return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), candidateDelay)
+    }
+    await model.bootstrap()
+    let read = await model.refreshUnifiedTrainingPlan()
+    check(read && model.canEditTrainingExecutions, "paging fixture negotiates current session/execution reads")
+    let openedSnapshot = model.trainingPlanStore.unified!
+    let opened = openedSnapshot.sessions!.sessions[0]
+    let editorIdentity = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: openedSnapshot.scope,
+        planInstanceId: opened.planInstanceId, stateRevision: openedSnapshot.stateRevision,
+        sessionId: opened.sessionId, sessionRevision: opened.sessionRevision)
+    let oldDraft = TrainingPlanSessionDraft.move(sessionId: opened.sessionId,
+        sessionRevision: opened.sessionRevision, localDate: "2026-10-10")
+    candidateStateRevision += 1
+    _ = await model.refreshUnifiedTrainingPlan()
+    let stalePreview = await model.previewTrainingSession(oldDraft, editorIdentity: editorIdentity)
+    let staleConfirm = await model.confirmTrainingSession(oldDraft, editorIdentity: editorIdentity)
+    check(!stalePreview && !staleConfirm && sessionPreviewRequests == 0,
+          "EDIT-01: production model blocks stale editor after background refresh without any preview/submit request")
+    let reloaded = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: openedSnapshot.scope,
+        planInstanceId: opened.planInstanceId, stateRevision: candidateStateRevision,
+        sessionId: opened.sessionId, sessionRevision: opened.sessionRevision)
+    _ = await model.previewTrainingSession(oldDraft, editorIdentity: reloaded)
+    check(sessionPreviewRequests == 1, "EDIT-01: explicitly rebuilt draft can reach preview")
+    let addIdentity = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: openedSnapshot.scope,
+        planInstanceId: opened.planInstanceId, stateRevision: candidateStateRevision, sessionId: nil, sessionRevision: nil)
+    let unsupported = await model.previewTrainingSession(.add(opened.prescription, deriveDistance: true), editorIdentity: addIdentity)
+    check(!unsupported && sessionPreviewRequests == 1,
+          "COMPAT-01: old server session command capability does not send omitted distance requests")
+    let unreadSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+    check(!unreadSkip && commandCount == 0 && model.executionCandidateIssue(for: "paging-course") != nil,
+          "I-01: unread candidates cannot authorize Skip or issue a command")
+    let first = await model.loadExecutionCandidates(for: "paging-course", widened: true)
+    check(first && model.executionCandidates(for: "paging-course")?.candidates.count == 50,
+          "widened candidate search loads the first 50 of 62 actual runs")
+    let nonemptySkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+    check(!nonemptySkip && commandCount == 0, "I-01: a nonempty candidate page must issue zero Skip requests")
+    let second = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+    check(second && model.executionCandidates(for: "paging-course")?.candidates.count == 62 &&
+          model.executionCandidates(for: "paging-course")?.nextCursor == nil,
+          "loading more after widening retains all 12 remaining candidates")
+    check(candidateQueries.last?["rangeStart"] == expanded.start && candidateQueries.last?["rangeEnd"] == expanded.end &&
+          candidateQueries.last?["cursor"] == "next-page", "pagination transmits the original expanded range with its cursor")
+    let fresh = await model.loadExecutionCandidates(for: "paging-course")
+    check(fresh && model.executionCandidates(for: "paging-course")?.candidates.count == 10 && candidateQueries.last?["rangeStart"] == nil,
+          "a fresh search deliberately resets to the default five-day range")
+    let requests = candidateQueries.count
+    let staleCursor = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+    check(!staleCursor && candidateQueries.count == requests, "a cursor from a replaced page cannot be reused for the new range")
+    _ = await model.loadExecutionCandidates(for: "paging-course", widened: true)
+    returnWrongRange = true
+    let wrongRange = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+    check(!wrongRange && model.executionCandidates(for: "paging-course")?.candidates.count == 50,
+          "a mismatched response range cannot silently truncate the candidate list")
+    returnWrongRange = false
+    rows = []
+    _ = await model.loadExecutionCandidates(for: "paging-course")
+    candidateFailure = true
+    let failedRead = await model.loadExecutionCandidates(for: "paging-course")
+    let failedSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+    check(!failedRead && !failedSkip && commandCount == 0 && model.executionCandidateIssue(for: "paging-course") != nil,
+          "I-01: failed reload must not authorize Skip using a previous empty page")
+    candidateFailure = false; candidateDelay = 0.15
+    let loading = Task { await model.loadExecutionCandidates(for: "paging-course") }
+    try await Task.sleep(for: .milliseconds(10))
+    check(model.isExecutionCandidateLoading("paging-course"), "candidate reload is in flight")
+    let loadingSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+    check(!loadingSkip && commandCount == 0, "I-01: an in-flight reload cannot authorize Skip")
+    _ = await loading.value
+    candidateDelay = 0
+    let rejectedSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+    check(!rejectedSkip && commandCount == 1 && model.executionCandidates(for: "paging-course") == nil &&
+          model.trainingPlanPublisher.message?.contains("候选") == true,
+          "I-01/P-03: an empty loaded page sends exactly one Skip; a server candidate conflict is shown without automatic retry")
+    _ = await model.loadExecutionCandidates(for: "paging-course")
+    candidateStateRevision += 1
+    _ = await model.refreshUnifiedTrainingPlan()
+    let stalePageSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+    check(!stalePageSkip && commandCount == 1 && model.executionCandidateIssue(for: "paging-course")?.contains("计划状态") == true,
+          "I-01: a page from an older state revision cannot authorize Skip against a fresh snapshot")
+    _ = await model.loadExecutionCandidates(for: "paging-course")
+    rejectSkip = false
+    let successfulSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: " 休息 ")
+    check(successfulSkip && commandCount == 2 && skipCommitted && validSkipReason,
+          "I-01: a legal empty page completes Skip with one request and a confirmed read")
+    candidateStateRevision += 1
+    unified["runState"] = "paused"
+    _ = await model.refreshUnifiedTrainingPlan()
+    check(model.canEditTrainingExecutions && !model.canLinkTrainingExecutions,
+          "EXEC-01: stopped snapshot allows history access and disables new execution actions")
+    let stoppedSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "paused")
+    check(!stoppedSkip && commandCount == 2, "EXEC-01: paused action issues no network mutation")
+    CacheStore.resetScheduleSafety()
 }

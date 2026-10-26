@@ -1,0 +1,625 @@
+--- a/apps/api/src/session-structure.ts
++++ b/apps/api/src/session-structure.ts
+@@ -20,9 +20,11 @@
+ 
+ /** Bounds keep a hallucinated plan from producing an absurd workout. */
+ export const MAX_STEP_METERS = 100_000;
+-export const MAX_STEP_SECONDS = 4 * 60 * 60;
++export const MAX_PLANNED_DURATION_SECONDS = 4 * 60 * 60;
++export const MAX_STEP_SECONDS = MAX_PLANNED_DURATION_SECONDS;
+ export const MAX_BLOCK_ITERATIONS = 20;
+ export const MAX_BLOCKS = 8;
++export const MAX_STEPS_PER_BLOCK = 8;
+ export const MAX_ALERT_PACE_SECONDS_PER_KM = 1200;
+ export const MAX_ALERT_HEART_RATE_BPM = 240;
+ /**
+@@ -119,7 +121,18 @@
+   };
+ }
+ 
+-/** Returns a sanitized structure, or null when nothing usable remains. */
++/**
++ * Quantity limits for new/edited prescriptions, after lossless shape parsing.
++ * Separate from legacy normalization: old commands could persist more than
++ * eight steps, which reads, migration and replay must preserve.
++ */
++export function sessionStructureWithinWriteLimits(structure: MobileSessionStructure): boolean {
++  return structure.blocks.length <= MAX_BLOCKS && structure.blocks.every(block =>
++    Number.isInteger(block.iterations) && block.iterations >= 1 && block.iterations <= MAX_BLOCK_ITERATIONS &&
++    block.steps.length >= 1 && block.steps.length <= MAX_STEPS_PER_BLOCK);
++}
++
++/** Legacy sanitization, not a strict write validator. Never slice historical steps. */
+ export function normalizeSessionStructure(value: unknown): MobileSessionStructure | null {
+   if (!value || typeof value !== "object") return null;
+   const raw = value as Record<string, unknown>;
+--- a/apps/api/src/schemas.ts
++++ b/apps/api/src/schemas.ts
+@@ -14,6 +14,7 @@
+   MAX_BLOCK_ITERATIONS,
+   MAX_BLOCKS,
+   MAX_PLANNED_DISTANCE_KM,
++  MAX_STEPS_PER_BLOCK,
+   MAX_STEP_METERS,
+   MAX_STEP_SECONDS
+ } from "./session-structure.js";
+@@ -279,7 +280,7 @@
+         required: ["iterations", "steps"],
+         properties: {
+           iterations: { type: "integer", minimum: 1, maximum: MAX_BLOCK_ITERATIONS },
+-          steps: { type: "array", minItems: 1, maxItems: 8, items: mobileWorkoutStepSchema }
++          steps: { type: "array", minItems: 1, maxItems: MAX_STEPS_PER_BLOCK, items: mobileWorkoutStepSchema }
+         }
+       }
+     },
+@@ -882,6 +883,9 @@
+   content: { "application/json": { schema } }
+ });
+ 
++export const trainingSessionPreviewBodySchema = trainingSessionCommandSchema(false);
++export const trainingSessionSubmitBodySchema = trainingSessionCommandSchema(true);
++
+ export const openapiDocument = {
+   openapi: "3.1.0",
+   info: {
+@@ -936,13 +940,13 @@
+     "/v1/mobile/coach-execution": { get: operation(["Read"], "过去28日冻结处方的观测、剂量和刺激评价") },
+     "/v1/mobile/training-plan/session-commands/preview": {
+       post: operation(["Workouts"], "课程编辑合同1：预览 move/edit/add/cancel/set_rest/unlock；零写入，绑定120秒候选", {
+-        requestBody: body(trainingSessionCommandSchema(false), "精确数据域、实例、状态/课程修订与草稿"),
++        requestBody: body(trainingSessionPreviewBodySchema, "精确数据域、实例、状态/课程修订与草稿"),
+         responses: trainingSessionResponses(false)
+       })
+     },
+     "/v1/mobile/training-plan/session-commands": {
+       post: operation(["Workouts"], "课程编辑合同1：原子保存课程、投影、冻结历史与持久操作结果", {
+-        requestBody: body(trainingSessionCommandSchema(true), "原预览内容、候选和持久UUID；已提交重放先于能力门"),
++        requestBody: body(trainingSessionSubmitBodySchema, "原预览内容、候选和持久UUID；已提交重放先于能力门"),
+         responses: trainingSessionResponses(true)
+       })
+     },
+--- a/apps/api/src/training-plan-session-commands.ts
++++ b/apps/api/src/training-plan-session-commands.ts
+@@ -13,7 +13,8 @@
+ import { parseTrainingPlanState, type TrainingPlanSessionState } from "./training-plan-store.js";
+ import { isValidLocalDate } from "./local-date.js";
+ import { internalErrorLogDetail } from "./training-plan-commands.js";
+-import { MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
++import { MAX_PLANNED_DISTANCE_KM, MAX_PLANNED_DURATION_SECONDS, sessionStructureWithinWriteLimits } from "./session-structure.js";
++import { trainingSessionPreviewBodySchema, trainingSessionSubmitBodySchema } from "./schemas.js";
+ import { measureStructure, pacesFromZones, roundKm, type CoachZonePrescription } from "./mobile-coach.js";
+ 
+ const route = "training-plan-session-command";
+@@ -70,6 +71,32 @@
+     if (error instanceof TrainingPlanSessionStateError) return invalid(error.message);
+     throw error;
+   }
++}
++
++/** Only supplied content is new. Metadata operations retain historical steps. */
++function assertDraftStructureLimits(draft: TrainingPlanSessionDraft): void {
++  const structure = draft.action === "add" ? draft.prescription.structure
++    : draft.action === "edit" ? draft.patch.structure : null;
++  if (structure && !sessionStructureWithinWriteLimits(structure)) invalid("训练结构最多8个区块，每区块最多8步、20次重复。");
++}
++
++/**
++ * Parse before AJV can coerce input. Defer schema errors to the handler so an
++ * already committed historical operation replays before new-write validation.
++ */
++export function trainingSessionCommandRouteOptions(submit: boolean) {
++  return {
++    schema: { body: submit ? trainingSessionSubmitBodySchema : trainingSessionPreviewBodySchema },
++    attachValidation: true,
++    preValidation: async (request: FastifyRequest, reply: FastifyReply) => {
++      reply.header("Cache-Control", "no-store");
++      try { parseTrainingSessionRequest(request.body, submit); }
++      catch (error) {
++        if (error instanceof PlanOperationError) return reply.code(error.statusCode).send({ code: error.code, message: error.message });
++        throw error;
++      }
++    }
++  };
+ }
+ 
+ export const trainingSessionMetadataOnly = (draft: TrainingPlanSessionDraft): boolean =>
+@@ -201,13 +228,14 @@
+     if (session && (draft.action === "add" || draft.action === "edit" &&
+       ["kind", "distanceKm", "structure"].some(key => Object.hasOwn(draft.patch, key)))) {
+       const p = session.prescription;
++      if (p.structure && !sessionStructureWithinWriteLimits(p.structure)) invalid("训练结构最多8个区块，每区块最多8步、20次重复；修改历史训练内容须提供合法结构。");
+       if (!p.structure) return invalid("修改训练内容需要明确结构，不能只改显示距离。");
+       const steps = [...(p.structure.warmup ? [p.structure.warmup] : []), ...p.structure.blocks.flatMap(b => b.steps),
+         ...(p.structure.cooldown ? [p.structure.cooldown] : [])];
+       if (steps.some(step => step.goal.type === "open")) invalid("人工课程需要整米或整秒剂量。");
+       const measured = measureStructure(p.structure, p.kind, pacesFromZones(facts!.prescription));
+       if (!Number.isFinite(measured.distanceKm) || !Number.isFinite(measured.durationSeconds) ||
+-        measured.distanceKm <= 0 || measured.distanceKm > MAX_PLANNED_DISTANCE_KM || measured.durationSeconds > 4 * 3600) {
++        measured.distanceKm <= 0 || measured.distanceKm > MAX_PLANNED_DISTANCE_KM || measured.durationSeconds > MAX_PLANNED_DURATION_SECONDS) {
+         invalid("训练剂量超出合法范围。");
+       }
+       const hasDistanceStep = steps.some(step => step.goal.type === "distance");
+@@ -272,6 +300,7 @@
+ 
+   preview(raw: TrainingPlanSessionPreviewRequest): TrainingPlanSessionPreviewResponse {
+     const request = parseTrainingSessionRequest(raw, false) as TrainingPlanSessionPreviewRequest;
++    assertDraftStructureLimits(request.draft);
+     const row = this.current(request);
+     const facts = trainingSessionMetadataOnly(request.draft) ? null : this.facts();
+     const previewedAt = new Date(this.now()).toISOString();
+@@ -287,6 +316,7 @@
+     const request = parseTrainingSessionRequest(raw, true) as TrainingPlanSessionCommandRequest;
+     const replay = this.replay(request);
+     if (replay !== null) return replay;
++    assertDraftStructureLimits(request.draft);
+     const c = this.decode(request);
+     const row = this.current(request);
+     const facts = trainingSessionMetadataOnly(request.draft) ? null : this.facts();
+@@ -328,6 +358,7 @@
+         const replay = service.replay(body as TrainingPlanSessionCommandRequest);
+         if (replay !== null) return replay;
+       }
++      if (request.validationError) invalid("课程命令不符合请求结构合同。");
+       admit(request);
+       const run = async () => submit ? service.submit(body as TrainingPlanSessionCommandRequest) : service.preview(body);
+       return trainingSessionMetadataOnly(body.draft) ? await run() : await withFactsLease(run);
+--- a/apps/api/src/server.ts
++++ b/apps/api/src/server.ts
+@@ -143,7 +143,7 @@
+   trainingPlanCommandError
+ } from "./training-plan-commands.js";
+ import { TrainingPlanCoordinator } from "./training-plan-coordinator.js";
+-import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers } from "./training-plan-session-commands.js";
++import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers, trainingSessionCommandRouteOptions } from "./training-plan-session-commands.js";
+ import { TrainingPlanExecutionCommandService, createTrainingExecutionCommandHandlers } from "./training-plan-execution-commands.js";
+ import { validateTrainingSessionSafety } from "./training-plan-session-safety.js";
+ import { trainingPlanGenerationDeps } from "./training-plan-generation.js";
+@@ -2139,8 +2139,8 @@
+     }
+     assertTrainingPlanSessionReadForCommand("training_session_commands_disabled", "课程编辑尚未启用或未完成合同协商。");
+   }, withTrainingPlanGenerationLease);
+-app.post("/v1/mobile/training-plan/session-commands/preview", trainingSessionCommands.preview);
+-app.post("/v1/mobile/training-plan/session-commands", trainingSessionCommands.submit);
++app.post("/v1/mobile/training-plan/session-commands/preview", trainingSessionCommandRouteOptions(false), trainingSessionCommands.preview);
++app.post("/v1/mobile/training-plan/session-commands", trainingSessionCommandRouteOptions(true), trainingSessionCommands.submit);
+ 
+ // B06: execution association is a separate opt-in capability. Candidate
+ // reads and writes share the same negotiated contract; a committed operation
+--- a/apps/api/test/session-structure.test.ts
++++ b/apps/api/test/session-structure.test.ts
+@@ -1,6 +1,6 @@
+ import assert from "node:assert/strict";
+ import test from "node:test";
+-import { normalizeSessionStructure } from "../src/session-structure.js";
++import { MAX_BLOCKS, MAX_BLOCK_ITERATIONS, MAX_STEPS_PER_BLOCK, normalizeSessionStructure, sessionStructureWithinWriteLimits } from "../src/session-structure.js";
+ 
+ function normalizedAlert(lower: unknown, upper: unknown) {
+   return normalizeSessionStructure({
+@@ -20,3 +20,16 @@
+   for (const invalid of [1, 60, 0, -5, 1201]) assert.equal(normalizedAlert(invalid, 423), null);
+   assert.deepEqual(normalizedAlert(423, 380), { kind: "pace", lower: 380, upper: 423 });
+ });
++
++
++test("D-03: legacy normalization keeps nine steps; strict quantity limits are independent of reads", () => {
++  const step = { purpose: "work" as const, goal: { type: "distance" as const, meters: 100 }, alert: null };
++  const structure = { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: Array.from({ length: 9 }, () => step) }] };
++  assert.deepEqual(normalizeSessionStructure(structure), structure);
++  assert.equal(sessionStructureWithinWriteLimits(structure), false);
++  assert.equal(sessionStructureWithinWriteLimits({ ...structure, blocks: [{ iterations: 20, steps: Array(8).fill(step) }] }), true);
++  assert.equal(sessionStructureWithinWriteLimits({ ...structure, blocks: [{ iterations: 21, steps: [step] }] }), false);
++  assert.equal(sessionStructureWithinWriteLimits({ ...structure, blocks: Array(8).fill({ iterations: 1, steps: [step] }) }), true);
++  assert.equal(sessionStructureWithinWriteLimits({ ...structure, blocks: Array(9).fill({ iterations: 1, steps: [step] }) }), false);
++  assert.deepEqual([MAX_BLOCKS, MAX_STEPS_PER_BLOCK, MAX_BLOCK_ITERATIONS], [8, 8, 20]);
++});
+--- a/apps/api/test/schemas.test.ts
++++ b/apps/api/test/schemas.test.ts
+@@ -15,6 +15,8 @@
+   importJobBodySchema,
+   importSourceBodySchema,
+   mobileGoalsBodySchema,
++  trainingSessionPreviewBodySchema,
++  trainingSessionSubmitBodySchema,
+   openapiDocument,
+   overrideBodySchema,
+   predictionModelIdParamsSchema,
+@@ -825,3 +827,38 @@
+     } finally { await app.close(); }
+   }
+ });
++
++
++test("D-03: Fastify and OpenAPI share the session request quantity schema", async () => {
++  for (const [path, schema] of [
++    ["/v1/mobile/training-plan/session-commands/preview", trainingSessionPreviewBodySchema],
++    ["/v1/mobile/training-plan/session-commands", trainingSessionSubmitBodySchema]
++  ] as const) {
++    const documented = (openapiDocument.paths[path].post as unknown as {
++      requestBody: { content: { "application/json": { schema: unknown } } }
++    }).requestBody.content["application/json"].schema;
++    assert.equal(documented, schema, "OpenAPI must use the mounted body schema object");
++    const app = Fastify({ ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
++    try {
++      app.post("/command", { schema: { body: schema } }, request => request.body);
++      for (const [steps, blocks, iterations, accepted] of [
++        [8, 1, 1, true], [9, 1, 1, false], [1, 8, 1, true], [1, 9, 1, false], [1, 1, 20, true], [1, 1, 21, false]
++      ] as const) {
++        const structure = { warmup: null, cooldown: null, blocks: Array.from({ length: blocks }, () => ({ iterations,
++          steps: Array.from({ length: steps }, () => ({ purpose: "work", goal: { type: "distance", meters: 100 }, alert: null })) })) };
++        for (const action of ["add", "edit"] as const) {
++          const draft = action === "add" ? { action, prescription: { localDate: "2026-10-29", kind: "easy", structure } }
++            : { action, sessionId: "session", sessionRevision: 1, patch: { structure } };
++          const payload = { contractVersion: 1, operationScope: { serverId: "s", athleteId: "a", datasetEpoch: "d" },
++            expectedStateRevision: 1, planInstanceId: "plan", draft,
++            ...(path.endsWith("preview") ? {} : { operationId: "00000000-0000-4000-8000-000000000001", candidateId: "c" }) };
++          const response = await app.inject({ method: "POST", url: "/command", payload });
++          assert.equal(response.statusCode, accepted ? 200 : 400, `${path} ${action} ${steps}/${blocks}/${iterations}: ${response.body}`);
++        }
++      }
++    } finally { await app.close(); }
++  }
++  const server = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
++  assert.match(server, /app\.post\("\/v1\/mobile\/training-plan\/session-commands\/preview", trainingSessionCommandRouteOptions\(false\)/);
++  assert.match(server, /app\.post\("\/v1\/mobile\/training-plan\/session-commands", trainingSessionCommandRouteOptions\(true\)/);
++});
+--- a/apps/api/test/training-plan-session-commands.test.ts
++++ b/apps/api/test/training-plan-session-commands.test.ts
+@@ -11,8 +11,10 @@
+ import type { MobilePlannedDay, TrainingPlanSessionDraft, TrainingPlanSessionCommandRequest, TrainingPlanSessionPreviewRequest } from "@rai/api-contracts";
+ import { MobileGoalsStore } from "../src/mobile-goals.js";
+ import { parseTrainingPlanState, TrainingPlanStore, type TrainingPlanSessionState } from "../src/training-plan-store.js";
+-import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers, parseTrainingSessionRequest } from "../src/training-plan-session-commands.js";
++import { TrainingPlanSessionCommandService, createTrainingSessionCommandHandlers, parseTrainingSessionRequest, trainingSessionCommandRouteOptions } from "../src/training-plan-session-commands.js";
+ import { resolveTrainingPlanSessions } from "../src/training-plan-session-policy.js";
++import { digest } from "../src/plan-digest.js";
++import { parseSessionPrescription } from "../src/training-plan-session-state.js";
+ import { PlanOperationError } from "../src/plan-publication.js";
+ import { TrainingPlanCommandService } from "../src/training-plan-commands.js";
+ import { trainingPlanContextDigest } from "../src/training-mode-policy.js";
+@@ -201,13 +203,15 @@
+ });
+ 
+ test("B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes", async () => {
+-  const f = setup(), app = Fastify();
++  // Match server.ts: oneOf validation must never remove fields from a signed command.
++  const f = setup(), app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
+   try {
+     let admitted = true, leases = 0;
+     const handlers = createTrainingSessionCommandHandlers(f.service, () => {
+       if (!admitted) throw new PlanOperationError("training_session_commands_disabled", "closed");
+     }, async fn => { leases++; return fn(); });
+-    app.post("/preview", handlers.preview); app.post("/submit", handlers.submit);
++    app.post("/preview", trainingSessionCommandRouteOptions(false), handlers.preview);
++    app.post("/submit", trainingSessionCommandRouteOptions(true), handlers.submit);
+     const body = f.command({ action: "move", ...f.existing(), localDate: "2026-10-29" });
+     const first = await app.inject({ method: "POST", url: "/submit", payload: body });
+     assert.equal(first.statusCode, 200, first.body);
+@@ -661,3 +665,192 @@
+     assert.deepEqual(result.session!.prescription.structure, structure);
+   } finally { f.close(); }
+ });
++
++
++// D-03: synthetic structures keep quantity tests independent of weekly safety.
++function quantityCourse(steps = 1, blocks = 1, iterations = 1): MobilePlannedDay & { kind: "easy"; structure: NonNullable<MobilePlannedDay["structure"]> } {
++  return { ...easy("2026-10-28"), kind: "easy", distanceKm: null, structure: { warmup: null, cooldown: null,
++    blocks: Array.from({ length: blocks }, () => ({ iterations,
++      steps: Array.from({ length: steps }, () => ({ purpose: "work" as const,
++        goal: { type: "distance" as const, meters: 100 }, alert: null })) })) } };
++}
++const allControlTables = (db: DatabaseSync) => db.prepare(
++  "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
++).all().map(row => ({ table: row.name, rows: db.prepare(`SELECT * FROM "${row.name}" ORDER BY rowid`).all() }));
++
++for (const [label, steps, blocks, iterations, accepted] of [
++  ["8 steps", 8, 1, 1, true], ["9 steps", 9, 1, 1, false],
++  ["8 blocks", 1, 8, 1, true], ["9 blocks", 1, 9, 1, false],
++  ["20 iterations", 1, 1, 20, true], ["21 iterations", 1, 1, 21, false]
++] as const) {
++  for (const action of ["add", "edit"] as const) test(`D-03: direct ${action} ${label} ${accepted ? "accepted" : "rejected"}`, () => {
++    const f = setup();
++    try {
++      const { localDate, distanceKm, ...patch } = quantityCourse(steps, blocks, iterations);
++      const draft: TrainingPlanSessionDraft = action === "add"
++        ? { action, prescription: { localDate: "2026-10-29", ...patch } as never }
++        : { action, ...f.existing(), patch };
++      const request = f.request(draft), before = allControlTables(f.db);
++      if (accepted) {
++        const preview = f.service.preview(request);
++        assert.deepEqual(allControlTables(f.db), before, "preview must write nothing");
++        const command = { ...request, operationId: randomUUID(), candidateId: preview.candidateId };
++        const result = f.service.submit(command);
++        assert.deepEqual(result.session!.prescription.structure, patch.structure);
++        assert.deepEqual(f.service.submit(command), result);
++      } else {
++        assert.throws(() => f.service.preview(request), code("training_session_command_invalid"));
++        assert.throws(() => f.service.submit({ ...request, operationId: randomUUID(), candidateId: "unissued" }),
++          code("training_session_command_invalid"));
++        assert.deepEqual(allControlTables(f.db), before, "every control table, history and receipt stays unchanged");
++      }
++    } finally { f.close(); }
++  });
++}
++
++test("D-03: API preview/submit reject nine steps without writes", async () => {
++  const f = setup(), app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
++  try {
++    const handlers = createTrainingSessionCommandHandlers(f.service, () => {}, async fn => fn());
++    app.post("/preview", trainingSessionCommandRouteOptions(false), handlers.preview);
++    app.post("/submit", trainingSessionCommandRouteOptions(true), handlers.submit);
++    const { distanceKm, ...prescription } = quantityCourse(9);
++    const request = f.request({ action: "add", prescription: { ...prescription, localDate: "2026-10-29" } as never });
++    const before = allControlTables(f.db);
++    const preview = await app.inject({ method: "POST", url: "/preview", payload: request });
++    assert.equal(preview.statusCode, 422, preview.body);
++    assert.equal(preview.json().code, "training_session_command_invalid");
++    const submit = await app.inject({ method: "POST", url: "/submit", payload: {
++      ...request, operationId: randomUUID(), candidateId: "unissued" } });
++    assert.equal(submit.statusCode, 422, submit.body);
++    assert.equal(submit.json().code, "training_session_command_invalid");
++    assert.deepEqual(allControlTables(f.db), before);
++  } finally { await app.close(); f.close(); }
++});
++
++test("D-03: persisted nine-step courses remain lossless; metadata edits survive, dose edits require legal replacement", () => {
++  const original = quantityCourse(9); original.distanceKm = 0.9;
++  const f = setup(original);
++  try {
++    assert.deepEqual(f.state().sessions[0]!.prescription, original);
++    assert.deepEqual(f.goals.read().weekPlan[0], original);
++    const oldHistory = f.db.prepare("SELECT * FROM mobile_training_session_history ORDER BY rowid").all();
++    f.service.submit(f.command({ action: "edit", ...f.existing(), patch: { reason: "preserve all nine historical steps" } }));
++    assert.deepEqual(f.state().sessions[0]!.prescription.structure, original.structure);
++    f.service.submit(f.command({ action: "move", ...f.existing(), localDate: "2026-10-29" }));
++    assert.deepEqual(f.state().sessions[0]!.prescription.structure, original.structure);
++    const before = allControlTables(f.db);
++    for (const patch of [{ kind: "interval" as const }, { distanceKm: 0.9 }, { structure: original.structure }]) {
++      assert.throws(() => f.service.preview(f.request({ action: "edit", ...f.existing(), patch })), code("training_session_command_invalid"));
++    }
++    assert.deepEqual(allControlTables(f.db), before);
++    const replacement = quantityCourse(8).structure!;
++    f.service.submit(f.command({ action: "edit", ...f.existing(), patch: { structure: replacement } }));
++    assert.deepEqual(f.state().sessions[0]!.prescription.structure, replacement);
++    assert.deepEqual(f.db.prepare("SELECT * FROM mobile_training_session_history ORDER BY rowid").all().slice(0, oldHistory.length), oldHistory,
++      "repair appends a new revision; old prescriptions are not rewritten");
++  } finally { f.close(); }
++});
++
++
++for (const [label, goals, iterations, accepted] of [
++  ["80 km", [80_000], 1, true], ["80 km plus one metre", [80_001], 1, false],
++  ["80 km through iterations", [4_000], 20, true], ["over 80 km through iterations", [4_001], 20, false],
++  ["4 hours", [14_400], 1, true], ["step over 4 hours", [14_401], 1, false],
++  ["4 hours through steps", [7_200, 7_200], 1, true], ["over 4 hours through steps", [7_200, 7_201], 1, false],
++  ["4 hours through iterations", [720], 20, true], ["over 4 hours through iterations", [721], 20, false]
++] as const) test(`D-03: dose boundary ${label}`, () => {
++  const isTime = label.includes("hours");
++  const f = setup(undefined, { ...distanceZones!, easyPaceUpper: isTime ? 400 : 150 });
++  try {
++    const prescription = { localDate: "2026-10-29", kind: "easy" as const, structure: { warmup: null, cooldown: null,
++      blocks: [{ iterations, steps: goals.map(amount => ({ purpose: "work" as const, alert: null,
++        goal: isTime ? { type: "time" as const, seconds: amount } : { type: "distance" as const, meters: amount } })) }] } };
++    const request = f.request({ action: "add", prescription }), before = allControlTables(f.db);
++    if (accepted) {
++      const preview = f.service.preview(request);
++      assert.deepEqual(allControlTables(f.db), before);
++      const result = f.service.submit({ ...request, operationId: randomUUID(), candidateId: preview.candidateId });
++      assert.deepEqual(result.session!.prescription.structure, prescription.structure);
++    } else {
++      assert.throws(() => f.service.preview(request), code("training_session_command_invalid"));
++      assert.deepEqual(allControlTables(f.db), before);
++    }
++  } finally { f.close(); }
++});
++
++test("D-03: lossless shape reader retains single-step metre/second ceilings", () => {
++  for (const [field, limit] of [["meters", 100_000], ["seconds", 14_400]] as const) {
++    const type = field === "meters" ? "distance" : "time";
++    const day = { ...easy("2026-10-28"), distanceKm: null, structure: { warmup: null, cooldown: null,
++      blocks: [{ iterations: 1, steps: [{ purpose: "work", goal: { type, [field]: Number(limit) }, alert: null }] }] } };
++    assert.deepEqual(parseSessionPrescription(day), day);
++    day.structure.blocks[0]!.steps[0]!.goal[field] = limit + 1;
++    assert.throws(() => parseSessionPrescription(day), /structure would lose or normalize fields/);
++  }
++});
++
++test("D-03: a committed historical nine-step operation replays ahead of schema/capability/new-write gates", async () => {
++  const f = setup(), app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
++  try {
++    const { distanceKm, ...prescription } = quantityCourse(9);
++    const request = { ...f.request({ action: "add", prescription: { ...prescription, localDate: "2026-10-29" } }),
++      operationId: randomUUID(), candidateId: "historical-candidate" };
++    // Seed an old immutable receipt, not a new business write under today's validator.
++    const historicalSession = { ...structuredClone(fixture.initial), prescription: { ...prescription, distanceKm: 0.9 } };
++    const result = { contractVersion: 1, operationId: request.operationId, stateRevision: 2, goalsRevision: 1,
++      planInstanceId: request.planInstanceId, outcome: "changed", session: historicalSession, execution: null,
++      planUpdate: "pending", warnings: [] };
++    f.db.prepare("INSERT INTO mobile_plan_operations(scope,operation_id,request_digest,result_json,expires_at) VALUES(?,?,?,?,?)")
++      .run(key, request.operationId, digest({ route: "training-plan-session-command", input: request }), JSON.stringify(result), "2099-01-01T00:00:00.000Z");
++    const before = allControlTables(f.db);
++    f.busy();
++    const handlers = createTrainingSessionCommandHandlers(f.service, () => { throw new Error("replay must not admit"); },
++      async () => { throw new Error("replay must not capture facts"); });
++    app.post("/submit", trainingSessionCommandRouteOptions(true), handlers.submit);
++    assert.deepEqual(f.service.submit(request), result);
++    const replay = await app.inject({ method: "POST", url: "/submit", payload: request });
++    assert.equal(replay.statusCode, 200, replay.body);
++    assert.deepEqual(replay.json(), result);
++    assert.deepEqual(allControlTables(f.db), before);
++    const fresh = await app.inject({ method: "POST", url: "/submit", payload: { ...request, operationId: randomUUID() } });
++    assert.equal(fresh.statusCode, 422);
++    assert.equal(fresh.json().code, "training_session_command_invalid");
++    assert.deepEqual(allControlTables(f.db), before);
++  } finally { await app.close(); f.close(); }
++});
++
++test("D-03: production route options share OpenAPI schemas and reject coercion without changing errors", async () => {
++  const f = setup(), app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
++  try {
++    const handlers = createTrainingSessionCommandHandlers(f.service, () => {}, async fn => fn());
++    app.post("/preview", trainingSessionCommandRouteOptions(false), handlers.preview);
++    app.post("/submit", trainingSessionCommandRouteOptions(true), handlers.submit);
++    const { distanceKm, ...prescription } = quantityCourse(8);
++    const request = f.request({ action: "add", prescription: { ...prescription, localDate: "2026-10-29" } });
++    const before = allControlTables(f.db);
++    for (const input of [
++      { ...request, expectedStateRevision: String(request.expectedStateRevision) },
++      { ...request, extra: true }, { ...request, contractVersion: 2 },
++      { ...request, draft: { ...request.draft, prescription: { ...prescription, structure: {
++        ...prescription.structure, blocks: [{ ...prescription.structure.blocks[0], iterations: "1" }] } } } }
++    ]) {
++      const response = await app.inject({ method: "POST", url: "/preview", payload: input });
++      assert.equal(response.statusCode, 422, response.body);
++      assert.equal(response.headers["cache-control"], "no-store");
++      assert.equal(response.json().code, input.contractVersion === 2 ? "training_session_contract_required" : "training_session_command_invalid");
++      assert.deepEqual(allControlTables(f.db), before);
++    }
++    const preview = await app.inject({ method: "POST", url: "/preview", payload: request });
++    assert.equal(preview.statusCode, 200, preview.body);
++    const command = { ...request, operationId: randomUUID(), candidateId: preview.json().candidateId };
++    const invalid = structuredClone(command);
++    if (invalid.draft.action !== "add") throw new Error("add expected");
++    invalid.draft.prescription.structure.blocks[0]!.steps.push({ purpose: "work", goal: { type: "distance", meters: 100 }, alert: null });
++    const rejected = await app.inject({ method: "POST", url: "/submit", payload: invalid });
++    assert.equal(rejected.statusCode, 422, rejected.body);
++    assert.deepEqual(allControlTables(f.db), before);
++    const submitted = await app.inject({ method: "POST", url: "/submit", payload: command });
++    assert.equal(submitted.statusCode, 200, submitted.body);
++  } finally { await app.close(); f.close(); }
++});
+--- a/apps/api/test/training-plan-session-migration.test.ts
++++ b/apps/api/test/training-plan-session-migration.test.ts
+@@ -174,3 +174,32 @@
+     assert.equal(applySessionIdentityMigration(f.db, scope, report.sourceDigest, 1).status, "applied");
+   } finally { f.close(); }
+ });
++
++
++test("D-03: identity migration and historical replay retain all nine legacy steps", () => {
++  const f = seed();
++  try {
++    const day = { localDate: "2026-10-28", kind: "easy" as const, distanceKm: 0.9, reason: "legacy nine-step course",
++      structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: Array.from({ length: 9 }, () => ({
++        purpose: "work" as const, goal: { type: "distance" as const, meters: 100 }, alert: null })) }] } };
++    const goals = f.goals.write({ weekPlan: [day] }, { preserveWeekPlan: true });
++    const row = f.store.read(scope)!;
++    f.store.commitState({ scope, expectedRevision: row.revision, state: {
++      ...f.state, weekPlan: [day], lockedSession: null, goalsRevision: goals.revision }, eventType: "fixture:legacy-nine-steps" });
++    const before = snapshot(f.db);
++    const report = inspectSessionIdentityMigration(f.db, scope);
++    assert.deepEqual(snapshot(f.db), before, "dry-run preserves historical JSON and allocates nothing");
++    const history = f.db.prepare("SELECT * FROM mobile_training_state_history ORDER BY revision").all();
++    const migrated = applySessionIdentityMigration(f.db, scope, report.sourceDigest, report.existingRevision);
++    const current = f.store.read(scope)!;
++    assert.equal(current.state.schemaVersion, 2);
++    if (current.state.schemaVersion !== 2) throw new Error("schema 2 required");
++    assert.deepEqual(current.state.sessions[0]!.prescription, day);
++    const repo = new TrainingPlanSessionRepository(f.db);
++    assert.deepEqual(repo.get(scope, migrated.planInstanceId!, current.state.sessions[0]!.sessionId, 1)!.session.prescription, day);
++    assert.deepEqual(f.db.prepare("SELECT * FROM mobile_training_state_history ORDER BY revision").all().slice(0, history.length), history);
++    const after = snapshot(f.db);
++    assert.equal(applySessionIdentityMigration(f.db, scope, report.sourceDigest, report.existingRevision).status, "replayed");
++    assert.deepEqual(snapshot(f.db), after);
++  } finally { f.close(); }
++});
+--- a/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
++++ b/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
+@@ -9,6 +9,9 @@
+     /// Mirrors `apps/api/src/session-structure.ts` (`MAX_STEP_METERS` /
+     /// `MAX_STEP_SECONDS`). The editor must not accept a step the server will
+     /// reject after preview.
++    static let maximumBlocks = 8
++    static let maximumStepsPerBlock = 8
++    static let maximumBlockIterations = 20
+     static let maximumStepMeters = 100_000.0
+     static let maximumStepSeconds = 4 * 60 * 60.0
+ 
+@@ -61,7 +64,7 @@
+     }
+ 
+     static func structureDistance(_ structure: MobileSessionStructure?) -> StructureDistance {
+-        guard let structure, !structure.blocks.isEmpty else { return .invalid }
++        guard let structure, !structure.blocks.isEmpty, structure.blocks.count <= maximumBlocks else { return .invalid }
+         var totalMeters = 0
+         var hasDistance = false
+         var hasTime = false
+@@ -88,7 +91,8 @@
+ 
+         if let warmup = structure.warmup, !validStep(warmup, multiplier: 1) { return .invalid }
+         for block in structure.blocks {
+-            guard block.iterations >= 1, block.iterations <= 20, !block.steps.isEmpty else { return .invalid }
++            guard block.iterations >= 1, block.iterations <= maximumBlockIterations,
++                  !block.steps.isEmpty, block.steps.count <= maximumStepsPerBlock else { return .invalid }
+             for step in block.steps where !validStep(step, multiplier: block.iterations) { return .invalid }
+         }
+         if let cooldown = structure.cooldown, !validStep(cooldown, multiplier: 1) { return .invalid }
+@@ -102,6 +106,10 @@
+     /// rescaling. Explicit distance-only changes still compare whole metres.
+     static func resolveDistance(_ text: String, structure: MobileSessionStructure?,
+                                 original: MobilePlannedDay? = nil, kind: String? = nil) -> DistanceResolution {
++        if let structure, structure.blocks.count > maximumBlocks ||
++            structure.blocks.contains(where: { $0.steps.count > maximumStepsPerBlock || $0.iterations > maximumBlockIterations }) {
++            return .failure("课程最多8个训练区块，每区块最多8步、20次重复；修改历史超限课程须先调整为合法结构。")
++        }
+         let unchanged = original != nil && original?.structure == structure && original?.kind == kind
+         switch structureDistance(structure) {
+         case .invalid:
+--- a/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
++++ b/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
+@@ -199,7 +199,7 @@
+                     if warmup != nil { Section("热身") { stepFields(Binding(get: { warmup! }, set: { warmup = $0 })) } }
+                     ForEach($blocks) { $block in
+                         Section("训练段") {
+-                            Stepper("重复 \(block.iterations) 次", value: $block.iterations, in: 1...20)
++                            Stepper("重复 \(block.iterations) 次", value: $block.iterations, in: 1...TrainingPlanSessionEditorPolicy.maximumBlockIterations)
+                             ForEach($block.steps) { $step in stepFields($step) }
+                         }
+                     }
+--- a/apps/ios/tests/TrainingPlanSessionEditorRegression.swift
++++ b/apps/ios/tests/TrainingPlanSessionEditorRegression.swift
+@@ -112,6 +112,23 @@
+                 structure(blocks: [.init(iterations: 1, steps: [distance(100_001)])])) == .invalid,
+               "a single step is capped at the server's MAX_STEP_METERS=100000")
+ 
++        let eightSteps = structure(blocks: [.init(iterations: 1, steps: Array(repeating: distance(100), count: 8))])
++        let nineSteps = structure(blocks: [.init(iterations: 1, steps: Array(repeating: distance(100), count: 9))])
++        check(TrainingPlanSessionEditorPolicy.structureDistance(eightSteps) == .meters(800), "D-03: eight steps are editable")
++        check(TrainingPlanSessionEditorPolicy.structureDistance(nineSteps) == .invalid, "D-03: nine steps cannot reach preview")
++        check(TrainingPlanSessionEditorPolicy.structureDistance(structure(blocks:
++            Array(repeating: .init(iterations: 1, steps: [distance(100)]), count: 8))) == .meters(800), "D-03: eight blocks are editable")
++        check(TrainingPlanSessionEditorPolicy.structureDistance(structure(blocks:
++            Array(repeating: .init(iterations: 1, steps: [distance(100)]), count: 9))) == .invalid, "D-03: nine blocks cannot reach preview")
++        check(TrainingPlanSessionEditorPolicy.structureDistance(structure(blocks: [.init(iterations: 20, steps: [distance(100)])])) == .meters(2000), "D-03: twenty iterations are editable")
++        check(TrainingPlanSessionEditorPolicy.structureDistance(structure(blocks: [.init(iterations: 21, steps: [distance(100)])])) == .invalid, "D-03: twenty-one iterations cannot reach preview")
++        let historical = MobilePlannedDay(localDate: "2026-10-28", kind: "easy", distanceKm: 0.9, structure: nineSteps, reason: nil)
++        if case .failure = TrainingPlanSessionEditorPolicy.resolveDistance("0.9", structure: nineSteps, original: historical, kind: "easy") {
++            check(true, "D-03: an unchanged historical over-limit structure cannot be resubmitted as content")
++        } else { check(false, "D-03: history is not a write-validation exemption") }
++        let decoded = try JSONDecoder().decode(MobilePlannedDay.self, from: JSONEncoder().encode(historical))
++        check(decoded.structure == nineSteps, "D-03: history decoding preserves every step")
++
+         struct DistanceFixture: Decodable {
+             struct Course: Decodable {
+                 struct Measurement: Decodable { let distanceKm: Double; let durationSeconds: Double }
+--- a/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
++++ b/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
+@@ -44,7 +44,7 @@
+ ## 2. 处方、单位与时间
+ 
+ 沿用 `MobileSessionStructure` 的 warmup / blocks / cooldown。结构目标使用整米、整秒；配速为整数秒/km，
+-心率为整数 bpm。步数、循环次数及范围遵守现有 session-structure 限额；单日最多 80km，仍须通过周预算/赛前/恢复政策。
++心率为整数 bpm。每课程最多 8 个 blocks，每个 block 最多 8 个 steps、iterations 为 1–20；warmup/cooldown 各自独立，不计入 block 的 steps 数量。单步最多 100,000 米或 14,400 秒；完整课程含所有重复、热身和放松，服务端测量最多 80 km / 4 小时，仍须通过周预算/赛前/恢复政策。
+ 新增命令严格拒绝非法值，不能依赖旧宽松 normalize 把错误字段删除/截断后当成功。
+ pace 范围为 120–1200 秒/km，heart_rate 为 1–240 bpm；每个非空 alert 至少一端非空，两端都有值时 lower ≤ upper。
+ 新处方必须有可测定剂量，不能用 open 工作步骤规避预算校验；旧 open/无结构处方仍按兼容合同读取。
+@@ -69,6 +69,10 @@
+ 旧客户端的合法整米 payload 和原样历史 payload 继续有效；结构变化后显式发送旧舍入值仍拒绝，需发送完整测量值或省略距离重新预览。
+ 旧无结构课可读，编辑剂量/类型/目标或 add 时须提供合法结构。iOS 不复制服务端配速模型，mixed 草稿省略距离，基础错误显示具体原因，最终剂量以服务端预览为准。
+ 固定课程、红测与分级验证见 [D-01/D-02 实施记录](../deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md)。
++D-03 数量校验只收紧新写入边界：add、edit 显式提供的结构均须合法；edit 修改 kind/distanceKm 时，合并后的完整结构也须合法，不能继承超限结构绕过。非法结构返回 `422 training_session_command_invalid`，不截断、不产生业务写入或操作回执。
++历史版本可能已保存每区块超过 8 steps 的课程；公共 normalizer、严格历史读取、身份迁移与历史回放保留全部步骤，不自动修剪处方。此类历史课程仍可 move/cancel/unlock 或仅修改 reason；编辑训练内容必须提供完整合法结构（即使显式重发的超限结构与历史相同也拒绝）。合法旧课程仍沿用 D-01/D-02 的距离兼容规则。
++课程命令 Fastify body Schema 与 OpenAPI 共用同一对象；原始请求先无损解析，再进行 Schema 验证。仅已提交且请求摘要完全匹配的历史 Submit 可在新写数量校验、能力和事实门之前返回原回执；未提交请求不能使用此例外。应用服务直接调用仍执行同等写入校验。
++iOS 编辑器仅检查上述结构数量及既有基础剂量输入，不复刻服务端 mixed 剂量测量；超限历史结构可解码查看，但不能作为内容编辑草稿重新提交。已有 move/cancel/unlock 动作继续可用，说明字段单独编辑的兼容能力由服务端 patch 合同提供。
+ 新 add 不接受 rest，休息走 set_rest；空 patch 拒绝。日期变更仅走 move，不能夹在 edit 中。
+ 明确改期可以保留与可跑日偏好冲突的用户意图，不能绕过伤病/恢复/容量等有效执行限制；冲突必须在预览解释。
+ 用户明确缩短课程不套用自动生成的完整剂量保证；不能自动加长回算法默认剂量。

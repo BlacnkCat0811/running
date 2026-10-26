@@ -1,0 +1,22 @@
+
+> rai-running-intelligence@0.1.0 check:training-plan-single-writer
+> node scripts/check-training-plan-single-writer.mjs
+
+single-writer 结构门禁：R1–R5 / 生产源文件 538 / 测试文件 179（R1/R2/R4 豁免）/ 违规 0
+single-writer 结构门禁通过。
+        2.43 real         0.64 user         0.51 sys
+            49688576  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               28894  page reclaims
+                   8  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                1760  involuntary context switches
+            18870272  peak memory footprint

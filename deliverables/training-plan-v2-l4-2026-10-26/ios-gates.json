@@ -1,0 +1,14 @@
+{
+  "name": "ios-gates",
+  "argv": [
+    "npm",
+    "run",
+    "check:ios-gates"
+  ],
+  "envOverrides": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "startedEpoch": 1792999036.614538,
+  "durationSeconds": 3.110835075378418,
+  "exitCode": 0
+}

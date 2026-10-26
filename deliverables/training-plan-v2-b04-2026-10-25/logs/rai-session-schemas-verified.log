@@ -1,0 +1,106 @@
+TAP version 13
+# Subtest: OpenAPI operations declare responses and write contracts
+ok 1 - OpenAPI operations declare responses and write contracts
+  ---
+  duration_ms: 12.145015
+  type: 'test'
+  ...
+# Subtest: inspect source schema rejects missing and additional fields
+ok 2 - inspect source schema rejects missing and additional fields
+  ---
+  duration_ms: 988.095319
+  type: 'test'
+  ...
+# Subtest: import job schema accepts only a source identifier
+ok 3 - import job schema accepts only a source identifier
+  ---
+  duration_ms: 161.269221
+  type: 'test'
+  ...
+# Subtest: prediction training schema rejects ambiguous timestamps and unknown input
+ok 4 - prediction training schema rejects ambiguous timestamps and unknown input
+  ---
+  duration_ms: 103.127835
+  type: 'test'
+  ...
+# Subtest: workout list queries accept eligibility filters and reject calibrating status
+ok 5 - workout list queries accept eligibility filters and reject calibrating status
+  ---
+  duration_ms: 128.853715
+  type: 'test'
+  ...
+# Subtest: training statistics queries constrain ranges and granularities
+ok 6 - training statistics queries constrain ranges and granularities
+  ---
+  duration_ms: 119.003231
+  type: 'test'
+  ...
+# Subtest: recovery trend queries require a whole-day range within the supported window
+ok 7 - recovery trend queries require a whole-day range within the supported window
+  ---
+  duration_ms: 101.503626
+  type: 'test'
+  ...
+# Subtest: training-zone settings require consistent automatic and manual values
+ok 8 - training-zone settings require consistent automatic and manual values
+  ---
+  duration_ms: 159.175333
+  type: 'test'
+  ...
+# Subtest: prediction model routes accept only generated model identifiers
+ok 9 - prediction model routes accept only generated model identifiers
+  ---
+  duration_ms: 53.523173
+  type: 'test'
+  ...
+# Subtest: the goals schema keeps step goals and alerts inside their own semantic bounds
+ok 10 - the goals schema keeps step goals and alerts inside their own semantic bounds
+  ---
+  duration_ms: 387.249404
+  type: 'test'
+  ...
+# Subtest: every registered mutation route is documented in OpenAPI
+ok 11 - every registered mutation route is documented in OpenAPI
+  ---
+  duration_ms: 223.967435
+  type: 'test'
+  ...
+# Subtest: a request that changes data is a route the router can see
+ok 12 - a request that changes data is a route the router can see
+  ---
+  duration_ms: 884.018313
+  type: 'test'
+  ...
+# Subtest: the week editor offers neither today — nor a day already gone — as an editable row
+ok 13 - the week editor offers neither today — nor a day already gone — as an editable row
+  ---
+  duration_ms: 155.141419
+  type: 'test'
+  ...
+# Subtest: native session and race pickers exactly match their API contracts
+ok 14 - native session and race pickers exactly match their API contracts
+  ---
+  duration_ms: 160.497638
+  type: 'test'
+  ...
+# Subtest: plan-operations query contract: four shared statuses, derived summary, strict narrowing
+ok 15 - plan-operations query contract: four shared statuses, derived summary, strict narrowing
+  ---
+  duration_ms: 9.872463
+  type: 'test'
+  ...
+# Subtest: plan publication identity is mandatory: operationId requires a declared scope
+ok 16 - plan publication identity is mandatory: operationId requires a declared scope
+  ---
+  duration_ms: 2.435231
+  type: 'test'
+  ...
+1..16
+# tests 16
+# suites 0
+# pass 16
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5535.203604

@@ -1,0 +1,84 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "sysctl",
+        "-n",
+        "hw.ncpu",
+        "hw.memsize"
+      ],
+      "exitCode": 0,
+      "output": "6\n17179869184\n"
+    },
+    {
+      "argv": [
+        "vm_stat"
+      ],
+      "exitCode": 0,
+      "output": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                  1251962.\nPages active:                                 760529.\nPages inactive:                              1085984.\nPages speculative:                             59137.\nPages throttled:                                   0.\nPages wired down:                             840989.\nPages purgeable:                                3962.\n\"Translation faults\":                    15749051278.\nPages copy-on-write:                       232528960.\nPages zero filled:                       10337731685.\nPages reactivated:                          76789947.\nPages purged:                                1201313.\nFile-backed pages:                           1071430.\nAnonymous pages:                              834220.\nPages stored in compressor:                  1971117.\nPages occupied by compressor:                 194414.\nDecompressions:                             69071323.\nCompressions:                               78252996.\nPageins:                                    44071036.\nPageouts:                                     224436.\nSwapins:                                     4562550.\nSwapouts:                                    5701095.\n"
+    },
+    {
+      "argv": [
+        "uptime"
+      ],
+      "exitCode": 0,
+      "output": "14:52  up 4 days,  4:09, 1 user, load averages: 8.12 6.48 9.03\n"
+    },
+    {
+      "argv": [
+        "df",
+        "-h",
+        "/tmp"
+      ],
+      "exitCode": 0,
+      "output": "Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk1s1   121Gi    90Gi   9.8Gi    91%    1.1M  103M    1%   /System/Volumes/Data\n"
+    },
+    {
+      "argv": [
+        "xcodebuild",
+        "-showsdks"
+      ],
+      "exitCode": 0,
+      "output": "DriverKit SDKs:\n\tDriverKit 25.5                \t-sdk driverkit25.5\n\niOS SDKs:\n\tiOS 26.5                      \t-sdk iphoneos26.5\n\niOS Simulator SDKs:\n\tSimulator - iOS 26.5          \t-sdk iphonesimulator26.5\n\nmacOS SDKs:\n\tmacOS 26.5                    \t-sdk macosx26.5\n\tmacOS 26.5                    \t-sdk macosx26.5\n\ntvOS SDKs:\n\ttvOS 26.5                     \t-sdk appletvos26.5\n\ntvOS Simulator SDKs:\n\tSimulator - tvOS 26.5         \t-sdk appletvsimulator26.5\n\nvisionOS SDKs:\n\tvisionOS 26.5                 \t-sdk xros26.5\n\nvisionOS Simulator SDKs:\n\tSimulator - visionOS 26.5     \t-sdk xrsimulator26.5\n\nwatchOS SDKs:\n\twatchOS 26.5                  \t-sdk watchos26.5\n\nwatchOS Simulator SDKs:\n\tSimulator - watchOS 26.5      \t-sdk watchsimulator26.5\n\n"
+    },
+    {
+      "argv": [
+        "xcrun",
+        "simctl",
+        "list",
+        "devices",
+        "booted"
+      ],
+      "exitCode": 0,
+      "output": "== Devices ==\n-- iOS 26.5 --\n    RAI Technology Acceptance (91C2D1F3-FB19-4843-B892-1A4F4AAF6D16) (Booted) \n"
+    },
+    {
+      "argv": [
+        "python3",
+        "--version"
+      ],
+      "exitCode": 0,
+      "output": "Python 3.9.6\n"
+    }
+  ],
+  "tools": {
+    "pod": null,
+    "ruby": "/usr/local/bin/ruby",
+    "cargo": null,
+    "rustup": null,
+    "actionlint": null,
+    "python": null,
+    "python3": "/usr/bin/python3",
+    "python3.12": "/Users/ta/.local/bin/python3.12",
+    "python3.13": null
+  },
+  "localDependencies": {
+    "research/.venv/bin/python": "True",
+    "var/cargo/bin/cargo": "True",
+    "apps/ios/Pods/Manifest.lock": "True",
+    "apps/ios/RAI.xcworkspace/contents.xcworkspacedata": "True",
+    "apps/ios/Pods/AMap3DMap/MAMapKit.framework/MAMapKit": "True",
+    "apps/ios/Pods/AMapFoundation/AMapFoundationKit.framework/AMapFoundationKit": "True"
+  },
+  "relevantEnvNames": []
+}

@@ -1,0 +1,51 @@
+{
+  "red-server": {
+    "tests": 38,
+    "pass": 32,
+    "fail": 6,
+    "skipped": 0,
+    "duration_ms": 5756.2833,
+    "failedTests": [
+      "29 - D-01: easy original full payload previews/submits without changing its persisted dose",
+      "30 - D-01: interval original full payload previews/submits without changing its persisted dose",
+      "31 - D-01: tempo original full payload previews/submits without changing its persisted dose",
+      "35 - D-01: historical-distance-only original full payload previews/submits without changing its persisted dose",
+      "37 - D-02: omitted distance delegates changed mixed dose to server; null/zero/rounded explicit totals stay strict",
+      "38 - D-02: add omission computes on server; pure time keeps null; explicit old-client exact totals remain accepted"
+    ]
+  },
+  "red-openapi": {
+    "tests": 17,
+    "pass": 16,
+    "fail": 1,
+    "skipped": 0,
+    "duration_ms": 3606.66036,
+    "failedTests": [
+      "17 - D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads"
+    ]
+  },
+  "l1-server": {
+    "tests": 60,
+    "pass": 60,
+    "fail": 0,
+    "skipped": 0,
+    "duration_ms": 7433.45633,
+    "failedTests": []
+  },
+  "l2-server": {
+    "tests": 253,
+    "pass": 253,
+    "fail": 0,
+    "skipped": 0,
+    "duration_ms": 177064.436879,
+    "failedTests": []
+  },
+  "l3-server": {
+    "tests": 638,
+    "pass": 638,
+    "fail": 0,
+    "skipped": 0,
+    "duration_ms": 475741.737358,
+    "failedTests": []
+  }
+}

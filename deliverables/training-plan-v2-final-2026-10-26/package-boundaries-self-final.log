@@ -1,0 +1,15 @@
+
+> rai-running-intelligence@0.1.0 check:package-boundaries
+> node scripts/check-package-boundaries.mjs --self-test
+
+包边界自测（/tmp 夹具突变回归）：
+  ✅ 健康夹具（scoring → contracts，声明↔实际一致）
+  ✅ 双引号单引号都拦：from "@rai/readiness"
+  ✅ 单引号 from '@rai/readiness'（第一版会漏）
+  ✅ .mts 源文件（第一版只扫 .ts/.tsx）
+  ✅ 动态 import("@rai/readiness")
+  ✅ require("@rai/readiness")
+  ✅ 跨层：包不得 import apps 实现（单引号 + 相对路径）
+  ✅ 声明了但从未使用（C 方向）
+
+包边界自测通过：8 项（含单引号/动态 import/require/.mts/跨层/声明未用）。

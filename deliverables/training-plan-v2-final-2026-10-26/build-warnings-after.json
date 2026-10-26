@@ -1,0 +1,26 @@
+{
+  "before": {
+    "source": "L4 inherited build evidence, frozen source before authorized actor fix",
+    "simulator": [
+      "external-archive/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:39: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+      "external-archive/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:91: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+      "external-archive/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:308:100: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context"
+    ],
+    "device": [
+      "external-archive/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:39: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+      "external-archive/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:91: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+      "external-archive/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:308:100: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context"
+    ]
+  },
+  "after": {
+    "source": "Actor fix build, fresh DerivedData, 2026-10-26",
+    "simulator": {
+      "totalWarnings": 0,
+      "actorWarnings": []
+    },
+    "device": {
+      "totalWarnings": 0,
+      "actorWarnings": []
+    }
+  }
+}

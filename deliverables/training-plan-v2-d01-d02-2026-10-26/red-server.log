@@ -1,0 +1,330 @@
+TAP version 13
+# (node:88634) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B08/S04-03: an unchanged protected course still clears the edit confirmation fence once
+ok 1 - B08/S04-03: an unchanged protected course still clears the edit confirmation fence once
+  ---
+  duration_ms: 143.062364
+  type: 'test'
+  ...
+# Subtest: B04/T13-18: add releases cancelled suppression on its target, and unlock does not lose the new course
+ok 2 - B04/T13-18: add releases cancelled suppression on its target, and unlock does not lose the new course
+  ---
+  duration_ms: 115.585883
+  type: 'test'
+  ...
+# Subtest: B04/T13-18: add releases moved suppression on its target, and unlock does not lose the new course
+ok 3 - B04/T13-18: add releases moved suppression on its target, and unlock does not lose the new course
+  ---
+  duration_ms: 114.792097
+  type: 'test'
+  ...
+# Subtest: B04/T09–12: preview zero-write; move/edit keep ID, suppress source and survive new-load generation
+ok 4 - B04/T09–12: preview zero-write; move/edit keep ID, suppress source and survive new-load generation
+  ---
+  duration_ms: 76.951227
+  type: 'test'
+  ...
+# Subtest: B04/T13–18: occupied/rest dates, cancel/add, repeated moves, release and no-op
+ok 5 - B04/T13–18: occupied/rest dates, cancel/add, repeated moves, release and no-op
+  ---
+  duration_ms: 158.178297
+  type: 'test'
+  ...
+# Subtest: B04/T19–20: draft, source, scope, instance, TTL and state/session CAS reject with zero business writes
+ok 6 - B04/T19–20: draft, source, scope, instance, TTL and state/session CAS reject with zero business writes
+  ---
+  duration_ms: 65.831497
+  type: 'test'
+  ...
+# Subtest: B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes
+ok 7 - B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes
+  ---
+  duration_ms: 813.580572
+  type: 'test'
+  ...
+# Subtest: B04: cancel and explicit rest remain usable with pending facts; additive edits require facts
+ok 8 - B04: cancel and explicit rest remain usable with pending facts; additive edits require facts
+  ---
+  duration_ms: 131.195577
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_goals rolls back the entire move; original candidate can retry
+ok 9 - B04/T22: SQL failure at mobile_goals rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 90.367357
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_goals_history rolls back the entire move; original candidate can retry
+ok 10 - B04/T22: SQL failure at mobile_goals_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 188.537875
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_state rolls back the entire move; original candidate can retry
+ok 11 - B04/T22: SQL failure at mobile_training_state rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 83.94914
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_state_history rolls back the entire move; original candidate can retry
+ok 12 - B04/T22: SQL failure at mobile_training_state_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 76.09873
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_session_history rolls back the entire move; original candidate can retry
+ok 13 - B04/T22: SQL failure at mobile_training_session_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 81.898229
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_plan_operations rolls back the entire move; original candidate can retry
+ok 14 - B04/T22: SQL failure at mobile_plan_operations rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 116.278341
+  type: 'test'
+  ...
+# Subtest: B04: strict shape, units, omission/null and coupled structure validation
+ok 15 - B04: strict shape, units, omission/null and coupled structure validation
+  ---
+  duration_ms: 345.526722
+  type: 'test'
+  ...
+# Subtest: B04/T21: two independent SQLite clients submit one state revision; only one owns the date
+ok 16 - B04/T21: two independent SQLite clients submit one state revision; only one owns the date
+  ---
+  duration_ms: 90.98507
+  type: 'test'
+  ...
+# Subtest: B04/T22: business COMMIT failure rolls back the move and all histories/results
+ok 17 - B04/T22: business COMMIT failure rolls back the move and all histories/results
+  ---
+  duration_ms: 164.706003
+  type: 'test'
+  ...
+# Subtest: B04/T17: active device evidence is scope-bound and changes invalidate a prepared edit
+ok 18 - B04/T17: active device evidence is scope-bound and changes invalidate a prepared edit
+  ---
+  duration_ms: 73.930097
+  type: 'test'
+  ...
+# Subtest: B04/T21: two OS processes race the same course revision; exactly one atomic move commits
+ok 19 - B04/T21: two OS processes race the same course revision; exactly one atomic move commits
+  ---
+  duration_ms: 788.629214
+  type: 'test'
+  ...
+# Subtest: B04/T16: completed history cannot be edited, moved, cancelled or unlocked
+ok 20 - B04/T16: completed history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 73.548709
+  type: 'test'
+  ...
+# Subtest: B04/T16: partial history cannot be edited, moved, cancelled or unlocked
+ok 21 - B04/T16: partial history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 56.621252
+  type: 'test'
+  ...
+# Subtest: B04/T16: skipped history cannot be edited, moved, cancelled or unlocked
+ok 22 - B04/T16: skipped history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 58.635994
+  type: 'test'
+  ...
+# Subtest: B04/T16: cancelled history cannot be edited, moved, cancelled or unlocked
+ok 23 - B04/T16: cancelled history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 50.248885
+  type: 'test'
+  ...
+# Subtest: P1.3/P2.4: add explicitly releases that day's explicit rest in the same transaction; move still refuses it
+ok 24 - P1.3/P2.4: add explicitly releases that day's explicit rest in the same transaction; move still refuses it
+  ---
+  duration_ms: 157.153406
+  type: 'test'
+  ...
+# Subtest: P1.4: distance steps require a non-null display distance and compare in whole metres
+ok 25 - P1.4: distance steps require a non-null display distance and compare in whole metres
+  ---
+  duration_ms: 45.189368
+  type: 'test'
+  ...
+# Subtest: P1.5: preview time is never persisted as the course's availableAt; submit stamps the commit instant
+ok 26 - P1.5: preview time is never persisted as the course's availableAt; submit stamps the commit instant
+  ---
+  duration_ms: 48.244562
+  type: 'test'
+  ...
+# Subtest: P2.4: move/cancel/set_rest replace only their own suppression and never another course's tombstone
+ok 27 - P2.4: move/cancel/set_rest replace only their own suppression and never another course's tombstone
+  ---
+  duration_ms: 215.646236
+  type: 'test'
+  ...
+# Subtest: D-01/D-02: frozen easy/interval/tempo are actual generated courses; measured and display values stay distinct
+ok 28 - D-01/D-02: frozen easy/interval/tempo are actual generated courses; measured and display values stay distinct
+  ---
+  duration_ms: 2.81626
+  type: 'test'
+  ...
+# Subtest: D-01: easy original full payload previews/submits without changing its persisted dose
+not ok 29 - D-01: easy original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 34.862912
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:30240'
+  failureType: 'testCodeFailure'
+  error: '距离与训练结构不一致，请同时调整结构。'
+  code: 'training_session_command_invalid'
+  stack: |-
+    invalid (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:20:53)
+    TrainingPlanSessionCommandService.apply (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:252:11)
+    TrainingPlanSessionCommandService.preview (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:270:25)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:522:33)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-01: interval original full payload previews/submits without changing its persisted dose
+not ok 30 - D-01: interval original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 36.257526
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:30240'
+  failureType: 'testCodeFailure'
+  error: '距离与训练结构不一致，请同时调整结构。'
+  code: 'training_session_command_invalid'
+  stack: |-
+    invalid (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:20:53)
+    TrainingPlanSessionCommandService.apply (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:252:11)
+    TrainingPlanSessionCommandService.preview (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:270:25)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:522:33)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-01: tempo original full payload previews/submits without changing its persisted dose
+not ok 31 - D-01: tempo original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 49.159009
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:30240'
+  failureType: 'testCodeFailure'
+  error: '距离与训练结构不一致，请同时调整结构。'
+  code: 'training_session_command_invalid'
+  stack: |-
+    invalid (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:20:53)
+    TrainingPlanSessionCommandService.apply (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:252:11)
+    TrainingPlanSessionCommandService.preview (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:270:25)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:522:33)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-01: distance-only original full payload previews/submits without changing its persisted dose
+ok 32 - D-01: distance-only original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 46.527268
+  type: 'test'
+  ...
+# Subtest: D-01: time-only original full payload previews/submits without changing its persisted dose
+ok 33 - D-01: time-only original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 46.734267
+  type: 'test'
+  ...
+# Subtest: D-01: mixed original full payload previews/submits without changing its persisted dose
+ok 34 - D-01: mixed original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 55.557786
+  type: 'test'
+  ...
+# Subtest: D-01: historical-distance-only original full payload previews/submits without changing its persisted dose
+not ok 35 - D-01: historical-distance-only original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 35.407859
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:30240'
+  failureType: 'testCodeFailure'
+  error: '距离与训练结构不一致，请同时调整结构。'
+  code: 'training_session_command_invalid'
+  stack: |-
+    invalid (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:20:53)
+    TrainingPlanSessionCommandService.apply (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:252:11)
+    TrainingPlanSessionCommandService.preview (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:270:25)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:522:33)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-01: historical rounding cannot mask changed steps, type, targets or fabricated totals
+ok 36 - D-01: historical rounding cannot mask changed steps, type, targets or fabricated totals
+  ---
+  duration_ms: 210.979632
+  type: 'test'
+  ...
+# Subtest: D-02: omitted distance delegates changed mixed dose to server; null/zero/rounded explicit totals stay strict
+not ok 37 - D-02: omitted distance delegates changed mixed dose to server; null/zero/rounded explicit totals stay strict
+  ---
+  duration_ms: 40.835349
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:32113'
+  failureType: 'testCodeFailure'
+  error: '距离与训练结构不一致，请同时调整结构。'
+  code: 'training_session_command_invalid'
+  stack: |-
+    invalid (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:20:53)
+    TrainingPlanSessionCommandService.apply (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:252:11)
+    TrainingPlanSessionCommandService.preview (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:270:25)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:565:31)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D-02: add omission computes on server; pure time keeps null; explicit old-client exact totals remain accepted
+not ok 38 - D-02: add omission computes on server; pure time keeps null; explicit old-client exact totals remain accepted
+  ---
+  duration_ms: 37.803552
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:1:33619'
+  failureType: 'testCodeFailure'
+  error: 'prescription: distanceKm must be non-negative or null'
+  code: 'training_session_command_invalid'
+  stack: |-
+    invalid (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:20:53)
+    parseTrainingSessionRequest (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:69:64)
+    TrainingPlanSessionCommandService.preview (/Users/ta/running/apps/api/src/training-plan-session-commands.ts:262:21)
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts:591:31)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 32
+# fail 6
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5756.2833

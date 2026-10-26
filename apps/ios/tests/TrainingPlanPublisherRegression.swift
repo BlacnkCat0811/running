@@ -191,6 +191,93 @@ final class CommandProtocol: URLProtocol, @unchecked Sendable {
               restarted.message?.contains("确认当前规则版本") == true,
               "policy-change rejection closes only the rejected intent and tells the user to accept the rules rather than repeat previews")
         check(!paths.contains("/v1/mobile/goals") && !paths.contains("/v1/mobile/run-coach"), "zero retired URL requests")
+        // B05: session commands share the durable journal, with their own wire
+        // contract, instance binding and independent capability.
+        var sessionPosts: [Data] = []
+        var sessionQueryHTTP = 200
+        var sessionQueryStatus = "committed"
+        var sessionLostReply = false
+        var sessionMissing = false
+        let sessionDraft = TrainingPlanSessionDraft.move(sessionId: "session", sessionRevision: 1, localDate: "2026-10-29")
+        let sessionRequest = TrainingPlanSessionPreviewRequest(operationScope: identity, expectedStateRevision: 2,
+            planInstanceId: "instance", draft: sessionDraft)
+        let sessionPreviewObject: [String: Any] = ["contractVersion": 1, "operationScope": ["serverId": "server", "athleteId": "athlete", "datasetEpoch": "epoch"],
+            "expectedStateRevision": 2, "planInstanceId": "instance", "candidateId": "signed-session-candidate", "inputKey": "facts-input",
+            "expiresAt": "2026-10-23T04:02:00.000Z", "impact": ["before": NSNull(), "after": NSNull(), "suppressions": [],
+                "affectedDates": ["2026-10-29"], "deviceWithdrawalRequired": true, "warnings": []]]
+        let sessionPreviewData = try JSONSerialization.data(withJSONObject: sessionPreviewObject)
+        func sessionResult(_ id: String) -> Data {
+            Data("{\"contractVersion\":1,\"operationId\":\"\(id)\",\"stateRevision\":4,\"goalsRevision\":18,\"planInstanceId\":\"instance\",\"warnings\":[]}".utf8)
+        }
+        let sessionJournal = CommandJournal()
+        CommandProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/preview") {
+                check(path == "/v1/mobile/training-plan/session-commands/preview" && request.httpMethod == "POST" &&
+                      request.value(forHTTPHeaderField: "X-RAI-Client-Training-Session-Commands") == "1", "session preview uses its own exact negotiated route")
+                return (200, sessionPreviewData)
+            }
+            if path.contains("/plan-operations/") {
+                if sessionQueryHTTP != 200 { return (sessionQueryHTTP, Data("{\"code\":\"route_missing\",\"message\":\"upgrade\"}".utf8)) }
+                let id = path.components(separatedBy: "/").last!
+                return (200, Data("{\"status\":\"\(sessionQueryStatus)\",\"operationId\":\"\(id)\"\(sessionQueryStatus == "committed" ? ",\"result\":" + String(data: sessionResult(id), encoding: .utf8)! : "")}".utf8))
+            }
+            check(path == "/v1/mobile/training-plan/session-commands" && request.httpMethod == "POST" &&
+                  request.value(forHTTPHeaderField: "X-RAI-Client-Training-Session-Commands") == "1", "session submit never uses configuration or retired routes")
+            let data: Data
+            if let body = request.httpBody { data = body }
+            else { let stream = request.httpBodyStream!; stream.open(); defer { stream.close() }
+                var bytes = [UInt8](repeating: 0, count: 8192); var value = Data()
+                while stream.hasBytesAvailable { let count = stream.read(&bytes, maxLength: bytes.count); if count <= 0 { break }; value.append(contentsOf: bytes[0..<count]) }; data = value }
+            sessionPosts.append(data)
+            let body = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+            check(body["contractVersion"] as? Int == 1 && body["planInstanceId"] as? String == "instance", "session contract and instance survive durable encoding")
+            if sessionMissing { return (404, Data("{\"code\":\"training_session_not_found\",\"message\":\"当前课程已不存在，请重读。\"}".utf8)) }
+            if sessionLostReply { return (503, Data("{\"code\":\"lost_reply\",\"message\":\"query\"}".utf8)) }
+            return (200, sessionResult(body["operationId"] as! String))
+        }
+        let sessionPublisher = TrainingPlanPublisher(api: api, persistence: sessionJournal, now: { clock })
+        check(await sessionPublisher.makeSessionPreview(sessionRequest, context: context) { true }, "session preview accepted")
+        sessionPublisher.cancelPreview()
+        check(await sessionPublisher.confirmSession(context: context) { true } == nil && sessionJournal.pending == nil, "closed session preview cannot submit")
+        check(await sessionPublisher.makeSessionPreview(sessionRequest, context: context) { true }, "new session preview accepted")
+        sessionJournal.failIntent = true
+        check(await sessionPublisher.confirmSession(context: context) { true } == nil && sessionPosts.isEmpty, "session intent failure sends zero HTTP")
+        sessionJournal.failIntent = false
+        check(await sessionPublisher.makeSessionPreview(sessionRequest, context: context) { true }, "session draft retry after storage repair")
+        sessionLostReply = true
+        check(await sessionPublisher.confirmSession(context: context) { true } == nil && sessionJournal.pending != nil, "session unknown response keeps original journal")
+        let originalSessionBytes = sessionJournal.pending!.payload
+        let sessionRestart = TrainingPlanPublisher(api: api, persistence: sessionJournal, now: { clock })
+        sessionQueryHTTP = 404
+        _ = await sessionRestart.recover(context: context, mayReplay: true) { true }
+        check(sessionPosts.count == 1 && sessionJournal.pending?.payload == originalSessionBytes, "session HTTP 404 is not business notFound")
+        sessionQueryHTTP = 200; sessionQueryStatus = "notFound"; sessionLostReply = false
+        check(await sessionRestart.recover(context: context, mayReplay: true) { true } != nil && sessionPosts.count == 2 &&
+              sessionPosts[1] == originalSessionBytes, "session restart replays original UUID and exact bytes only after business notFound")
+        check(sessionJournal.watermark?.stateRevision == 4 && sessionRestart.executionBlocked, "session save persists separate state/goals floors before re-read")
+        check(sessionRestart.finishRead(context: context) && sessionJournal.pending == nil, "session read completion closes journal")
+        sessionJournal.pending = .init(operationId: (try JSONDecoder().decode(TrainingPlanRefreshRequest.self, from: originalSessionBytes)).operationId,
+            route: "training-session", payload: originalSessionBytes, preparedAt: clock)
+        sessionQueryStatus = "committed"
+        check(await sessionRestart.recover(context: context, mayReplay: false) { true } != nil && sessionPosts.count == 2,
+              "session committed query works with independent write capability disabled")
+        check(sessionRestart.finishRead(context: context), "close the previous known result before testing entity rejection")
+        sessionMissing = true
+        check(await sessionRestart.makeSessionPreview(sessionRequest, context: context) { true }, "preview precedes a competing session deletion")
+        check(await sessionRestart.confirmSession(context: context) { true } == nil && sessionJournal.pending == nil &&
+              sessionRestart.phase == .needsPreview && sessionRestart.message?.contains("当前课程已不存在") == true,
+              "known session-not-found 404 is a rejected business command, not a missing route or unknown operation")
+        let patch = TrainingPlanSessionPatch(reason: nil, updatesReason: true)
+        let patchObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as! [String: Any]
+        check(patchObject["reason"] is NSNull && patchObject["structure"] == nil, "session explicit clear differs from omission")
+        let day = MobilePlannedDay(localDate: "2026-10-29", kind: "easy", distanceKm: 8,
+            structure: .init(warmup: nil, blocks: [.init(iterations: 1, steps: [.init(purpose: "work", goal: .distance(meters: 8000), alert: nil)])], cooldown: nil), reason: nil)
+        let addObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(TrainingPlanSessionDraft.add(day))) as! [String: Any]
+        let prescribed = addObject["prescription"] as! [String: Any], structured = prescribed["structure"] as! [String: Any]
+        let block = (structured["blocks"] as! [[String: Any]])[0], step = (block["steps"] as! [[String: Any]])[0]
+        check(structured["warmup"] is NSNull && structured["cooldown"] is NSNull && step["alert"] is NSNull && prescribed["reason"] is NSNull,
+              "session structure sends canonical null fields rather than lossy optional encoding")
         print("TrainingPlanPublisher regression passed")
     }
 }

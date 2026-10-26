@@ -1,0 +1,10 @@
+
+> rai-running-intelligence@0.1.0 check:docs
+> node scripts/check-doc-links.mjs
+
+Documentation: 108 files, 821 local links, 3 anchors, 0 problems
+docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md: 26 处引用，0 处越界/无法解析，内容漂移 未核对（无基线）（--problems-only）
+
+合计 26 处（去重后）；越界/无法解析 0 处；内容漂移 未核对（无基线；1 份文档均无 .linerefs.json）；锚在空行 0 处（告警）
+
+EXIT_CODE=0

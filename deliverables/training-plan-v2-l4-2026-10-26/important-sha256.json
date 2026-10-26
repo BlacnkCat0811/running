@@ -1,0 +1,11 @@
+{
+  "AGENTS.md": "2df97360c6034d7517e5a04b45c24e71bba3d53d30f699060df531e2390af1e7",
+  "package.json": "a774d2d94590c53e71d94cc807985b6740d8be87dbef2f3032b809412796480f",
+  "scripts/run-tests.mjs": "9f4479bc8943a3ac4bd7455f3af008d7462d56012ab7ced41192066c1e6d8eb7",
+  ".github/workflows/ci.yml": "d726cf371fcb9a1ffad385dfbd54720b95b3d203d56e1269be848a2582c83d73",
+  "apps/api/src/training-plan-execution-commands.ts": "1d77f45b6dbfae645f3eb724e70269ced5f95711a90a15d9a682d354de2f13d7",
+  "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift": "662075a793a1c063b49e0135e7d093bbac13538acda9fd45f3daf02debee6671",
+  "apps/ios/tests/fixtures/training-session-distance-v1.json": "24667252898aa4c1a237eb3eed2434e3b72624551beadbf76f622499dfa91156",
+  "apps/ios/RAI.xcodeproj/project.pbxproj": "9ea441c0d0b34954cefb992fa973b840424ba669684f97f5c2c36ccbd9aef112",
+  "apps/ios/Podfile.lock": "85bf628c4624a7899a8ecafbe4a388e80a4c34c8afbb34261234fd383e606c3c"
+}

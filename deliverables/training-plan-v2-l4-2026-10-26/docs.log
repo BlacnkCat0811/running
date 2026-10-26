@@ -1,0 +1,21 @@
+
+> rai-running-intelligence@0.1.0 check:docs
+> node scripts/check-doc-links.mjs
+
+Documentation: 124 files, 1123 local links, 6 anchors, 0 problems
+        1.66 real         0.47 user         0.40 sys
+            49737728  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               27694  page reclaims
+                  22  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   3  messages sent
+                   3  messages received
+                   0  signals received
+                   3  voluntary context switches
+                1477  involuntary context switches
+            18927616  peak memory footprint

@@ -1,0 +1,81 @@
+{
+  "head": "1b6a10b4769526b2930090e79860d2f93cc50318",
+  "recordedAt": "2026-10-25T02:48:36.089294+00:00",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "a99979d51330719fd5cfa096f41062eab6dfb10a89489fb5b672da2a851d31c3",
+      "preexisting": true
+    },
+    {
+      "path": "apps/api/src/server.ts",
+      "sha256": "e5c761be710ddc15f7943951df562c7530d8eaa890adb494108d6ad8db031d00",
+      "preexisting": false
+    },
+    {
+      "path": "apps/api/test/phase5-training-plan.test.ts",
+      "sha256": "474cdd041a78140ab48efa47468f551f244eb4d660341078b556ffe0d1ac4e17",
+      "preexisting": false
+    },
+    {
+      "path": "apps/api/test/training-plan-closed-loop-contract.test.ts",
+      "sha256": "630ac3bb5beb11870851a7a95cd0b439abd1b9d31cf86a9805b27cc9cd5f5a7b",
+      "preexisting": false
+    },
+    {
+      "path": "apps/ios/RAI/APIModels.swift",
+      "sha256": "d3efb4ce2ac74066cf4daeab379dcf8303f5d6d459e3cd8e04461dcaec48412c",
+      "preexisting": false
+    },
+    {
+      "path": "apps/ios/tests/TrainingPlanV2Regression.swift",
+      "sha256": "585db66bd0eed56625655e09360b5dbdb76841ffb48c5ea2e361be81518651a0",
+      "preexisting": false
+    },
+    {
+      "path": "apps/ios/tests/fixtures/training-plan-closed-loop.json",
+      "sha256": "f838f1f5fea991854775b619db7e2310f98b8a2209e5ffbdd8d1c0d1b55b4fee",
+      "preexisting": false
+    },
+    {
+      "path": "docs/DECISIONS.md",
+      "sha256": "e81e7b9cd547eaa10aeb87a082e31aefca2e20342aa878274f63500b09504f6e",
+      "preexisting": false
+    },
+    {
+      "path": "docs/IOS_NATIVE_API_CONTRACT.md",
+      "sha256": "601fea7c0f82cf0191e9a94f8fe92d872d3b405d36bd498ffd89509a4e7e1edb",
+      "preexisting": false
+    },
+    {
+      "path": "docs/RUN_COACH.md",
+      "sha256": "95c4b7c70430c98899971d205371d764e46efcd260a55b2f82b6cb3ac3074925",
+      "preexisting": false
+    },
+    {
+      "path": "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md",
+      "sha256": "75dfe2fc6e0f6d970b2a629869b67706c57750d8eda30288340a651caf969f9d",
+      "preexisting": false
+    },
+    {
+      "path": "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md",
+      "sha256": "608e09fa2bd1fd1e4fb49fdc6d76cf9059b219272b40d162a2a31c6d60418338",
+      "preexisting": true
+    },
+    {
+      "path": "packages/api-contracts/src/handshake-registry.ts",
+      "sha256": "11482fb77d5dd6d3721fb2f10c4ba2c2017531d077408379d22e4b20cc16bdf4",
+      "preexisting": false
+    },
+    {
+      "path": "packages/api-contracts/src/index.ts",
+      "sha256": "6b989eb2e2f5c47cedb9014366d28144c66af2ff41a78edc11f9abc02d21bff9",
+      "preexisting": false
+    },
+    {
+      "path": "packages/api-contracts/src/training-plan-closed-loop.ts",
+      "sha256": "ba0d70e1a088832a161aa695b3644486bbef7c00f0197bcf8b65ed0840299e2c",
+      "preexisting": false
+    }
+  ]
+}

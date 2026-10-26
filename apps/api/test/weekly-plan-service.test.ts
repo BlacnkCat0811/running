@@ -49,6 +49,27 @@ const args = () => ({
   previousWeekDistanceKm: 40
 });
 
+test("B03/S01-02: a protected course outside the rolling window spends volume and quality slots exactly once", () => {
+  const retained: MobilePlannedDay = { localDate: "2026-11-04", kind: "tempo", distanceKm: 8, reason: "protected",
+    structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: [
+      { purpose: "work", goal: { type: "distance", meters: 8000 }, alert: { kind: "pace", lower: 270, upper: 300 } }
+    ] }] } };
+  const proposed: MobilePlannedDay = { localDate: "2026-11-02", kind: "tempo", distanceKm: 6, reason: null,
+    structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: [
+      { purpose: "work", goal: { type: "distance", meters: 6000 }, alert: { kind: "pace", lower: 270, upper: 300 } }
+    ] }] } };
+  const input = { ...args(), automaticDosePolicy: false,
+    today: todayPayload({ today: { localDate: "2026-10-28", workoutCount: 0 },
+      week: { periodEnd: "2026-11-01", distanceKm: 0 } }),
+    goals: { ...args().goals, easyDurationFloorFraction: 0, weekPlan: [retained] } };
+  const baseline = constrainUpcomingPlan([proposed], input);
+  const warnings: string[] = [];
+  const protectedResult = constrainUpcomingPlan([proposed], { ...input, protectedDays: [retained] }, warnings);
+  assert.equal(baseline.find(day => day.localDate === proposed.localDate)?.kind, "tempo", "one quality slot remains in the next week");
+  assert.deepEqual(protectedResult, baseline, "marking an already retained course as protected cannot spend its budget again");
+  assert.ok(warnings.some(warning => warning.includes("预留 8.0 km、1 堂质量课")));
+});
+
 /** A complete-looking but too-short session: 5 + 5 min of work is under the 30 min policy. */
 const shortSession: MobileSessionStructure = {
   warmup: { purpose: "warmup", goal: { type: "time", seconds: 300 }, alert: null },

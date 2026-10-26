@@ -1,0 +1,2 @@
+editor/TrainingPlanSessionEditorRegression.swift:10: Precondition failed: EDIT-01: background refresh cannot wrap an old draft with the new revision
+/tmp/rai-p1-editor.sh: line 5: 19379 Illegal instruction: 4  "$out/editor"

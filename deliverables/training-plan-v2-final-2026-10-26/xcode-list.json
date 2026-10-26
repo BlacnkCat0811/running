@@ -1,0 +1,11 @@
+{
+  "workspace" : {
+    "name" : "RAI",
+    "schemes" : [
+      "AMap3DMap",
+      "AMapFoundation",
+      "Pods-RAI",
+      "RAI"
+    ]
+  }
+}

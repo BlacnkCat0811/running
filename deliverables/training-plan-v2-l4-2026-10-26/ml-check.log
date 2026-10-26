@@ -1,0 +1,29 @@
+
+> rai-running-intelligence@0.1.0 preml:check
+> npm run check:node
+
+
+> rai-running-intelligence@0.1.0 check:node
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 ml:check
+> node research/scripts/python-env.mjs --check
+
+Python 训练环境就绪: /Users/ta/running/research/.venv/bin/python
+        7.89 real         1.63 user         1.61 sys
+           103055360  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               76077  page reclaims
+                7120  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   1  messages sent
+                   1  messages received
+                   0  signals received
+                1088  voluntary context switches
+                3316  involuntary context switches
+            19111936  peak memory footprint

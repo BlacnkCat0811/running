@@ -1,0 +1,293 @@
+阶段一验收证据仍对应当前工作区，可以进入交付实施。但应先解决证据打包风险，再按主题提交；目前不能宣称 GitHub CI 或生产验收通过。
+
+本轮保持只读：未修改、复制、移动或删除文件，未暂存、提交、推送、修改 CI、部署或启用生产写能力。
+
+**1. 当前工作区准确状态**
+
+| 项目 | 最新实测 |
+|---|---|
+| 分支 | `main` |
+| HEAD | `2e7c07bb66b3701c4e1b768c90f431b654584f5c` |
+| 已跟踪修改 | **53 文件，4013 additions / 359 deletions** |
+| 暂存区 | **空** |
+| 未跟踪文件 | **241：8 个产品源码/测试/Fixture/工具，233 个交付证据** |
+| `origin` | Gitee：`tpandmr/running` |
+| `github` | GitHub：[BlacnkCat0811/running](https://github.com/BlacnkCat0811/running) |
+| GitHub 默认分支 | `main`，已通过连接器确认 |
+| GitHub 实时 `main` | `1fc866a369695971ca8c176c4705ef59f05fa496`，已用 `ls-remote` 确认 |
+| 本地相对 GitHub main | ahead **1**；相对 Gitee main ahead **2** |
+
+HEAD 已包含 V2 主实现：297 个变更文件，其中 91 个非交付证据文件、206 个交付证据文件。课程身份、编辑、执行关联、输入身份、协调器、原生界面和既有回归已在该提交中，不能再把它们全部归为本轮未提交实现。
+
+对阶段一冻结清单逐个重新计算 SHA-256：
+
+- **2651/2651 文件一致**，无缺失、无新增非忽略文件。
+- HEAD、完整 status、原始 diff 均与阶段一一致。
+- 阶段一证据清单 **118 项**、P1 证据清单 **107 项**，哈希全部匹配。
+- Node 原始日志终态确为 **2854 tests / 2851 pass / 0 fail / 3 skip**。
+- Simulator、Device、VisualAcceptance 原始日志分别保留成功终态。
+
+本轮另实际执行了文档检查、测试发现检查和 `git diff --check`；没有重复运行 L4 或 App build。
+
+**2. 未提交文件归属**
+
+以下覆盖全部 **53 个 tracked 修改**。共享文件同时标明多轮归属，不能按整文件直接分配给某一轮。
+
+| 文件 | 归属与内容 |
+|---|---|
+| [AGENTS.md](/Users/ta/running/AGENTS.md)、[.gitignore](/Users/ta/running/.gitignore) | 工程治理；构建产物及一次性脚本忽略规则 |
+| [data.ts](/Users/ta/running/apps/api/src/data.ts) | 前置 B06：保留未知/零剂量真实跑步候选；P1 EXEC-02：候选与评价共用事实身份、记录时长 |
+| [training-plan-input-identity.ts](/Users/ta/running/apps/api/src/training-plan-input-identity.ts)、[training-plan-coordinator.ts](/Users/ta/running/apps/api/src/training-plan-coordinator.ts)、[training-plan-routes.ts](/Users/ta/running/apps/api/src/training-plan-routes.ts) | B08 输入身份、所有刷新原因的 analysis-ready 门、更新读缓存协商 |
+| [mobile-goals.ts](/Users/ta/running/apps/api/src/mobile-goals.ts) | A-01 写入不变量；I-01/P-03 最终提交检查钩子 |
+| [training-plan-session-state.ts](/Users/ta/running/apps/api/src/training-plan-session-state.ts)、[training-plan-session-policy.ts](/Users/ta/running/apps/api/src/training-plan-session-policy.ts)、[training-plan-store.ts](/Users/ta/running/apps/api/src/training-plan-store.ts) | 前置锁课/休息防护、A-01 严格读取和统一分类；P1 合法 rest lock 分类修正 |
+| [training-plan-session-migration.ts](/Users/ta/running/apps/api/src/training-plan-session-migration.ts) | A-01 历史 Preflight；P1 A-01-01 合法 rest lock 迁移去重 |
+| [training-plan-execution-match.ts](/Users/ta/running/apps/api/src/training-plan-execution-match.ts) | 前置 B06 游标绑定 contract/scope/range/facts，稳定 422 |
+| [training-plan-execution-commands.ts](/Users/ta/running/apps/api/src/training-plan-execution-commands.ts) | 前置课程资格、Correct 实时事实复查；I/P Skip；P1 执行授权、评价一致性、最终检查及 reconcile-v2 |
+| [training-plan-session-commands.ts](/Users/ta/running/apps/api/src/training-plan-session-commands.ts) | 前置 suppression/提交时刻修正；D-01/D-02 距离合同；D-03 写入结构与 Schema |
+| [session-structure.ts](/Users/ta/running/apps/api/src/session-structure.ts)、[schemas.ts](/Users/ta/running/apps/api/src/schemas.ts) | D-03 数量常量及共用 Schema；schemas 另含 D-02 距离可省略 |
+| [server.ts](/Users/ta/running/apps/api/src/server.ts) | 前置存储错误映射、缓存与锁课防护；D-03 路由 Schema；P1 后台租约及省略距离协商 |
+| [data.test.ts](/Users/ta/running/apps/api/test/data.test.ts)、[training-plan-coordinator.test.ts](/Users/ta/running/apps/api/test/training-plan-coordinator.test.ts)、[training-plan-input-identity.test.ts](/Users/ta/running/apps/api/test/training-plan-input-identity.test.ts)、[training-plan-v2-route.test.ts](/Users/ta/running/apps/api/test/training-plan-v2-route.test.ts) | B08 与候选事实回归 |
+| [direct-sync-handshake-capability.test.ts](/Users/ta/running/apps/api/test/direct-sync-handshake-capability.test.ts)、[training-plan-execution-match.test.ts](/Users/ta/running/apps/api/test/training-plan-execution-match.test.ts)、[training-plan-session-policy.test.ts](/Users/ta/running/apps/api/test/training-plan-session-policy.test.ts)、[training-plan-session-state.test.ts](/Users/ta/running/apps/api/test/training-plan-session-state.test.ts) | 更早未提交的缓存、游标、锁课/休息防护回归 |
+| [training-plan-execution-commands.test.ts](/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts) | 前置执行修正 + I/P + P1，含真实双库、最终 COMMIT 和跨进程验证 |
+| [training-plan-session-commands.test.ts](/Users/ta/running/apps/api/test/training-plan-session-commands.test.ts)、[schemas.test.ts](/Users/ta/running/apps/api/test/schemas.test.ts)、[session-structure.test.ts](/Users/ta/running/apps/api/test/session-structure.test.ts)、[training-plan-session-migration.test.ts](/Users/ta/running/apps/api/test/training-plan-session-migration.test.ts) | 前置课程修正、D-01/D-02、D-03 |
+| [phase5-training-plan.test.ts](/Users/ta/running/apps/api/test/phase5-training-plan.test.ts) | P1 COMPAT-01 真实 HTTP 协商 |
+| [training-plan-crash-child.ts](/Users/ta/running/apps/api/test/helpers/training-plan-crash-child.ts) | 更早未提交的原子 checkpoint 发布，防止读取半份 JSON |
+| [APIClient.swift](/Users/ta/running/apps/ios/RAI/APIClient.swift)、[APIModels.swift](/Users/ta/running/apps/ios/RAI/APIModels.swift) | D-02 编码；P1 独立能力位、原 journal 准入 |
+| [NativeAppModel.swift](/Users/ta/running/apps/ios/RAI/NativeAppModel.swift) | 前置候选防护、I-01 Skip、P1 执行授权及不可变编辑身份 |
+| [PlanStatePolicy.swift](/Users/ta/running/apps/ios/RAI/PlanStatePolicy.swift)、[TrainingPlanStore.swift](/Users/ta/running/apps/ios/RAI/TrainingPlanStore.swift) | B08 更新读协商、阶段和水位校验 |
+| [TrainingPlanExecutionPolicy.swift](/Users/ta/running/apps/ios/RAI/TrainingPlanExecutionPolicy.swift)、[TechPlanView.swift](/Users/ta/running/apps/ios/RAI/Skins/Technology/TechPlanView.swift)、[TechTrainingExecutionReview.swift](/Users/ta/running/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift) | 前置快照、展示及数值防护；I/P Skip 提示；P1 停止状态资格 |
+| [TechTrainingSessionEditor.swift](/Users/ta/running/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift) | 前置编辑基础、D-02、D-03、P1 stale editor；仍有 Actor 警告 |
+| [ModelRegression.swift](/Users/ta/running/apps/ios/tests/ModelRegression.swift)、[TrainingPlanExecutionRegression.swift](/Users/ta/running/apps/ios/tests/TrainingPlanExecutionRegression.swift) | 前置执行视图、I/P、P1 模型及策略回归 |
+| [TrainingPlanStoreRegression.swift](/Users/ta/running/apps/ios/tests/TrainingPlanStoreRegression.swift)、[TrainingPlanV2Regression.swift](/Users/ta/running/apps/ios/tests/TrainingPlanV2Regression.swift) | B08 Store/DTO 回归及准确错误断言 |
+| [run-model-tests.sh](/Users/ta/running/apps/ios/tests/run-model-tests.sh) | 前置 editor policy 回归接入；P1 模型编译单元依赖 |
+| [handshake-registry.ts](/Users/ta/running/packages/api-contracts/src/handshake-registry.ts)、[index.ts](/Users/ta/running/packages/api-contracts/src/index.ts)、[training-plan-closed-loop.ts](/Users/ta/running/packages/api-contracts/src/training-plan-closed-loop.ts) | B08 update DTO、D-02、I/P 错误码、P1 能力及授权合同 |
+| [bench-training-plan-closed-loop.mjs](/Users/ta/running/scripts/bench-training-plan-closed-loop.mjs)、[migrate-training-planner.mts](/Users/ta/running/scripts/migrate-training-planner.mts) | 更早的计时范围修正；A-01 结构化迁移冲突输出 |
+| [OPERATIONS.md](/Users/ta/running/docs/OPERATIONS.md)、[闭环合同](/Users/ta/running/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md) | A-01、距离、Skip、结构、P1 及证据索引 |
+
+静态审查未发现新增客户端、基础设施替换、生产配置改动、退役接口恢复或运行时代码中的临时绝对路径/调试输出。依赖锁、CI、Xcode 工程、历史数据库迁移文件和测试发现器均未修改。
+
+未发现明显私钥、GitHub/OpenAI 密钥或真实 Health XML；这属于候选文件静态检查，不是完整秘密扫描认证。更早改动的历史授权不能仅靠当前 diff 证明，提交说明应保留其原任务归属。
+
+**3. Actor 警告最小修复建议**
+
+已确认位置：
+
+- [EditorStep.init](/Users/ta/running/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift:34)
+- [三个初始化器引用](/Users/ta/running/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307)
+
+完整构建使用 Swift 5 语言模式、默认 MainActor 和 approachable concurrency。Simulator、Device 各产生同样三条警告。该写法在 HEAD 已存在，不是后四轮新引入。
+
+建议只将三个初始化器函数引用改为在现有隔离上下文中形成的闭包：
+
+```swift
+warmup = structure.warmup.map { EditorStep($0) }
+cooldown = structure.cooldown.map { EditorStep($0) }
+blocks = structure.blocks.map { block in
+    EditorBlock(
+        iterations: block.iterations,
+        steps: block.steps.map { EditorStep($0) }
+    )
+}
+```
+
+依据是普通闭包继承形成位置的隔离上下文；这是最小修复建议，**本轮未编译验证该改法**。[Swift 官方隔离说明](https://www.swift.org/migration/documentation/swift-6-concurrency-migration-guide/dataracesafety/)
+
+- 风险等级：**P2，编译隔离与工具链兼容风险**；尚无实际业务失败证据。
+- 建议独立提交，仅修改该文件。
+- 不修改 `EditorStep.init` 的隔离，不添加 `nonisolated` 或关闭检查。
+- 本机是 Xcode **26.5 / Swift 6.3.2**；不能推断 Xcode 26.6 已通过或必然失败。
+- 修复后必须重新运行完整 Simulator、Device App build，并确认三处诊断消失；同时运行现有 iOS 门禁。无需仅因这项 Swift 修改重复 Node 2851 个测试体。
+
+**4. 必须显式提交的未跟踪产品文件**
+
+| 文件 | 用途 |
+|---|---|
+| [training-plan-state-audit.ts](/Users/ta/running/apps/api/src/training-plan-state-audit.ts) | A-01 只读审计实现 |
+| [audit-training-plan-state.mts](/Users/ta/running/scripts/audit-training-plan-state.mts) | 显式副本路径审计 CLI |
+| [training-plan-history-compatibility.test.ts](/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts) | A-01/P1 历史兼容 |
+| [training-plan-state-audit.test.ts](/Users/ta/running/apps/api/test/training-plan-state-audit.test.ts) | 审计正确性、只读和隐私 |
+| [training-plan-execution-cursor-errors.test.ts](/Users/ta/running/apps/api/test/training-plan-execution-cursor-errors.test.ts) | 游标错误保持 422 |
+| [TrainingPlanSessionEditorPolicy.swift](/Users/ta/running/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift) | 编辑器基础、距离、结构、身份和兼容策略 |
+| [TrainingPlanSessionEditorRegression.swift](/Users/ta/running/apps/ios/tests/TrainingPlanSessionEditorRegression.swift) | 对应永久 Swift 回归 |
+| [training-session-distance-v1.json](/Users/ta/running/apps/ios/tests/fixtures/training-session-distance-v1.json) | Node/Swift 共用合成基准 |
+
+三个新增 Node 测试已被当前发现器纳入 **331 文件**。Swift 回归已接入聚合入口。
+
+新 Swift 产品文件也没有漏 Target：工程使用同步目录，两个完整 App build 的 SwiftFileList 均包含它；各有 106 个产品 Swift 文件及一个生成文件。
+
+最终必须覆盖 **53 个 tracked 修改 + 8 个新增产品文件，共 61 个路径**，另行选择必要证据。
+
+**5. 证据保留方案及不应提交内容**
+
+当前五个未跟踪交付目录：
+
+| 目录 | 文件数 |
+|---|---:|
+| [A-01](/Users/ta/running/deliverables/training-plan-v2-a01-2026-10-26) | 14 |
+| [D-01/D-02](/Users/ta/running/deliverables/training-plan-v2-d01-d02-2026-10-26) | 23 |
+| [I-01/P-03](/Users/ta/running/deliverables/training-plan-v2-i01-p03-2026-10-26) | 42 |
+| [D-03](/Users/ta/running/deliverables/training-plan-v2-d03-2026-10-26) | 46 |
+| [P1](/Users/ta/running/deliverables/training-plan-v2-p1-2026-10-26) | 108 |
+| **合计** | **233，3,639,362 bytes** |
+
+**确定的打包风险：**
+
+[历史测试副本](/Users/ta/running/deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/test/training-plan-execution-commands.test.ts) 一旦被跟踪，会触发 [测试防漏跑检查](/Users/ta/running/scripts/run-tests.mjs:44)，因为它符合测试命名、却不在产品发现目录。本轮只读集合检查已确认它是唯一的此类候选。**不能使用 `git add .` 或整目录收入全部证据。**
+
+建议长期保留、精选入 Git：
+
+- 五份最终报告的明确标注交付版本。
+- 四份独立补丁：`D01_D02.diff`、`stage.diff`、`D03.patch`、`P1.patch`。
+- 最终测试清单、命令、环境、统计和哈希。
+- 能解释缺陷的红测日志，以及最终成功日志。
+
+原始证据另作完整外部归档，保留原始哈希。Git 中的整理版必须说明删选范围，保留失败事实，不改写成“从未失败”。
+
+不建议入 Git：
+
+- `before/**`、`REPORT.draft.txt`。
+- `RedSkipRegression.swift`、`SkipRegression.swift` 等历史聚焦副本。
+- `l1-ios-command.sh`、`red-ios-repro.sh`、`model-targeted.sh`、`swift-editor.sh` 等一次性入口；前三者硬编码本机路径。
+- 构建产物、Pods/依赖副本、进程采样、大型资源追踪。
+
+阶段一目录仍存在：
+
+[阶段一报告](/tmp/rai-v2-l4-20261026-vczzvoi8/REPORT.md)
+
+建议保留其报告、`SUMMARY.json`、命令/环境、测试发现、构建 coverage、`build-warnings.json`、结果 JSON、源码指纹及核心日志。`node-l4-samples.json` 约 20.4 MB，三个 iOS/build samples 各约 7 MB，应留外部归档；各 build、源码依赖副本和 Rust target 也不入 Git。
+
+阶段一报告含 `/tmp` 绝对链接，**不能原样复制进仓库作为可移植报告**。另外，现有五份报告引用了快照和脚本；精选证据时必须同步处理链接，否则 [文档门禁](/Users/ta/running/scripts/check-doc-links.mjs:110) 会失败。原始版本应保持归档，整理版本注明来源与原哈希。
+
+**6. 推荐提交顺序**
+
+从当前 HEAD 建立独立交付分支，保留已有 V2 主提交，推荐顺序如下：
+
+| 顺序 | 提交边界 |
+|---|---|
+| 1 | AGENTS.md 工程治理 |
+| 2 | B08 输入身份、analysis-ready、update DTO/Store/读合同 |
+| 3 | 更早的后端收口：候选剂量、游标、课程资格、存储错误与缓存协商 |
+| 4 | 更早的课程/原生收口：提交时刻、suppression、编辑基础、快照与展示防护 |
+| 5 | crash checkpoint 原子发布、输入键 benchmark 计时修正 |
+| 6 | A-01 只读审计、历史 Preflight、运行时不变量 |
+| 7 | D-01/D-02 距离合同、跨端 Fixture 与回归 |
+| 8 | I-01/P-03 Skip 全链路与提交检查钩子 |
+| 9 | D-03 结构上限、Schema、历史读取与重放兼容 |
+| 10a | P1 EXEC-01/02/03 授权、事实一致性及 reconcile-v2 |
+| 10b | P1 EDIT-01 不可变编辑身份 |
+| 10c | P1 COMPAT-01 独立距离省略协商及 journal 准入 |
+| 11 | 经授权的 Actor 最小修复 |
+| 12 | 最终文档、精选验收证据及 `.gitignore` |
+
+A-01-01 的合法 rest lock 分类与迁移去重建议随第 6 项原子提交，并明确标注其 P1 来源，避免人为重建一个已知不一致的中间版本。
+
+各产品提交应带对应合同语义和测试；新报告链接可到最终证据提交再加入。无需每个提交重复全仓 2851 个测试体。
+
+**7. 共享文件 hunk 拆分方案**
+
+| 共享位置 | 拆分边界 |
+|---|---|
+| `mobile-goals.ts` | A-01：不变量导入、persist/bootstrap 防护；I/P：检查数组、注册方法、COMMIT 前执行和清理 |
+| `data.ts` | 前置：取消剂量过滤；P1：`executionWorkout` 共用候选事实及摘要 |
+| `server.ts` | 前置：可读状态断言、503、缓存、锁课；D-03：路由 options；P1：后台 reconcile 入口和新能力协商 |
+| `session-commands.ts` | 前置：suppression 和实际提交时间；D-01/D-02：有效距离解析；D-03：数量谓词、Schema/options、验证顺序 |
+| `session-state.ts` / migration | A-01 最终分类与 Preflight；合法 rest lock 去重须与相关测试成组 |
+| API contracts | B08 `update`、D-02 draft、I/P 错误码、P1 能力/授权分别暂存 |
+| `APIModels.swift` | D-02 编码选项；P1 capability、payload 判定及兼容资格 |
+| editor policy/回归 | 先引入基础文件，再叠加 D-02、D-03、P1；新增文件也不能直接收入最终全部内容 |
+| `NativeAppModel.swift` / editor | I-01 Skip 与 P1 执行授权、编辑身份、降级恢复分别拆分 |
+| `ModelRegression.swift` | 同一大型 Fixture 内按行为拆测试块；共享变量和 handler 随首次使用一起提交 |
+| `run-model-tests.sh` | 基础 editor 回归入口；P1 首个模型编译单元依赖分别提交 |
+| 合同/运维文档 | 语义随代码提交；报告链接和归档说明最后提交 |
+
+四份独立补丁可以辅助辨认归属，不能直接整体叠加到当前最终文件。
+
+建议下一轮使用**隔离 checkout/worktree**重建提交序列，不 stash 或覆盖原工作区。现有 hook 多数读取工作树；直接在脏工作区分 hunk 提交，可能出现“验证了最终工作树，却没有验证中间提交”的问题。
+
+最终逐路径比较 61 个文件的内容、文件模式与哈希；除明确授权的 Actor/文档整理外，应与本次冻结内容完全一致。
+
+**8. 提交后的验证计划**
+
+每个提交在对应干净 checkout 执行相关 L1/L2及现有 hooks，检查暂存 diff、文件清单、LF 和秘密/大文件。不得绕过 hooks。
+
+最终累计提交至少执行：
+
+```bash
+git diff --check
+npm run typecheck
+npm run check:docs
+npm run check:doc-refs
+npm run check:acceptance-matrix
+npm run check:scripts
+npm run check:package-boundaries
+npm run check:training-plan-single-writer
+npm run check:ios-gates
+npm run test:ios
+```
+
+另运行真实测试发现断言，要求：
+
+- 非空，发现集合仍为预期 331 文件；
+- 三个新增产品测试已跟踪；
+- tracked 测试全部可发现；
+- 历史证据测试副本未被误跟踪。
+
+Actor 修复后重新完成完整 Simulator/Device build及 VisualAcceptance 编译。Node 产品内容一致时可沿用本次冻结的本地 L4证据；最终 PR 的 CI 仍必须执行一次完整 `npm test`。若出现额外业务修改，再按影响升级回归。
+
+本轮实际检查结果：
+
+| 检查 | 结果 |
+|---|---|
+| `git diff --check` | PASS |
+| 文档链接 | PASS：124 文件、1123 本地链接、0 problems |
+| 文档行引用 | PASS，但有 8 处空行告警，内容漂移缺基线 |
+| 测试发现 | PASS：331 文件，当前 tracked 无漏发现 |
+| 新增业务测试/App build | 本轮未运行；已核对阶段一日志及内容身份 |
+
+**9. GitHub PR 与 CI 操作计划**
+
+以下为后续命令和步骤，本轮未执行：
+
+1. 在隔离 checkout 从 `2e7c07b` 创建 `codex/training-plan-v2-final-20261026`，按上述顺序提交。
+2. 获得 Git 写操作授权后更新 `github` 引用；若 main 已前进，先审查变化和合并影响。
+3. 审查完整 PR diff、提交序列、源码指纹和干净 checkout 验证。
+4. 明确推送至 GitHub：
+
+   ```bash
+   git push --set-upstream github codex/training-plan-v2-final-20261026
+   ```
+
+5. 使用已连接 GitHub 工具创建 **draft PR**，目标 `BlacnkCat0811/running:main`，创建后附加到本聊天。当前主机未发现 `gh`，不依赖默认 remote 或 CLI。
+6. PR 描述列出源码身份、本地 L4、Actor复验、CI结果，以及 UI/真机/历史副本未验证范围。
+
+当前 [CI 工作流](/Users/ta/running/.github/workflows/ci.yml)只对 main/master push、PR 和手动事件触发；**仅推送交付分支不会触发 push CI，需要创建 PR。**
+
+必须验收全部四个 job 实例：
+
+| Job | 必须核实 |
+|---|---|
+| `verify` / Node 22 / Ubuntu 24.04 | actionlint、类型、文档、结构、完整 Node、Python、模型边界、API及仅生产依赖启动 |
+| `rust-data-worker` / Ubuntu 24.04 | 原生引擎与跨语言回归 |
+| `rust-data-worker` / macOS 26 | 同上 |
+| `ios` / macOS 26 / Xcode 26.6 | 真正执行 iOS门禁、锁定 Pods、完整 Simulator App build、UI工程编译 |
+
+当前 CI **不执行 Device build 或 UI测试运行**。取消、跳过、未执行都不能记作通过。每次新提交应重新绑定 head SHA及检查结果。
+
+分支保护和实际允许的合并方式尚未核实；连接器的相关字段返回 null，不能推断。建议可用时使用 merge commit保留提交边界；最终合并须再次明确授权。
+
+回滚使用反向提交及复验；不重写远程历史，不回退数据库，不删除旧回执。生产二进制回退还需单独检查 schema读取兼容性。
+
+**10. 下一轮可执行的 IMPLEMENT 清单**
+
+1. 创建隔离交付 checkout及61路径冻结清单，保持原工作区原样。
+2. 实施并单独验证 Actor 最小修复。
+3. 整理证据 allowlist、归档索引与可移植报告，排除历史测试副本和临时入口。
+4. 同步三个已确认文档差异：
+   - [AGENTS.md:705](/Users/ta/running/AGENTS.md:705)及 [run-ios-gates.sh:18](/Users/ta/running/apps/ios/tests/run-ios-gates.sh:18)仍称视觉验收需要个人 `var/rai.sqlite`；当前入口使用合成 Fixture。
+   - [原生 API 合同](/Users/ta/running/docs/IOS_NATIVE_API_CONTRACT.md:62)尚未列出独立距离省略能力。
+   - 同文档的 Vary说明尚未反映更新读头。
+5. 按提交边界重建、验证中间树并审查最终内容一致性。
+6. 获得明确提交/推送授权后执行 Git操作、创建 draft PR并验收全部 CI。
+7. 真机、Simulator UI实际执行及真实历史一致副本审计继续作为独立验收任务；生产写能力保持关闭。
+
+本轮审查与方案已完成，停在此处。

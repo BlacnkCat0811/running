@@ -84,6 +84,24 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         func day(_ date: String, _ kind: String, km: Double = 5) -> MobilePlannedDay {
             .init(localDate: date, kind: kind, distanceKm: km, structure: nil, reason: nil)
         }
+        func updateView(contractVersion: Int = 1,
+                        factsStatus: String = "stored",
+                        analysisStatus: String = "ready",
+                        associationStatus: String = "current",
+                        planStatus: String = "pending",
+                        desired: String? = "desired-key",
+                        published: String? = nil,
+                        evaluatedKey: String? = nil,
+                        evaluatedRevision: Int? = nil,
+                        reasonCodes: [String] = []) -> TrainingPlanUpdateView {
+            .init(contractVersion: contractVersion,
+                  facts: .init(status: factsStatus, identity: "facts-1"),
+                  analysis: .init(status: analysisStatus, identity: "analysis-1"),
+                  association: .init(status: associationStatus, identity: "execution-1"),
+                  plan: .init(status: planStatus, desiredInputKey: desired,
+                              publishedInputKey: published, evaluatedInputKey: evaluatedKey,
+                              evaluatedStateRevision: evaluatedRevision, reasonCodes: reasonCodes))
+        }
 
         // MARK: 协商常量 / 线格式解码
 
@@ -129,6 +147,35 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         check(legacyHandshake.factsAnalysisContractVersion == nil && legacyHandshake.factsAnalysisViewContractVersion == nil,
               "an old server's missing capability keys decode as nil, never as a zero/empty view")
 
+        // B01 protocol freeze: same synthetic matrix as the Node contract tests.
+        // New routes/storage/UI remain deferred; these gates do not grant execution.
+        let sharedURL = URL(fileURLWithPath: "apps/ios/tests/fixtures/training-plan-closed-loop.json")
+        let shared = try JSONSerialization.jsonObject(with: Data(contentsOf: sharedURL)) as! [String: Any]
+        let capabilityCases = shared["capabilities"] as! [[String: Any]]
+        check(capabilityCases.count == 22, "the complete B01 capability matrix is loaded")
+        for row in capabilityCases {
+            let payload = try JSONSerialization.data(withJSONObject: row["handshake"]!)
+            let value = try JSONDecoder().decode(RaiHandshake.self, from: payload)
+            let expected = row["expected"] as! [String: Bool]
+            let name = row["name"] as! String
+            check(value.trainingPlanSessionsSupported == expected["sessions"] &&
+                  value.trainingPlanSessionCommandsSupported == expected["sessionCommands"] &&
+                  value.trainingPlanExecutionCommandsSupported == expected["executionCommands"] &&
+                  value.trainingPlanUpdatesSupported == expected["updates"], "B01 exact capabilities: \(name)")
+            check(value.legacyPlanWritesSupported == (row["legacyWrites"] as! Bool),
+                  "B01 capabilities never authorize retired URLs: \(name)")
+        }
+        for row in shared["projections"] as! [[String: Any]] where row["rejected"] as! Bool == false {
+            let payload = try JSONSerialization.data(withJSONObject: row["wire"]!)
+            let before = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: payload)
+            var extended = row["wire"] as! [String: Any]
+            extended["sessions"] = shared["sessions"]
+            let withExtension = try JSONSerialization.data(withJSONObject: extended)
+            let after = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: withExtension)
+            check(before.plan == after.plan && before.scope == after.scope && !after.execution.permitted && after.sessions != nil,
+                  "B02 optional extension retains identities without altering the existing projection: \(row["name"]!)")
+        }
+
         let v2JSON = """
         {
           "contractVersion": 2,
@@ -162,9 +209,13 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         }
         var observedHeader: String?
         var observedPath: String?
+        var observedMethod: String?
+        var observedBody: Data?
         V2ContractProtocol.handler = { request in
             observedHeader = request.value(forHTTPHeaderField: RaiTrainingPlanContract.headerField)
             observedPath = request.url?.path
+            observedMethod = request.httpMethod
+            observedBody = request.httpBody
             return (200, v2JSON)
         }
         let live = try await api.trainingPlanStateV2(baseURL: base, token: "test-token")
@@ -172,6 +223,8 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
               "the v2 read call decodes the unified payload from the wire")
         check(observedHeader == "2" && observedPath == "/v1/mobile/training-plan-state",
               "the training-plan read always requests contract 2 on its own path")
+        check(observedMethod == "GET" && observedBody == nil,
+              "the negotiated unified read sends GET with no mutation body")
         func contractFailure(_ status: Int, _ body: String) async -> RaiTrainingPlanContractError? {
             V2ContractProtocol.handler = { _ in (status, body) }
             do {
@@ -426,6 +479,190 @@ final class V2ContractProtocol: URLProtocol, @unchecked Sendable {
         check(TrainingPlanUnifiedPolicy.observationNote(neverPlannedRow) == "未排课",
             "single-day note distinguishes never-planned")
 
+        // B02 stable identity fixture is shared with the real TypeScript reader.
+        let identitiesURL = URL(fileURLWithPath: "apps/ios/tests/fixtures/training-plan-sessions-v2.json")
+        let identitiesFixture = try JSONSerialization.jsonObject(with: Data(contentsOf: identitiesURL)) as! [String: Any]
+        let identitiesWire = identitiesFixture["wire"] as! [String: Any]
+        let identitiesData = try JSONSerialization.data(withJSONObject: identitiesWire)
+        let identitiesSnapshot = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: identitiesData)
+        let identitiesScope = PlanReceiptScope(serverId: "synthetic-server", athleteId: "synthetic-athlete", datasetEpoch: "synthetic-epoch")
+        let identitiesNow = ISO8601DateFormatter().date(from: "2026-10-25T04:00:00Z")!
+        do {
+            try TrainingPlanUnifiedPolicy.validate(identitiesSnapshot, identity: identitiesScope,
+                                                   minimumGoalsRevision: 7, now: identitiesNow,
+                                                   updateNegotiated: true)
+            check(true, "B02 legitimate identity view passes validation (including an absent update = unknown)")
+        } catch {
+            check(false, "B02 legitimate identity view must pass validation: \(error)")
+        }
+        let roundTrip = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: JSONEncoder().encode(identitiesSnapshot))
+        check(roundTrip == identitiesSnapshot && roundTrip.sessions?.sessions.first?.sessionRevision == 3,
+              "B02 identity, revision, override, protection, suppression and units survive Codable round-trip")
+        check(roundTrip.sessions?.sessions.first?.userOverride?.prescription.distanceKm == 10 &&
+              roundTrip.sessions?.sessions.first?.sessionId == "synthetic-stable-session" &&
+              roundTrip.sessions?.suppressions.count == 2 && !roundTrip.execution.permitted,
+              "B02 moved and edited intent keeps one stable ID and grants no execution")
+        V2ContractProtocol.handler = { request in
+            precondition(request.httpMethod == "GET" && request.httpBody == nil && request.url?.path == "/v1/mobile/training-plan-state")
+            precondition(request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" &&
+                         request.value(forHTTPHeaderField: "X-RAI-Training-Sessions") == "1")
+            return (200, String(decoding: identitiesData, as: UTF8.self))
+        }
+        let identitiesLive = try await api.trainingPlanStateV2(baseURL: base, token: "test-token", sessionEntities: true)
+        check(identitiesLive.sessions == identitiesSnapshot.sessions, "B02 actual transport requests exactly the optional session read extension")
+
+        // B08 update extension: present only after exact negotiation, bound to the
+        // same session view/instance, and its evaluated watermark cannot exceed the
+        // snapshot it claims to describe.
+        var validUpdateSnapshot = identitiesSnapshot
+        validUpdateSnapshot.update = updateView(planStatus: "current", desired: "current-key",
+            published: "current-key", evaluatedKey: "current-key", evaluatedRevision: 7)
+        do {
+            try TrainingPlanUnifiedPolicy.validate(validUpdateSnapshot, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow, updateNegotiated: true)
+            check(true, "B08 a negotiated update view with matching published/evaluated keys is accepted")
+        } catch {
+            check(false, "B08 a valid negotiated update view must be accepted: \(error)")
+        }
+        var unnegotiated = identitiesSnapshot
+        unnegotiated.update = updateView()
+        do {
+            try TrainingPlanUnifiedPolicy.validate(unnegotiated, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow)
+            check(false, "B08 an update view without negotiation must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .unexpectedUpdateExtension,
+                  "B08 an unnegotiated update view fails closed instead of being ignored")
+        } catch { check(false, "B08 unnegotiated update failed with the wrong error: \(error)") }
+        var noSessions = snapshot(days: [])
+        noSessions.update = updateView()
+        do {
+            try TrainingPlanUnifiedPolicy.validate(noSessions, identity: identity,
+                minimumGoalsRevision: 12, now: now, updateNegotiated: true)
+            check(false, "B08 an update view without the session view must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .updateRequiresSessions,
+                  "B08 an update view cannot be attributed without the exact session view")
+        } catch { check(false, "B08 missing session view failed with the wrong error: \(error)") }
+        var futureUpdate = identitiesSnapshot
+        futureUpdate.update = updateView(contractVersion: 2)
+        do {
+            try TrainingPlanUnifiedPolicy.validate(futureUpdate, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow, updateNegotiated: true)
+            check(false, "B08 an unknown update contract version must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .unknownValue(field: "update.contractVersion", value: "2"),
+                  "B08 update contractVersion is checked independently of the handshake")
+        } catch { check(false, "B08 update version failed with the wrong error: \(error)") }
+        var futureWatermark = identitiesSnapshot
+        futureWatermark.update = updateView(evaluatedKey: "evaluated-key", evaluatedRevision: 8)
+        do {
+            try TrainingPlanUnifiedPolicy.validate(futureWatermark, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow, updateNegotiated: true)
+            check(false, "B08 evaluatedStateRevision beyond stateRevision must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .invalidUpdate("evaluatedStateRevision 8 超过 stateRevision 7"),
+                  "B08 evaluatedStateRevision cannot exceed the snapshot state revision")
+        } catch { check(false, "B08 future evaluated watermark failed with the wrong error: \(error)") }
+        var missingEvaluatedKey = identitiesSnapshot
+        missingEvaluatedKey.update = updateView(evaluatedRevision: 7)
+        do {
+            try TrainingPlanUnifiedPolicy.validate(missingEvaluatedKey, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow, updateNegotiated: true)
+            check(false, "B08 evaluatedStateRevision without its key must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .invalidUpdate("evaluatedStateRevision 缺少 evaluatedInputKey"),
+                  "B08 evaluated revision and evaluated key must be present together")
+        } catch { check(false, "B08 evaluated key mismatch failed with the wrong error: \(error)") }
+        var falseCurrent = identitiesSnapshot
+        falseCurrent.update = updateView(planStatus: "current", desired: "desired-key",
+            published: "other-published", evaluatedKey: "other-evaluated", evaluatedRevision: 7)
+        do {
+            try TrainingPlanUnifiedPolicy.validate(falseCurrent, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow, updateNegotiated: true)
+            check(false, "B08 status=current with neither published nor evaluated input key must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .invalidUpdate("status=current 但 published/evaluated 输入键都不是当前输入"),
+                  "B08 plan.current is only accepted with a matching published or evaluated input key")
+        } catch { check(false, "B08 false-current update failed with the wrong error: \(error)") }
+        var badStage = identitiesSnapshot
+        badStage.update = updateView(factsStatus: "unknown")
+        do {
+            try TrainingPlanUnifiedPolicy.validate(badStage, identity: identitiesScope,
+                minimumGoalsRevision: 7, now: identitiesNow, updateNegotiated: true)
+            check(false, "B08 unknown update stage status must be rejected")
+        } catch let error as TrainingPlanUnifiedValidationError {
+            check(error == .invalidUpdate("facts.status 未知"),
+                  "B08 update stage values are a closed set, not free strings")
+        } catch { check(false, "B08 unknown stage failed with the wrong error: \(error)") }
+        let expectedErrors: [String: TrainingPlanUnifiedValidationError] = [
+            "unknown_version": .unknownValue(field: "sessions.contractVersion", value: "99"),
+            "duplicate": .invalidDays("课程身份、修订或状态不可信"),
+            "foreign_instance": .invalidDays("课程身份、修订或状态不可信"),
+            "unknown_lifecycle": .invalidDays("课程身份、修订或状态不可信"),
+            "unknown_protection": .invalidDays("课程身份、修订或状态不可信"),
+            "lost_owner": .invalidDays("已发布意图没有稳定课程身份"),
+            "bad_override": .invalidDays("用户覆盖与有效处方不一致"),
+            "unknown_reference": .invalidDays("课程日期抑制不可信")
+        ]
+        for variant in expectedErrors.keys.sorted() {
+            var wire = identitiesWire
+            var extensionValue = wire["sessions"] as! [String: Any]
+            var sessions = extensionValue["sessions"] as! [[String: Any]]
+            switch variant {
+            case "unknown_version": extensionValue["contractVersion"] = 99
+            case "duplicate": sessions.append(sessions[0])
+            case "foreign_instance": sessions[0]["planInstanceId"] = "other"
+            case "unknown_lifecycle": sessions[0]["lifecycle"] = "scheduled_is_completed"
+            case "unknown_protection": sessions[0]["protection"] = "future_value"
+            case "lost_owner": sessions = []
+            case "bad_override": sessions[0]["protection"] = "automatic"
+            default:
+                var suppressions = extensionValue["suppressions"] as! [[String: Any]]
+                suppressions[0]["sessionId"] = "other-session"
+                extensionValue["suppressions"] = suppressions
+            }
+            extensionValue["sessions"] = sessions; wire["sessions"] = extensionValue
+            let changed = try JSONDecoder().decode(TrainingPlanStateResponseV2.self, from: JSONSerialization.data(withJSONObject: wire))
+            do {
+                try TrainingPlanUnifiedPolicy.validate(changed, identity: identitiesScope, minimumGoalsRevision: 7, now: identitiesNow)
+                check(false, "B02 corrupt identity view must be rejected: \(variant)")
+            } catch let error as TrainingPlanUnifiedValidationError {
+                check(error == expectedErrors[variant],
+                      "B02 identity validation rejects \(variant) with the expected error \(String(describing: error))")
+            } catch {
+                check(false, "B02 identity validation failed with the wrong error type for \(variant): \(error)")
+            }
+        }
+        check(RaiTrainingPlanContractError.classification(serverCode: "training_session_contract_unsupported", status: 409) == .contractUnsupported,
+              "B02 unsupported session extension is an upgrade state and never a legacy fallback")
+        // B07 replaces the B02 refusal with a compatible optional decoder: a
+        // present execution view must be preserved, not thrown away. Absence is
+        // still distinguishable from an explicit empty history.
+        var executionsWire = identitiesWire
+        var executionsExtension = executionsWire["sessions"] as! [String: Any]
+        executionsExtension["executions"] = [["sessionId": "synthetic-stable-session", "executionRevision": 1,
+            "association": "unlinked", "trainingSessionId": NSNull(), "sourceFactDigest": NSNull(),
+            "prescriptionSessionRevision": 3, "assessment": NSNull(),
+            "availableAt": "2026-10-25T02:00:00.000Z", "reasonCodes": []]]
+        executionsWire["sessions"] = executionsExtension
+        let withExecutions = try JSONDecoder().decode(TrainingPlanStateResponseV2.self,
+            from: JSONSerialization.data(withJSONObject: executionsWire))
+        check(withExecutions.sessions?.executions?.count == 1 &&
+              withExecutions.sessions?.executions?.first?.association == "unlinked" &&
+              withExecutions.sessions?.executions?.first?.trainingSessionId == nil,
+              "B07 optional executions decode compatibly and keep unknown-vs-unlinked identity")
+        let roundTrippedExecutions = try JSONDecoder().decode(TrainingPlanStateResponseV2.self,
+            from: JSONEncoder().encode(withExecutions))
+        check(roundTrippedExecutions.sessions?.executions == withExecutions.sessions?.executions,
+              "B07 execution rows survive the real cache Codable round-trip")
+        var absentExecutionsWire = identitiesWire
+        var absentExtension = absentExecutionsWire["sessions"] as! [String: Any]
+        absentExtension.removeValue(forKey: "executions"); absentExecutionsWire["sessions"] = absentExtension
+        let absentExecutions = try JSONDecoder().decode(TrainingPlanStateResponseV2.self,
+            from: JSONSerialization.data(withJSONObject: absentExecutionsWire))
+        check(absentExecutions.sessions?.executions == nil,
+              "B07 absent executions remain unknown, never an empty history")
         print("Training plan v2 contract regression: \(count) checks passed")
     }
 }

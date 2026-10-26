@@ -1,0 +1,71 @@
+TAP version 13
+# (node:44587) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:44587) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: B02/T24/T26: dry-run allocates nothing; controlled apply maps all 1001 scoped revisions without guessing continuity
+ok 1 - B02/T24/T26: dry-run allocates nothing; controlled apply maps all 1001 scoped revisions without guessing continuity
+  ---
+  duration_ms: 3491.491735
+  type: 'test'
+  ...
+# Subtest: B02/T24/T25: stale digest/CAS, source duplicates, unknown payload and owner disagreement refuse without writes
+ok 2 - B02/T24/T25: stale digest/CAS, source duplicates, unknown payload and owner disagreement refuse without writes
+  ---
+  duration_ms: 53.802662
+  type: 'test'
+  ...
+# Subtest: B02/T22/T24: each new migration write point and COMMIT failure rolls back schema/ID mapping/state/audit together
+ok 3 - B02/T22/T24: each new migration write point and COMMIT failure rolls back schema/ID mapping/state/audit together
+  ---
+  duration_ms: 251.569613
+  type: 'test'
+  ...
+# Subtest: B02/T24: CLI session mode is read-only by default, enforces digest/lock, applies once and never opens the health DB
+ok 4 - B02/T24: CLI session mode is read-only by default, enforces digest/lock, applies once and never opens the health DB
+  ---
+  duration_ms: 4370.599525
+  type: 'test'
+  ...
+# Subtest: B02/T22/T23: schema 3 and its ledger entry roll back together; SQLite busy never starts a partial upgrade
+ok 5 - B02/T22/T23: schema 3 and its ledger entry roll back together; SQLite busy never starts a partial upgrade
+  ---
+  duration_ms: 49.850596
+  type: 'test'
+  ...
+# (node:44588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:44588) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/override/null/structure fields without normalization
+ok 6 - B02/T25: schema 1 stays compatible; schema 2 round-trips all identity/override/null/structure fields without normalization
+  ---
+  duration_ms: 47.072377
+  type: 'test'
+  ...
+# Subtest: B02/T26: stable identity and frozen prescriptions survive moving/editing and 1000 newer whole-plan revisions
+ok 7 - B02/T26: stable identity and frozen prescriptions survive moving/editing and 1000 newer whole-plan revisions
+  ---
+  duration_ms: 5368.026191
+  type: 'test'
+  ...
+# Subtest: B02/T22: course history failure rolls back state, history, projection and operation result in the existing publication transaction
+ok 8 - B02/T22: course history failure rolls back state, history, projection and operation result in the existing publication transaction
+  ---
+  duration_ms: 38.914357
+  type: 'test'
+  ...
+# Subtest: B02/T25: exact session read negotiation is zero-write and older wire stays identical
+ok 9 - B02/T25: exact session read negotiation is zero-write and older wire stays identical
+  ---
+  duration_ms: 178.417371
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9168.382228
+EXIT:0

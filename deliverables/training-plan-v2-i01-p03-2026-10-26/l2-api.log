@@ -1,0 +1,587 @@
+TAP version 13
+# Subtest: serializes overlapping API mutations and releases idempotently
+ok 1 - serializes overlapping API mutations and releases idempotently
+  ---
+  duration_ms: 2.880419
+  type: 'test'
+  ...
+# Subtest: legacy route waits for a short handoff but still bounds contention
+ok 2 - legacy route waits for a short handoff but still bounds contention
+  ---
+  duration_ms: 63.540496
+  type: 'test'
+  ...
+# (node:97119) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:97119) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: a stable control snapshot is read twice and built once
+ok 3 - a stable control snapshot is read twice and built once
+  ---
+  duration_ms: 58.058577
+  type: 'test'
+  ...
+# Subtest: one control change retries against the newer snapshot and returns its build
+ok 4 - one control change retries against the newer snapshot and returns its build
+  ---
+  duration_ms: 0.689848
+  type: 'test'
+  ...
+# Subtest: a control that keeps changing fails closed after three attempts
+ok 5 - a control that keeps changing fails closed after three attempts
+  ---
+  duration_ms: 0.689297
+  type: 'test'
+  ...
+# Subtest: attempts: 1 builds once and throws without a second attempt
+ok 6 - attempts: 1 builds once and throws without a second attempt
+  ---
+  duration_ms: 2.136252
+  type: 'test'
+  ...
+# Subtest: the attempt budget is clamped to 1..5
+ok 7 - the attempt budget is clamped to 1..5
+  ---
+  duration_ms: 10.081172
+  type: 'test'
+  ...
+# Subtest: G: a publication that starts during the build discards the attempt and rebuilds
+ok 8 - G: a publication that starts during the build discards the attempt and rebuilds
+  ---
+  duration_ms: 1.312915
+  type: 'test'
+  ...
+# Subtest: G: a live publication marker blocks the build and fails closed after three attempts
+ok 9 - G: a live publication marker blocks the build and fails closed after three attempts
+  ---
+  duration_ms: 10.504021
+  type: 'test'
+  ...
+# Subtest: G: a stale pending marker left by a crashed publisher no longer blocks reads
+ok 10 - G: a stale pending marker left by a crashed publisher no longer blocks reads
+  ---
+  duration_ms: 0.516118
+  type: 'test'
+  ...
+# Subtest: P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+ok 11 - P3-02: an unreadable guard fails closed instead of silently disabling the cross-store check
+  ---
+  duration_ms: 0.883366
+  type: 'test'
+  ...
+# Subtest: P3-02: a guard that starts failing after the build also fails closed
+ok 12 - P3-02: a guard that starts failing after the build also fails closed
+  ---
+  duration_ms: 6.769105
+  type: 'test'
+  ...
+# Subtest: P3-02: a store without any guard still degrades to the digest-only check
+ok 13 - P3-02: a store without any guard still degrades to the digest-only check
+  ---
+  duration_ms: 0.448928
+  type: 'test'
+  ...
+# Subtest: G: optionalPublicationGuard binds a store method and is absent when unsupported
+ok 14 - G: optionalPublicationGuard binds a store method and is absent when unsupported
+  ---
+  duration_ms: 0.234809
+  type: 'test'
+  ...
+# Subtest: read amplification: one successful attempt reads control twice and digests twice
+ok 15 - read amplification: one successful attempt reads control twice and digests twice
+  ---
+  duration_ms: 0.292999
+  type: 'test'
+  ...
+# Subtest: P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+ok 16 - P2-5: a transient file identity read returns null instead of throwing into the 500 handler
+  ---
+  duration_ms: 50.648584
+  type: 'test'
+  ...
+# Subtest: P2-02: only an inode change counts as a replaced database file
+ok 17 - P2-02: only an inode change counts as a replaced database file
+  ---
+  duration_ms: 3.982935
+  type: 'test'
+  ...
+# Subtest: benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+ok 18 - benchmark: 200 guarded stable-snapshot reads stay under the 50ms p95 budget
+  ---
+  duration_ms: 23.746052
+  type: 'test'
+  ...
+# readStableSnapshot p50=0.041ms p95=0.225ms (n=200)
+# Subtest: trainingPlanState reads one control pair before and one after the build
+ok 19 - trainingPlanState reads one control pair before and one after the build
+  ---
+  duration_ms: 631.884752
+  type: 'test'
+  ...
+# Subtest: P3-03: planReadGuard never disables itself, even inside the store's own publication
+ok 20 - P3-03: planReadGuard never disables itself, even inside the store's own publication
+  ---
+  duration_ms: 0.612317
+  type: 'test'
+  ...
+# Subtest: P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+ok 21 - P3-14: a pending marker left by a killed publisher is cleared when the store opens, epoch preserved
+  ---
+  duration_ms: 145.154645
+  type: 'test'
+  ...
+# Subtest: P3-15: a publication that keeps changing bounds the cost to attempts x build
+ok 22 - P3-15: a publication that keeps changing bounds the cost to attempts x build
+  ---
+  duration_ms: 1.390005
+  type: 'test'
+  ...
+# 3-attempt fail-closed span: 0.294ms (no sleep by design)
+# (node:97131) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: reports missing and replacing databases as stable 409 states
+ok 23 - reports missing and replacing databases as stable 409 states
+  ---
+  duration_ms: 13.61025
+  type: 'test'
+  ...
+# Subtest: rejects a concurrent database replacement owner
+ok 24 - rejects a concurrent database replacement owner
+  ---
+  duration_ms: 2.097572
+  type: 'test'
+  ...
+# Subtest: database replacement waits for asynchronous read leases and blocks new reads
+ok 25 - database replacement waits for asynchronous read leases and blocks new reads
+  ---
+  duration_ms: 77.582014
+  type: 'test'
+  ...
+# Subtest: beginReplace times out when read leases do not drain
+ok 26 - beginReplace times out when read leases do not drain
+  ---
+  duration_ms: 68.607047
+  type: 'test'
+  ...
+# Subtest: P3-4: the cached read store reopens when the database file is replaced
+ok 27 - P3-4: the cached read store reopens when the database file is replaced
+  ---
+  duration_ms: 19.717927
+  type: 'test'
+  ...
+# Subtest: P3-4+: utimes-only mtime change must not reopen the cached read store
+ok 28 - P3-4+: utimes-only mtime change must not reopen the cached read store
+  ---
+  duration_ms: 9.541815
+  type: 'test'
+  ...
+# Subtest: P3-4+: a WAL checkpoint (mtime change, same inode) keeps the connection and still sees new commits
+ok 29 - P3-4+: a WAL checkpoint (mtime change, same inode) keeps the connection and still sees new commits
+  ---
+  duration_ms: 18.92236
+  type: 'test'
+  ...
+# WAL checkpoint: ino=22391485 mtime 1792987863664.666 -> 1792987863670.878 ms, storeOpenCount=1
+# Subtest: latency: cold open vs same-inode mtime path (p50/p95, diagnostic)
+ok 30 - latency: cold open vs same-inode mtime path (p50/p95, diagnostic)
+  ---
+  duration_ms: 44.203587
+  type: 'test'
+  ...
+# cold RaiReadStore open n=30 p50=0.235ms p95=0.617ms
+# same-inode mtime path n=200 p50=0.021ms p95=0.050ms
+# Subtest: dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it
+ok 31 - dataVersionFingerprint identifies the cached snapshot: foreign commits and replacement both change it
+  ---
+  duration_ms: 35.173301
+  type: 'test'
+  ...
+# Subtest: all heavy workers share the mutation lease, yield fairly, and withdraw on shutdown
+ok 32 - all heavy workers share the mutation lease, yield fairly, and withdraw on shutdown
+  ---
+  duration_ms: 9.901404
+  type: 'test'
+  ...
+# Subtest: cancellation pins out a following import even after its compute worker exits
+ok 33 - cancellation pins out a following import even after its compute worker exits
+  ---
+  duration_ms: 0.587848
+  type: 'test'
+  ...
+# Subtest: recovery blocks are token-bound, additive, and never clear permanent blocks
+ok 34 - recovery blocks are token-bound, additive, and never clear permanent blocks
+  ---
+  duration_ms: 4.731033
+  type: 'test'
+  ...
+# Subtest: resolving a recovery block wakes waiting owners so they re-evaluate
+ok 35 - resolving a recovery block wakes waiting owners so they re-evaluate
+  ---
+  duration_ms: 0.466019
+  type: 'test'
+  ...
+# Subtest: B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+ok 36 - B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+  ---
+  duration_ms: 3.011549
+  type: 'test'
+  ...
+# Subtest: B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+ok 37 - B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+  ---
+  duration_ms: 8.702688
+  type: 'test'
+  ...
+# Subtest: B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+ok 38 - B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+  ---
+  duration_ms: 9.519844
+  type: 'test'
+  ...
+# Subtest: B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+ok 39 - B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+  ---
+  duration_ms: 0.437138
+  type: 'test'
+  ...
+# Subtest: B01: all new error codes and capability headers are documented without declaring runtime support
+ok 40 - B01: all new error codes and capability headers are documented without declaring runtime support
+  ---
+  duration_ms: 1.069596
+  type: 'test'
+  ...
+# (node:97290) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S05-01/T22: each execution write point fails atomically (state, frozen history, execution, operation)
+ok 41 - B06/S05-01/T22: each execution write point fails atomically (state, frozen history, execution, operation)
+  ---
+  duration_ms: 1766.65218
+  type: 'test'
+  ...
+# B06 write-point course state update: rolled back cleanly (stateRevision=2)
+# B06 write-point course state history insert: rolled back cleanly (stateRevision=2)
+# B06 write-point frozen session history insert: rolled back cleanly (stateRevision=2)
+# B06 write-point execution history insert: rolled back cleanly (stateRevision=2)
+# B06 write-point current execution upsert (insert): rolled back cleanly (stateRevision=2)
+# B06 write-point operation result insert: rolled back cleanly (stateRevision=2)
+# Subtest: B06/S05-01/T22: current-execution update (correct) failure keeps the old link and history
+ok 42 - B06/S05-01/T22: current-execution update (correct) failure keeps the old link and history
+  ---
+  duration_ms: 304.786317
+  type: 'test'
+  ...
+# B06 current execution UPDATE failure: old revision 1/run-easy retained, no history append
+# Subtest: B06/S05-01/T22: a COMMIT-time failure rolls back every business row and leaves no operation
+ok 43 - B06/S05-01/T22: a COMMIT-time failure rolls back every business row and leaves no operation
+  ---
+  duration_ms: 464.19453
+  type: 'test'
+  ...
+# B06 COMMIT failure: deferred FK raised at COMMIT; all business rows rolled back
+# Subtest: B08/S04-03/T22: evaluation cursor insert failure rolls back the operation result
+ok 44 - B08/S04-03/T22: evaluation cursor insert failure rolls back the operation result
+  ---
+  duration_ms: 71.709656
+  type: 'test'
+  ...
+# B08 cursor INSERT failure: no cursor and no operation committed
+# Subtest: B08/S04-03/T22: evaluation cursor update failure keeps the old cursor and leaves no operation
+ok 45 - B08/S04-03/T22: evaluation cursor update failure keeps the old cursor and leaves no operation
+  ---
+  duration_ms: 107.938967
+  type: 'test'
+  ...
+# B08 cursor UPDATE failure: old inputKey=input-old retained; no operation row
+# Subtest: B08/S04-03/T22: evaluation COMMIT failure rolls cursor and operation result back together
+ok 46 - B08/S04-03/T22: evaluation COMMIT failure rolls cursor and operation result back together
+  ---
+  duration_ms: 188.844929
+  type: 'test'
+  ...
+# B08 evaluation COMMIT failure: cursor and operation result rolled back together
+# Subtest: B08/S04-03/T23: SQLITE_BUSY is a bounded retryable failure and does not lose a committed operation
+ok 47 - B08/S04-03/T23: SQLITE_BUSY is a bounded retryable failure and does not lose a committed operation
+  ---
+  duration_ms: 2180.231297
+  type: 'test'
+  ...
+# B08 SQLITE_BUSY: failed in 2111ms with database_busy; old cursor/op replay intact; retry succeeded
+# Subtest: B06/S05-01/T21: two real processes confirming one run for two courses: one wins, one gets training_execution_link_conflict
+ok 48 - B06/S05-01/T21: two real processes confirming one run for two courses: one wins, one gets training_execution_link_conflict
+  ---
+  duration_ms: 2646.31402
+  type: 'test'
+  ...
+# two-process race: winner=synthetic-stable-session loser=training_execution_link_conflict; replay appended nothing
+# (node:97318) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+ok 49 - B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 620.928722
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+ok 50 - B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 285.925671
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+ok 51 - B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+  ---
+  duration_ms: 115.565469
+  type: 'test'
+  ...
+# Subtest: B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+ok 52 - B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+  ---
+  duration_ms: 191.309805
+  type: 'test'
+  ...
+# Subtest: B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+ok 53 - B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+  ---
+  duration_ms: 346.318904
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+ok 54 - B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+  ---
+  duration_ms: 230.506211
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+ok 55 - B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+  ---
+  duration_ms: 150.391791
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+ok 56 - B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+  ---
+  duration_ms: 185.542356
+  type: 'test'
+  ...
+# Subtest: B06: strict wire parsing rejects malformed execution drafts before any write
+ok 57 - B06: strict wire parsing rejects malformed execution drafts before any write
+  ---
+  duration_ms: 117.041424
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+ok 58 - B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+  ---
+  duration_ms: 380.326649
+  type: 'test'
+  ...
+# Subtest: P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+ok 59 - P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+  ---
+  duration_ms: 356.786586
+  type: 'test'
+  ...
+# Subtest: P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+ok 60 - P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+  ---
+  duration_ms: 216.261392
+  type: 'test'
+  ...
+# Subtest: P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+ok 61 - P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+  ---
+  duration_ms: 135.017583
+  type: 'test'
+  ...
+# Subtest: P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+ok 62 - P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+  ---
+  duration_ms: 207.855154
+  type: 'test'
+  ...
+# Subtest: P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+ok 63 - P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+  ---
+  duration_ms: 445.224729
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+ok 64 - P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+  ---
+  duration_ms: 565.849125
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+ok 65 - P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+  ---
+  duration_ms: 483.140581
+  type: 'test'
+  ...
+# Subtest: P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+ok 66 - P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+  ---
+  duration_ms: 435.460556
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite state failure leaves no Skip or partial operation
+ok 67 - P-03: SQLite state failure leaves no Skip or partial operation
+  ---
+  duration_ms: 427.014026
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite receipt failure leaves no Skip or partial operation
+ok 68 - P-03: SQLite receipt failure leaves no Skip or partial operation
+  ---
+  duration_ms: 407.874407
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite commit failure leaves no Skip or partial operation
+ok 69 - P-03: SQLite commit failure leaves no Skip or partial operation
+  ---
+  duration_ms: 400.450985
+  type: 'test'
+  ...
+# Subtest: P-03: confirmed association and its immutable history survive a stale Skip
+ok 70 - P-03: confirmed association and its immutable history survive a stale Skip
+  ---
+  duration_ms: 901.443659
+  type: 'test'
+  ...
+# Subtest: P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+ok 71 - P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+  ---
+  duration_ms: 1581.183864
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: an invalid candidate cursor is a 422 command error, never a storage 503
+ok 72 - B06/S03-02: an invalid candidate cursor is a 422 command error, never a storage 503
+  ---
+  duration_ms: 3.614477
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: default window is ±2 natural days; expanded range is capped at 31 days and must contain the course
+ok 73 - B06/S03-02: default window is ±2 natural days; expanded range is capped at 31 days and must contain the course
+  ---
+  duration_ms: 18.248813
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: cross-midnight runs are filtered by startedAt's Shanghai date, not endedAt
+ok 74 - B06/S03-02: cross-midnight runs are filtered by startedAt's Shanghai date, not endedAt
+  ---
+  duration_ms: 21.046343
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is not a write token
+ok 75 - B06/S03-02: candidate paging is stable, bounded at 50 and the cursor is not a write token
+  ---
+  duration_ms: 7.394313
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: cursor is bound to contract scope, range and the candidate fact set
+ok 76 - B06/S03-02: cursor is bound to contract scope, range and the candidate fact set
+  ---
+  duration_ms: 14.91474
+  type: 'test'
+  ...
+# Subtest: B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial
+ok 77 - B06: a completed link stays completed when dose is unknown; only explicit shortfall is partial
+  ---
+  duration_ms: 0.333059
+  type: 'test'
+  ...
+# Subtest: B06: the fact digest changes when the main library corrects or re-imports the run
+ok 78 - B06: the fact digest changes when the main library corrects or re-imports the run
+  ---
+  duration_ms: 0.700537
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: early/late runs stay candidates in the ±2 window and same-day runs are never merged
+ok 79 - B06/S03-02: early/late runs stay candidates in the ±2 window and same-day runs are never merged
+  ---
+  duration_ms: 1.314505
+  type: 'test'
+  ...
+# (node:97443) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-01: execution rows are transaction-only, revision-monotonic and immutable in history
+ok 80 - B06/S03-01: execution rows are transaction-only, revision-monotonic and immutable in history
+  ---
+  duration_ms: 61.684503
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: one actual run can be confirmed by at most one course, but an unlinked/missing run does not occupy the key
+ok 81 - B06/S03-01: one actual run can be confirmed by at most one course, but an unlinked/missing run does not occupy the key
+  ---
+  duration_ms: 76.938241
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: a rolled-back publication leaves no ghost execution or history
+ok 82 - B06/S03-01: a rolled-back publication leaves no ghost execution or history
+  ---
+  duration_ms: 111.517775
+  type: 'test'
+  ...
+# (node:97446) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+ok 83 - 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+  ---
+  duration_ms: 2.8276
+  type: 'test'
+  ...
+# Subtest: v2 投影：模式按业务日期派生，读取不带执行授权
+ok 84 - v2 投影：模式按业务日期派生，读取不带执行授权
+  ---
+  duration_ms: 4.728792
+  type: 'test'
+  ...
+# Subtest: v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+ok 85 - v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+  ---
+  duration_ms: 0.268309
+  type: 'test'
+  ...
+# Subtest: v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+ok 86 - v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+  ---
+  duration_ms: 16.736129
+  type: 'test'
+  ...
+# Subtest: 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+ok 87 - 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+  ---
+  duration_ms: 1093.550111
+  type: 'test'
+  ...
+# Subtest: 路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖
+ok 88 - 路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖
+  ---
+  duration_ms: 160.854577
+  type: 'test'
+  ...
+# Subtest: 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+ok 89 - 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+  ---
+  duration_ms: 149.40609
+  type: 'test'
+  ...
+# Subtest: 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+ok 90 - 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+  ---
+  duration_ms: 274.0619
+  type: 'test'
+  ...
+# Subtest: 未迁移的 store 读返回 null（不是伪造的空状态）
+ok 91 - 未迁移的 store 读返回 null（不是伪造的空状态）
+  ---
+  duration_ms: 71.362287
+  type: 'test'
+  ...
+1..91
+# tests 91
+# suites 0
+# pass 91
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 22537.434458

@@ -15,6 +15,8 @@ import {
   importJobBodySchema,
   importSourceBodySchema,
   mobileGoalsBodySchema,
+  trainingSessionPreviewBodySchema,
+  trainingSessionSubmitBodySchema,
   openapiDocument,
   overrideBodySchema,
   predictionModelIdParamsSchema,
@@ -662,6 +664,17 @@ test("native session and race pickers exactly match their API contracts", () => 
         }
         continue;
       }
+      if (name.endsWith("TechTrainingSessionEditor.swift")) {
+        const options = balancedBlock(source, source.indexOf("{", close));
+        const tags = [...options.matchAll(/\.tag\(\s*"([^"]+)"\)/g)].map(match => match[1]!).sort();
+        if (args.includes('"操作"')) assert.deepEqual(tags, ["move", "edit", "cancel", "unlock", "add", "set_rest"].sort());
+        else if (args.includes('"类型 / 强度"')) assert.deepEqual(tags, sessionKinds.filter(value => value !== "rest").sort());
+        else if (args.includes('"分段用途"')) assert.deepEqual(tags, ["warmup", "work", "recovery", "cooldown"].sort());
+        else if (args.includes('"剂量单位"')) assert.deepEqual(tags, ["distance", "time", "open"].sort());
+        else { assert.ok(args.includes('"强度目标"'), "unexpected session editor picker");
+          assert.deepEqual(tags, ["none", "pace", "heart_rate"].sort()); }
+        continue;
+      }
       if (name.endsWith("TechPlanView.swift")) {
         const options = balancedBlock(source, source.indexOf("{", close));
         const tags = [...options.matchAll(/\.tag\(\s*([^)]*)\)/g)].map(match => match[1]!.trim());
@@ -786,4 +799,66 @@ test("plan publication identity is mandatory: operationId requires a declared sc
 
   assert.equal(service.publish("goals", {}, () => 7), 7);
   assert.deepEqual(calls, ["none"], "无 operationId 的普通发布保持直通");
+});
+
+
+test("D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads", async () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../ios/tests/fixtures/training-session-distance-v1.json", import.meta.url), "utf8"));
+  for (const path of ["/v1/mobile/training-plan/session-commands/preview", "/v1/mobile/training-plan/session-commands"] as const) {
+    const operation = openapiDocument.paths[path].post;
+    assert.ok("requestBody" in operation);
+    const schema = (operation.requestBody as { content: { "application/json": { schema: object } } }).content["application/json"].schema;
+    const app = Fastify();
+    app.post("/command", { schema: { body: schema } }, request => request.body);
+    try {
+      const original = fixture.cases.find((item: { id: string }) => item.id === "mixed").prescription;
+      const { distanceKm, ...prescription } = original;
+      const body = { contractVersion: 1, operationScope: { serverId: "s", athleteId: "a", datasetEpoch: "e" },
+        expectedStateRevision: 1, planInstanceId: "p", draft: { action: "add", prescription },
+        ...(path.endsWith("/preview") ? {} : { operationId: "00000000-0000-4000-8000-000000000001", candidateId: "candidate" }) };
+      const omitted = await app.inject({ method: "POST", url: "/command", payload: body });
+      assert.equal(omitted.statusCode, 200, omitted.body);
+      assert.equal(Object.hasOwn(omitted.json().draft.prescription, "distanceKm"), false);
+      const old = await app.inject({ method: "POST", url: "/command", payload: { ...body, draft: { action: "add", prescription: original } } });
+      assert.equal(old.statusCode, 200, old.body);
+      const { structure, ...missingStructure } = prescription;
+      const invalid = await app.inject({ method: "POST", url: "/command", payload: { ...body, draft: { action: "add", prescription: missingStructure } } });
+      assert.equal(invalid.statusCode, 400, "server measurement does not make the structure optional");
+    } finally { await app.close(); }
+  }
+});
+
+
+test("D-03: Fastify and OpenAPI share the session request quantity schema", async () => {
+  for (const [path, schema] of [
+    ["/v1/mobile/training-plan/session-commands/preview", trainingSessionPreviewBodySchema],
+    ["/v1/mobile/training-plan/session-commands", trainingSessionSubmitBodySchema]
+  ] as const) {
+    const documented = (openapiDocument.paths[path].post as unknown as {
+      requestBody: { content: { "application/json": { schema: unknown } } }
+    }).requestBody.content["application/json"].schema;
+    assert.equal(documented, schema, "OpenAPI must use the mounted body schema object");
+    const app = Fastify({ ajv: { customOptions: { coerceTypes: false, removeAdditional: false } } });
+    try {
+      app.post("/command", { schema: { body: schema } }, request => request.body);
+      for (const [steps, blocks, iterations, accepted] of [
+        [8, 1, 1, true], [9, 1, 1, false], [1, 8, 1, true], [1, 9, 1, false], [1, 1, 20, true], [1, 1, 21, false]
+      ] as const) {
+        const structure = { warmup: null, cooldown: null, blocks: Array.from({ length: blocks }, () => ({ iterations,
+          steps: Array.from({ length: steps }, () => ({ purpose: "work", goal: { type: "distance", meters: 100 }, alert: null })) })) };
+        for (const action of ["add", "edit"] as const) {
+          const draft = action === "add" ? { action, prescription: { localDate: "2026-10-29", kind: "easy", structure } }
+            : { action, sessionId: "session", sessionRevision: 1, patch: { structure } };
+          const payload = { contractVersion: 1, operationScope: { serverId: "s", athleteId: "a", datasetEpoch: "d" },
+            expectedStateRevision: 1, planInstanceId: "plan", draft,
+            ...(path.endsWith("preview") ? {} : { operationId: "00000000-0000-4000-8000-000000000001", candidateId: "c" }) };
+          const response = await app.inject({ method: "POST", url: "/command", payload });
+          assert.equal(response.statusCode, accepted ? 200 : 400, `${path} ${action} ${steps}/${blocks}/${iterations}: ${response.body}`);
+        }
+      }
+    } finally { await app.close(); }
+  }
+  const server = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+  assert.match(server, /app\.post\("\/v1\/mobile\/training-plan\/session-commands\/preview", trainingSessionCommandRouteOptions\(false\)/);
+  assert.match(server, /app\.post\("\/v1\/mobile\/training-plan\/session-commands", trainingSessionCommandRouteOptions\(true\)/);
 });

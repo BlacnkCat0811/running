@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: handshake registry covers exactly every HandshakeResponse key
+ok 1 - handshake registry covers exactly every HandshakeResponse key
+  ---
+  duration_ms: 5.060746
+  type: 'test'
+  ...
+# Subtest: every registration states semantics, precondition, consumer and old-server behaviour
+ok 2 - every registration states semantics, precondition, consumer and old-server behaviour
+  ---
+  duration_ms: 0.390539
+  type: 'test'
+  ...
+# Subtest: deferred capabilities are explicit and mirrored where the contract says
+ok 3 - deferred capabilities are explicit and mirrored where the contract says
+  ---
+  duration_ms: 0.937107
+  type: 'test'
+  ...
+# Subtest: B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+ok 4 - B01: old/production/validation/unknown capabilities obey the shared exact-version matrix
+  ---
+  duration_ms: 3.691716
+  type: 'test'
+  ...
+# Subtest: B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+ok 5 - B01: shared unmanaged/managed/runCoach/paused/ended/empty projections match the current real parser and resolver
+  ---
+  duration_ms: 14.315968
+  type: 'test'
+  ...
+# Subtest: B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+ok 6 - B01: frozen session preview/submit wire uses the exact new path/body and preserves ID
+  ---
+  duration_ms: 12.965412
+  type: 'test'
+  ...
+# Subtest: B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+ok 7 - B01: unknown/absent/null remain distinct in JSON; multiple same-day runs remain candidates
+  ---
+  duration_ms: 0.449619
+  type: 'test'
+  ...
+# Subtest: B01: all new error codes and capability headers are documented without declaring runtime support
+ok 8 - B01: all new error codes and capability headers are documented without declaring runtime support
+  ---
+  duration_ms: 4.809943
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1338.689697

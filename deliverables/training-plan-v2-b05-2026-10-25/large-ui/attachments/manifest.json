@@ -1,0 +1,62 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "534A8834-BFE0-4ED5-8C43-8A2191D8E422.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "session-move-restart-accessibility_0_27151074-9726-46AD-BEBA-78959C80484C.txt",
+        "timestamp" : 1792922932.827
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "32A34D8F-8956-4B4C-8C9D-DC951E298DB4.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "session-move-restart_0_16444939-2D80-4B53-A241-B44B6D972FCB.png",
+        "timestamp" : 1792922930.246
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "FD5B97DD-F8F2-41A9-A3CF-9BCFDF95E8B0.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "session-move-saved-accessibility_0_2A6AD9B9-6E87-4BF2-A767-A3E2B5E4EDBF.txt",
+        "timestamp" : 1792922822.034
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "0907B825-3AA3-428A-BE63-12CB29C889C9.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "session-move-saved_0_05AC20DE-E4C7-41F9-BF93-0AEA7D50E482.png",
+        "timestamp" : 1792922820.318
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "6814FE46-CC18-4657-9475-F7B5E985EF02.txt",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "session-move-preview-accessibility_0_879EF413-3C87-43A7-BB32-F404928AF58D.txt",
+        "timestamp" : 1792922758.289
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "91C2D1F3-FB19-4843-B892-1A4F4AAF6D16",
+        "deviceName" : "RAI Technology Acceptance",
+        "exportedFileName" : "DD270A6C-F8C9-4842-972E-0FFFA4DE9D5D.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "session-move-preview_0_151C3780-E4BB-4004-A177-85D46DF04DFD.png",
+        "timestamp" : 1792922755.359
+      }
+    ],
+    "testIdentifier" : "Phase5Acceptance/testSessionEditorMovePreviewSaveAndRestart()",
+    "testIdentifierURL" : "test://com.apple.xcode/VisualAcceptance/VisualAcceptance/Phase5Acceptance/testSessionEditorMovePreviewSaveAndRestart"
+  }
+]

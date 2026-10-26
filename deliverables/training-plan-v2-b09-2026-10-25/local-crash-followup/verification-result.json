@@ -1,0 +1,35 @@
+{
+  "capturedAt": "2026-10-25T14:20:12.339915+00:00",
+  "fullTest": {
+    "command": [
+      "npm",
+      "test"
+    ],
+    "testConcurrency": 2,
+    "platform": "macOS-26.6.2-x86_64-i386-64bit",
+    "node": "v22.23.2",
+    "startedAt": "2026-10-25T13:45:14.832059+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:18:37.169384+00:00"
+  },
+  "testSummary": {
+    "tests": 2729,
+    "pass": 2726,
+    "fail": 0,
+    "skipped": 3,
+    "cancelled": 0,
+    "durationMs": 2000546.414292,
+    "skips": [
+      "ok 481 - rejects Windows path aliases before extraction # SKIP needs Windows path-alias semantics",
+      "ok 587 - keeps a genuinely locked rollback as a visible backup after commit # SKIP Windows-only: POSIX can rename an open database, so the locked-rollback path cannot be reproduced here",
+      "ok 1406 - cancelling prediction training terminates the Windows process tree # SKIP needs Windows process-tree semantics"
+    ]
+  },
+  "sourceIdentity": {
+    "checkedFiles": 361,
+    "changedSinceRunStart": []
+  },
+  "G5": "BLOCKED",
+  "G6": "BLOCKED",
+  "productionActions": false
+}

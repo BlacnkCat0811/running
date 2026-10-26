@@ -1,0 +1,11 @@
+
+> rai-running-intelligence@0.1.0 test:ios
+> node scripts/run-ios.mjs gates
+
+类型检查 99 个文件（已跳过 3 个仅依赖高德 SDK 的文件）
+
+iOS 类型检查通过
+error: input file 'apps/ios/RAI/APIModels.swift' was modified during the build
+error: input file 'apps/ios/RAI/APIModels.swift' was modified during the build
+
+EXIT_CODE=1

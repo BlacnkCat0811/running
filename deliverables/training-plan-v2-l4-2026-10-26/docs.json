@@ -1,0 +1,12 @@
+{
+  "name": "docs",
+  "argv": [
+    "npm",
+    "run",
+    "check:docs"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997634.806079,
+  "durationSeconds": 1.6877000331878662,
+  "exitCode": 0
+}

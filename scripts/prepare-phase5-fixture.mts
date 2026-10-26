@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 import { RaiDatabase } from "@rai/storage-sqlite";
 import { MobileGoalsStore } from "../apps/api/src/mobile-goals.js";
 import { coachLocalDate } from "../apps/api/src/coach-loop-facts.js";
+import { DatabaseSync } from "node:sqlite";
+import { inspectSessionIdentityMigration, applySessionIdentityMigration } from "../apps/api/src/training-plan-session-migration.js";
 
 const root = resolve(process.argv[2] ?? "");
 if (!process.argv[2] || ![tmpdir(), "/tmp"].filter(existsSync).some(parent => realpathSync(root).startsWith(realpathSync(parent) + sep))) {
@@ -34,4 +36,12 @@ const run = (extra: string[]) => {
 const dryRun = run([]);
 const applied = run(["--apply", "--expect-source-digest", dryRun.sourceDigest]);
 const repeated = run(["--apply", "--expect-source-digest", dryRun.sourceDigest]);
+if (process.argv[3] === "--session-identities") {
+  const sessionDatabase = new DatabaseSync(control);
+  try {
+    const scope = JSON.stringify(["phase5-validation", "athlete_1", "phase5-synthetic"]);
+    const migration = inspectSessionIdentityMigration(sessionDatabase, scope);
+    applySessionIdentityMigration(sessionDatabase, scope, migration.sourceDigest, migration.existingRevision);
+  } finally { sessionDatabase.close(); }
+}
 process.stdout.write(JSON.stringify({ synthetic: true, database, control, dryRun, applied, repeated }, null, 2) + "\n");

@@ -1,0 +1,135 @@
+{
+  "nodeDomains": [
+    {
+      "domain": "apps/api",
+      "tracked": 164,
+      "discovered": 167
+    },
+    {
+      "domain": "packages/application",
+      "tracked": 49,
+      "discovered": 49
+    },
+    {
+      "domain": "packages/contracts",
+      "tracked": 6,
+      "discovered": 6
+    },
+    {
+      "domain": "packages/durability",
+      "tracked": 1,
+      "discovered": 1
+    },
+    {
+      "domain": "packages/dynamics",
+      "tracked": 1,
+      "discovered": 1
+    },
+    {
+      "domain": "packages/features",
+      "tracked": 5,
+      "discovered": 5
+    },
+    {
+      "domain": "packages/health-export-parser",
+      "tracked": 32,
+      "discovered": 32
+    },
+    {
+      "domain": "packages/model-eval",
+      "tracked": 7,
+      "discovered": 7
+    },
+    {
+      "domain": "packages/normalization",
+      "tracked": 1,
+      "discovered": 1
+    },
+    {
+      "domain": "packages/physiology",
+      "tracked": 3,
+      "discovered": 3
+    },
+    {
+      "domain": "packages/prediction-inference",
+      "tracked": 1,
+      "discovered": 1
+    },
+    {
+      "domain": "packages/readiness",
+      "tracked": 2,
+      "discovered": 2
+    },
+    {
+      "domain": "packages/scoring",
+      "tracked": 9,
+      "discovered": 9
+    },
+    {
+      "domain": "packages/storage-sqlite",
+      "tracked": 44,
+      "discovered": 44
+    },
+    {
+      "domain": "packages/training-load",
+      "tracked": 2,
+      "discovered": 2
+    },
+    {
+      "domain": "packages/training-zones",
+      "tracked": 1,
+      "discovered": 1
+    }
+  ],
+  "productFixtureFiles": 9,
+  "iosRegressionFiles": 33,
+  "iosRegressionUntracked": [
+    "apps/ios/tests/TrainingPlanSessionEditorRegression.swift"
+  ],
+  "fixtures": [
+    "apps/api/test/fixtures/pre-commit-barrier.mjs",
+    "apps/ios/tests/fixtures/coach-loop-v1.json",
+    "apps/ios/tests/fixtures/plan-v1.json",
+    "apps/ios/tests/fixtures/plan-v2.json",
+    "apps/ios/tests/fixtures/pr5-c9-baseline-keys.json",
+    "apps/ios/tests/fixtures/prescription-digests.json",
+    "apps/ios/tests/fixtures/training-plan-closed-loop.json",
+    "apps/ios/tests/fixtures/training-plan-sessions-v2.json",
+    "apps/ios/tests/fixtures/training-session-distance-v1.json"
+  ],
+  "iosRegression": [
+    "apps/ios/tests/BackgroundSyncPolicyRegression.swift",
+    "apps/ios/tests/CoordinateConversionRegression.swift",
+    "apps/ios/tests/DirectSyncReceiptRegression.swift",
+    "apps/ios/tests/HealthKitRecordCursorRegression.swift",
+    "apps/ios/tests/HealthSyncArchiveRegression.swift",
+    "apps/ios/tests/HealthSyncBackgroundRecoveryRegression.swift",
+    "apps/ios/tests/HealthSyncBlockedRecoveryRegression.swift",
+    "apps/ios/tests/HealthSyncCancellationRegression.swift",
+    "apps/ios/tests/HealthSyncIntentJournalRegression.swift",
+    "apps/ios/tests/HealthSyncLifecycleRegression.swift",
+    "apps/ios/tests/HealthSyncResumeRegression.swift",
+    "apps/ios/tests/KeychainRegression.swift",
+    "apps/ios/tests/ModelRegression.swift",
+    "apps/ios/tests/PlanWatchContextRegression.swift",
+    "apps/ios/tests/PlanWatchSchedulingRegression.swift",
+    "apps/ios/tests/RouteCommitSettlementRegression.swift",
+    "apps/ios/tests/RouteGpxStreamingRegression.swift",
+    "apps/ios/tests/RouteSyncStatePersistenceRegression.swift",
+    "apps/ios/tests/ServerSessionRegression.swift",
+    "apps/ios/tests/StoreRegression.swift",
+    "apps/ios/tests/SyncAtomicUnitRegression.swift",
+    "apps/ios/tests/SyncStateCommitRegression.swift",
+    "apps/ios/tests/SyncTaskMigrationRegression.swift",
+    "apps/ios/tests/TechPresentationRegression.swift",
+    "apps/ios/tests/TrainingPlanExecutionRegression.swift",
+    "apps/ios/tests/TrainingPlanPublisherRegression.swift",
+    "apps/ios/tests/TrainingPlanStoreRegression.swift",
+    "apps/ios/tests/TrainingPlanV2Regression.swift",
+    "apps/ios/tests/UserExperienceRegression.swift",
+    "apps/ios/tests/WorkoutPlanMapperRegression.swift",
+    "apps/ios/tests/WorkoutWindowPagingRegression.swift",
+    "apps/ios/tests/WorkoutWindowPagingStoreRegression.swift",
+    "apps/ios/tests/TrainingPlanSessionEditorRegression.swift"
+  ]
+}

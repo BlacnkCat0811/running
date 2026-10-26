@@ -1,0 +1,19 @@
+TAP version 13
+# (node:45875) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B03/S01-02: managed runtime keeps a future user-protected course field-by-field and budgets around it
+ok 1 - B03/S01-02: managed runtime keeps a future user-protected course field-by-field and budgets around it
+  ---
+  duration_ms: 1185.668172
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2531.576862
+EXIT:0

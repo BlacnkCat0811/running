@@ -1,0 +1,244 @@
+TAP version 13
+# (node:71372) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: real router: first coach enable generates for the retained unified race goal
+ok 1 - real router: first coach enable generates for the retained unified race goal
+  ---
+  duration_ms: 28320.855267
+  type: 'test'
+  ...
+# Subtest: real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available
+ok 2 - real router: import/recompute busy blocks new unmanaged and managed generation; replay and pause remain available
+  ---
+  duration_ms: 15686.629835
+  type: 'test'
+  ...
+# Subtest: real router: lock → pause clears both current locks and stops today/aggregate execution; resume cannot reuse the old lock
+ok 3 - real router: lock → pause clears both current locks and stops today/aggregate execution; resume cannot reuse the old lock
+  ---
+  duration_ms: 10292.611506
+  type: 'test'
+  ...
+# Subtest: real server startup timer: migrated managed empty window refreshes; paused and corrupt owners never publish
+ok 4 - real server startup timer: migrated managed empty window refreshes; paused and corrupt owners never publish
+  ---
+  duration_ms: 119961.470163
+  type: 'test'
+  ...
+# Subtest: Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+ok 5 - Phase 5: authenticated real router, unified ownership, managed lifecycle, restart and disabled admission
+  ---
+  duration_ms: 20606.014364
+  type: 'test'
+  ...
+# Subtest: B04 real HTTP: independent negotiation, six session actions, safety, restart replay and closed production writer
+ok 6 - B04 real HTTP: independent negotiation, six session actions, safety, restart replay and closed production writer
+  ---
+  duration_ms: 17801.399238
+  type: 'test'
+  ...
+# Subtest: OpenAPI operations declare responses and write contracts
+ok 7 - OpenAPI operations declare responses and write contracts
+  ---
+  duration_ms: 14.499806
+  type: 'test'
+  ...
+# Subtest: inspect source schema rejects missing and additional fields
+ok 8 - inspect source schema rejects missing and additional fields
+  ---
+  duration_ms: 872.002147
+  type: 'test'
+  ...
+# Subtest: import job schema accepts only a source identifier
+ok 9 - import job schema accepts only a source identifier
+  ---
+  duration_ms: 175.222995
+  type: 'test'
+  ...
+# Subtest: prediction training schema rejects ambiguous timestamps and unknown input
+ok 10 - prediction training schema rejects ambiguous timestamps and unknown input
+  ---
+  duration_ms: 66.963228
+  type: 'test'
+  ...
+# Subtest: workout list queries accept eligibility filters and reject calibrating status
+ok 11 - workout list queries accept eligibility filters and reject calibrating status
+  ---
+  duration_ms: 128.351342
+  type: 'test'
+  ...
+# Subtest: training statistics queries constrain ranges and granularities
+ok 12 - training statistics queries constrain ranges and granularities
+  ---
+  duration_ms: 62.479991
+  type: 'test'
+  ...
+# Subtest: recovery trend queries require a whole-day range within the supported window
+ok 13 - recovery trend queries require a whole-day range within the supported window
+  ---
+  duration_ms: 86.466966
+  type: 'test'
+  ...
+# Subtest: training-zone settings require consistent automatic and manual values
+ok 14 - training-zone settings require consistent automatic and manual values
+  ---
+  duration_ms: 135.809854
+  type: 'test'
+  ...
+# Subtest: prediction model routes accept only generated model identifiers
+ok 15 - prediction model routes accept only generated model identifiers
+  ---
+  duration_ms: 90.570746
+  type: 'test'
+  ...
+# Subtest: the goals schema keeps step goals and alerts inside their own semantic bounds
+ok 16 - the goals schema keeps step goals and alerts inside their own semantic bounds
+  ---
+  duration_ms: 381.470985
+  type: 'test'
+  ...
+# Subtest: every registered mutation route is documented in OpenAPI
+ok 17 - every registered mutation route is documented in OpenAPI
+  ---
+  duration_ms: 287.076942
+  type: 'test'
+  ...
+# Subtest: a request that changes data is a route the router can see
+ok 18 - a request that changes data is a route the router can see
+  ---
+  duration_ms: 764.171224
+  type: 'test'
+  ...
+# Subtest: the week editor offers neither today — nor a day already gone — as an editable row
+ok 19 - the week editor offers neither today — nor a day already gone — as an editable row
+  ---
+  duration_ms: 124.878185
+  type: 'test'
+  ...
+# Subtest: native session and race pickers exactly match their API contracts
+ok 20 - native session and race pickers exactly match their API contracts
+  ---
+  duration_ms: 178.077179
+  type: 'test'
+  ...
+# Subtest: plan-operations query contract: four shared statuses, derived summary, strict narrowing
+ok 21 - plan-operations query contract: four shared statuses, derived summary, strict narrowing
+  ---
+  duration_ms: 0.913756
+  type: 'test'
+  ...
+# Subtest: plan publication identity is mandatory: operationId requires a declared scope
+ok 22 - plan publication identity is mandatory: operationId requires a declared scope
+  ---
+  duration_ms: 0.313199
+  type: 'test'
+  ...
+# (node:71464) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B04/T09–12: preview zero-write; move/edit keep ID, suppress source and survive new-load generation
+ok 23 - B04/T09–12: preview zero-write; move/edit keep ID, suppress source and survive new-load generation
+  ---
+  duration_ms: 723.439833
+  type: 'test'
+  ...
+# Subtest: B04/T13–18: occupied/rest dates, cancel/add, repeated moves, release and no-op
+ok 24 - B04/T13–18: occupied/rest dates, cancel/add, repeated moves, release and no-op
+  ---
+  duration_ms: 991.734767
+  type: 'test'
+  ...
+# Subtest: B04/T19–20: draft, source, scope, instance, TTL and state/session CAS reject with zero business writes
+ok 25 - B04/T19–20: draft, source, scope, instance, TTL and state/session CAS reject with zero business writes
+  ---
+  duration_ms: 708.63815
+  type: 'test'
+  ...
+# Subtest: B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes
+ok 26 - B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes
+  ---
+  duration_ms: 1183.21596
+  type: 'test'
+  ...
+# Subtest: B04: cancel and explicit rest remain usable with pending facts; additive edits require facts
+ok 27 - B04: cancel and explicit rest remain usable with pending facts; additive edits require facts
+  ---
+  duration_ms: 568.986323
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_goals rolls back the entire move; original candidate can retry
+ok 28 - B04/T22: SQL failure at mobile_goals rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 168.882838
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_goals_history rolls back the entire move; original candidate can retry
+ok 29 - B04/T22: SQL failure at mobile_goals_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 365.814291
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_state rolls back the entire move; original candidate can retry
+ok 30 - B04/T22: SQL failure at mobile_training_state rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 245.255656
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_state_history rolls back the entire move; original candidate can retry
+ok 31 - B04/T22: SQL failure at mobile_training_state_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 298.309806
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_session_history rolls back the entire move; original candidate can retry
+ok 32 - B04/T22: SQL failure at mobile_training_session_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 198.438178
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_plan_operations rolls back the entire move; original candidate can retry
+ok 33 - B04/T22: SQL failure at mobile_plan_operations rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 438.695693
+  type: 'test'
+  ...
+# Subtest: B04: strict shape, units, omission/null and coupled structure validation
+ok 34 - B04: strict shape, units, omission/null and coupled structure validation
+  ---
+  duration_ms: 444.518783
+  type: 'test'
+  ...
+# Subtest: B04/T21: two independent SQLite clients submit one state revision; only one owns the date
+ok 35 - B04/T21: two independent SQLite clients submit one state revision; only one owns the date
+  ---
+  duration_ms: 685.123376
+  type: 'test'
+  ...
+# Subtest: B04/T22: business COMMIT failure rolls back the move and all histories/results
+ok 36 - B04/T22: business COMMIT failure rolls back the move and all histories/results
+  ---
+  duration_ms: 339.05423
+  type: 'test'
+  ...
+# Subtest: B04/T17: active device evidence is scope-bound and changes invalidate a prepared edit
+ok 37 - B04/T17: active device evidence is scope-bound and changes invalidate a prepared edit
+  ---
+  duration_ms: 175.004314
+  type: 'test'
+  ...
+# (node:71525) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B04 safety: real zone bounds, natural-week actuals, phase and other protected courses constrain the exact user intent
+ok 38 - B04 safety: real zone bounds, natural-week actuals, phase and other protected courses constrain the exact user intent
+  ---
+  duration_ms: 86.571302
+  type: 'test'
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 38
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 214283.213906

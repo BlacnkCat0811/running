@@ -1,0 +1,236 @@
+TAP version 13
+# (node:62911) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 1 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 121.140533
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 2 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 48.71512
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 3 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 51.966209
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 4 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 40.814099
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 5 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 47.667704
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 6 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 80.028355
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 7 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 58.433294
+  type: 'test'
+  ...
+# Subtest: migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening
+ok 8 - migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening
+  ---
+  duration_ms: 119.43
+  type: 'test'
+  ...
+# Subtest: generation latch: facts changed during generation cannot be stamped with the new version
+ok 9 - generation latch: facts changed during generation cannot be stamped with the new version
+  ---
+  duration_ms: 70.208301
+  type: 'test'
+  ...
+# Subtest: facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first
+ok 10 - facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first
+  ---
+  duration_ms: 350.729077
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 11 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 82.108657
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 12 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 55.198437
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals: all business rows roll back and lane can retry
+ok 13 - publication abort at mobile_goals: all business rows roll back and lane can retry
+  ---
+  duration_ms: 93.140048
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals_history: all business rows roll back and lane can retry
+ok 14 - publication abort at mobile_goals_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 39.309105
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state: all business rows roll back and lane can retry
+ok 15 - publication abort at mobile_training_state: all business rows roll back and lane can retry
+  ---
+  duration_ms: 37.164233
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+ok 16 - publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 40.837691
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+ok 17 - publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+  ---
+  duration_ms: 43.66084
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 18 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 33.910984
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 19 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 35.749528
+  type: 'test'
+  ...
+# Subtest: 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+ok 20 - 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+  ---
+  duration_ms: 30.502497
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 21 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 63.884645
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 22 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 41.460147
+  type: 'test'
+  ...
+# Subtest: 命令体形状错误返回 422 training_command_invalid，而不是 500
+ok 23 - 命令体形状错误返回 422 training_command_invalid，而不是 500
+  ---
+  duration_ms: 44.354856
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 24 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 36.920084
+  type: 'test'
+  ...
+# Subtest: B08/S04-03: an identical refresh advances only the evaluation cursor; a real content change publishes once
+ok 25 - B08/S04-03: an identical refresh advances only the evaluation cursor; a real content change publishes once
+  ---
+  duration_ms: 43.624269
+  type: 'test'
+  ...
+# Subtest: 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+ok 26 - 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+  ---
+  duration_ms: 24.30442
+  type: 'test'
+  ...
+# Subtest: 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+ok 27 - 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+  ---
+  duration_ms: 0.714328
+  type: 'test'
+  ...
+# Subtest: 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+ok 28 - 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+  ---
+  duration_ms: 0.567467
+  type: 'test'
+  ...
+# Subtest: 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+ok 29 - 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+  ---
+  duration_ms: 1.474105
+  type: 'test'
+  ...
+# Subtest: 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+ok 30 - 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+  ---
+  duration_ms: 0.309478
+  type: 'test'
+  ...
+# Subtest: B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats
+ok 31 - B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats
+  ---
+  duration_ms: 1.266656
+  type: 'test'
+  ...
+# Subtest: B08: the automatic operation key changes with the input identity, not only the state revision
+ok 32 - B08: the automatic operation key changes with the input identity, not only the state revision
+  ---
+  duration_ms: 0.341799
+  type: 'test'
+  ...
+# (node:62913) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B08/S04-03: the evaluation cursor is one row per scope and only advances inside a transaction
+ok 33 - B08/S04-03: the evaluation cursor is one row per scope and only advances inside a transaction
+  ---
+  duration_ms: 27.579529
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: the same inputs and a later wall clock produce the same key; output revisions are excluded
+ok 34 - B08/S04-01: the same inputs and a later wall clock produce the same key; output revisions are excluded
+  ---
+  duration_ms: 19.538868
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: relevant facts, corrected runs, a new analysis release, config/override/execution changes move the key
+ok 35 - B08/S04-01: relevant facts, corrected runs, a new analysis release, config/override/execution changes move the key
+  ---
+  duration_ms: 2.422651
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: record-only updates and unrelated record fields do not enter the facts digest
+ok 36 - B08/S04-01: record-only updates and unrelated record fields do not enter the facts digest
+  ---
+  duration_ms: 0.345549
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: automatic pending prescriptions are output, protected courses and suppressions are user decisions
+ok 37 - B08/S04-01: automatic pending prescriptions are output, protected courses and suppressions are user decisions
+  ---
+  duration_ms: 0.798437
+  type: 'test'
+  ...
+1..37
+# tests 37
+# suites 0
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2447.210053

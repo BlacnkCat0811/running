@@ -1,0 +1,135 @@
+PASS: the contract header has one spelling
+PASS: the client requests exactly contract 2 (no version picker, no v1 downgrade)
+PASS: the receipt and view capabilities decode as separate keys
+PASS: an explicitly negotiated legacy protocol does not imply v2 writes
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: v2 commands require the durable operation capability
+PASS: an old server's missing capability keys decode as nil, never as a zero/empty view
+PASS: the complete B01 capability matrix is loaded
+PASS: B01 exact capabilities: old_server
+PASS: B01 capabilities never authorize retired URLs: old_server
+PASS: B01 exact capabilities: production_current
+PASS: B01 capabilities never authorize retired URLs: production_current
+PASS: B01 exact capabilities: validation_configuration_only
+PASS: B01 capabilities never authorize retired URLs: validation_configuration_only
+PASS: B01 exact capabilities: future_exact
+PASS: B01 capabilities never authorize retired URLs: future_exact
+PASS: B01 exact capabilities: trainingPlanContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanContractVersion_unknown
+PASS: B01 exact capabilities: planPublicationContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: planPublicationContractVersion_absent
+PASS: B01 exact capabilities: planPublicationContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: planPublicationContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanSessionContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanSessionContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanSessionCommandContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionCommandContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanSessionCommandContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionCommandContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanExecutionCommandContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanExecutionCommandContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanExecutionCommandContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanExecutionCommandContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanUpdateContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanUpdateContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanUpdateContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanUpdateContractVersion_unknown
+PASS: B01 exact capabilities: unknown_sync
+PASS: B01 capabilities never authorize retired URLs: unknown_sync
+PASS: B01 exact capabilities: unknown_api
+PASS: B01 capabilities never authorize retired URLs: unknown_api
+PASS: B01 exact capabilities: unknown_only_trainingPlanSessionContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanSessionContractVersion
+PASS: B01 exact capabilities: unknown_only_trainingPlanSessionCommandContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanSessionCommandContractVersion
+PASS: B01 exact capabilities: unknown_only_trainingPlanExecutionCommandContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanExecutionCommandContractVersion
+PASS: B01 exact capabilities: unknown_only_trainingPlanUpdateContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanUpdateContractVersion
+PASS: B02 optional extension retains identities without altering the existing projection: unmanaged
+PASS: B02 optional extension retains identities without altering the existing projection: managed
+PASS: B02 optional extension retains identities without altering the existing projection: legacy_run_coach
+PASS: B02 optional extension retains identities without altering the existing projection: paused
+PASS: B02 optional extension retains identities without altering the existing projection: ended
+PASS: B02 optional extension retains identities without altering the existing projection: empty_data
+PASS: the v2 read call decodes the unified payload from the wire
+PASS: the training-plan read always requests contract 2 on its own path
+PASS: the negotiated unified read sends GET with no mutation body
+PASS: 409 training_contract_unsupported surfaces as a typed upgrade state
+PASS: 409 training_plan_not_migrated surfaces as a typed migration state
+PASS: 503 training_plan_state_unavailable surfaces as a typed retryable state
+PASS: a 404 from an old server surfaces as an upgrade state, not rest
+PASS: an unrelated 500 is not misreported as a contract problem
+Training plan v2 wire negotiation: 6 checks passed
+PASS: the v2 payload decodes with its identity and revision
+PASS: mode, reason and days-to-race survive decoding
+PASS: the race goal carries distance support and target time
+PASS: the published weekly intention decodes as stored intent
+PASS: the read projection carries no execution grant
+PASS: a missing day is an absent intent, never an implied rest
+PASS: an empty/legacy payload cannot decode as the v2 contract (no silent fallback)
+PASS: week rows cached before F03 still decode (optional intent/observation)
+PASS: a past planned-but-unobserved row keeps its intent and unknown observation
+PASS: an unsupported contract version is a typed upgrade state
+PASS: an unmigrated scope is a typed migration state
+PASS: an unreadable unified store is a retryable unavailable state
+PASS: an old server without the route is an upgrade state, not a generic failure
+PASS: unrelated server failures are not misreported as contract problems
+PASS: a transport failure is not misreported as a contract problem
+PASS: a coherent v2 snapshot is accepted
+PASS: a snapshot without a known identity fails the identity check
+PASS: a snapshot from another athlete is rejected before display
+PASS: a newer contract version is an explicit upgrade state
+PASS: the write-confirmation revision floor cannot be lowered by a read
+PASS: a snapshot from another business date fails closed
+PASS: a day outside the business-date window fails closed
+PASS: duplicate published days fail closed
+PASS: race mode without its race facts fails closed
+PASS: an unknown contract version shows an upgrade state, never rest
+PASS: an unmigrated scope shows a migration state, never rest
+PASS: a failed read is unavailable, never rest
+PASS: a read in flight is loading, not an empty plan
+PASS: an unknown mode is not assessable and never rest
+PASS: a configured coach plan is ready with its mode and run state
+PASS: a published session is not rest and the projection grants no execution
+PASS: only an explicitly prescribed rest day is rendered as rest
+PASS: a missing today intention is unknown, not a rest day
+PASS: a race-day plan is distinguished from rest
+PASS: an incomplete configuration is its own state
+PASS: an ended programme needs confirmation and never reports active
+PASS: a snapshot whose goals moved after migration is refresh-required
+PASS: a cached snapshot is reference-only, never current
+PASS: facts freshness and device coordination stay distinguishable
+PASS: a projection that wrongly carries an execution grant is ignored and flagged
+PASS: an observed past day reports an imported workout
+PASS: a past planned interval with no observation keeps its intent and says observation is missing
+PASS: a past day that was never planned says so instead of asserting a rest
+PASS: planned-but-unobserved is never rendered as rest
+PASS: a payload without observation says the field is absent instead of claiming rest
+PASS: an observed day's note says the workout was imported
+PASS: single-day note distinguishes planned-but-unobserved
+PASS: single-day note distinguishes never-planned
+PASS: B02 identity, revision, override, protection, suppression and units survive Codable round-trip
+PASS: B02 moved and edited intent keeps one stable ID and grants no execution
+PASS: B02 actual transport requests exactly the optional session read extension
+PASS: B02 identity validation fails closed: unknown_version
+PASS: B02 identity validation fails closed: duplicate
+PASS: B02 identity validation fails closed: foreign_instance
+PASS: B02 identity validation fails closed: unknown_lifecycle
+PASS: B02 identity validation fails closed: unknown_protection
+PASS: B02 identity validation fails closed: lost_owner
+PASS: B02 identity validation fails closed: bad_override
+PASS: B02 identity validation fails closed: unknown_reference
+PASS: B02 unsupported session extension is an upgrade state and never a legacy fallback
+PASS: B02 unsupported future execution view refuses lossy caching
+Training plan v2 contract regression: 131 checks passed
+
+EXIT_CODE=0

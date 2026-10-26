@@ -1,0 +1,223 @@
+{
+  "generatedAt": "2026-10-26T17:47:10+08:00",
+  "headAtRun": "00414eb22e58f357924dfc5b68162719ebf5e9c8",
+  "checks": [
+    {
+      "name": "typecheck-final",
+      "argv": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 32,
+      "log": "typecheck-final.log"
+    },
+    {
+      "name": "docs-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:docs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1,
+      "log": "docs-final.log"
+    },
+    {
+      "name": "doc-refs-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:doc-refs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1,
+      "log": "doc-refs-final.log"
+    },
+    {
+      "name": "acceptance-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:acceptance-matrix"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 2,
+      "log": "acceptance-final.log"
+    },
+    {
+      "name": "scripts-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:scripts"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1,
+      "log": "scripts-final.log"
+    },
+    {
+      "name": "package-boundaries-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:package-boundaries"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1,
+      "log": "package-boundaries-final.log"
+    },
+    {
+      "name": "package-boundaries-self-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:package-boundaries",
+        "--",
+        "--self-test"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1,
+      "log": "package-boundaries-self-final.log"
+    },
+    {
+      "name": "single-writer-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:training-plan-single-writer"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1,
+      "log": "single-writer-final.log"
+    },
+    {
+      "name": "ios-gates-final",
+      "argv": [
+        "npm",
+        "run",
+        "check:ios-gates"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 4,
+      "log": "ios-gates-final.log"
+    },
+    {
+      "name": "blob-final",
+      "argv": [
+        "node",
+        "scripts/check-blob-size.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 0,
+      "log": "blob-final.log"
+    }
+  ],
+  "apiTargeted": {
+    "name": "api-targeted-final",
+    "argv": [
+      "node",
+      "--import",
+      "tsx",
+      "--test",
+      "--test-concurrency=2",
+      "5 explicit files"
+    ],
+    "exitCode": 0,
+    "tests": 134,
+    "passed": 134,
+    "failed": 0,
+    "skipped": 0,
+    "durationSeconds": 28.05,
+    "log": "api-targeted-final.log"
+  },
+  "actor": {
+    "commit": "00414eb22e58f357924dfc5b68162719ebf5e9c8",
+    "iosGate": "PASS (103 Swift files typechecked; logs: actor-precommit.log)",
+    "editorChecks": 79,
+    "simulator": "PASS",
+    "device": "PASS",
+    "visualAcceptanceCompile": "PASS",
+    "uiExecution": "NOT RUN"
+  },
+  "nodeL4Inherited": {
+    "source": "external L4 log for frozen TypeScript/Node source",
+    "files": 331,
+    "tests": 2854,
+    "passed": 2851,
+    "failed": 0,
+    "skipped": 3,
+    "cancelled": 0,
+    "durationSeconds": 1346.007,
+    "concurrency": 2,
+    "note": "NOT re-run; documentation-only final commit"
+  },
+  "pythonInherited": {
+    "passed": 32,
+    "failed": 0
+  },
+  "rustInherited": {
+    "unitPassed": 2,
+    "parityPassed": 32,
+    "paritySkipped": 0
+  },
+  "testDiscovery": {
+    "discoveredCount": 331,
+    "trackedCount": 331,
+    "newTests": [
+      {
+        "path": "apps/api/test/training-plan-execution-cursor-errors.test.ts",
+        "tracked": true,
+        "discovered": true
+      },
+      {
+        "path": "apps/api/test/training-plan-history-compatibility.test.ts",
+        "tracked": true,
+        "discovered": true
+      },
+      {
+        "path": "apps/api/test/training-plan-state-audit.test.ts",
+        "tracked": true,
+        "discovered": true
+      }
+    ],
+    "missingTracked": [],
+    "evidenceTestCopies": []
+  },
+  "builds": {
+    "simulator": {
+      "status": "PASS",
+      "seconds": 216.27,
+      "warnings": 0,
+      "actorWarnings": 0,
+      "productSwiftFiles": 106,
+      "policyIncluded": true
+    },
+    "device": {
+      "status": "PASS",
+      "seconds": 260.86,
+      "warnings": 0,
+      "actorWarnings": 0,
+      "productSwiftFiles": 106,
+      "policyIncluded": true
+    },
+    "visualAcceptance": {
+      "buildForTesting": "PASS",
+      "seconds": 50.12,
+      "warnings": [
+        "warning: Metadata extraction skipped. No AppIntents.framework dependency found.",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework/XCUnit (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework/XCTestSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework/XCTestCore (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework/XCTest (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework/XCTAutomationSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+        "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework/Testing (in target 'VisualAcceptance' from project 'VisualAcceptance')"
+      ],
+      "execution": "NOT RUN"
+    }
+  },
+  "githubCI": "NOT CHECKED - local branch not pushed"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "typecheck",
+  "argv": [
+    "npm",
+    "run",
+    "typecheck"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997519.280339,
+  "durationSeconds": 26.14374589920044,
+  "exitCode": 0
+}

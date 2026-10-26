@@ -1,0 +1,916 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -destination "platform=iOS Simulator,id=91C2D1F3-FB19-4843-B892-1A4F4AAF6D16" -derivedDataPath /tmp/rai-training-session-visual-retry/test-derived -resultBundlePath /tmp/rai-training-session-visual-retry/tests.xcresult CODE_SIGNING_ALLOWED=NO "-only-testing:VisualAcceptance/Phase5Acceptance/testSessionEditorMovePreviewSaveAndRestart" test
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+
+Writing result bundle at path:
+	/tmp/rai-training-session-visual-retry/tests.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'VisualAcceptance' in project 'VisualAcceptance' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: b4badf0c4d6b990a0b8a29b3df9e260f
+Build description path: /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/XCBuildData/b4badf0c4d6b990a0b8a29b3df9e260f.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+CreateBuildDirectory /tmp/rai-training-session-visual-retry/test-derived/Build/Products
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-training-session-visual-retry/test-derived/Build/Products
+
+CreateBuildDirectory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex
+
+CreateBuildDirectory /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator
+
+CreateBuildDirectory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/ExplicitPrecompiledModules
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+CreateBuildDirectory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+CreateBuildDirectory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance-f82d1e1e7c0e943bb510b26a2d1cd636-VFS-iphonesimulator/all-product-headers.yaml
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance-f82d1e1e7c0e943bb510b26a2d1cd636-VFS-iphonesimulator/all-product-headers.yaml
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.hmap
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-non-framework-target-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-non-framework-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList
+
+WriteAuxiliaryFile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    write-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json
+
+MkDir /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /bin/mkdir -p /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest
+
+ProcessInfoPlistFile /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-infoPlistUtility /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist -o /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist
+
+SwiftDriver VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-training-session-visual-retry/test-derived/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-training-session-visual-retry/test-derived/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdarg-ED193Y7VYRT9MWI7893LW613J.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ptrcheck-60OTJKWEYG4Q4H4FORNM9BEZM.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/DeveloperToolsSupport-99HE26AIUH30TMPRGQV1Z6ZD1.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stddef-42MBW1P0JOY4NAQ4HNEN00HHJ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_AvailabilityInternal-6K4JTZ4Y2WHGQUXGMDR1KJG1S.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_float-8X6PH9SXW26K3NQSXSEQGCNTQ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdbool-3EA568V001BS6BGQDC3MUW2QI.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_SwiftConcurrencyShims-C140HJ5RCD5FX3UGHOR06YMNO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdbool-2T97OJOWWM6JFMCJNILO83I5T.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ptrcheck-6OQZLMH8H55Y3J2YZ7HE3SEX1.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdarg-4L7W30BESLIXSDS8BA6Z5SMUT.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_AvailabilityInternal-2ZN79290KV1W1HN8D61QDYZ6R.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/SwiftShims-7BWPHRCXP0NNVPHXFUUB2ACOH.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_DarwinFoundation1-ADZPGJCTWVX19FC33DLWS98RR.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_SwiftConcurrencyShims-7R2YHE0NV4QY7YTTHYKSVUPB0.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ptrauth-C88XBRB0B8KO1ESFEDEL7NB6M.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_float-66WVWSJRE5TKTKTEFG1MELPTV.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ptrauth-36D85KK1J9AXAABQRFCRPPI6V.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_DarwinFoundation1-B1JI3O0OJ4RERZ5PZCVGG8FFT.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/DeveloperToolsSupport-9CAXHGXQ2OGUGG4WJI4XMY7WZ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/SwiftShims-DXOBI3PND41MWOJ14QUVX1SGT.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stddef-CXMSBHH7THF7H8GNDB0951TKI.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_limits-1IZ5NWPU4MBH3CXDJCK97U00O.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_DarwinFoundation2-DTISKHZ9140UUD86WYUMZA5PO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_limits-ICCROGOBS3HD6ROV96RL7OB1.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_DarwinFoundation2-ESIQ8JAWHWV9LHXPTCKMBJRFW.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_tgmath-3MOSPEIWSPMHDU6M5YUZ8EV9W.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/sys_types-3HOB24P6ZLHGNYCCZHUOGEDTT.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdint-5CWN73Z2J8E3ONLFH3QMBZG0F.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_DarwinFoundation3-5NMSEWVU36NDD8Z4004TRNKUY.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdatomic-DMSWSG5T9W6TZUJGTLWLHI1JZ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/sys_types-CERDPT5NV0HEHMM8G4XTJGTFB.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdint-8GMBMUDCZHRWOBGK7392DXKA6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_tgmath-3PAQ0ITUF43XYU0TJLVZ12S6Z.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_stdatomic-TERWCLX5LELJLZM8XJQ20DTC.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_intrinsics-Y4GDY2IU6K5L7H6U9FNA06A8.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_DarwinFoundation3-3M77376M09QOH8BN3V9LJFS6H.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_intrinsics-E9Z8XYSSNJBKYF2CCJI4P65BC.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_inttypes-BQJWM489VYXZ3TO1BH4I1RO1N.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Darwin-7AF26Q8VNJ1HDXHUOHMLT7DTL.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/_Builtin_inttypes-BBDF8AW7A8THPNOJ2P2BEN18R.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Darwin-DVD4OSW9RMVR9QBV072WDO17R.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/simd-E7WKKW256LJQVRP09CJAKCT3X.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/MachO-6N0P95FWMG6TMUQBUJ1VZZAZM.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ObjectiveC-DNSUX9KWBUCTVV1MUS3XG7QNY.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/MachO-7DIT6MFNQY8WT0FGLXKSOLTEW.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ObjectiveC-36LYCGRIGHT5U57S8FJJUCCLQ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/os_object-9UXLQXTLM8DMUS958BRJCSCQU.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/os_workgroup-DZ9PZFI8BIAJN79P1QFBZKXK2.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/simd-5P6H9J6DRYKECRGSU61Q995YV.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/os_object-BCMPSKXGJEV58FLSSO8YF50H4.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Dispatch-3LI03X3UI76H9FIJA3KV2U0RT.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/os_workgroup-AWKOGD3SLKTF69FGPAE8YLLKF.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreFoundation-62H665E3F10P5PW6A6J9E0NC6.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/XPC-6RMOBWEA77NHHD4VOQ38EWHJU.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Dispatch-4ZPDT81VG5N1ZEMDM4KRWO1IC.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/os-EXZ6AU3X7LNN1TYRLUQ055ICA.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/XPC-8TTN85J4TZU0113X7H9G187FR.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreFoundation-E3R5VD5LAQ81NT1NYJCO963JE.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/os-4AGQ7I3KXPKEH24TJ3V6W4F10.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreGraphics-ES7I6PIKBYCSY9315WUVM5RK3.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Security-ECACWZ35T7FPKHCPC7HZ20T4E.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CFNetwork-B1DO9HGZ8MCX08N0W029HQ0DW.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CFNetwork-7N3HQQGDZ528297VXPFTKSETU.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreGraphics-4QW11B4J3TL9E7VSJ9Z6EYF1N.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Security-9J9W9DBK82RAOQXQBYXZAQXFX.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Spatial-9PXU9N5WPXFA58J4YPMJP4U16.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ImageIO-9BW49U9HN8X53U73V3LM637KL.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreText-4LXG765RZQL87GAOVZZZG75DN.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Foundation-6I1ICGKQWWO3GHD4YDS1RZGIE.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Foundation-E7EZALYRJ2HLIUUCA2A6A9M7E.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreText-EFV2Q4S7NQ7NL2KHGMXY19LL6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/ImageIO-3QM1SVB5NHTWE6BOC38Z1GYV1.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Spatial-4HSHHC5OFADGPW2DKWK2FPLVD.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/FileProvider-3W2YS9SN60FDCQ5IF3QYAZBUY.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UIUtilities-5505GP65H4YX7M1ALD822KXMU.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/IOSurface-8RB2MZC8QENUZ4X697WP2YGYP.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/OpenGLES-ECMK6EAQJUUMG8VDL7XJPJHR0.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Accessibility-4TCXNJDERT5PRCJ0TWHD94X7P.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/OSLog-D3VXM51WN3PODV4ZYJCQHN1Y6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/OpenGLES-BE4AH03MJ4XGEMPZ8YV4OC92H.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Symbols-9DSHB540PY8JCFVTH5YW017Z5.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UIUtilities-7VE2RCGMI6708BSC9XXS0SSQC.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreTransferable-DEAEB7PI2TFHVITMT9JFL2I04.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UserNotifications-BTKEVGBHL6ISCUH3MZQ1WS5JX.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/FileProvider-4087E7QV7F7PWANEUSRP1UE3D.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UniformTypeIdentifiers-BOK8Q4UOK7W11S6LQC3PTOL73.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/DataDetection-8MPLLXCFSLT7MWCRH48EGLR4P.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/DataDetection-AOYE83ZXP09RQX7PP1JMB2IDF.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Symbols-ESPQARAHCZJMYIL97MN5Z4XSG.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/IOSurface-EW797SQLENCTX9U5TXY02X60B.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Metal-3B7XGCWSB7RHW15ZXO1X7SKQR.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UserNotifications-DY3IUVGUJRI2RST0IEWA3UEPC.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreTransferable-1969TXBFJ0HKBY2X39X2NO4CN.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/OSLog-85M8YLN028JNN9A9HOK3GVRAS.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Accessibility-7GT8BZQHNROGW7I04PDN8DZJ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UniformTypeIdentifiers-3C6U1BSOZ86A88LXGLZ06A380.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Metal-A19MZU3B18DM1Y8GOOQKZ0MBM.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreVideo-EJ7LBJLZYLMQ32BPACWH7R8BS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/QuartzCore-2UCWNJJTLFICIGTAP7RJNBXX3.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreImage-AU7IVWPTR9T01GXKRTVJAW4OY.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreVideo-4SEVIRYYE7UWZX6S7MOARV5HX.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/QuartzCore-6I455YB4X85CQQKTF2UHP0I2R.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/CoreImage-BDQKOPA5C539L8B6KB7NUOAJD.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/SwiftUICore-4KFVD1BQ0TQR2UN1MZPIIXDBF.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UIKit-ETNMZSVQLAYGUDWGNFKO7GQBN.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/SwiftUICore-2BEIAST1OXKEL80HLO1IDUNQT.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/UIKit-ETMRNRRWICW617WATSYSYJF6I.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-69BFZ7TJCMR0CQK2T1ABPASHJ.pcm
+
+SwiftExplicitDependencyCompileModuleFromInterface x86_64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-2X2UCFIZ3KB9L.swiftmodule
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-78CC9NWGTBA3K74NYWYZQKTSF.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-4BI6HBRCOZOUWJBD23M9TPZMG.pcm
+
+SwiftExplicitDependencyCompileModuleFromInterface arm64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-ZAVT6282RM7.swiftmodule
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-AEZW767COKED40NQ886RZDB32.pcm
+
+SwiftExplicitDependencyCompileModuleFromInterface x86_64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-V23ZGK2LAULZ.swiftmodule
+
+SwiftCompile normal x86_64 Compiling\ VisualAcceptance.swift /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftEmitModule normal x86_64 Emitting\ module\ for\ VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftExplicitDependencyCompileModuleFromInterface arm64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-TQ1WZLO7NHI1.swiftmodule
+
+SwiftDriverJobDiscovery normal x86_64 Emitting module for VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation\ Requirements VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-training-session-visual-retry/test-derived/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftdoc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftdoc (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftdoc /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftdoc
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftmodule /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.abi.json /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.abi.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.abi.json /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftsourceinfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftsourceinfo /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo
+
+SwiftCompile normal arm64 Compiling\ VisualAcceptance.swift /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation\ Requirements VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-training-session-visual-retry/test-derived/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftdoc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftdoc (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftdoc /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftdoc
+
+SwiftMergeGeneratedHeaders /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/VisualAcceptance-Swift.h /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-swiftHeaderTool -arch arm64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -arch x86_64 /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -o /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/VisualAcceptance-Swift.h
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftmodule /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.abi.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.abi.json /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftsourceinfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftsourceinfo /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+SwiftDriverJobDiscovery normal x86_64 Compiling VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-training-session-visual-retry/test-derived/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance normal x86_64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target x86_64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -Os -L/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -filelist /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_lto.o -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-linker-args.resp -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -o /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance
+
+SwiftDriverJobDiscovery normal arm64 Compiling VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-training-session-visual-retry/test-derived/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-training-session-visual-retry/test-derived/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-training-session-visual-retry/test-derived/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance normal arm64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -Os -L/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -filelist /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_lto.o -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule @/tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-linker-args.resp -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -o /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance
+
+CreateUniversalBinary /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance normal arm64\ x86_64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo -create /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance -output /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance
+
+GenerateDSYMFile /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest.dSYM /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/dsymutil /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance -o /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest.dSYM
+
+ExtractAppIntentsMetadata (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Users/ta/Library/Developer/DVTDownloads/MetalToolchain/mounts/656653e63a393644d316d4c630af4cccd68d1d2f/Metal.xctoolchain --module-name VisualAcceptance --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk --xcode-version 17F42 --platform-family iOS --deployment-target 17.0 --bundle-identifier app.rai.visual-tests --output /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest --target-triple arm64-apple-ios17.0-simulator --target-triple x86_64-apple-ios17.0-simulator --binary-file /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --dependency-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_dependency_info.dat --dependency-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_dependency_info.dat --stringsdata-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --stringsdata-file /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList --source-file-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList --metadata-file-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList --static-metadata-file-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList --swift-const-vals-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-10-25 15:26:04.636 appintentsmetadataprocessor[73334:7968151] Starting appintentsmetadataprocessor export
+2026-10-25 15:26:04.648 appintentsmetadataprocessor[73334:7968151] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+CopySwiftLibs /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/PlugIns --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/SystemExtensions --scan-folder /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Extensions --platform iphonesimulator --toolchain /Users/ta/Library/Developer/DVTDownloads/MetalToolchain/mounts/656653e63a393644d316d4c630af4cccd68d1d2f/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+AppIntentsSSUTraining (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsnltrainingprocessor --infoplist-path /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist --temp-dir-path /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ssu --bundle-id app.rai.visual-tests --product-path /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest --extracted-metadata-path /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Metadata.appintents --metadata-file-list /tmp/rai-training-session-visual-retry/test-derived/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList --source-file /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist --archive-ssu-assets
+2026-10-25 15:26:04.753 appintentsnltrainingprocessor[73335:7968152] Parsing options for appintentsnltrainingprocessor
+2026-10-25 15:26:04.758 appintentsnltrainingprocessor[73335:7968152] Starting AppIntents SSU YAML Generation
+2026-10-25 15:26:04.759 appintentsnltrainingprocessor[73335:7968152] No AppShortcuts found - Skipping.
+
+MkDir /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /bin/mkdir -p /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app
+
+CopyPlistFile /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Info.plist /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/Info.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copyPlist --validate --convert xml1 --macro-expansion WRAPPEDPRODUCTNAME VisualAcceptance-Runner --macro-expansion WRAPPEDPRODUCTBUNDLEIDENTIFIER app.rai.visual-tests.xctrunner --macro-expansion TESTPRODUCTNAME VisualAcceptance --macro-expansion TESTPRODUCTBUNDLEIDENTIFIER app.rai.visual-tests --copy-value UIDeviceFamily /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist --outdir /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app -- /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/Info.plist
+
+CopyAndPreserveArchs /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/VisualAcceptance-Runner (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/XCTRunner -output /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/VisualAcceptance-Runner -extract arm64 -extract x86_64
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PkgInfo /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/PkgInfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/PkgInfo /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/libXCTestSwiftSupport.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCUnit.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework/XCUnit (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCUIAutomation.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTestSupport.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework/XCTestSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTestCore.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework/XCTestCore (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTest.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework/XCTest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTAutomationSupport.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework/XCTAutomationSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/Testing.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework/Testing (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+RegisterExecutionPolicyException /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-RegisterExecutionPolicyException /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest
+
+Touch /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /usr/bin/touch -c /tmp/rai-training-session-visual-retry/test-derived/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest
+
+2026-10-25 15:26:18.034809+0800 VisualAcceptance-Runner[73413:7968720] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-10-25 15:26:25.979.
+Test Suite 'VisualAcceptance.xctest' started at 2026-10-25 15:26:25.984.
+Test Suite 'Phase5Acceptance' started at 2026-10-25 15:26:25.984.
+Test Case '-[VisualAcceptance.Phase5Acceptance testSessionEditorMovePreviewSaveAndRestart]' started.
+    t =     0.03s Start Test at 2026-10-25 15:26:26.013
+    t =     0.29s Set Up
+    t =     0.31s Open app.rai.running.debug
+    t =     0.32s     Launch app.rai.running.debug
+    t =     0.90s         Setting up automation session
+    t =     5.60s         Wait for app.rai.running.debug to idle
+    t =    15.93s Waiting 40.0s for "tab.设置" Button to exist
+    t =    16.94s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    16.94s         Checking existence of `"tab.设置" Button`
+    t =    17.55s Tap "tab.设置" Button
+    t =    17.55s     Wait for app.rai.running.debug to idle
+    t =    17.76s     Find the "tab.设置" Button
+    t =    17.87s     Check for interrupting elements affecting "tab.设置" Button
+    t =    18.02s     Synthesize event
+    t =    18.44s     Wait for app.rai.running.debug to idle
+    t =    20.00s Waiting 20.0s for Button (First Match) to exist
+    t =    21.03s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =    21.03s         Checking existence of `Button (First Match)`
+    t =    21.09s Tap Button (First Match)
+    t =    21.09s     Wait for app.rai.running.debug to idle
+    t =    21.10s     Find the Button (First Match)
+    t =    21.17s     Check for interrupting elements affecting "RAI 服务, 待连接" Button
+    t =    21.26s     Synthesize event
+    t =    21.73s     Wait for app.rai.running.debug to idle
+    t =    22.81s Waiting 15.0s for SecureTextField (First Match) to exist
+    t =    23.83s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =    23.83s         Checking existence of `SecureTextField (First Match)`
+    t =    23.94s Tap SecureTextField (First Match)
+    t =    23.94s     Wait for app.rai.running.debug to idle
+    t =    23.96s     Find the SecureTextField (First Match)
+    t =    24.06s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    24.17s     Synthesize event
+    t =    24.56s     Wait for app.rai.running.debug to idle
+    t =    28.44s Find the "云端部署时填写" SecureTextField
+    t =    29.00s Type 'rai-visua...' into "云端部署时填写" SecureTextField
+    t =    29.00s     Wait for app.rai.running.debug to idle
+    t =    29.04s     Find the "云端部署时填写" SecureTextField
+    t =    29.43s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =    29.73s     Synthesize event
+    t =    30.62s     Wait for app.rai.running.debug to idle
+    t =    32.72s Checking existence of `"连接服务" Button`
+    t =    33.37s Tap "连接服务" Button
+    t =    33.37s     Wait for app.rai.running.debug to idle
+    t =    33.88s     Find the "连接服务" Button
+    t =    34.13s     Check for interrupting elements affecting "连接服务" Button
+    t =    34.43s     Synthesize event
+    t =    34.89s     Wait for app.rai.running.debug to idle
+    t =    35.29s Waiting 30.0s for "服务：phase5-validation" StaticText to exist
+    t =    36.36s     Checking `Expect predicate `existsNoRetry == 1` for object "服务：phase5-validation" StaticText`
+    t =    36.36s         Checking existence of `"服务：phase5-validation" StaticText`
+    t =    37.09s Checking existence of `Button (Element at index 0)`
+    t =    37.67s Tap Button (Element at index 0)
+    t =    37.67s     Wait for app.rai.running.debug to idle
+    t =    37.87s     Find the Button (Element at index 0)
+    t =    38.40s     Check for interrupting elements affecting "navigation.back" Button
+    t =    38.67s     Synthesize event
+    t =    39.05s     Wait for app.rai.running.debug to idle
+    t =    41.74s Waiting 15.0s for "tab.今日" Button to exist
+    t =    42.77s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.今日" Button`
+    t =    42.77s         Checking existence of `"tab.今日" Button`
+    t =    42.86s Tap "tab.今日" Button
+    t =    42.86s     Wait for app.rai.running.debug to idle
+    t =    42.87s     Find the "tab.今日" Button
+    t =    42.95s     Check for interrupting elements affecting "tab.今日" Button
+    t =    43.04s     Synthesize event
+    t =    43.40s     Wait for app.rai.running.debug to idle
+    t =    45.04s Waiting 30.0s for "打开训练计划" Button to exist
+    t =    46.11s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    46.11s         Checking existence of `"打开训练计划" Button`
+    t =    46.39s Tap "打开训练计划" Button
+    t =    46.39s     Wait for app.rai.running.debug to idle
+    t =    46.42s     Find the "打开训练计划" Button
+    t =    46.69s     Check for interrupting elements affecting "calendar" Button
+    t =    46.86s     Synthesize event
+    t =    47.22s     Wait for app.rai.running.debug to idle
+    t =    48.98s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =    49.89s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    50.50s Swipe up Application 'app.rai.running.debug'
+    t =    50.50s     Wait for app.rai.running.debug to idle
+    t =    50.51s     Find the Application 'app.rai.running.debug'
+    t =    50.70s     Check for interrupting elements affecting "RAI" Application
+    t =    50.94s     Synthesize event
+    t =    51.41s     Wait for app.rai.running.debug to idle
+    t =    53.53s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =    54.06s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    54.47s Swipe up Application 'app.rai.running.debug'
+    t =    54.47s     Wait for app.rai.running.debug to idle
+    t =    54.48s     Find the Application 'app.rai.running.debug'
+    t =    54.93s     Check for interrupting elements affecting "RAI" Application
+    t =    55.58s     Synthesize event
+    t =    56.05s     Wait for app.rai.running.debug to idle
+    t =    57.38s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =    57.88s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    58.58s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =    58.94s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    59.35s Tap "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    59.35s     Wait for app.rai.running.debug to idle
+    t =    59.37s     Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    59.70s     Check for interrupting elements affecting "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    59.91s     Synthesize event
+    t =    60.31s     Wait for app.rai.running.debug to idle
+    t =    63.26s Waiting 10.0s for "training.session.date" TextField to exist
+    t =    64.28s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.date" TextField`
+    t =    64.28s         Checking existence of `"training.session.date" TextField`
+    t =    65.32s Tap "training.session.date" TextField
+    t =    65.32s     Wait for app.rai.running.debug to idle
+    t =    65.33s     Find the "training.session.date" TextField
+    t =    65.74s     Check for interrupting elements affecting "training.session.date" TextField
+    t =    66.28s     Synthesize event
+    t =    66.63s     Wait for app.rai.running.debug to idle
+    t =    68.19s Find the "training.session.date" TextField
+    t =    69.30s Type '2026-1...' into "training.session.date" TextField
+    t =    69.30s     Wait for app.rai.running.debug to idle
+    t =    69.31s     Find the "training.session.date" TextField
+    t =    70.47s     Check for interrupting elements affecting "training.session.date" TextField
+    t =    71.13s     Synthesize event
+    t =    71.74s     Wait for app.rai.running.debug to idle
+    t =    74.69s Tap "training.session.preview" Button
+    t =    74.69s     Wait for app.rai.running.debug to idle
+    t =    74.76s     Find the "training.session.preview" Button
+    t =    75.79s     Check for interrupting elements affecting "training.session.preview" Button
+    t =    76.49s     Synthesize event
+    t =    76.72s         Scroll element to visible
+    t =    76.73s         Find the "training.session.preview" Button
+    t =    77.68s         Computed hit point {214, 533.83333333333326} after scrolling to visible
+    t =    77.99s     Wait for app.rai.running.debug to idle
+    t =    78.84s Waiting 30.0s for "training.session.save" Button to exist
+    t =    79.85s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =    79.86s         Checking existence of `"training.session.save" Button`
+    t =    80.27s Find the Application 'app.rai.running.debug'
+    t =    81.48s Added attachment named 'session-move-preview'
+    t =    81.48s Requesting snapshot of accessibility hierarchy for app with pid 73480
+    t =    85.51s Requesting snapshot of accessibility hierarchy for app with pid 73480
+    t =    86.23s Added attachment named 'session-move-preview-accessibility'
+    t =    86.23s Tap "training.session.close" Button
+    t =    86.23s     Wait for app.rai.running.debug to idle
+    t =    86.25s     Find the "training.session.close" Button
+    t =    86.75s     Check for interrupting elements affecting "training.session.close" Button
+    t =    87.12s     Synthesize event
+    t =    87.56s     Wait for app.rai.running.debug to idle
+    t =    88.53s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =    90.38s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    91.16s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =    91.49s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    91.75s Tap "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    91.75s     Wait for app.rai.running.debug to idle
+    t =    91.76s     Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    92.36s     Check for interrupting elements affecting "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =    92.90s     Synthesize event
+    t =    93.40s     Wait for app.rai.running.debug to idle
+    t =    93.83s Waiting 10.0s for "training.session.date" TextField to exist
+    t =    94.90s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.date" TextField`
+    t =    94.90s         Checking existence of `"training.session.date" TextField`
+    t =    95.33s Tap "training.session.date" TextField
+    t =    95.33s     Wait for app.rai.running.debug to idle
+    t =    95.35s     Find the "training.session.date" TextField
+    t =    95.75s     Check for interrupting elements affecting "training.session.date" TextField
+    t =    96.14s     Synthesize event
+    t =    96.56s     Wait for app.rai.running.debug to idle
+    t =    97.29s Find the "training.session.date" TextField
+    t =    98.26s Type '2026-1...' into "training.session.date" TextField
+    t =    98.26s     Wait for app.rai.running.debug to idle
+    t =    98.34s     Find the "training.session.date" TextField
+    t =    99.15s     Check for interrupting elements affecting "training.session.date" TextField
+    t =    99.61s     Synthesize event
+    t =   100.26s     Wait for app.rai.running.debug to idle
+    t =   102.18s Tap "training.session.preview" Button
+    t =   102.18s     Wait for app.rai.running.debug to idle
+    t =   102.21s     Find the "training.session.preview" Button
+    t =   102.96s     Check for interrupting elements affecting "training.session.preview" Button
+    t =   103.67s     Synthesize event
+    t =   104.22s     Wait for app.rai.running.debug to idle
+    t =   104.88s Waiting 30.0s for "training.session.save" Button to exist
+    t =   105.90s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.save" Button`
+    t =   105.90s         Checking existence of `"training.session.save" Button`
+    t =   106.33s Tap "training.session.save" Button
+    t =   106.33s     Wait for app.rai.running.debug to idle
+    t =   106.34s     Find the "training.session.save" Button
+    t =   107.01s     Check for interrupting elements affecting "training.session.save" Button
+    t =   107.44s     Synthesize event
+    t =   107.93s     Wait for app.rai.running.debug to idle
+    t =   108.20s Waiting 40.0s for "已保存并刷新。" StaticText to exist
+    t =   109.25s     Checking `Expect predicate `existsNoRetry == 1` for object "已保存并刷新。" StaticText`
+    t =   109.25s         Checking existence of `"已保存并刷新。" StaticText`
+    t =   110.42s         Capturing element debug description
+    t =   111.25s     Checking `Expect predicate `existsNoRetry == 1` for object "已保存并刷新。" StaticText`
+    t =   111.25s         Checking existence of `"已保存并刷新。" StaticText`
+    t =   112.30s Find the Application 'app.rai.running.debug'
+    t =   113.32s Added attachment named 'session-move-saved'
+    t =   113.32s Requesting snapshot of accessibility hierarchy for app with pid 73480
+    t =   114.44s Requesting snapshot of accessibility hierarchy for app with pid 73480
+    t =   114.76s Added attachment named 'session-move-saved-accessibility'
+    t =   114.79s Terminate app.rai.running.debug:73480
+    t =   115.88s Open app.rai.running.debug
+    t =   115.89s     Launch app.rai.running.debug
+    t =   116.22s         Setting up automation session
+    t =   119.53s         Wait for app.rai.running.debug to idle
+    t =   126.00s Waiting 40.0s for "tab.设置" Button to exist
+    t =   127.03s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =   127.03s         Checking existence of `"tab.设置" Button`
+    t =   127.41s Tap "tab.设置" Button
+    t =   127.41s     Wait for app.rai.running.debug to idle
+    t =   127.42s     Find the "tab.设置" Button
+    t =   127.74s     Check for interrupting elements affecting "tab.设置" Button
+    t =   127.90s     Synthesize event
+    t =   128.27s     Wait for app.rai.running.debug to idle
+    t =   129.17s Waiting 20.0s for Button (First Match) to exist
+    t =   130.23s     Checking `Expect predicate `existsNoRetry == 1` for object Button (First Match)`
+    t =   130.23s         Checking existence of `Button (First Match)`
+    t =   130.30s Tap Button (First Match)
+    t =   130.31s     Wait for app.rai.running.debug to idle
+    t =   130.32s     Find the Button (First Match)
+    t =   130.40s     Check for interrupting elements affecting "RAI 服务, 待连接" Button
+    t =   130.50s     Synthesize event
+    t =   130.88s     Wait for app.rai.running.debug to idle
+    t =   131.39s Waiting 15.0s for SecureTextField (First Match) to exist
+    t =   132.41s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =   132.41s         Checking existence of `SecureTextField (First Match)`
+    t =   132.51s Tap SecureTextField (First Match)
+    t =   132.51s     Wait for app.rai.running.debug to idle
+    t =   132.55s     Find the SecureTextField (First Match)
+    t =   132.65s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =   132.79s     Synthesize event
+    t =   133.19s     Wait for app.rai.running.debug to idle
+    t =   135.04s Find the "云端部署时填写" SecureTextField
+    t =   135.54s Type 'rai-visua...' into "云端部署时填写" SecureTextField
+    t =   135.54s     Wait for app.rai.running.debug to idle
+    t =   135.56s     Find the "云端部署时填写" SecureTextField
+    t =   135.99s     Check for interrupting elements affecting "云端部署时填写" SecureTextField
+    t =   136.26s     Synthesize event
+    t =   137.18s     Wait for app.rai.running.debug to idle
+    t =   139.00s Checking existence of `"连接服务" Button`
+    t =   139.66s Tap "连接服务" Button
+    t =   139.66s     Wait for app.rai.running.debug to idle
+    t =   140.49s     Find the "连接服务" Button
+    t =   140.81s     Check for interrupting elements affecting "连接服务" Button
+    t =   140.95s     Synthesize event
+    t =   141.48s     Wait for app.rai.running.debug to idle
+    t =   141.74s Waiting 30.0s for "服务：phase5-validation" StaticText to exist
+    t =   142.78s     Checking `Expect predicate `existsNoRetry == 1` for object "服务：phase5-validation" StaticText`
+    t =   142.79s         Checking existence of `"服务：phase5-validation" StaticText`
+    t =   143.37s Checking existence of `Button (Element at index 0)`
+    t =   143.91s Tap Button (Element at index 0)
+    t =   143.91s     Wait for app.rai.running.debug to idle
+    t =   144.24s     Find the Button (Element at index 0)
+    t =   144.42s     Check for interrupting elements affecting "navigation.back" Button
+    t =   144.60s     Synthesize event
+    t =   145.12s     Wait for app.rai.running.debug to idle
+    t =   147.49s Waiting 15.0s for "tab.今日" Button to exist
+    t =   148.51s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.今日" Button`
+    t =   148.52s         Checking existence of `"tab.今日" Button`
+    t =   148.60s Tap "tab.今日" Button
+    t =   148.60s     Wait for app.rai.running.debug to idle
+    t =   148.63s     Find the "tab.今日" Button
+    t =   148.72s     Check for interrupting elements affecting "tab.今日" Button
+    t =   148.81s     Synthesize event
+    t =   149.20s     Wait for app.rai.running.debug to idle
+    t =   149.62s Waiting 30.0s for "打开训练计划" Button to exist
+    t =   150.65s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =   150.65s         Checking existence of `"打开训练计划" Button`
+    t =   150.88s Tap "打开训练计划" Button
+    t =   150.88s     Wait for app.rai.running.debug to idle
+    t =   150.89s     Find the "打开训练计划" Button
+    t =   151.15s     Check for interrupting elements affecting "calendar" Button
+    t =   151.33s     Synthesize event
+    t =   151.73s     Wait for app.rai.running.debug to idle
+    t =   152.94s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =   154.73s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   156.13s Swipe up Application 'app.rai.running.debug'
+    t =   156.13s     Wait for app.rai.running.debug to idle
+    t =   156.29s     Find the Application 'app.rai.running.debug'
+    t =   156.73s     Check for interrupting elements affecting "RAI" Application
+    t =   157.13s     Synthesize event
+    t =   157.59s     Wait for app.rai.running.debug to idle
+    t =   159.73s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =   160.27s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   161.02s Swipe up Application 'app.rai.running.debug'
+    t =   161.02s     Wait for app.rai.running.debug to idle
+    t =   161.03s     Find the Application 'app.rai.running.debug'
+    t =   161.65s     Check for interrupting elements affecting "RAI" Application
+    t =   161.90s     Synthesize event
+    t =   162.35s     Wait for app.rai.running.debug to idle
+    t =   163.23s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =   163.77s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   164.51s Checking existence of `"training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button`
+    t =   164.83s Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   165.13s Tap "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   165.13s     Wait for app.rai.running.debug to idle
+    t =   165.14s     Find the "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   165.39s     Check for interrupting elements affecting "training.session.edit.session-ce56a38d-903c-4957-9408-fe83793d601c" Button
+    t =   165.76s     Synthesize event
+    t =   166.18s     Wait for app.rai.running.debug to idle
+    t =   168.47s Waiting 10.0s for "training.session.date" TextField to exist
+    t =   169.50s     Checking `Expect predicate `existsNoRetry == 1` for object "training.session.date" TextField`
+    t =   169.50s         Checking existence of `"training.session.date" TextField`
+    t =   170.46s Find the Application 'app.rai.running.debug'
+    t =   171.19s Added attachment named 'session-move-restart'
+    t =   171.20s Requesting snapshot of accessibility hierarchy for app with pid 74026
+    t =   173.95s Requesting snapshot of accessibility hierarchy for app with pid 74026
+    t =   174.58s Added attachment named 'session-move-restart-accessibility'
+    t =   174.58s Find the "training.session.date" TextField
+/Users/ta/running/apps/ios/tests/VisualAcceptance.swift:930: error: -[VisualAcceptance.Phase5Acceptance testSessionEditorMovePreviewSaveAndRestart] : XCTAssertEqual failed: ("Optional("2026-10-25")") is not equal to ("Optional("2026-11-04")")
+    t =   175.33s Tap "training.session.close" Button
+    t =   175.34s     Wait for app.rai.running.debug to idle
+    t =   175.36s     Find the "training.session.close" Button
+    t =   175.90s     Check for interrupting elements affecting "training.session.close" Button
+    t =   176.38s Tear Down
+Test Case '-[VisualAcceptance.Phase5Acceptance testSessionEditorMovePreviewSaveAndRestart]' failed (176.955 seconds).
+2026-10-25 15:29:22.958147+0800 VisualAcceptance-Runner[73413:7968720] [Default] Flushing outgoing messages to the IDE with timeout 600.00s
+2026-10-25 15:29:22.960533+0800 VisualAcceptance-Runner[73413:7968872] [Default] Received confirmation that IDE processed remaining outgoing messages
+2026-10-25 15:29:25.559983+0800 VisualAcceptance-Runner[74156:7976857] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+
+Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.
+
+Test Suite 'Selected tests' started at 2026-10-25 15:29:29.340.
+Test Suite 'VisualAcceptance.xctest' started at 2026-10-25 15:29:29.342.
+Test Suite 'VisualAcceptance.xctest' passed at 2026-10-25 15:29:29.348.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+Test Suite 'Selected tests' passed at 2026-10-25 15:29:29.353.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.013) seconds
+2026-10-25 15:31:32.936 xcodebuild[72767:7964678] [MT] IDETestOperationsObserverDebug: 325.895 elapsed -- Testing started completed.
+2026-10-25 15:31:32.936 xcodebuild[72767:7964678] [MT] IDETestOperationsObserverDebug: 0.004 sec, +0.004 sec -- start
+2026-10-25 15:31:32.936 xcodebuild[72767:7964678] [MT] IDETestOperationsObserverDebug: 325.895 sec, +325.891 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/rai-training-session-visual-retry/tests.xcresult
+
+Failing tests:
+	Phase5Acceptance.testSessionEditorMovePreviewSaveAndRestart()
+
+** TEST FAILED **
+
+Testing started

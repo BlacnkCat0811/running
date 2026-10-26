@@ -499,6 +499,109 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
         cache.clear(scope: loopStore.scope)
         check((cache.pendingCoachFeedback(scope: loopStore.scope).value ?? nil)?.operationId == feedbackCommand.operationId,
             "clearing presentation cache cannot erase unknown-result feedback operation")
+        let identitiesData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/training-plan-sessions-v2.json"))
+        let identitiesFixture = try JSONSerialization.jsonObject(with: identitiesData) as! [String: Any]
+        let identitiesWire = identitiesFixture["wire"] as! [String: Any]
+        let identitiesJSON = String(decoding: try JSONSerialization.data(withJSONObject: identitiesWire), as: UTF8.self)
+        var identitiesHandshake = RaiHandshake(serverId: "synthetic-server", athleteId: "synthetic-athlete", datasetEpoch: "synthetic-epoch",
+            syncProtocolVersion: 1, apiVersion: "v1")
+        identitiesHandshake.trainingPlanContractVersion = 2
+        identitiesHandshake.trainingPlanSessionContractVersion = 1
+        let identityScope = UUID().uuidString
+        let identityClock = { ISO8601DateFormatter().date(from: "2026-10-25T04:00:00Z")! }
+        let identityStore = TrainingPlanStore(cache: cache, api: api, scope: identityScope, now: identityClock)
+        PlanStoreProtocol.handler = { request in
+            precondition(request.httpMethod == "GET" && request.value(forHTTPHeaderField: "X-RAI-Training-Sessions") == "1")
+            return (200, identitiesJSON, 0)
+        }
+        let identityLoaded = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(identityLoaded && identityStore.unifiedIsCurrent && identityStore.unified?.sessions?.sessions.first?.sessionRevision == 3,
+              "B02 Store accepts the negotiated stable session revision")
+        // B08: the update extension is only accepted after exact negotiation and
+        // when the same response still carries the session view it belongs to.
+        var updateWire = identitiesWire
+        updateWire["update"] = ["contractVersion": 1,
+            "facts": ["status": "stored", "identity": "facts-1"],
+            "analysis": ["status": "ready", "identity": "analysis-1"],
+            "association": ["status": "current", "identity": "execution-1"],
+            "plan": ["status": "current", "desiredInputKey": "input-1", "publishedInputKey": "input-1",
+                     "evaluatedInputKey": "input-1", "evaluatedStateRevision": 7, "reasonCodes": []]]
+        let updateJSON = String(decoding: try JSONSerialization.data(withJSONObject: updateWire), as: UTF8.self)
+        var updateHandshake = identitiesHandshake
+        updateHandshake.trainingPlanUpdateContractVersion = 1
+        PlanStoreProtocol.handler = { request in
+            precondition(request.value(forHTTPHeaderField: "X-RAI-Training-Updates") == "1")
+            return (200, updateJSON, 0)
+        }
+        let updateLoaded = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: updateHandshake, isValid: { true })
+        check(updateLoaded && identityStore.unified?.update?.contractVersion == 1 &&
+              identityStore.unified?.update?.plan.publishedInputKey == "input-1" &&
+              identityStore.unified?.sessions != nil,
+              "B08 Store accepts an exactly negotiated update view beside the session view")
+        let unnegotiatedStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: identityClock)
+        PlanStoreProtocol.handler = { _ in (200, updateJSON, 0) }
+        let unnegotiatedUpdate = await unnegotiatedStore.refreshUnifiedPlan(
+            baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(!unnegotiatedUpdate && unnegotiatedStore.unified == nil,
+              "B08 an update view returned without negotiation is rejected, not ignored")
+        var updateWithoutSessions = updateWire
+        updateWithoutSessions.removeValue(forKey: "sessions")
+        let updateWithoutSessionsJSON = String(
+            decoding: try JSONSerialization.data(withJSONObject: updateWithoutSessions), as: UTF8.self)
+        let noSessionsStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: identityClock)
+        PlanStoreProtocol.handler = { _ in (200, updateWithoutSessionsJSON, 0) }
+        let noSessionsUpdate = await noSessionsStore.refreshUnifiedPlan(
+            baseURL: base, token: "", handshake: updateHandshake, isValid: { true })
+        check(!noSessionsUpdate && noSessionsStore.unified == nil,
+              "B08 an update view without the session view is rejected instead of attributed to no instance")
+        let identityCached = TrainingPlanStore(cache: cache, api: api, scope: identityScope, now: identityClock)
+        identityCached.loadCache()
+        check(identityCached.unified == identityStore.unified && !identityCached.unifiedIsCurrent && identityCached.executablePlan == nil,
+              "B02 real SQLite cache retains complete identity/override/suppression but remains reference-only after restart")
+        let isolatedIdentity = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString, now: identityClock)
+        isolatedIdentity.loadCache()
+        check(isolatedIdentity.unified == nil, "B02 identities cannot cross the cache scope")
+        // B07: the optional execution rows are cached with the same snapshot, and
+        // a lower state revision / same-revision instance swap cannot roll it back.
+        var executionWire = identitiesWire
+        var executionExtension = executionWire["sessions"] as! [String: Any]
+        executionExtension["executions"] = [["sessionId": "synthetic-stable-session", "executionRevision": 1,
+            "association": "unlinked", "trainingSessionId": NSNull(), "sourceFactDigest": NSNull(),
+            "prescriptionSessionRevision": 3, "assessment": NSNull(),
+            "availableAt": "2026-10-25T02:00:00.000Z", "reasonCodes": []]]
+        executionWire["sessions"] = executionExtension
+        let executionJSON = String(decoding: try JSONSerialization.data(withJSONObject: executionWire), as: UTF8.self)
+        PlanStoreProtocol.handler = { _ in (200, executionJSON, 0) }
+        let executionLoaded = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(executionLoaded && identityStore.sessionExecutionsKnown &&
+              identityStore.sessionExecution(for: "synthetic-stable-session")?.association == "unlinked",
+              "B07 Store caches the optional execution view without inventing a row")
+        var staleWire = executionWire
+        staleWire["stateRevision"] = 6
+        let staleJSON = String(decoding: try JSONSerialization.data(withJSONObject: staleWire), as: UTF8.self)
+        PlanStoreProtocol.handler = { _ in (200, staleJSON, 0) }
+        let staleRejected = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(!staleRejected && identityStore.unified?.stateRevision == 7 &&
+              identityStore.sessionExecution(for: "synthetic-stable-session") != nil,
+              "B07 an older GET cannot overwrite a newer execution snapshot")
+        var foreignInstanceWire = executionWire
+        var foreignExtension = foreignInstanceWire["sessions"] as! [String: Any]
+        foreignExtension["planInstanceId"] = "other-instance"
+        var foreignSessions = foreignExtension["sessions"] as! [[String: Any]]
+        foreignSessions[0]["planInstanceId"] = "other-instance"
+        foreignExtension["sessions"] = foreignSessions
+        foreignInstanceWire["sessions"] = foreignExtension
+        let foreignJSON = String(decoding: try JSONSerialization.data(withJSONObject: foreignInstanceWire), as: UTF8.self)
+        PlanStoreProtocol.handler = { _ in (200, foreignJSON, 0) }
+        let foreignRejected = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(!foreignRejected && identityStore.unified?.sessions?.planInstanceId == "synthetic-plan",
+              "B07 a same-revision plan-instance swap is rejected")
+        var missingIdentity = identitiesWire; missingIdentity.removeValue(forKey: "sessions")
+        let missingIdentityJSON = String(decoding: try JSONSerialization.data(withJSONObject: missingIdentity), as: UTF8.self)
+        PlanStoreProtocol.handler = { _ in (200, missingIdentityJSON, 0) }
+        let missingRead = await identityStore.refreshUnifiedPlan(baseURL: base, token: "", handshake: identitiesHandshake, isValid: { true })
+        check(!missingRead && !identityStore.unifiedIsCurrent && identityStore.unified?.sessions != nil,
+              "B02 missing negotiated identities do not overwrite the retained reference with an empty extension")
         print("TrainingPlanStore regression: \(count) checks passed")
     }
 }

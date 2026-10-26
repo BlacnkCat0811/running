@@ -1,0 +1,278 @@
+TAP version 13
+# (node:28687) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+not ok 1 - P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+  ---
+  duration_ms: 201.719777
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:1:22570'
+  failureType: 'testCodeFailure'
+  error: |-
+    no-change reconciliation must not save an operation tombstone
+    + actual - expected
+    ... Skipped lines
+    
+      {
+        mobile_goals: [
+          [Object: null prototype] {
+            payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}',
+            revision: 1,
+    ...
+          },
+    +     [Object: null prototype] {
+    +       expires_at: '2027-01-24T06:30:36.059Z',
+    +       operation_id: 'reconcile-029e2774ad33a720550bc7f68140e12d9c2faadc',
+    +       request_digest: '9dc378e2906816b471f0adc64aeab4a1b07c9a0ad96cb72fa57c8fdc5a98f6f5',
+    +       result_json: '{"changed":0}',
+    +       scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+    +     }
+        ],
+        mobile_training_execution: [
+          [Object: null prototype] {
+            association_status: 'confirmed',
+            available_at: '2026-10-30T03:00:00.000Z',
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    mobile_goals:
+      0:
+        singleton: 1
+        revision: 1
+        payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+        updated_at: '2026-10-26T06:30:35.968Z'
+    mobile_goals_history:
+      0:
+        id: 1
+        revision: 0
+        payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+        changed_at: '1970-01-01T00:00:00.000Z'
+      1:
+        id: 2
+        revision: 1
+        payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+        changed_at: '2026-10-26T06:30:35.968Z'
+    mobile_training_state:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 3
+        payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"synthetic-plan","sessions":[{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null},{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}],"suppressions":[],"publishedInputKey":"synthetic-input-1"}'
+        updated_at: '2026-10-26T06:30:36.043Z'
+    mobile_training_state_history:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 1
+        event_type: 'migration_created'
+        payload_json: '{"schemaVersion":1,"migrationVersion":1,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}],"cooldown":null}}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z"}'
+        changed_at: '2026-10-25T02:00:00.000Z'
+      1:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 2
+        event_type: 'fixture:upgrade'
+        payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"synthetic-plan","sessions":[{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":1,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null},{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}],"suppressions":[],"publishedInputKey":"synthetic-input-1"}'
+        changed_at: '2026-10-26T06:30:35.999Z'
+      2:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 3
+        event_type: 'execution:confirm'
+        payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"synthetic-plan","sessions":[{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null},{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}],"suppressions":[],"publishedInputKey":"synthetic-input-1"}'
+        changed_at: '2026-10-26T06:30:36.043Z'
+    mobile_training_session_history:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-stable-session'
+        session_revision: 1
+        state_revision: 2
+        local_date: '2026-10-28'
+        available_at: '2026-10-25T03:00:00.000Z'
+        payload_json: '{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":1,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}'
+      1:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-interval-session'
+        session_revision: 1
+        state_revision: 2
+        local_date: '2026-10-29'
+        available_at: '2026-10-25T03:00:00.000Z'
+        payload_json: '{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}'
+      2:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-stable-session'
+        session_revision: 2
+        state_revision: 3
+        local_date: '2026-10-28'
+        available_at: '2026-10-30T03:00:00.000Z'
+        payload_json: '{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null}'
+    mobile_training_execution:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-stable-session'
+        execution_revision: 1
+        association_status: 'confirmed'
+        training_session_id: 'run-easy'
+        prescription_session_revision: 1
+        source_fact_digest: '1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f'
+        payload_json: '{"sessionId":"synthetic-stable-session","executionRevision":1,"association":"confirmed","trainingSessionId":"run-easy","sourceFactDigest":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f","prescriptionSessionRevision":1,"assessment":{"version":"rai-coach-execution-assessment-candidate-v1","policyStatus":"candidate","localDate":"2026-10-28","asOf":"2026-10-30T03:00:00.000Z","planRevision":1,"prescriptionDigest":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e","workoutIds":["run-easy"],"association":{"status":"matched","method":"plan_history","evidenceRefs":[{"source":"training_session_history","id":"synthetic-plan:synthetic-stable-session:1","observedAt":"2026-10-25T03:00:00.000Z","availableAt":"2026-10-25T03:00:00.000Z","revisionOrHash":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"}]},"observation":"observed","evidenceLevel":"summary_only","dose":{"status":"met","basis":"whole_session","requiredDistanceMeters":8000,"observedDistanceMeters":8200,"requiredWorkSeconds":null,"observedWorkSeconds":null,"requiredReps":null,"verifiedReps":null},"stimulus":{"status":"not_assessable","channel":null,"validCoverageFraction":null,"timeInTargetFraction":null},"completion":"unconfirmed","reasons":[{"code":"stimulus_evidence_unavailable","policyVersion":"rai-coach-execution-assessment-candidate-v1","affectedDates":["2026-10-28"],"params":{"coverage":null},"evidenceRefs":[]}]},"availableAt":"2026-10-30T03:00:00.000Z","reasonCodes":["stimulus_evidence_unavailable"]}'
+        available_at: '2026-10-30T03:00:00.000Z'
+    mobile_training_execution_history:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        session_id: 'synthetic-stable-session'
+        execution_revision: 1
+        reason: 'execution:confirm'
+        available_at: '2026-10-30T03:00:00.000Z'
+        payload_json: '{"sessionId":"synthetic-stable-session","executionRevision":1,"association":"confirmed","trainingSessionId":"run-easy","sourceFactDigest":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f","prescriptionSessionRevision":1,"assessment":{"version":"rai-coach-execution-assessment-candidate-v1","policyStatus":"candidate","localDate":"2026-10-28","asOf":"2026-10-30T03:00:00.000Z","planRevision":1,"prescriptionDigest":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e","workoutIds":["run-easy"],"association":{"status":"matched","method":"plan_history","evidenceRefs":[{"source":"training_session_history","id":"synthetic-plan:synthetic-stable-session:1","observedAt":"2026-10-25T03:00:00.000Z","availableAt":"2026-10-25T03:00:00.000Z","revisionOrHash":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"}]},"observation":"observed","evidenceLevel":"summary_only","dose":{"status":"met","basis":"whole_session","requiredDistanceMeters":8000,"observedDistanceMeters":8200,"requiredWorkSeconds":null,"observedWorkSeconds":null,"requiredReps":null,"verifiedReps":null},"stimulus":{"status":"not_assessable","channel":null,"validCoverageFraction":null,"timeInTargetFraction":null},"completion":"unconfirmed","reasons":[{"code":"stimulus_evidence_unavailable","policyVersion":"rai-coach-execution-assessment-candidate-v1","affectedDates":["2026-10-28"],"params":{"coverage":null},"evidenceRefs":[]}]},"availableAt":"2026-10-30T03:00:00.000Z","reasonCodes":["stimulus_evidence_unavailable"]}'
+    mobile_plan_operations:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        operation_id: 'b0c02c5b-0b6c-4295-88a7-48816c4b5e24'
+        request_digest: '7fadba8d46dfa6c533a0ffb751c84dbaf472348fd98ae7bf0775d74449fe9db3'
+        result_json: '{"contractVersion":1,"operationId":"b0c02c5b-0b6c-4295-88a7-48816c4b5e24","stateRevision":3,"goalsRevision":1,"planInstanceId":"synthetic-plan","outcome":"changed","session":{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null},"execution":{"sessionId":"synthetic-stable-session","executionRevision":1,"association":"confirmed","trainingSessionId":"run-easy","sourceFactDigest":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f","prescriptionSessionRevision":1,"assessment":{"version":"rai-coach-execution-assessment-candidate-v1","policyStatus":"candidate","localDate":"2026-10-28","asOf":"2026-10-30T03:00:00.000Z","planRevision":1,"prescriptionDigest":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e","workoutIds":["run-easy"],"association":{"status":"matched","method":"plan_history","evidenceRefs":[{"source":"training_session_history","id":"synthetic-plan:synthetic-stable-session:1","observedAt":"2026-10-25T03:00:00.000Z","availableAt":"2026-10-25T03:00:00.000Z","revisionOrHash":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"}]},"observation":"observed","evidenceLevel":"summary_only","dose":{"status":"met","basis":"whole_session","requiredDistanceMeters":8000,"observedDistanceMeters":8200,"requiredWorkSeconds":null,"observedWorkSeconds":null,"requiredReps":null,"verifiedReps":null},"stimulus":{"status":"not_assessable","channel":null,"validCoverageFraction":null,"timeInTargetFraction":null},"completion":"unconfirmed","reasons":[{"code":"stimulus_evidence_unavailable","policyVersion":"rai-coach-execution-assessment-candidate-v1","affectedDates":["2026-10-28"],"params":{"coverage":null},"evidenceRefs":[]}]},"availableAt":"2026-10-30T03:00:00.000Z","reasonCodes":["stimulus_evidence_unavailable"]},"planUpdate":"pending","warnings":["执行关联只确认实际训练身份；剂量与刺激仍按证据独立评价。","保存关联不会自动更新设备排期，也不会调用 WorkoutKit。"]}'
+        expires_at: '2027-01-24T06:30:36.046Z'
+  actual:
+    mobile_goals:
+      0:
+        singleton: 1
+        revision: 1
+        payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+        updated_at: '2026-10-26T06:30:35.968Z'
+    mobile_goals_history:
+      0:
+        id: 1
+        revision: 0
+        payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+        changed_at: '1970-01-01T00:00:00.000Z'
+      1:
+        id: 2
+        revision: 1
+        payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+        changed_at: '2026-10-26T06:30:35.968Z'
+    mobile_training_state:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 3
+        payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"synthetic-plan","sessions":[{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null},{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}],"suppressions":[],"publishedInputKey":"synthetic-input-1"}'
+        updated_at: '2026-10-26T06:30:36.043Z'
+    mobile_training_state_history:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 1
+        event_type: 'migration_created'
+        payload_json: '{"schemaVersion":1,"migrationVersion":1,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}],"cooldown":null}}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z"}'
+        changed_at: '2026-10-25T02:00:00.000Z'
+      1:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 2
+        event_type: 'fixture:upgrade'
+        payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"synthetic-plan","sessions":[{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":1,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null},{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}],"suppressions":[],"publishedInputKey":"synthetic-input-1"}'
+        changed_at: '2026-10-26T06:30:35.999Z'
+      2:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        revision: 3
+        event_type: 'execution:confirm'
+        payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"synthetic-plan","sessions":[{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null},{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}],"suppressions":[],"publishedInputKey":"synthetic-input-1"}'
+        changed_at: '2026-10-26T06:30:36.043Z'
+    mobile_training_session_history:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-stable-session'
+        session_revision: 1
+        state_revision: 2
+        local_date: '2026-10-28'
+        available_at: '2026-10-25T03:00:00.000Z'
+        payload_json: '{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":1,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}'
+      1:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-interval-session'
+        session_revision: 1
+        state_revision: 2
+        local_date: '2026-10-29'
+        available_at: '2026-10-25T03:00:00.000Z'
+        payload_json: '{"planInstanceId":"synthetic-plan","sessionId":"synthetic-interval-session","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"interval","distanceKm":8,"structure":{"warmup":null,"cooldown":null,"blocks":[{"iterations":4,"steps":[{"purpose":"work","goal":{"type":"distance","meters":1000},"alert":{"kind":"pace","lower":240,"upper":260}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}]},"reason":null},"recommendation":null,"userOverride":null,"protection":"automatic","lifecycle":"pending","availableAt":"2026-10-25T03:00:00.000Z","supersededBySessionId":null}'
+      2:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-stable-session'
+        session_revision: 2
+        state_revision: 3
+        local_date: '2026-10-28'
+        available_at: '2026-10-30T03:00:00.000Z'
+        payload_json: '{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null}'
+    mobile_training_execution:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        plan_instance_id: 'synthetic-plan'
+        session_id: 'synthetic-stable-session'
+        execution_revision: 1
+        association_status: 'confirmed'
+        training_session_id: 'run-easy'
+        prescription_session_revision: 1
+        source_fact_digest: '1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f'
+        payload_json: '{"sessionId":"synthetic-stable-session","executionRevision":1,"association":"confirmed","trainingSessionId":"run-easy","sourceFactDigest":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f","prescriptionSessionRevision":1,"assessment":{"version":"rai-coach-execution-assessment-candidate-v1","policyStatus":"candidate","localDate":"2026-10-28","asOf":"2026-10-30T03:00:00.000Z","planRevision":1,"prescriptionDigest":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e","workoutIds":["run-easy"],"association":{"status":"matched","method":"plan_history","evidenceRefs":[{"source":"training_session_history","id":"synthetic-plan:synthetic-stable-session:1","observedAt":"2026-10-25T03:00:00.000Z","availableAt":"2026-10-25T03:00:00.000Z","revisionOrHash":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"}]},"observation":"observed","evidenceLevel":"summary_only","dose":{"status":"met","basis":"whole_session","requiredDistanceMeters":8000,"observedDistanceMeters":8200,"requiredWorkSeconds":null,"observedWorkSeconds":null,"requiredReps":null,"verifiedReps":null},"stimulus":{"status":"not_assessable","channel":null,"validCoverageFraction":null,"timeInTargetFraction":null},"completion":"unconfirmed","reasons":[{"code":"stimulus_evidence_unavailable","policyVersion":"rai-coach-execution-assessment-candidate-v1","affectedDates":["2026-10-28"],"params":{"coverage":null},"evidenceRefs":[]}]},"availableAt":"2026-10-30T03:00:00.000Z","reasonCodes":["stimulus_evidence_unavailable"]}'
+        available_at: '2026-10-30T03:00:00.000Z'
+    mobile_training_execution_history:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        session_id: 'synthetic-stable-session'
+        execution_revision: 1
+        reason: 'execution:confirm'
+        available_at: '2026-10-30T03:00:00.000Z'
+        payload_json: '{"sessionId":"synthetic-stable-session","executionRevision":1,"association":"confirmed","trainingSessionId":"run-easy","sourceFactDigest":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f","prescriptionSessionRevision":1,"assessment":{"version":"rai-coach-execution-assessment-candidate-v1","policyStatus":"candidate","localDate":"2026-10-28","asOf":"2026-10-30T03:00:00.000Z","planRevision":1,"prescriptionDigest":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e","workoutIds":["run-easy"],"association":{"status":"matched","method":"plan_history","evidenceRefs":[{"source":"training_session_history","id":"synthetic-plan:synthetic-stable-session:1","observedAt":"2026-10-25T03:00:00.000Z","availableAt":"2026-10-25T03:00:00.000Z","revisionOrHash":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"}]},"observation":"observed","evidenceLevel":"summary_only","dose":{"status":"met","basis":"whole_session","requiredDistanceMeters":8000,"observedDistanceMeters":8200,"requiredWorkSeconds":null,"observedWorkSeconds":null,"requiredReps":null,"verifiedReps":null},"stimulus":{"status":"not_assessable","channel":null,"validCoverageFraction":null,"timeInTargetFraction":null},"completion":"unconfirmed","reasons":[{"code":"stimulus_evidence_unavailable","policyVersion":"rai-coach-execution-assessment-candidate-v1","affectedDates":["2026-10-28"],"params":{"coverage":null},"evidenceRefs":[]}]},"availableAt":"2026-10-30T03:00:00.000Z","reasonCodes":["stimulus_evidence_unavailable"]}'
+    mobile_plan_operations:
+      0:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        operation_id: 'b0c02c5b-0b6c-4295-88a7-48816c4b5e24'
+        request_digest: '7fadba8d46dfa6c533a0ffb751c84dbaf472348fd98ae7bf0775d74449fe9db3'
+        result_json: '{"contractVersion":1,"operationId":"b0c02c5b-0b6c-4295-88a7-48816c4b5e24","stateRevision":3,"goalsRevision":1,"planInstanceId":"synthetic-plan","outcome":"changed","session":{"planInstanceId":"synthetic-plan","sessionId":"synthetic-stable-session","sessionRevision":2,"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"recommendation":{"prescription":{"localDate":"2026-10-28","kind":"easy","distanceKm":8,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":{"kind":"pace","lower":330,"upper":360}}]}],"cooldown":null},"reason":"synthetic"},"source":"heuristic","policyHash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"userOverride":null,"protection":"automatic","lifecycle":"completed","availableAt":"2026-10-30T03:00:00.000Z","supersededBySessionId":null},"execution":{"sessionId":"synthetic-stable-session","executionRevision":1,"association":"confirmed","trainingSessionId":"run-easy","sourceFactDigest":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f","prescriptionSessionRevision":1,"assessment":{"version":"rai-coach-execution-assessment-candidate-v1","policyStatus":"candidate","localDate":"2026-10-28","asOf":"2026-10-30T03:00:00.000Z","planRevision":1,"prescriptionDigest":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e","workoutIds":["run-easy"],"association":{"status":"matched","method":"plan_history","evidenceRefs":[{"source":"training_session_history","id":"synthetic-plan:synthetic-stable-session:1","observedAt":"2026-10-25T03:00:00.000Z","availableAt":"2026-10-25T03:00:00.000Z","revisionOrHash":"cce1fc947911df8bf34336540b7616a5835d37af0a47502f05c5b4d60a41d69e"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"},{"source":"workout","id":"run-easy","observedAt":"2026-10-28T00:00:00.000Z","availableAt":"2026-10-30T03:00:00.000Z","revisionOrHash":"1b8c95bc32383d34864ab3645aceb0cdcf05775bb910072e434f2ab6d29a3d7f"}]},"observation":"observed","evidenceLevel":"summary_only","dose":{"status":"met","basis":"whole_session","requiredDistanceMeters":8000,"observedDistanceMeters":8200,"requiredWorkSeconds":null,"observedWorkSeconds":null,"requiredReps":null,"verifiedReps":null},"stimulus":{"status":"not_assessable","channel":null,"validCoverageFraction":null,"timeInTargetFraction":null},"completion":"unconfirmed","reasons":[{"code":"stimulus_evidence_unavailable","policyVersion":"rai-coach-execution-assessment-candidate-v1","affectedDates":["2026-10-28"],"params":{"coverage":null},"evidenceRefs":[]}]},"availableAt":"2026-10-30T03:00:00.000Z","reasonCodes":["stimulus_evidence_unavailable"]},"planUpdate":"pending","warnings":["执行关联只确认实际训练身份；剂量与刺激仍按证据独立评价。","保存关联不会自动更新设备排期，也不会调用 WorkoutKit。"]}'
+        expires_at: '2027-01-24T06:30:36.046Z'
+      1:
+        scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+        operation_id: 'reconcile-029e2774ad33a720550bc7f68140e12d9c2faadc'
+        request_digest: '9dc378e2906816b471f0adc64aeab4a1b07c9a0ad96cb72fa57c8fdc5a98f6f5'
+        result_json: '{"changed":0}'
+        expires_at: '2027-01-24T06:30:36.059Z'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:391:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+# Subtest: EXEC-03: recovery between pre-scan and transaction cannot persist a no-change receipt that masks later deletion
+not ok 2 - EXEC-03: recovery between pre-scan and transaction cannot persist a no-change receipt that masks later deletion
+  ---
+  duration_ms: 889.935401
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:20:1363'
+  failureType: 'testCodeFailure'
+  error: |-
+    later deletion must not replay a poisoned no-change receipt
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:818:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3293.495835

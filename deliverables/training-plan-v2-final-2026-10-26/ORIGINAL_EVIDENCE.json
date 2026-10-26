@@ -1,0 +1,1167 @@
+{
+  "deliverables/training-plan-v2-a01-2026-10-26/REPORT.md": {
+    "sha256": "5407d87c7d4e8f2ab0afd8d5ecb0386b3516b0aa1f475bf4e21f9f970be41bc2",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/acceptance.log": {
+    "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/before-fix-red.log": {
+    "sha256": "a9fa4964e63335346a0efb0834fbf72fdcdb26b59beed32ecc3c4fc3099b4cda",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/doc-refs.log": {
+    "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/docs.log": {
+    "sha256": "af8ce495bc7d42edf46c0774bbd1741fa90c2409a19921c9ddedff4a46dab455",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/l1.log": {
+    "sha256": "b0a45d806b00e48b567c8a02d64ec1716d517d59db149f1382bcbab2da2dec11",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/l2-files.json": {
+    "sha256": "41a312671ff89b3205b09b5825ca74d96416ad9da137c26e17708155804ff0c1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/l2_initial.log": {
+    "sha256": "c27867c96f824c20857e90d8497beb070fee58353939062eca8a7d4bfb815851",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/l3-files.json": {
+    "sha256": "63e86e14df9b4f6c23f11a220e44c9c8520c68bd1f3ba2588c9571254c3f1943",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/l3.log": {
+    "sha256": "a988b35dca8f48493d034decdb681b08d9727a9cd2deb5ecd442c73d742278d4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/single-writer.log": {
+    "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/typecheck.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/verification.json": {
+    "sha256": "12ded0652453694ad46a05b736d08725dd782914b30ce464c979e377a521808a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-a01-2026-10-26/workspace-before-sha256.json": {
+    "sha256": "659a93986b640fd7e7354f518050d71879d5ade3a0f47c8daf4a49f129b7eda5",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/D01_D02.diff": {
+    "sha256": "e574fab36b0b04abd46775d01440968aba544248d54f065423a2f19b6de513b8",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md": {
+    "sha256": "e23e0350f64e99f83ec72c2526db77c5e8c38b32994e862e992810c497bec0cb",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/acceptance-matrix.log": {
+    "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/doc-refs.log": {
+    "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/docs.log": {
+    "sha256": "2552e76c7f2e659d9061d63429586872b872c629409f70a862b05f73fd4e2ed9",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-gates.log": {
+    "sha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-initial.log": {
+    "sha256": "ac9a4e105f55c5b24564baf59532782cfc5cba504111334fec908ee654e31c29",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-result.json": {
+    "sha256": "aa273c8d53ad97bf0b57ba3c156479e3f412b2d61edc4937afdfc5c03aaf5b70",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-source-check-interrupted.log": {
+    "sha256": "12ae456d8e7203d022fd13c342cdb5693f59ab1bb266d333afb037848cb4c258",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/ios.log": {
+    "sha256": "c6fa9d9b71a19e2cba440ebec6d7d7c5a53d615ac2df83357fab0d3bd33ed919",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-ios.log": {
+    "sha256": "458e7087b56972758a0d87c1f4c69d780e811c4b31fc9f77ec4bb94d412ddd38",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-server.log": {
+    "sha256": "c9bc397af0ebcfe9e4ef00d1f6aa2ac3ab32e0ed9f960b0706010888e0372aab",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/l2-server.log": {
+    "sha256": "82eef5bf7a1bfa34930f9014f76da2dcb4784532eb5ba57394a15c231421bfaf",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-files.json": {
+    "sha256": "4fa0e3c4c8bb291286450717fc56b9e0e84596f451fa0e6aa049ed5fe58b36bb",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-server.log": {
+    "sha256": "c943a8ce53b77f062bf9752693cdfb2c0b5a982b3edee332636ae78df00949ac",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/node-results.json": {
+    "sha256": "6767aa430db575151fae464bcd46c1004bf33f2c1f3e23b77a51cafdf09bfa5d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/red-ios.log": {
+    "sha256": "193c815b85ef679b807db60e41abc35b4269729514f1b07b980174d77e7a536e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/red-openapi.log": {
+    "sha256": "e5aeb8f0c3f597ae6fed71033412eecced7dbd865613c4bc644c83e3e2088621",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/red-server.log": {
+    "sha256": "14fca28120935303fbe8d9a9134c593ed034f9b85e162841f2f9da491ee5da05",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck-initial.log": {
+    "sha256": "ac0312358e7e17b5e9f3e1c90077f61d0ac063ef2987295ed91c2bb5fe951735",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/validation-commands.json": {
+    "sha256": "7d2bdf7c232a5230876d5e0dfad883df948a26f9e6a1b5e7575875d5b0823ab7",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d01-d02-2026-10-26/workspace-preservation.json": {
+    "sha256": "987ae0da0682da1fafd274f914a25e3a14c81e4f09d8edd2eff0ec37dcc62e35",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/D03.patch": {
+    "sha256": "efccca4bc40905b4623cb7b1cc0a8acd731e688db4d58abdcc30bf96360a03d4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/REPORT.md": {
+    "sha256": "a6b99d6a14743ede4e3b9833be16d38ba974bfa76b4379721c4716e732ee8f2c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/acceptance.json": {
+    "sha256": "5cb42c1c51848789ff4f78336a6c3b962e89c2943ae17cfb6487c7096aa1d18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/acceptance.log": {
+    "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/doc-refs.json": {
+    "sha256": "2f858d32be86b2748120f159f7f311b30c8ba852ad83f5b6f467a9ff0f19c74a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/doc-refs.log": {
+    "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/docs.json": {
+    "sha256": "7bccba5273699859c01f8976b21ed6a10d7c6f234d1e77291afe06a371a91351",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/docs.log": {
+    "sha256": "c0cbc97f551d820d3331fc26bb4741c94be160c9d4efc858a2fc0474affe9505",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/ios-gates.json": {
+    "sha256": "cba41bc8a443a8ebf2dc9bc675967b9d6ed720fc3d513695b408d85ceea454e3",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/ios-gates.log": {
+    "sha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/ios.json": {
+    "sha256": "1015cc844e36c90592c0978fbf6321ec6f195fb99b71c8888f5fb5adb0914ed7",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/ios.log": {
+    "sha256": "253db907ba7eddc01f1711712876031eb4867a2a33f8e0a25ec9fc605846162a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1-expanded.json": {
+    "sha256": "3956f7fcafc596be98567ecd0e48b6b54176b936ad1dc39f42f72e969b185e57",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1-expanded.log": {
+    "sha256": "5f817dfa6a3ce19329294dccb4efe15e77fa0876dee17a4b998aa5432eedd783",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1-final.json": {
+    "sha256": "db5dee358cc5b84335c1a12a73efec0afd332d6d725ab79b07111557882b3e18",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1-final.log": {
+    "sha256": "6c6e5a5ce929b51375b52a4a5cb9721407db035778c2a62fc641c0c52f262522",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1-first.json": {
+    "sha256": "7f945c282891ac26cacd1330c21ce2e8b2c22064fb9bccc261b7b377d142d8da",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1-first.log": {
+    "sha256": "016e1e4e02f4f53e6862f92ff5f470941026cd64e8a09ca74a9f9e2f0e4f4afe",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1.json": {
+    "sha256": "1c08469d94100558b7340e1489ef165e62cca2c7c7225ffb23f8f356aefc8a7b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l1.log": {
+    "sha256": "1012e624a5d29037dde8e908200c3800831a28c6e0a0b991d68bc1cf2ba67561",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l2-final.json": {
+    "sha256": "caae0c2249d8b5bbe71f998878dbcd9e6f9c7b932c7f99d5d7def003c1be3d8a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l2-final.log": {
+    "sha256": "0684b36255199eb461ca6182f5761ada8515d4c52916b66cde5b5c2514c8a291",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.json": {
+    "sha256": "eef4f0518b0223def2726cd0f091787cd8b073f941b24da5c72d9ee44e27182f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.log": {
+    "sha256": "b9003994610475576c9af1edbab896c706b60fa6d24cea5c7f92d305882cf099",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l2.json": {
+    "sha256": "0f17c71f87e17c61a867a2deac48feb86c755144cd1bd3d1ed2ca40a0418c618",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l2.log": {
+    "sha256": "38aee2bd6d15ca30ae048164d6a05f72e5424ed77f33c0ff004524c4b80c8341",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l3-files.json": {
+    "sha256": "e31cfcbedd6eac9de005273b73ae2d457d54897f7671c8dd00da2a89a8b29969",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l3.json": {
+    "sha256": "a3f3aed3f37741a63f2dca4b669829b9666ddbf7bca5c75a0883f893752c02fd",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/l3.log": {
+    "sha256": "f7e252b2159e2837c070e7ed9fc7c61a4b44d9d48a98cc8e6495a59f61d7a7db",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/red-node.json": {
+    "sha256": "cb6863cc7a3532f1b1da8a4965b64262f9c48188992626419b17bd0dd2b690f1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/red-node.log": {
+    "sha256": "089b8692197e8387b12050a366ffeb06903c854fd746f3f17b974be0660b2fa6",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/red-swift.json": {
+    "sha256": "aab1a15a77f7c5650a61571b907c10e168fd69ccc11ca85e98b3f443a37da2ad",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/red-swift.log": {
+    "sha256": "aece3c5a120fdaea3312df11740fdfe0d5940157f37794023a71ae640066baca",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.json": {
+    "sha256": "7b8bfe5001e7b480b5b2a1a8be6a927e72ebe272d908d983c6f282fff2477311",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.log": {
+    "sha256": "3866a9384a07de1f64242601f4cf87887d1e94105b77efb63a45623950bb96b4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-baseline.log": {
+    "sha256": "33389f65df6d1375e9441eed290af3e6c053c0f0ecf5014a18c3cb1b35b5691c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.json": {
+    "sha256": "fa163ed749b3def76acd266cbfef643de7f208603b7c3b69837b1674920c1c3e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-first-failure.json": {
+    "sha256": "6f83b9310c4e5005272d5a65f99c4b64f66632941656957020edc510a18bf6c2",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-first-failure.log": {
+    "sha256": "01308d1dd1f42ce78ff79247cc4e9f6006e7aa4c78fa9951123170051cfa53e1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-red-tests.json": {
+    "sha256": "8fdd42196ef39ba21cc0cfcdeff6613bab3f2da1be2ac88c0ec2fd710300e100",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck-red-tests.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck.json": {
+    "sha256": "94905ad7b9c7f19e2442dbcceba8ea5a29138cb3e99f5e6b922d72f81d0fd29a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/typecheck.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/validation-summary.json": {
+    "sha256": "abc4b84a77be93b2e67a326b810174de9cdea86732a3ee324530ad2a0345d7fd",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-d03-2026-10-26/workspace-preservation.json": {
+    "sha256": "21a28e1ff920b897aaf4549f3b6aba39c85793b4bb6186cef0b68abcafaf6d5b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.draft.txt": {
+    "sha256": "32b5121e2c85071e5ad841cc70a4eb37c0878c8ab3e921363850a7778ca831a8",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md": {
+    "sha256": "616014b63076a9f9d2dc235a28080106a9387ecceb195870c3d45a09acf1c1cf",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/RedSkipRegression.swift": {
+    "sha256": "9039b04689b1ab9ce47f1d41eaf31cb8c9348374c2b814ca9fd423fb7d2879c8",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/SkipRegression.swift": {
+    "sha256": "9039b04689b1ab9ce47f1d41eaf31cb8c9348374c2b814ca9fd423fb7d2879c8",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/acceptance-matrix.log": {
+    "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/src/mobile-goals.ts": {
+    "sha256": "fe90a44dd67c6c6d1c51ea651bb853517a50c124a4192bc60c5fa964480710b9",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/src/training-plan-execution-commands.ts": {
+    "sha256": "8b3af71938e0147336cb012c9e48b35362f599398d31931fd0548fcf6d4c0ff0",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/test/training-plan-execution-commands.test.ts": {
+    "sha256": "ff7fa06ad3baaa1230119963225fb8fe3cc6bc25bea6ea02aa441a4809b555b5",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/NativeAppModel.swift": {
+    "sha256": "3aa00f5352fd95e861ca69b7c03dfd020b11b4b81b9676002524f2ffcf5deec0",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift": {
+    "sha256": "f4e87870c69d7e10b43c52d7b64df827a4a24dc254a193c9f9480f906c597989",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/TrainingPlanExecutionPolicy.swift": {
+    "sha256": "dc7b1cf8d211d7c429f6f4f055930ec7f3e4ff8304dc89e388f00134ea5a9ada",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/tests/ModelRegression.swift": {
+    "sha256": "a704c002e66ffe37fc7d2334ada0786aef9abb5af6e22ee6cf6914849c66e47f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md.txt": {
+    "sha256": "692dc6cc99b244d191002dc4b04d61093813a11d9554b2afaefff42437097864",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/before/packages/api-contracts/src/training-plan-closed-loop.ts": {
+    "sha256": "d68f9601b4e5edcd9ec3dc042a18042a7edbf5a11d29fb3e7c056181d7e0ac8b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/changed-files.json": {
+    "sha256": "c660c982d30b32bbac841145ae3e6592d2c10f5ce6c532616d927ecb166884a1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/doc-refs.log": {
+    "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/docs.log": {
+    "sha256": "c0cbc97f551d820d3331fc26bb4741c94be160c9d4efc858a2fc0474affe9505",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/final-source-sha256.json": {
+    "sha256": "51eb12375fee893b0235ce4a00e145bd503e76279a98c2cf01afb76bf0b589ad",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/initial-status.txt": {
+    "sha256": "9a73feac385db646c220104c76b33550990b1c79d7afe5ab87292e432ee1666a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/ios-gates.log": {
+    "sha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/ios-result.json": {
+    "sha256": "d76232cc2ce3148994f33a8fbc8acb3f0ffd6acbab6c163ce5def70e4c514715",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-api.log": {
+    "sha256": "cb0f1b27d7f608725e9a905c2e084d7f8f972178965f4089bebc2bdacf268c0e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-command.sh": {
+    "sha256": "0085d2da1201cf99718b21bd24d2af122e9dffd252265a4940d0adda2ef60ba9",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-final.log": {
+    "sha256": "9fbf305e3d2f6fcc137dd400a515ff4a910406f0c581564218ebc6a091c8edde",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-targeted.log": {
+    "sha256": "3d194fb7ab2ab41317da630e2ed6aed425611151f805688be8c275bb6854249d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios.log": {
+    "sha256": "9ee2f340c1199ddcce6ace313a7bdc8014e6442573e091c5140f99e9181bd22a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l2-api.log": {
+    "sha256": "cc797e517ffb141c588933a638f79ff2f1d7cc78c003670a01990824621eb7dd",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-api.log": {
+    "sha256": "5c4b7e20a0768c0607af94d426de44bcbee719351c95191420abd15e212a0014",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-related.log": {
+    "sha256": "09fc86b9a99a481e5717cd21f57d50012152f8fe628d16381cfbd24ed325e98f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/node-results.json": {
+    "sha256": "b2eebf4444006a2ba5673148c7785541e299a5a5371be05076a74f7a5122287c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/prior-phase-preservation.json": {
+    "sha256": "c7fe3b70d20c44c3fc7b94fb5c49f04ebb065e7e536116edc4bbffb134a03fd3",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/red-api.log": {
+    "sha256": "1f7dc4210c5b4a0ba734d729c8bbbc694bb8aa63f80d4cb92aafed13a8445240",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-final.log": {
+    "sha256": "5ed4ed7f2182e8aafdcbad9d42172c38244893c5089f23c22708805d193aa740",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-repro.sh": {
+    "sha256": "52f1c95c8b5adbadaff321561bacbb60ff5531b56406b82aab5854f6e4bbdfcf",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-targeted.log": {
+    "sha256": "77dccc76a1e8a2795aa8b8c36675e326cf8e29cb41dcc244cd42904ede891117",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios.log": {
+    "sha256": "b4185a0d3dd1bcbe1fcd7b2ddc79934a10ef5fad5e6d5eb22ccdcb34ff241e59",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/single-writer.log": {
+    "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/stage.diff": {
+    "sha256": "4fa6a519415e8e0e278683ccb3ea79da8d15f4ffc34ba76435963e3b1256884b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios-final.log": {
+    "sha256": "a47dd1b0f5ce2821f65a4fdc3b809fbf09a089c15acc580411a1dc686b8f002f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios.log": {
+    "sha256": "a35997f9aec188a7f3434bf2f907cc4ea8f204d93c80d2791bad57e979bc942d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/typecheck.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-i01-p03-2026-10-26/verification-manifest.json": {
+    "sha256": "f9c1fa808a6f085efad141a89b0249c36810c98a5e48f27c84bd5faea20eecc7",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/P1.patch": {
+    "sha256": "e0958ac6fd7541e8bbb67d0d8fec85a98099e279262f9ac5a2ce208dff9d8cf6",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/REPORT.md": {
+    "sha256": "75001850d696d38de391138cff9566b223635c9dcefc1978626e9d9493262215",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/SHA256SUMS.json": {
+    "sha256": "5ac525731589c7c54c89dc473aab4888cecf58592542444412d573484b7b2a65",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/a01-green.json": {
+    "sha256": "ad34f32deab8d04aca1237509c90fdf332a0a393c979ea98b0b97bd3066bf764",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/a01-green.log": {
+    "sha256": "2a76e04e5a64d2725b00200bb92943ef26b1ef497d8ab01728b17e06cf5f5968",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/a01-red.json": {
+    "sha256": "d076009d89a501bc59d3b23b94b5e359288b64453ddd55dc441ac8e4c35580f5",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/a01-red.log": {
+    "sha256": "9315b8cafa319e44813a12cd229131821a61f939447bd587117f6f749a03ef96",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.json": {
+    "sha256": "99ebf60830165641d7ea112ca4388ce3310da916cc198c78345ba4aa6f627ec2",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.log": {
+    "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/acceptance.json": {
+    "sha256": "18423d29208b354606da5d6be5f4b34c2cb6c24fb8995f48184250e145a5331e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/acceptance.log": {
+    "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.json": {
+    "sha256": "e6f05f5ee84ec535645d2149ebf9efb28aa00b35bd12f8fd46f6c7b051cb0611",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.log": {
+    "sha256": "e85aabb7480a454d62cb410bff1d6f9b1c13ad3138fd7f3efc4207acae14771a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/compat01-green.json": {
+    "sha256": "a76ceb0aeddcfd331b74afcf491137ae0bf531ccf32923f68a42c04f9678fead",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/compat01-green.log": {
+    "sha256": "3a9dfaedb7a9199af160132ab531932d8b92c6434b4464d125f57fae4b99aab8",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/compat01-red.json": {
+    "sha256": "025bdcb6fbced77936c281032367c321bd4deafe18cdb30b4e5a194fccbf5d44",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/compat01-red.log": {
+    "sha256": "ff404a520e9ea443ede85710b17a1343a890e5eff9ce539460e0317e56008131",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/diff-check-final.json": {
+    "sha256": "01d827788ee4a2577eb7766b940d12963b60d7f05654047f989c6dc73bbf3bab",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/diff-check-final.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/diff-check.json": {
+    "sha256": "9a3eec19c9cd9b784d1fda07b29271843f738bde24f0843f83b019b297301ea0",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/diff-check.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/diff-sealed.json": {
+    "sha256": "eacb9f3c593e37c60cabc282b2d7d84e054c0589af3f8bdce6084b8ad9df2f00",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/diff-sealed.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/doc01-green.json": {
+    "sha256": "b1749dc54013c525edb70d59a287221a52483c5fd8dd3ef16add3f3f6f6d45b1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/doc01-green.log": {
+    "sha256": "1301eda890abad9de774b060ddb3ead8a61a28ef71c03474d30301bff6ef3fa4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/doc01-red.json": {
+    "sha256": "deb3cff8cdf765e0deec222a1e7ef0e8b0eeeb024584e9076e7601428b2a9155",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/doc01-red.log": {
+    "sha256": "fae66a56b15beac3746757ad76db86ff8c7164a8270519c6b89295c72a6fae26",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/doc01-refs.json": {
+    "sha256": "cfed705b51b8ff9be15624de4fce381d80d2691adac67ccc80df49d4df509bb6",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/doc01-refs.log": {
+    "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.json": {
+    "sha256": "66f40aeb3c0fb512cf1a9ad8b909b9b79b2e2d6b8f4a4202cfeb97eede046daf",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.log": {
+    "sha256": "0a8e1717aacfc2dcbed0fbaa6fb135cd6bc32ebf32e875fd353ee63cd717efdb",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-final-report.json": {
+    "sha256": "1625988891a6bf6d730dfa03e9b8ee660533580fb03df2578be5452c912d0da4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-final-report.log": {
+    "sha256": "b0147027052dc1b3cc49d12d1e68092c71f2f2297c4738e3775bc0ce05c24d6d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-final.json": {
+    "sha256": "7d5a9259131403e6eeaeea06df1b71294fd4e086943e85fefc72929bdd48bad1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-final.log": {
+    "sha256": "1301eda890abad9de774b060ddb3ead8a61a28ef71c03474d30301bff6ef3fa4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-sealed.json": {
+    "sha256": "88c16c9b07ef38b72aa44b71b605bc07ca839e7bb0708a666a4ef6bcf8304937",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/docs-sealed.log": {
+    "sha256": "0a8e1717aacfc2dcbed0fbaa6fb135cd6bc32ebf32e875fd353ee63cd717efdb",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/edit01-green.json": {
+    "sha256": "c4e22da59f0fed6bf638888edc9081e18f3ef15448166e01ff9434e0c1d54543",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/edit01-green.log": {
+    "sha256": "c561781607674f57a353b9ee6c1898fc7280d03fbfd6df0556d0cd13333bf65f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/edit01-red.json": {
+    "sha256": "1f6c0b11e7bab6a7479375ed15dcc68cbbe9195496592aa4bf8ff22bd07c91c6",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/edit01-red.log": {
+    "sha256": "819043de1f84f87a7a4d5bf560bedd91f05e89939c81809920e79dba67e83d4f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/environment.json": {
+    "sha256": "85a228218bc3bad1f4d9cfd124c39a5f2dac3b7bb1404bb266ba7dc0e9d19691",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec01-green.json": {
+    "sha256": "e686f3690311d9b79f385ed74c441d1c6bb1aa0a5e75daccc58d595973ab91af",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec01-green.log": {
+    "sha256": "81281911b7ba73c8f2e0fcd12eccf9851877613f8861a9f18312e6b678fba69d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec01-red.json": {
+    "sha256": "fd0620f16b0c54d8d411363724fffffdbedc2f50a1c8abea5ed8c8e8406d0500",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec01-red.log": {
+    "sha256": "04390193c3b981fa1f9dd0e3f00d4919bb0f25b8d9e539e86b6544ae634f2e49",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec0203-green.json": {
+    "sha256": "93a9fb3c7b4be4831baf31d7171fa8b3d8a18467133595bfd951ecfaeaec71e1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec0203-green.log": {
+    "sha256": "05967ecd46f08269421b73061ebb42d5c0ef6275b2f8e73444d111e3a0e1ec90",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.json": {
+    "sha256": "97f888113116dbcc57a4f75eede25e92802642fd571a3e04d07aec9e479ed8a6",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.log": {
+    "sha256": "4e40ce580406cc35796b26b698c0a9db2e82f50728d72f11a712902ca223028f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.json": {
+    "sha256": "56d222af6669f72c253720106561e2353e8974a06c234cb8f821de0b40f53751",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.log": {
+    "sha256": "57687a7cadfe2ee725601b207a6454b97e589da1c254991de76d106e9576b9a5",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.json": {
+    "sha256": "0a3ccaac6f2d5e7a00973c0a2843ab333b189e5207b531e0c8d8a163019b8d55",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.log": {
+    "sha256": "e0d03a66e14988e142162805b9deef10fcdedc1bfdb30428383b58d71d162037",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.json": {
+    "sha256": "641de10add5a0ad1942a501148a8b5b91654a79f7ee4e0725a6ca936ad7defae",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.log": {
+    "sha256": "58b1c16e0ea4c15b39df26d6708ee3cd2598f214e434d0df65478cfb1a3a774e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.json": {
+    "sha256": "5a83ab30794775d7444707fd2e4215a8ad5011c1fa407a86cbcb373c6b65ae69",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.log": {
+    "sha256": "7431a4b0888af00d7148bb3b565fff8c6eaa8c044c24ad58565dbca208ab47da",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-prescan-red.json": {
+    "sha256": "4031bc6e9e0390d748665ac6515091fa82e8d8844ea0b77ed33cf59f8480b61b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-prescan-red.log": {
+    "sha256": "ef1b069c37f1287aa4f0122caac80344409b5c3dcb4649be36c3579d7ff336dd",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-red.json": {
+    "sha256": "e2c6a9f97489ac233ea6b139a0e12ab0e7c9fa8a8dc6558ef493178fd9c27f94",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/exec03-red.log": {
+    "sha256": "a02653f1824aeb035d9ff44c7702c62062c307ee31f0cf8c9a0908ac74d2b050",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/ios-gates.json": {
+    "sha256": "b1eb44687a42235e6139e42abc4a98cdd74d178a57b444341befe91d5d9aa5bb",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/ios-gates.log": {
+    "sha256": "f2b67e1a0c11cec62ec1effe5ef6d130ec64f459468d634b7551cfd7343fa55f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/ios.json": {
+    "sha256": "ead8287c367f718a0c86528e31c806575fe0be4a394610ba4fde63f11ced7a82",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/ios.log": {
+    "sha256": "1ef510d4b711430ac5521bd6c7de1d55c277a143e1c2268032c26e008a6579b9",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/l3-files.json": {
+    "sha256": "053122cf131d3c04d69acf948b4bb6b50128ea9964f1eab797c561e3fc77a48d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/l3-final.json": {
+    "sha256": "c683e4288f64086568715151a7d5be05672e99aca4dce93aa2c4088863c76d5c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/l3-final.log": {
+    "sha256": "aeb96dc7f519428fdd2a286bb8c8d34d901e9be65e716bd88fc2f98e67a0b200",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/l3.json": {
+    "sha256": "b64a6d98390358cd5cb3fb7c6741a060b04c0a6ae0423536f56da72eb6808f03",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/l3.log": {
+    "sha256": "35548da36f659599e4a57f9831f9bfbe4ac4a7b8b74e8cc3d94b4cbf6b8a221c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.json": {
+    "sha256": "3c650c2d17a9e644e4330d86749a1de951487cebb7adc2e62386d4a03ae86e1f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.log": {
+    "sha256": "fe1b0edd059a9c43efece2742f497b3906f1f73fd8d62dbc31435f458d6d5834",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.sh": {
+    "sha256": "605113e86f38ac01a3040b2f7604f95cdab3e1cc6c63a83282feaefbeced4dd7",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.json": {
+    "sha256": "744999cdef88459e1118a4bc05df00f84594ec83d2d36d409fd56820071539ec",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.log": {
+    "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-final-report.json": {
+    "sha256": "bc64b779f92dd1be609093a2d234d2ef048aef0fd263b970712f58fd4cda7e51",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-final-report.log": {
+    "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-final.json": {
+    "sha256": "a0a86d44d6c383e9e81b9c9f244f715e900b281b8a71a0f582f1c9180bc70bb6",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-final.log": {
+    "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-sealed.json": {
+    "sha256": "73e39e52c417dd3bd3a1331196d3e92134163ed445983a4c54169200de9223b0",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/refs-sealed.log": {
+    "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.json": {
+    "sha256": "017f48c59e3bbbbdeb9c6ab14d1b4b1a4baf528d39481dc3e098618c5de3914d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/rollback-check.json": {
+    "sha256": "ac8d8b6e197565f3b76983bffee254cecf28d5f0f2b18c592864150f644b3b96",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/rollback-check.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/rollback-sealed.json": {
+    "sha256": "d61c997cb6356ed7339f774b65079717dec69f9635ba37658ba5fb607a8abd4b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/rollback-sealed.log": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.json": {
+    "sha256": "7c8891799f503801a38b8493a364c83f214b7e922873d38c3b372d9abd40b93f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.log": {
+    "sha256": "59e45bf97b137d5b3d2aaa4c31b56fca563e3208242c0cd8b42179debf681838",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.json": {
+    "sha256": "40795f088bb9953ba36d5836dbcb39c0da0040df7bc9473bfff8ab9bed86714a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.log": {
+    "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/single-writer.json": {
+    "sha256": "d15d4b72d5df14bf6f4f0f07b84324ed976a8b8e05d877df2f3f76bc5b163c8b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/single-writer.log": {
+    "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/source-locations.json": {
+    "sha256": "97f54af1e5b3d27c83fc658fa0dcc4ed86de8a5c37b7e607b3a6fa7a66f3f2ad",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/swift-editor.sh": {
+    "sha256": "f78f5f0429b569d029d102545171c82dd2a5751ae71aa2a1db987326862df563",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.json": {
+    "sha256": "a256862a404c7a213a366df9584178cecee87612f739835acdefa308f5ffc721",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.log": {
+    "sha256": "7357b24e4b1e37740f90f66b6ccf6755a4c53eab07aef9fec703ea27fff7ac8e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/task-files.json": {
+    "sha256": "2dc39ca3e0604c716a03c354da71850aa28441cf8c35f97e73bf46d025a53d24",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/test-summary.json": {
+    "sha256": "5f026b9b8934a94d4ce75f7722b0dd4ccdb23658174dcd2b3a35b0fb9eba9a7c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/typecheck-final.json": {
+    "sha256": "a1ef239eaf0bf5ca81117372e8cf4b23b13e8e20d5e7b6fe01330c76e4556e45",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/typecheck-final.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.json": {
+    "sha256": "532a368be952bc6b9fb7cdd7ebdb6bd8ac1971abb949a8fdccde228f2e852d3c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/typecheck.json": {
+    "sha256": "ad43de20154b13de2fa82bb2bf122c669681e06f9a2e987eb3aa4f3e3412e22f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/typecheck.log": {
+    "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/workspace-baseline.json": {
+    "sha256": "2f202b320d528c51e8e8e250ba1f6b5c662952bfb2a75c4c541ca2aefb497bb3",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "deliverables/training-plan-v2-p1-2026-10-26/workspace-preservation.json": {
+    "sha256": "b6b58200bea75423ea4958b7dacd24a4868b358f2ef03b0868899042b4558837",
+    "mode": "0o644",
+    "crlf": false
+  }
+}

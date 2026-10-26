@@ -1,0 +1,14 @@
+{
+  "name": "production-install",
+  "argv": [
+    "npm",
+    "ci",
+    "--omit=dev"
+  ],
+  "envOverrides": {
+    "ONNXRUNTIME_NODE_INSTALL": "skip"
+  },
+  "startedEpoch": 1793000397.165051,
+  "durationSeconds": 22.44121503829956,
+  "exitCode": 0
+}

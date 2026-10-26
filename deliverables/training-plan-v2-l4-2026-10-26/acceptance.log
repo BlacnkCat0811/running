@@ -1,0 +1,24 @@
+
+> rai-running-intelligence@0.1.0 check:acceptance-matrix
+> tsx scripts/check-acceptance-matrix.mts
+
+§16.1 矩阵：80 条；cited 80；declared-gap 0；missing 0
+  注：cited 仅表示测试**标题**引用了该 ID，不代表断言存在；覆盖强度请看测试内容，不要只看这个数字。
+
+验收矩阵检查通过。
+        4.67 real         1.07 user         0.73 sys
+            89088000  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               51449  page reclaims
+                   9  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   3  messages sent
+                   3  messages received
+                   0  signals received
+                  12  voluntary context switches
+                3746  involuntary context switches
+            18841600  peak memory footprint

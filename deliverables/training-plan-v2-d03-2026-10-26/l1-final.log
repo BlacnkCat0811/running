@@ -1,0 +1,194 @@
+TAP version 13
+# Subtest: D-03: Fastify and OpenAPI share the session request quantity schema
+ok 1 - D-03: Fastify and OpenAPI share the session request quantity schema
+  ---
+  duration_ms: 2191.459005
+  type: 'test'
+  ...
+# Subtest: D-03: legacy normalization keeps nine steps; strict quantity limits are independent of reads
+ok 2 - D-03: legacy normalization keeps nine steps; strict quantity limits are independent of reads
+  ---
+  duration_ms: 3.138239
+  type: 'test'
+  ...
+# (node:8418) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D-03: direct add 8 steps accepted
+ok 3 - D-03: direct add 8 steps accepted
+  ---
+  duration_ms: 1118.503278
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 8 steps accepted
+ok 4 - D-03: direct edit 8 steps accepted
+  ---
+  duration_ms: 252.32352
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 9 steps rejected
+ok 5 - D-03: direct add 9 steps rejected
+  ---
+  duration_ms: 139.394496
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 9 steps rejected
+ok 6 - D-03: direct edit 9 steps rejected
+  ---
+  duration_ms: 242.840355
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 8 blocks accepted
+ok 7 - D-03: direct add 8 blocks accepted
+  ---
+  duration_ms: 318.001018
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 8 blocks accepted
+ok 8 - D-03: direct edit 8 blocks accepted
+  ---
+  duration_ms: 139.483336
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 9 blocks rejected
+ok 9 - D-03: direct add 9 blocks rejected
+  ---
+  duration_ms: 79.136348
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 9 blocks rejected
+ok 10 - D-03: direct edit 9 blocks rejected
+  ---
+  duration_ms: 53.173424
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 20 iterations accepted
+ok 11 - D-03: direct add 20 iterations accepted
+  ---
+  duration_ms: 101.552135
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 20 iterations accepted
+ok 12 - D-03: direct edit 20 iterations accepted
+  ---
+  duration_ms: 115.676734
+  type: 'test'
+  ...
+# Subtest: D-03: direct add 21 iterations rejected
+ok 13 - D-03: direct add 21 iterations rejected
+  ---
+  duration_ms: 61.374993
+  type: 'test'
+  ...
+# Subtest: D-03: direct edit 21 iterations rejected
+ok 14 - D-03: direct edit 21 iterations rejected
+  ---
+  duration_ms: 40.214442
+  type: 'test'
+  ...
+# Subtest: D-03: API preview/submit reject nine steps without writes
+ok 15 - D-03: API preview/submit reject nine steps without writes
+  ---
+  duration_ms: 1662.962703
+  type: 'test'
+  ...
+# Subtest: D-03: persisted nine-step courses remain lossless; metadata edits survive, dose edits require legal replacement
+ok 16 - D-03: persisted nine-step courses remain lossless; metadata edits survive, dose edits require legal replacement
+  ---
+  duration_ms: 351.796034
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary 80 km
+ok 17 - D-03: dose boundary 80 km
+  ---
+  duration_ms: 88.758514
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary 80 km plus one metre
+ok 18 - D-03: dose boundary 80 km plus one metre
+  ---
+  duration_ms: 123.436985
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary 80 km through iterations
+ok 19 - D-03: dose boundary 80 km through iterations
+  ---
+  duration_ms: 81.728959
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary over 80 km through iterations
+ok 20 - D-03: dose boundary over 80 km through iterations
+  ---
+  duration_ms: 76.908217
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary 4 hours
+ok 21 - D-03: dose boundary 4 hours
+  ---
+  duration_ms: 71.808084
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary step over 4 hours
+ok 22 - D-03: dose boundary step over 4 hours
+  ---
+  duration_ms: 40.286702
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary 4 hours through steps
+ok 23 - D-03: dose boundary 4 hours through steps
+  ---
+  duration_ms: 61.135735
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary over 4 hours through steps
+ok 24 - D-03: dose boundary over 4 hours through steps
+  ---
+  duration_ms: 59.156193
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary 4 hours through iterations
+ok 25 - D-03: dose boundary 4 hours through iterations
+  ---
+  duration_ms: 70.762649
+  type: 'test'
+  ...
+# Subtest: D-03: dose boundary over 4 hours through iterations
+ok 26 - D-03: dose boundary over 4 hours through iterations
+  ---
+  duration_ms: 47.026217
+  type: 'test'
+  ...
+# Subtest: D-03: lossless shape reader retains single-step metre/second ceilings
+ok 27 - D-03: lossless shape reader retains single-step metre/second ceilings
+  ---
+  duration_ms: 0.620868
+  type: 'test'
+  ...
+# Subtest: D-03: a committed historical nine-step operation replays ahead of schema/capability/new-write gates
+ok 28 - D-03: a committed historical nine-step operation replays ahead of schema/capability/new-write gates
+  ---
+  duration_ms: 259.381644
+  type: 'test'
+  ...
+# Subtest: D-03: production route options share OpenAPI schemas and reject coercion without changing errors
+ok 29 - D-03: production route options share OpenAPI schemas and reject coercion without changing errors
+  ---
+  duration_ms: 503.751949
+  type: 'test'
+  ...
+# (node:8430) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D-03: identity migration and historical replay retain all nine legacy steps
+ok 30 - D-03: identity migration and historical replay retain all nine legacy steps
+  ---
+  duration_ms: 210.627493
+  type: 'test'
+  ...
+1..30
+# tests 30
+# suites 0
+# pass 30
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8309.540363

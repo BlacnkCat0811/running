@@ -21,6 +21,8 @@ import type { MobileGoalsStore } from "./mobile-goals.js";
 import { PlanOperationError, PlanPublicationService } from "./plan-publication.js";
 import { MutationConflictError } from "./mutation-coordinator.js";
 import { mergePlanWindow } from "./weekly-plan-service.js";
+import { resolveTrainingPlanSessions } from "./training-plan-session-policy.js";
+import type { TrainingPlanSession, TrainingPlanSuppression } from "@rai/api-contracts";
 import { digest } from "./plan-digest.js";
 import {
   admissionStateFor,
@@ -232,6 +234,38 @@ export class TrainingPlanCommandService {
   }
 
   /**
+   * B03: turn a generated candidate into the committed materialization.
+   *
+   * Schema 1 keeps the historical `mergePlanWindow` behaviour byte for byte.
+   * Schema 2 goes through the one session resolver: protected/executed courses and
+   * suppressions win, new automatic courses receive stable IDs, and every day in
+   * `weekPlan` has exactly one owner. This runs inside the publication transaction
+   * for the commit and outside it for the API getter only through the prepared
+   * candidate (the generator never writes).
+   */
+  private materializePlan(state: TrainingPlanState, days: MobilePlannedDay[], previousWeekPlan: MobilePlannedDay[],
+    prepared?: PreparedTrainingPlan): {
+      weekPlan: MobilePlannedDay[]; sessions?: TrainingPlanSession[]; suppressions?: TrainingPlanSuppression[];
+      archivedSessionIds?: string[]; preserveWeekPlan: boolean; warnings: string[];
+    } {
+    const businessDate = this.businessDate();
+    if (state.schemaVersion !== 2) {
+      return { weekPlan: mergePlanWindow(previousWeekPlan, days, businessDate), preserveWeekPlan: false, warnings: [] };
+    }
+    const resolved = resolveTrainingPlanSessions({
+      state,
+      executions: this.store.trainingPlanExecutions(this.scopeKey(), state.planInstanceId),
+      generatedDays: days,
+      businessDate,
+      availableAt: new Date(this.now()).toISOString(),
+      recommendation: { source: prepared?.audit.generatedBy ?? "heuristic",
+        policyHash: prepared?.coachReceipt?.policyHash ?? state.coachLoop?.policyHash ?? null }
+    });
+    return { weekPlan: resolved.weekPlan, sessions: resolved.sessions, suppressions: resolved.suppressions,
+      archivedSessionIds: resolved.archivedSessionIds, preserveWeekPlan: true, warnings: resolved.warnings };
+  }
+
+  /**
    * PR4-4: the configuration a command would commit, without writing anything.
    * The route prepares the candidate plan against this state (outside the control
    * transaction), then `submit` re-derives it and verifies the configuration digest.
@@ -324,6 +358,7 @@ export class TrainingPlanCommandService {
       const publishesPlan = options.prepared !== undefined && afterState.runState === "active";
       let preparedDays: MobilePlannedDay[] | null = null;
       let preparedAudit: MobilePlanAudit | null = null;
+      let materializedPlan: ReturnType<TrainingPlanCommandService["materializePlan"]> | null = null;
       if (publishesPlan) {
         const prepared = options.prepared!;
         const contextDigest = trainingPlanContextDigest({
@@ -338,22 +373,26 @@ export class TrainingPlanCommandService {
             "训练事实在生成期间变化，请重新生成；原计划保持不变。", 409);
         }
         const goalsBefore = this.store.read();
-        preparedDays = mergePlanWindow(goalsBefore.weekPlan, prepared.days, this.businessDate());
+        const materialized = this.materializePlan(afterState, prepared.days, goalsBefore.weekPlan, prepared);
+        preparedDays = materialized.weekPlan;
         preparedAudit = prepared.audit;
+        materializedPlan = materialized;
       }
       const goals = this.store.write({
         expectedRevision: this.store.read().revision,
         ...(afterState.runState === "paused" ? { lockedSession: null } : {}),
         ...(mirror === undefined ? {} : { raceTarget: mirror }),
         ...(publishesPlan && preparedDays !== null && preparedAudit !== null
-          ? { weekPlan: preparedDays, weekPlanAudit: preparedAudit, weekPlanReplanRequired: false }
+          ? { weekPlan: preparedDays, weekPlanAudit: preparedAudit, weekPlanReplanRequired: false,
+            ...(materializedPlan?.preserveWeekPlan === true ? { preserveWeekPlan: true } : {}) }
           : {
             // Until the unified refresh publishes a plan, the legacy generator must
             // not overwrite the window: it would be a second scheduler.
             weekPlanReplanRequired: true
           })
       }, publishesPlan && preparedAudit !== null
-        ? { prescription: options.prepared!.prescription, confirmCoachPlan: true, runCoach: null } : { runCoach: null });
+        ? { prescription: options.prepared!.prescription, confirmCoachPlan: true, runCoach: null,
+          ...(materializedPlan?.preserveWeekPlan === true ? { preserveWeekPlan: true } : {}) } : { runCoach: null });
       const committed = this.store.commitTrainingPlanCommandState({
         scope: this.scopeKey(),
         expectedRevision: row.revision,
@@ -366,11 +405,14 @@ export class TrainingPlanCommandService {
             coachLoop: this.publishCoachEvidence(request.operationId, goals.revision, options.prepared)
           }),
           ...(publishesPlan && preparedDays !== null
-            ? { weekPlan: preparedDays, planContextDigest: afterState.planContextDigest } : {}),
+            ? { weekPlan: preparedDays, planContextDigest: afterState.planContextDigest,
+              ...(materializedPlan?.sessions === undefined ? {} : { sessions: materializedPlan.sessions,
+                suppressions: materializedPlan.suppressions ?? [] }) } : {}),
           goalsRevision: goals.revision
         },
         eventType: `command:${request.action}`
-      });
+      }, { ...(materializedPlan?.archivedSessionIds === undefined ? {} : {
+        archivedSessionIds: materializedPlan.archivedSessionIds, archiveBefore: this.businessDate() }) });
       const afterSummary = summarize({ ...afterState, goalsRevision: goals.revision }, this.businessDate());
       return {
         contractVersion: TRAINING_PLAN_CONTRACT_VERSION,
@@ -385,7 +427,7 @@ export class TrainingPlanCommandService {
           ? { days: preparedDays, audit: preparedAudit,
             contextDigest: afterState.planContextDigest!, goalsRevision: goals.revision }
           : null,
-        warnings
+        warnings: [...warnings, ...(materializedPlan?.warnings ?? [])]
       };
     });
   }
@@ -438,29 +480,82 @@ export class TrainingPlanCommandService {
       }
       const goals = this.store.read();
       const mirror = legacyRaceTargetMirror(current.state);
-      // Today's finished/locked day and the current natural week's earlier days stay
-      // stored: the generator only owns the seven-day window from today.
-      const weekPlan = mergePlanWindow(goals.weekPlan, prepared.days, this.businessDate());
+      // B03: the resolver owns the session/protection materialization. A protected
+      // course is never replaced and a moved source date never resurrects; the
+      // newly allocated automatic session IDs are part of this same transaction.
+      const materialized = this.materializePlan(current.state, prepared.days, goals.weekPlan, prepared);
+      const weekPlan = materialized.weekPlan;
+      // B08: "generated the same bytes again" is not a content revision. Compare
+      // the effective plan, user decisions and coach authorization, not the audit
+      // clock. A no-change result advances only the durable evaluation cursor.
+      const evaluationInput = deps.evaluation?.(current.state) ?? null;
+      const coachSemantic = (receipt: NonNullable<PreparedTrainingPlan["coachReceipt"]>) => ({
+        settings: receipt.settings, policyHash: receipt.policyHash, policyManifest: receipt.policyManifest,
+        factsHash: receipt.factsHash, inputDigest: receipt.inputDigest, effectiveDigest: receipt.effectiveDigest,
+        anchor: receipt.anchor, reservations: receipt.reservations, templateIds: receipt.templateIds,
+        result: receipt.result, changes: receipt.changes
+      });
+      const previousCoach = current.state.coachLoop === null ? null
+        : this.store.coachLoopReceipt<NonNullable<PreparedTrainingPlan["coachReceipt"]>>(
+          this.scopeKey(), current.state.coachLoop.operationId);
+      const coachChanged = prepared.coachReceipt !== undefined &&
+        (previousCoach === null || digest(coachSemantic(previousCoach)) !== digest(coachSemantic(prepared.coachReceipt)));
+      const contentChanged = digest(weekPlan) !== digest(current.state.weekPlan) ||
+        (materialized.sessions !== undefined && digest(materialized.sessions) !== digest(
+          current.state.schemaVersion === 2 ? current.state.sessions : null)) ||
+        (materialized.suppressions !== undefined && digest(materialized.suppressions) !== digest(
+          current.state.schemaVersion === 2 ? current.state.suppressions : null)) ||
+        contextDigest !== current.state.planContextDigest || coachChanged ||
+        current.state.goalsRevision !== goals.revision || goals.weekPlanReplanRequired === true;
+      if (!contentChanged && evaluationInput !== null) {
+        this.store.recordTrainingPlanEvaluation(this.scopeKey(), {
+          inputKey: evaluationInput.inputKey, stateRevision: current.row.revision,
+          businessDate: evaluationInput.businessDate, policyHash: evaluationInput.policyHash,
+          executionDigest: evaluationInput.executionDigest, operationId: request.operationId,
+          evaluatedAt: new Date(this.now()).toISOString()
+        });
+        return {
+          contractVersion: TRAINING_PLAN_CONTRACT_VERSION,
+          operationId: request.operationId,
+          stateRevision: current.row.revision,
+          goalsRevision: goals.revision,
+          plan: { days: current.state.weekPlan, audit: prepared.audit, current: true, contextDigest },
+          warnings: [...prepared.warnings, "输入已检查：训练计划没有需要发布的变化。"],
+          outcome: "no_change"
+        };
+      }
       const written = this.store.write({
         expectedRevision: goals.revision,
         weekPlan,
         weekPlanAudit: prepared.audit,
         ...(mirror === undefined ? {} : { raceTarget: mirror }),
+        ...(materialized.preserveWeekPlan ? { preserveWeekPlan: true } : {}),
         weekPlanReplanRequired: false
-      }, { prescription: prepared.prescription, confirmCoachPlan: true, runCoach: null });
+      }, { prescription: prepared.prescription, confirmCoachPlan: true, runCoach: null,
+        ...(materialized.preserveWeekPlan ? { preserveWeekPlan: true } : {}) });
       const committed = this.store.commitTrainingPlanCommandState({
         scope: this.scopeKey(),
         expectedRevision: current.row.revision,
         state: {
           ...current.state,
-          ...(prepared.coachReceipt === undefined ? {} : {
+          ...(prepared.coachReceipt === undefined || !coachChanged ? {} : {
             coachLoop: this.publishCoachEvidence(request.operationId, written.revision, prepared)
           }),
           weekPlan,
+          ...(materialized.sessions === undefined ? {} : { sessions: materialized.sessions,
+            suppressions: materialized.suppressions ?? [] }),
+          ...(evaluationInput === null || current.state.schemaVersion !== 2 ? {} : { publishedInputKey: evaluationInput.inputKey }),
           planContextDigest: contextDigest,
           goalsRevision: written.revision
         },
         eventType: "command:refresh"
+      }, materialized.archivedSessionIds === undefined ? {} : {
+        archivedSessionIds: materialized.archivedSessionIds, archiveBefore: this.businessDate() });
+      if (evaluationInput !== null) this.store.recordTrainingPlanEvaluation(this.scopeKey(), {
+        inputKey: evaluationInput.inputKey, stateRevision: committed.revision,
+        businessDate: evaluationInput.businessDate, policyHash: evaluationInput.policyHash,
+        executionDigest: evaluationInput.executionDigest, operationId: request.operationId,
+        evaluatedAt: new Date(this.now()).toISOString()
       });
       return {
         contractVersion: TRAINING_PLAN_CONTRACT_VERSION,
@@ -468,7 +563,8 @@ export class TrainingPlanCommandService {
         stateRevision: committed.revision,
         goalsRevision: written.revision,
         plan: { days: weekPlan, audit: prepared.audit, current: true, contextDigest },
-        warnings: prepared.warnings
+        warnings: [...prepared.warnings, ...materialized.warnings],
+        outcome: "changed"
       };
     });
   }
@@ -518,6 +614,12 @@ export interface PreparedTrainingPlan {
 export interface TrainingPlanRefreshDeps {
   prepare: (state: TrainingPlanState) => Promise<PreparedTrainingPlan>;
   fingerprint: () => string;
+  /**
+   * B08: the input identity this refresh evaluated. When present, the cursor is
+   * written in the same transaction and an identical plan is a no-change.
+   */
+  evaluation?: (state: TrainingPlanState) => { inputKey: string; businessDate: string;
+    policyHash: string | null; executionDigest: string } | null;
 }
 
 /**

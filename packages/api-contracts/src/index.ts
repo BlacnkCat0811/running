@@ -180,19 +180,24 @@ export interface HandshakeResponse {
    *
    * 🔴 读能力 != 该 scope 已迁移：未迁移的 scope 仍返回类型化 409
    * `training_plan_not_migrated`，客户端必须分别处理"能力存在"和"scope 未迁移"。
-   * 受 coach-loop 管理的 scope 当前对该读返回 409（合同 §1），因此握手在该状态
-   * 省略本键，与 `planSnapshotContractVersion` 的宣告前提保持一致。
+   * managed scope 在已迁移且 owner-ready 时也可宣告；这不开放 legacy 聚合读。
    */
   trainingPlanContractVersion?: number;
   /**
    * 2026-10-21（PR-02）：统一训练**写命令**合同能力（`/training-plan/commands*`）。
    *
    * 与读能力分开是刻意的：命令面可写不代表 WorkoutKit 执行获准，也不代表该
-   * scope 已完成迁移或 PR-03/04 的验收。**当前服务端不宣告本键**，直到 PR-03
-   * 所有权闭环与 PR-04 客户端编排通过验收；客户端缺位时必须按只读处理，不能
-   * 用 `coachLoopContractVersion` 猜测写能力。
+   * scope 已完成迁移。仅 validation 模式、owner-ready 且同请求精确协商时宣告 2；
+   * 生产保持省略。客户端缺位时只读，不能用 coachLoopContractVersion 猜测。
    */
   trainingPlanCommandContractVersion?: number;
+  /** B01 registered only; B02+ may advertise exact version 1 after acceptance. */
+  trainingPlanSessionContractVersion?: number;
+  trainingPlanSessionCommandContractVersion?: number;
+  /** Exact opt-in 1: add/edit may omit distance for server measurement. */
+  trainingPlanSessionDistanceOmissionContractVersion?: number;
+  trainingPlanExecutionCommandContractVersion?: number;
+  trainingPlanUpdateContractVersion?: number;
   /** Opt-in coach-loop aggregate/commands; legacy plan DTOs retain their meaning. */
   coachLoopContractVersion?: number;
   planPublicationContractVersion?: number;
@@ -2212,6 +2217,14 @@ export interface TrainingPlanStateResponseV2 {
     permitted: false;
     reasonCodes: string[];
   };
+  /** B02 compatible read. Sent only for explicit session extension negotiation. */
+  sessions?: import("./training-plan-closed-loop.js").TrainingPlanSessionsView;
+  /**
+   * B08 four-stage update read. Sent only with exact session + update extension
+   * negotiation; absence means the update state is unknown, never "current" and
+   * never "nothing pending".
+   */
+  update?: import("./training-plan-closed-loop.js").TrainingPlanUpdateView;
 }
 
 // ---------------------------------------------------------------------------
@@ -2325,6 +2338,8 @@ export interface TrainingPlanRefreshResponse {
     contextDigest: string;
   };
   warnings: string[];
+  /** B08: absent on older servers/users must treat a missing value as `changed`. */
+  outcome?: "changed" | "no_change";
 }
 
 export {
@@ -2339,3 +2354,5 @@ export {
   HANDSHAKE_KEY_REGISTRY,
   type HandshakeKeyRegistration
 } from "./handshake-registry.js";
+
+export * from "./training-plan-closed-loop.js";

@@ -1,0 +1,372 @@
+TAP version 13
+# Subtest: OpenAPI operations declare responses and write contracts
+ok 1 - OpenAPI operations declare responses and write contracts
+  ---
+  duration_ms: 6.078957
+  type: 'test'
+  ...
+# Subtest: inspect source schema rejects missing and additional fields
+ok 2 - inspect source schema rejects missing and additional fields
+  ---
+  duration_ms: 619.924337
+  type: 'test'
+  ...
+# Subtest: import job schema accepts only a source identifier
+ok 3 - import job schema accepts only a source identifier
+  ---
+  duration_ms: 76.455788
+  type: 'test'
+  ...
+# Subtest: prediction training schema rejects ambiguous timestamps and unknown input
+ok 4 - prediction training schema rejects ambiguous timestamps and unknown input
+  ---
+  duration_ms: 99.376594
+  type: 'test'
+  ...
+# Subtest: workout list queries accept eligibility filters and reject calibrating status
+ok 5 - workout list queries accept eligibility filters and reject calibrating status
+  ---
+  duration_ms: 96.611435
+  type: 'test'
+  ...
+# Subtest: training statistics queries constrain ranges and granularities
+ok 6 - training statistics queries constrain ranges and granularities
+  ---
+  duration_ms: 58.417455
+  type: 'test'
+  ...
+# Subtest: recovery trend queries require a whole-day range within the supported window
+ok 7 - recovery trend queries require a whole-day range within the supported window
+  ---
+  duration_ms: 36.907924
+  type: 'test'
+  ...
+# Subtest: training-zone settings require consistent automatic and manual values
+ok 8 - training-zone settings require consistent automatic and manual values
+  ---
+  duration_ms: 84.470979
+  type: 'test'
+  ...
+# Subtest: prediction model routes accept only generated model identifiers
+ok 9 - prediction model routes accept only generated model identifiers
+  ---
+  duration_ms: 29.178882
+  type: 'test'
+  ...
+# Subtest: the goals schema keeps step goals and alerts inside their own semantic bounds
+ok 10 - the goals schema keeps step goals and alerts inside their own semantic bounds
+  ---
+  duration_ms: 222.71609
+  type: 'test'
+  ...
+# Subtest: every registered mutation route is documented in OpenAPI
+ok 11 - every registered mutation route is documented in OpenAPI
+  ---
+  duration_ms: 164.730578
+  type: 'test'
+  ...
+# Subtest: a request that changes data is a route the router can see
+ok 12 - a request that changes data is a route the router can see
+  ---
+  duration_ms: 521.695153
+  type: 'test'
+  ...
+# Subtest: the week editor offers neither today — nor a day already gone — as an editable row
+ok 13 - the week editor offers neither today — nor a day already gone — as an editable row
+  ---
+  duration_ms: 68.959176
+  type: 'test'
+  ...
+# Subtest: native session and race pickers exactly match their API contracts
+ok 14 - native session and race pickers exactly match their API contracts
+  ---
+  duration_ms: 80.587788
+  type: 'test'
+  ...
+# Subtest: plan-operations query contract: four shared statuses, derived summary, strict narrowing
+ok 15 - plan-operations query contract: four shared statuses, derived summary, strict narrowing
+  ---
+  duration_ms: 0.780467
+  type: 'test'
+  ...
+# Subtest: plan publication identity is mandatory: operationId requires a declared scope
+ok 16 - plan publication identity is mandatory: operationId requires a declared scope
+  ---
+  duration_ms: 0.397439
+  type: 'test'
+  ...
+# Subtest: D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads
+ok 17 - D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads
+  ---
+  duration_ms: 368.524368
+  type: 'test'
+  ...
+# Subtest: missing pace edges stay missing rather than becoming one second per km
+ok 18 - missing pace edges stay missing rather than becoming one second per km
+  ---
+  duration_ms: 3.727656
+  type: 'test'
+  ...
+# Subtest: corrupt pace targets are dropped, not clamped into sprint targets
+ok 19 - corrupt pace targets are dropped, not clamped into sprint targets
+  ---
+  duration_ms: 0.329649
+  type: 'test'
+  ...
+# (node:90057) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B08/S04-03: an unchanged protected course still clears the edit confirmation fence once
+ok 20 - B08/S04-03: an unchanged protected course still clears the edit confirmation fence once
+  ---
+  duration_ms: 344.69158
+  type: 'test'
+  ...
+# Subtest: B04/T13-18: add releases cancelled suppression on its target, and unlock does not lose the new course
+ok 21 - B04/T13-18: add releases cancelled suppression on its target, and unlock does not lose the new course
+  ---
+  duration_ms: 237.747784
+  type: 'test'
+  ...
+# Subtest: B04/T13-18: add releases moved suppression on its target, and unlock does not lose the new course
+ok 22 - B04/T13-18: add releases moved suppression on its target, and unlock does not lose the new course
+  ---
+  duration_ms: 177.515227
+  type: 'test'
+  ...
+# Subtest: B04/T09–12: preview zero-write; move/edit keep ID, suppress source and survive new-load generation
+ok 23 - B04/T09–12: preview zero-write; move/edit keep ID, suppress source and survive new-load generation
+  ---
+  duration_ms: 96.297455
+  type: 'test'
+  ...
+# Subtest: B04/T13–18: occupied/rest dates, cancel/add, repeated moves, release and no-op
+ok 24 - B04/T13–18: occupied/rest dates, cancel/add, repeated moves, release and no-op
+  ---
+  duration_ms: 243.666822
+  type: 'test'
+  ...
+# Subtest: B04/T19–20: draft, source, scope, instance, TTL and state/session CAS reject with zero business writes
+ok 25 - B04/T19–20: draft, source, scope, instance, TTL and state/session CAS reject with zero business writes
+  ---
+  duration_ms: 90.836976
+  type: 'test'
+  ...
+# Subtest: B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes
+ok 26 - B04: committed replay survives restart, disabled capability and expiry without facts/lease/guard writes
+  ---
+  duration_ms: 359.385486
+  type: 'test'
+  ...
+# Subtest: B04: cancel and explicit rest remain usable with pending facts; additive edits require facts
+ok 27 - B04: cancel and explicit rest remain usable with pending facts; additive edits require facts
+  ---
+  duration_ms: 74.442026
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_goals rolls back the entire move; original candidate can retry
+ok 28 - B04/T22: SQL failure at mobile_goals rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 74.981354
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_goals_history rolls back the entire move; original candidate can retry
+ok 29 - B04/T22: SQL failure at mobile_goals_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 67.394622
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_state rolls back the entire move; original candidate can retry
+ok 30 - B04/T22: SQL failure at mobile_training_state rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 65.498828
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_state_history rolls back the entire move; original candidate can retry
+ok 31 - B04/T22: SQL failure at mobile_training_state_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 61.361924
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_training_session_history rolls back the entire move; original candidate can retry
+ok 32 - B04/T22: SQL failure at mobile_training_session_history rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 99.581363
+  type: 'test'
+  ...
+# Subtest: B04/T22: SQL failure at mobile_plan_operations rolls back the entire move; original candidate can retry
+ok 33 - B04/T22: SQL failure at mobile_plan_operations rolls back the entire move; original candidate can retry
+  ---
+  duration_ms: 65.950817
+  type: 'test'
+  ...
+# Subtest: B04: strict shape, units, omission/null and coupled structure validation
+ok 34 - B04: strict shape, units, omission/null and coupled structure validation
+  ---
+  duration_ms: 62.729639
+  type: 'test'
+  ...
+# Subtest: B04/T21: two independent SQLite clients submit one state revision; only one owns the date
+ok 35 - B04/T21: two independent SQLite clients submit one state revision; only one owns the date
+  ---
+  duration_ms: 64.750281
+  type: 'test'
+  ...
+# Subtest: B04/T22: business COMMIT failure rolls back the move and all histories/results
+ok 36 - B04/T22: business COMMIT failure rolls back the move and all histories/results
+  ---
+  duration_ms: 81.741159
+  type: 'test'
+  ...
+# Subtest: B04/T17: active device evidence is scope-bound and changes invalidate a prepared edit
+ok 37 - B04/T17: active device evidence is scope-bound and changes invalidate a prepared edit
+  ---
+  duration_ms: 55.726265
+  type: 'test'
+  ...
+# Subtest: B04/T21: two OS processes race the same course revision; exactly one atomic move commits
+ok 38 - B04/T21: two OS processes race the same course revision; exactly one atomic move commits
+  ---
+  duration_ms: 840.979951
+  type: 'test'
+  ...
+# Subtest: B04/T16: completed history cannot be edited, moved, cancelled or unlocked
+ok 39 - B04/T16: completed history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 58.374065
+  type: 'test'
+  ...
+# Subtest: B04/T16: partial history cannot be edited, moved, cancelled or unlocked
+ok 40 - B04/T16: partial history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 58.908553
+  type: 'test'
+  ...
+# Subtest: B04/T16: skipped history cannot be edited, moved, cancelled or unlocked
+ok 41 - B04/T16: skipped history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 60.511981
+  type: 'test'
+  ...
+# Subtest: B04/T16: cancelled history cannot be edited, moved, cancelled or unlocked
+ok 42 - B04/T16: cancelled history cannot be edited, moved, cancelled or unlocked
+  ---
+  duration_ms: 54.137706
+  type: 'test'
+  ...
+# Subtest: P1.3/P2.4: add explicitly releases that day's explicit rest in the same transaction; move still refuses it
+ok 43 - P1.3/P2.4: add explicitly releases that day's explicit rest in the same transaction; move still refuses it
+  ---
+  duration_ms: 142.487345
+  type: 'test'
+  ...
+# Subtest: P1.4: distance steps require a non-null display distance and compare in whole metres
+ok 44 - P1.4: distance steps require a non-null display distance and compare in whole metres
+  ---
+  duration_ms: 71.903454
+  type: 'test'
+  ...
+# Subtest: P1.5: preview time is never persisted as the course's availableAt; submit stamps the commit instant
+ok 45 - P1.5: preview time is never persisted as the course's availableAt; submit stamps the commit instant
+  ---
+  duration_ms: 65.886758
+  type: 'test'
+  ...
+# Subtest: P2.4: move/cancel/set_rest replace only their own suppression and never another course's tombstone
+ok 46 - P2.4: move/cancel/set_rest replace only their own suppression and never another course's tombstone
+  ---
+  duration_ms: 284.584141
+  type: 'test'
+  ...
+# Subtest: D-01/D-02: frozen easy/interval/tempo are actual generated courses; measured and display values stay distinct
+ok 47 - D-01/D-02: frozen easy/interval/tempo are actual generated courses; measured and display values stay distinct
+  ---
+  duration_ms: 2.833229
+  type: 'test'
+  ...
+# Subtest: D-01: easy original full payload previews/submits without changing its persisted dose
+ok 48 - D-01: easy original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 62.46151
+  type: 'test'
+  ...
+# Subtest: D-01: interval original full payload previews/submits without changing its persisted dose
+ok 49 - D-01: interval original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 63.533006
+  type: 'test'
+  ...
+# Subtest: D-01: tempo original full payload previews/submits without changing its persisted dose
+ok 50 - D-01: tempo original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 52.669386
+  type: 'test'
+  ...
+# Subtest: D-01: distance-only original full payload previews/submits without changing its persisted dose
+ok 51 - D-01: distance-only original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 65.989907
+  type: 'test'
+  ...
+# Subtest: D-01: time-only original full payload previews/submits without changing its persisted dose
+ok 52 - D-01: time-only original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 60.488546
+  type: 'test'
+  ...
+# Subtest: D-01: mixed original full payload previews/submits without changing its persisted dose
+ok 53 - D-01: mixed original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 61.548233
+  type: 'test'
+  ...
+# Subtest: D-01: historical-distance-only original full payload previews/submits without changing its persisted dose
+ok 54 - D-01: historical-distance-only original full payload previews/submits without changing its persisted dose
+  ---
+  duration_ms: 54.719739
+  type: 'test'
+  ...
+# Subtest: D-01: historical rounding cannot mask changed steps, type, targets or fabricated totals
+ok 55 - D-01: historical rounding cannot mask changed steps, type, targets or fabricated totals
+  ---
+  duration_ms: 244.858558
+  type: 'test'
+  ...
+# Subtest: D-02: omitted distance delegates changed mixed dose to server; null/zero/rounded explicit totals stay strict
+ok 56 - D-02: omitted distance delegates changed mixed dose to server; null/zero/rounded explicit totals stay strict
+  ---
+  duration_ms: 74.529775
+  type: 'test'
+  ...
+# Subtest: D-02: add omission computes on server; pure time keeps null; explicit old-client exact totals remain accepted
+ok 57 - D-02: add omission computes on server; pure time keeps null; explicit old-client exact totals remain accepted
+  ---
+  duration_ms: 84.891718
+  type: 'test'
+  ...
+# Subtest: D-01/D-02: shared native omission/null/value payloads preserve unchanged dose; legal structure adjustments remeasure
+ok 58 - D-01/D-02: shared native omission/null/value payloads preserve unchanged dose; legal structure adjustments remeasure
+  ---
+  duration_ms: 443.485966
+  type: 'test'
+  ...
+# Subtest: D-01: unchanged but corrupt historical totals are not accepted as legacy rounding
+ok 59 - D-01: unchanged but corrupt historical totals are not accepted as legacy rounding
+  ---
+  duration_ms: 40.422892
+  type: 'test'
+  ...
+# Subtest: D-02: COMMIT failure rolls back a server-measured mixed edit, projection, override and operation
+ok 60 - D-02: COMMIT failure rolls back a server-measured mixed edit, projection, override and operation
+  ---
+  duration_ms: 67.68801
+  type: 'test'
+  ...
+1..60
+# tests 60
+# suites 0
+# pass 60
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7433.45633

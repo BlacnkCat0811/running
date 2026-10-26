@@ -1,0 +1,97 @@
+{
+  "timeBasis": "Filesystem log creation/last-write times (includes wrapper overhead); Node duration_ms is the runner measurement.",
+  "executions": [
+    {
+      "command": "RAI_TEST_CONCURRENCY=2 npm test",
+      "testConcurrency": 2,
+      "log": "baseline-tests.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:16:42.346395+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:16:42.346395+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:35:48.383573+00:00",
+      "sha256": "f17a17342c46e231a677d337c2a05d8e15425139cc71a8ccbf77b072ebcdebe5",
+      "tests": 2626,
+      "pass": 2623,
+      "fail": 0,
+      "skipped": 3,
+      "duration_ms": 1145172.862107
+    },
+    {
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/training-plan-closed-loop-contract.test.ts apps/api/test/handshake-registry.test.ts apps/api/test/phase5-training-plan.test.ts",
+      "testConcurrency": 2,
+      "log": "contracts-final-tests.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:25:34.102802+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:25:34.102802+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:27:49.876968+00:00",
+      "sha256": "c5452f77900e21784c6be242eb4bd9564d6b82eb1123c286790eb95e46139265",
+      "tests": 13,
+      "pass": 13,
+      "fail": 0,
+      "skipped": 0,
+      "duration_ms": 135630.388229
+    },
+    {
+      "command": "node --import tsx --test --test-concurrency=2 apps/api/test/training-plan-closed-loop-contract.test.ts apps/api/test/handshake-registry.test.ts",
+      "testConcurrency": 2,
+      "log": "frozen-contract-tests.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:37:00.615253+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:37:00.615253+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:37:01.330460+00:00",
+      "sha256": "f3510bc2c40aa720918d9924d7ecdc263ab4b539f7e64d3386681c8cb0b33fb1",
+      "tests": 8,
+      "pass": 8,
+      "fail": 0,
+      "skipped": 0,
+      "duration_ms": 584.707496
+    },
+    {
+      "command": "npm run test:ios",
+      "testConcurrency": "aggregate scripts serial; compiler default",
+      "log": "ios-tests.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:32:56.917110+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:32:56.917110+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:46:11.137221+00:00",
+      "sha256": "760a3097b128aa761ceeaef0371e6b8a622f68ddddd04e212b0e7a38492f3fac"
+    },
+    {
+      "command": "npm run test:ios",
+      "failure": "source comment changed during compile; superseded by full frozen rerun",
+      "log": "ios-tests-attempt1.log",
+      "exitCode": 1,
+      "logCreatedAtUTC": "2026-10-25T02:23:08.816188+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:23:08.816188+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:31:50.179548+00:00",
+      "sha256": "e29eb07e733fe46e663ae8436b32595ab624d044a25c15a2e8dc60de6993fcdd"
+    },
+    {
+      "command": "npm run check:ios-gates",
+      "log": "ios-gates.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:23:34.301278+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:23:34.301278+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:23:43.387684+00:00",
+      "sha256": "c146f4b19666de625aa82a6f133633d26b27c546a644d53f3f7dce19880e51c6"
+    },
+    {
+      "command": "npm run typecheck && npm run check:training-plan-single-writer && npm run check:acceptance-matrix && npm run check:package-boundaries && npm run check:scripts && git diff --check",
+      "log": "final-gates.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:32:40.494297+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:32:40.494297+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:33:19.245058+00:00",
+      "sha256": "912d8315b88bb3850a52f654a62038731a2f3b4ba9f0875083dd7b936adcb909"
+    },
+    {
+      "command": "npm run check:docs && node scripts/check-doc-line-refs.mjs docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md --problems-only && git diff --check",
+      "log": "docs-final-check.log",
+      "exitCode": 0,
+      "logCreatedAtUTC": "2026-10-25T02:46:35.129912+00:00",
+      "logCreatedAtShanghai": "2026-10-25T10:46:35.129912+08:00",
+      "logLastWrittenAtUTC": "2026-10-25T02:48:08.727917+00:00",
+      "sha256": "49afb4ced4e51832ce0e91563a6445f7e948859196346d3def64109a999bbd34"
+    }
+  ]
+}

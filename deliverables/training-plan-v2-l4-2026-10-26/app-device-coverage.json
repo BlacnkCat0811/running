@@ -1,0 +1,39 @@
+{
+  "productSwiftSourceCount": 106,
+  "listedProductSwiftCount": 106,
+  "allProductSourcesListed": true,
+  "totalSwiftCompileInputs": 107,
+  "AMapCoverage": {
+    "MapPrivacy": {
+      "fileListEntries": [
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/MapPrivacy.swift"
+      ],
+      "object": "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device/Build/Intermediates.noindex/RAI.build/Debug-iphoneos/RAI.build/Objects-normal/arm64/MapPrivacy.o",
+      "objectExists": true,
+      "objectBytes": 47272,
+      "objectSHA256": "8d0bf6040d45f04578c98176a21ec54fcce2e5418ef961dd21e6a300da7a44ba"
+    },
+    "RAIApp": {
+      "fileListEntries": [
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/RAIApp.swift"
+      ],
+      "object": "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device/Build/Intermediates.noindex/RAI.build/Debug-iphoneos/RAI.build/Objects-normal/arm64/RAIApp.o",
+      "objectExists": true,
+      "objectBytes": 157512,
+      "objectSHA256": "3afd061354e8242b6fd02c6a8a7e90d772a625b64d4ba93bacb95835fe6c8a4b"
+    },
+    "TechRouteView": {
+      "fileListEntries": [
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechRouteView.swift"
+      ],
+      "object": "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device/Build/Intermediates.noindex/RAI.build/Debug-iphoneos/RAI.build/Objects-normal/arm64/TechRouteView.o",
+      "objectExists": true,
+      "objectBytes": 804792,
+      "objectSHA256": "b7240d415a88bf0476d5e7f5f8d14fe5b30b86af6a579098279c10b0ae380b12"
+    }
+  },
+  "binary": "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device/Build/Products/Debug-iphoneos/RAI.app/RAI",
+  "binaryExists": true,
+  "binarySHA256": "4a921a46284cbc8ba34d2a4e8e0788f80da29809e02ea42dc61520071d83ee56",
+  "platformEvidence": "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device/Build/Products/Debug-iphoneos/RAI.app/RAI:\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform IOS\n    minos 17.0\n      sdk 26.5\n   ntools 1\n     tool LD\n  version 1267.0\n"
+}

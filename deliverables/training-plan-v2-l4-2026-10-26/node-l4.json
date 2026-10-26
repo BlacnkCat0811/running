@@ -1,0 +1,13 @@
+{
+  "name": "node-l4",
+  "argv": [
+    "npm",
+    "test"
+  ],
+  "envOverrides": {
+    "RAI_TEST_CONCURRENCY": "2"
+  },
+  "startedEpoch": 1792997560.3919811,
+  "durationSeconds": 1346.007069826126,
+  "exitCode": 0
+}

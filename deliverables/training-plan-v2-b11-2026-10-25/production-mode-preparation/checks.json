@@ -1,0 +1,128 @@
+[
+  {
+    "name": "typecheck",
+    "command": [
+      "npm",
+      "run",
+      "typecheck"
+    ],
+    "startedAt": "2026-10-25T14:41:54.461547+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:42:25.174813+00:00"
+  },
+  {
+    "name": "smoke-api",
+    "command": [
+      "npm",
+      "run",
+      "smoke:api"
+    ],
+    "startedAt": "2026-10-25T14:42:25.178470+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:42:28.321267+00:00"
+  },
+  {
+    "name": "single-writer",
+    "command": [
+      "npm",
+      "run",
+      "check:training-plan-single-writer"
+    ],
+    "startedAt": "2026-10-25T14:42:28.322857+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:42:29.387236+00:00"
+  },
+  {
+    "name": "acceptance",
+    "command": [
+      "npm",
+      "run",
+      "check:acceptance-matrix"
+    ],
+    "startedAt": "2026-10-25T14:42:29.388514+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:42:30.871190+00:00"
+  },
+  {
+    "name": "scripts",
+    "command": [
+      "npm",
+      "run",
+      "check:scripts"
+    ],
+    "startedAt": "2026-10-25T14:42:30.873803+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:42:31.678672+00:00"
+  },
+  {
+    "name": "boundaries",
+    "command": [
+      "npm",
+      "run",
+      "check:package-boundaries"
+    ],
+    "startedAt": "2026-10-25T14:42:31.679869+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T14:42:32.839765+00:00"
+  },
+  {
+    "name": "registry-contracts-final",
+    "command": [
+      "node",
+      "--import",
+      "tsx",
+      "--test",
+      "--test-concurrency=1",
+      "apps/api/test/handshake-registry.test.ts",
+      "apps/api/test/training-plan-closed-loop-contract.test.ts"
+    ],
+    "startedAt": "2026-10-25T15:01:10.066840+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T15:01:11.532620+00:00"
+  },
+  {
+    "name": "typecheck-final",
+    "command": [
+      "npm",
+      "run",
+      "typecheck"
+    ],
+    "startedAt": "2026-10-25T15:01:11.534679+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T15:01:30.051091+00:00"
+  },
+  {
+    "name": "ios-gates-final",
+    "command": [
+      "npm",
+      "run",
+      "check:ios-gates"
+    ],
+    "startedAt": "2026-10-25T15:01:30.052631+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T15:01:32.203309+00:00"
+  },
+  {
+    "name": "docs-final",
+    "command": [
+      "npm",
+      "run",
+      "check:docs"
+    ],
+    "startedAt": "2026-10-25T15:01:32.204915+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T15:01:34.594314+00:00"
+  },
+  {
+    "name": "plan-refs-final",
+    "command": [
+      "node",
+      "scripts/check-doc-line-refs.mjs",
+      "docs/TRAINING_PLAN_V2_CLOSED_LOOP_IMPLEMENTATION_PLAN.md",
+      "--problems-only"
+    ],
+    "startedAt": "2026-10-25T15:01:34.595941+00:00",
+    "exitCode": 0,
+    "finishedAt": "2026-10-25T15:01:34.800659+00:00"
+  }
+]

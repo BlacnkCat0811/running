@@ -1,0 +1,14 @@
+{
+  "name": "xcode-list",
+  "argv": [
+    "xcodebuild",
+    "-workspace",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI.xcworkspace",
+    "-list",
+    "-json"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1793000013.185802,
+  "durationSeconds": 8.391226053237915,
+  "exitCode": 0
+}

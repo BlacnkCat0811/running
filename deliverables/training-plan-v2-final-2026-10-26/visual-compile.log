@@ -1,0 +1,576 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project /private/tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath /private/tmp/rai-v2-final-actor-20261026/visual-acceptance CODE_SIGNING_ALLOWED=NO build-for-testing
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+    SDKROOT = iphonesimulator26.5
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'VisualAcceptance' in project 'VisualAcceptance' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: c631d57bf0d4fde0284977da0804c247
+Build description path: /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/XCBuildData/c631d57bf0d4fde0284977da0804c247.xcbuilddata
+CreateBuildDirectory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products
+
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+CreateBuildDirectory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex
+
+CreateBuildDirectory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator
+
+CreateBuildDirectory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+CreateBuildDirectory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/ExplicitPrecompiledModules
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance-f82d1e1e7c0e943bb510b26a2d1cd636-VFS-iphonesimulator/all-product-headers.yaml
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance-f82d1e1e7c0e943bb510b26a2d1cd636-VFS-iphonesimulator/all-product-headers.yaml
+
+CreateBuildDirectory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.xcodeproj
+    builtin-create-build-directory /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.hmap
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-non-framework-target-headers.hmap (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-non-framework-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList
+
+WriteAuxiliaryFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    write-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json
+
+MkDir /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /bin/mkdir -p /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest
+
+ProcessInfoPlistFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-infoPlistUtility /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/empty-VisualAcceptance.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ProductTypeInfoPlistAdditions.plist -o /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist
+
+SwiftDriver VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /tmp/rai-v2-final-actor-20261026/ios-source/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /tmp/rai-v2-final-actor-20261026/ios-source/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/DeveloperToolsSupport-CPMAF8HYAIHQL7U3AAB6S53OL.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_SwiftConcurrencyShims-7EVXKU2P53YS33UBTSJ83TI48.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_float-AA563FIKFDCZVJAX7GMCD9SG5.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ptrcheck-9Z28B3GYQX2AQBHEJENIDOV1O.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdarg-7X7AAGUBDAEZ9FMF3W4WXFE3D.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdbool-B1S92NWXAF2SJFRKAT7579A1O.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_AvailabilityInternal-22RGE18HQF5O0ABDTNF9D3DRD.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdbool-DP5ZTXET5C4YXV5KZMV8RPP5O.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/SwiftShims-DPFQCSG81SZO7NXO3IQW8DG8J.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/DeveloperToolsSupport-3ZSZAJCK590MI2GGJWWUFBRXO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_float-9V2XEO565CT2KI8AC1B03QEXD.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stddef-AMBT5VG6IWPHHKL0G3Q2JK14A.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ptrcheck-ESA8RMYMU20YN0P6VQF5CEJAM.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdarg-9QT3C2CUNGVOY6OGFNYT3T3O6.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/SwiftShims-6Z1KU6OI4C8SC2HHIFJJ3OFI6.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_DarwinFoundation1-2YWO9T2VKVKBDDDSBV1J2K2S0.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_SwiftConcurrencyShims-764WU2SYVXIOBE6VT56F28U27.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ptrauth-D8GI2XJSLFEVSJQAHTYRL7EIG.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_AvailabilityInternal-5DXU1Q5QKMQM9QN2AEM7L6NJH.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ptrauth-8AVALUDU84WVBVDE3ZJTPY1PE.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stddef-1KOI6A6XXQB6MCOWL7S5Z1O8U.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_DarwinFoundation1-7OI1134IZWHXDXE54YJ09V25I.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_limits-81J63SJYZ1CMGK13JTCZMS7TI.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_DarwinFoundation2-3BIJWSAUFZY86IOEB3PW0DY8O.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_DarwinFoundation2-6AIEKTE5EH3JWSBY0S9MN34K6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_limits-EFHAAROHL9F3M1P25E4V1E1Q4.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/sys_types-65E1UEAQGL3WZY3EF7WRIX2PU.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdint-87E4NUC0PNJJDXVPTCNWYQGQ7.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_tgmath-AGNU1TNJIXLVN57LF97YTRINT.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdatomic-4IVUBJN15GMRRH9KRNM1853C3.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_DarwinFoundation3-DO96Q8DL2TDZ50TTIVFRFSTDI.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdint-9HXNQ1GK93AA38DCM9HNFRWND.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/sys_types-18JKA9GLY0GSUQ8PJNDM81B3G.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_tgmath-7Y87WDFDG13A9C7YS0TKCDARB.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_intrinsics-883VBWRCRCYNMOK129ZG38CUD.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_stdatomic-1713ZW10TSACMR8GHIW7U74NK.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_DarwinFoundation3-CPNUKMB0IZVKOIFGMN0JJ1E2T.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_inttypes-92ASPGHTANB6YEOP1L17GL3WE.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_intrinsics-3HYBHFJQB4LTEH1GEPUHR31GH.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Darwin-1OJ79OVS6FR7RRZX8K4TPQTEE.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/_Builtin_inttypes-CAE3GW8L5JNZGU53E0AXO4X16.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Darwin-E84CDQXU4UZ5TJE3JRFQKL832.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/simd-4X6I0M0EJS7NCI1FPXYRNWLG8.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ObjectiveC-AA8GE4CZW9MDOJPTYIW80O3EQ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/MachO-AL8BEMQBNQE7G2UUATOIVGCNY.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/os_object-6C6DCWCOPBAT07MXS5W3F32ZW.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/os_workgroup-EY9NVB2THYLYTZS3V9HSOJ4TF.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/MachO-BGTJRDCGY4CE46JUSBRH6YD0Q.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ObjectiveC-856CXBY93LDUIVLK8J747LN8X.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Dispatch-E31TH8EOW2NKCWG783L7BXM3W.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/simd-2FS2XFUOUC1D55AKVP3M7EK1W.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/os_object-4T3RTUGI1PHU3RDYQAZWXSOET.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/XPC-2SJP8OKBSOP8LX0JLLSNVSZ4.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreFoundation-9I3B9KP55XDFAYY72693J4EW6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/os_workgroup-12CBZ5Y0SO61H55ZJ2FM1JI5U.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Dispatch-BP51EA6DII8YPGD45L7AOFHUT.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/os-63G25K9CE76WJSA6D2PCE8G90.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/XPC-BY1B512A80UG9X337LJCCG7K.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreFoundation-5Z2GF75JOXSD2AKMPXYHYAS6R.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Security-AMW5GDB7I6D31L0N9CKADNIF2.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CFNetwork-1R9YNSE0REW1CXD5UISWWJ13G.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreGraphics-BDGQLFVIP8RDEG1GR912NBBYA.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/os-D2SP1G2PYJ7U25AE6Q8QKZDL8.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Foundation-1UD3Q1THYPC6A9233T4UUKTQ4.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreGraphics-QN3419LF5G3S698A57T00ZSD.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Security-5DC66JKAJG6NMZBGW4F52XLLK.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CFNetwork-8DQL4OJTJQJ3DKD9WQYPDI08M.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Spatial-6AF5AZNVGRU0XIW7A55TF62KA.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ImageIO-6SJ9FI8TGR8H1T229X0PHV0H0.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreText-9CRSMGYOAC9SVUN5DZ4G8ZEBO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/ImageIO-1691JWA9IAXZIOWVHAM33M0Q5.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreText-59980SAK7VY5EU0Q5XZQV1LVN.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Foundation-78XPSJH6SEMNW054TBR0Q2WPP.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Spatial-CQRCFRV44S4ON1CNNKWR77SBC.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/OpenGLES-5UGGU2NTOV060B0E8B3ITGAPB.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UserNotifications-6MQ337SK3FLW2DH3S8LFOC42Z.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UIUtilities-D9E4OEO1YRKJMIQXV6KZKHP8P.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/FileProvider-3OPQFZO7ZPL5MRLK38ENYLRHQ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/DataDetection-CHGO8Q3Q1R37NPER0D6U1KPPV.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Accessibility-EVKSB3WRLPSPWEHSVF1IRB6TW.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Symbols-1MR48Y6G1F78YZ44YAKZ720FB.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreTransferable-7HIPLG73HBUZ1JIARK6G6A1L5.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UniformTypeIdentifiers-54RHLR259H1XELWVQ2JP04YUZ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/IOSurface-F19FO1LMI3Z34J3LMF8NUCH7D.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/OSLog-BOFILUYEYWVANZQ06AJF8VURL.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Metal-4VGFF2P3HOJ1FJ6ZLCBT3ZUTI.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/DataDetection-D0TPU3FYUP8YRLJEJFF5CKY1C.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UserNotifications-9FZRYK4TSGRNKZC7XFU9KA0LO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/FileProvider-E5Y0MIY08PEN8TQ1OV0YK9N6X.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/OSLog-1UZPAXAOPE50XN95HWJEG6NWN.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/OpenGLES-EQIZSN9I8GKAYQS55TYHU1ATG.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UniformTypeIdentifiers-4GTHR02CTG0O9Z2O6APL2AQ42.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/IOSurface-3TZXR7V702N92NL7IQ7FP2N7C.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreTransferable-7X48WBF0IK1IDH6GSPZ1V0T7T.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Accessibility-BI0OJE0RRA4MR576Q4NN3VP6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UIUtilities-81J8XBGVAHS8RYAR2FFRHJ6TU.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Symbols-9DR7WMEE85SIBO5CTNVSC43M2.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Metal-8LW017FTVRHKPLTE85ZDJ5C2G.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreVideo-3B6BV08UMYMJPGERTOTXWICCA.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/QuartzCore-1SNIPQRWBMJ4WST8FL0SGNGV8.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreImage-DTK8W2K8AN2713IWOLXR5Z63R.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreVideo-7CTURAEYBTFJ58A6VM1M1PHNP.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/SwiftUICore-SO6OEME4651D78O31JW6K4G7.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UIKit-7FEHI9BUQOTRIV7KDKOSUHX85.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/QuartzCore-1EKHYS9L6JBWNFS1GXTXA4OI1.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/CoreImage-1909SK2EXRWLB528NU6NXUZ5H.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/SwiftUICore-CP7HVNWJWOEXKMMQSILPWKIVZ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/UIKit-A7D5LF83D70O0UBRDMHTQ6S1J.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-8ZUNVSHY7Y0XLR6KELUS1ZTG3.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-2V6TDML72NOC4QST07AWVN2T5.pcm
+
+SwiftExplicitDependencyCompileModuleFromInterface x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-2BN5ETK9JCJ5T.swiftmodule
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-7LEKU29E2136BNFHG2TLJ66JK.pcm
+
+SwiftExplicitDependencyCompileModuleFromInterface arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCUIAutomation-3KCJ4OXN41146.swiftmodule
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-6DGQRRRDVYSDFDRCDTFL7ZKN8.pcm
+
+SwiftExplicitDependencyCompileModuleFromInterface x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-3QMQF1M2I8ARH.swiftmodule
+
+SwiftExplicitDependencyCompileModuleFromInterface arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules/XCTest-1X7C26I1GDNYJ.swiftmodule
+
+SwiftEmitModule normal x86_64 Emitting\ module\ for\ VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal x86_64 /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    
+
+SwiftCompile normal x86_64 Compiling\ VisualAcceptance.swift /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+SwiftCompile normal x86_64 /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    
+
+SwiftDriverJobDiscovery normal x86_64 Emitting module for VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation\ Requirements VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /tmp/rai-v2-final-actor-20261026/ios-source/tests -experimental-emit-module-separately -disable-cmo
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftmodule /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.abi.json /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.abi.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.abi.json /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftsourceinfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftsourceinfo /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftdoc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftdoc (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftdoc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.swiftdoc
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal arm64 /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    
+
+SwiftCompile normal arm64 Compiling\ VisualAcceptance.swift /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+SwiftCompile normal arm64 /tmp/rai-v2-final-actor-20261026/ios-source/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation\ Requirements VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /tmp/rai-v2-final-actor-20261026/ios-source/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftMergeGeneratedHeaders /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/VisualAcceptance-Swift.h /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-swiftHeaderTool -arch arm64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -arch x86_64 /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -o /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/VisualAcceptance-Swift.h
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftmodule /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.abi.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.abi.json /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftdoc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftdoc (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftdoc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.swiftdoc
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftsourceinfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftsourceinfo /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+SwiftDriverJobDiscovery normal x86_64 Compiling VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /tmp/rai-v2-final-actor-20261026/ios-source/tests -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance normal x86_64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target x86_64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -Os -L/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -filelist /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_lto.o -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-linker-args.resp -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -o /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance
+
+SwiftDriverJobDiscovery normal arm64 Compiling VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-688ef53f1462e2c8f657fdc38a81448f6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /tmp/rai-v2-final-actor-20261026/ios-source/tests -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance normal arm64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -Os -L/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -filelist /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_lto.o -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule @/tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-linker-args.resp -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -o /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance
+
+CreateUniversalBinary /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance normal arm64\ x86_64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo -create /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance -output /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance
+
+CopySwiftLibs /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --scan-folder /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --scan-folder /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/PlugIns --scan-folder /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/SystemExtensions --scan-folder /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Extensions --platform iphonesimulator --toolchain /Users/ta/Library/Developer/DVTDownloads/MetalToolchain/mounts/656653e63a393644d316d4c630af4cccd68d1d2f/Metal.xctoolchain --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+Ignoring --strip-bitcode because --sign was not passed
+
+ExtractAppIntentsMetadata (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Users/ta/Library/Developer/DVTDownloads/MetalToolchain/mounts/656653e63a393644d316d4c630af4cccd68d1d2f/Metal.xctoolchain --module-name VisualAcceptance --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk --xcode-version 17F42 --platform-family iOS --deployment-target 17.0 --bundle-identifier app.rai.visual-tests --output /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest --target-triple arm64-apple-ios17.0-simulator --target-triple x86_64-apple-ios17.0-simulator --binary-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --dependency-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_dependency_info.dat --dependency-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_dependency_info.dat --stringsdata-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --stringsdata-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList --source-file-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList --metadata-file-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList --static-metadata-file-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList --swift-const-vals-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-10-26 17:22:32.004 appintentsmetadataprocessor[72357:11502097] Starting appintentsmetadataprocessor export
+2026-10-26 17:22:32.015 appintentsmetadataprocessor[72357:11502097] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+GenerateDSYMFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest.dSYM /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/dsymutil /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance -o /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest.dSYM
+
+AppIntentsSSUTraining (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsnltrainingprocessor --infoplist-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist --temp-dir-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/ssu --bundle-id app.rai.visual-tests --product-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest --extracted-metadata-path /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Metadata.appintents --metadata-file-list /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList --source-file /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist --archive-ssu-assets
+2026-10-26 17:22:32.099 appintentsnltrainingprocessor[72359:11502101] Parsing options for appintentsnltrainingprocessor
+2026-10-26 17:22:32.104 appintentsnltrainingprocessor[72359:11502101] Starting AppIntents SSU YAML Generation
+2026-10-26 17:22:32.104 appintentsnltrainingprocessor[72359:11502101] No AppShortcuts found - Skipping.
+
+MkDir /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /bin/mkdir -p /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app
+
+CopyPlistFile /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Info.plist /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/Info.plist (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copyPlist --validate --convert xml1 --macro-expansion WRAPPEDPRODUCTNAME VisualAcceptance-Runner --macro-expansion WRAPPEDPRODUCTBUNDLEIDENTIFIER app.rai.visual-tests.xctrunner --macro-expansion TESTPRODUCTNAME VisualAcceptance --macro-expansion TESTPRODUCTBUNDLEIDENTIFIER app.rai.visual-tests --copy-value UIDeviceFamily /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Info.plist --outdir /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app -- /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/Info.plist
+
+CopyAndPreserveArchs /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/VisualAcceptance-Runner (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/XCTRunner -output /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/VisualAcceptance-Runner -extract arm64 -extract x86_64
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PkgInfo /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/PkgInfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/XCTRunner.app/PkgInfo /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/libXCTestSwiftSupport.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCUnit.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework/XCUnit (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCUIAutomation.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTestSupport.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework/XCTestSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTestCore.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework/XCTestCore (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTest.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework/XCTest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/XCTAutomationSupport.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework/XCTAutomationSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+Copy /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks/Testing.framework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -exclude Headers -exclude PrivateHeaders -exclude Modules -exclude \*.tbd -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/Frameworks
+warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework/Testing (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+RegisterExecutionPolicyException /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    builtin-RegisterExecutionPolicyException /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest
+
+Touch /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /tmp/rai-v2-final-actor-20261026/ios-source/tests
+    /usr/bin/touch -c /tmp/rai-v2-final-actor-20261026/visual-acceptance/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest
+
+** TEST BUILD SUCCEEDED **
+
