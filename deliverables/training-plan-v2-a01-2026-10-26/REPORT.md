@@ -1,0 +1,130 @@
+# A-01 历史状态兼容性修复 — 2026-10-26
+
+交付整理版：测试结果保持原样；原始报告见 [REPORT.source.txt](REPORT.source.txt)，来源哈希及未入库材料见 [精选清单](../training-plan-v2-final-2026-10-26/EVIDENCE_ALLOWLIST.json)。绝对路径只记录历史执行环境，不作为当前运行入口。
+
+
+## 任务结果
+
+仅实施 A-01：独立只读历史状态审计、身份迁移 Preflight 和统一锁课/休息写入防护。
+没有修复任何真实历史数据，没有连接生产服务器、执行生产迁移、打开 V2 生产能力或进入 D-01/D-02。
+
+起止 HEAD 均为 `2e7c07bb66b3701c4e1b768c90f431b654584f5c`，分支 `main`。
+开始时有 36 个已修改文件和 3 个未跟踪文件；39 个文件全部保留。仅在其中
+`training-plan-session-state.ts`、`training-plan-session-policy.ts` 上叠加 A-01 修改，原有保护行为保留。
+其余 37 个原有文件的 SHA-256 均与开始时一致。未 stash、移动工作区、清理、暂存、提交或推送。
+原文件哈希见 [workspace-before-sha256.json](workspace-before-sha256.json)。
+
+## 修改文件
+
+| 文件 | 目的 |
+|---|---|
+| [training-plan-session-state.ts](../../apps/api/src/training-plan-session-state.ts) | 共用原始冲突检测与严格不变量，安全输出日期、锁定类型、时间 |
+| [training-plan-store.ts](../../apps/api/src/training-plan-store.ts) | schema 1/2 严格读取及 CAS 写入检查；legacy 来源迁移分类明确报冲突 |
+| [training-plan-session-policy.ts](../../apps/api/src/training-plan-session-policy.ts) | resolver 与保护预算共用检查，冲突时先拒绝，不分配 ID |
+| [mobile-goals.ts](../../apps/api/src/mobile-goals.ts) | legacy lock、命令/协调器、staged owner 发布及文件导入控制库的写入防护 |
+| [training-plan-session-migration.ts](../../apps/api/src/training-plan-session-migration.ts) | 在严格读取、ID 分配、DDL 和写入前检查当前、完整历史、当前 goals 投影 |
+| [migrate-training-planner.mts](../../scripts/migrate-training-planner.mts) | CLI 输出可区分错误码和结构化 conflicts |
+| [training-plan-state-audit.ts](../../apps/api/src/training-plan-state-audit.ts) | 只读副本扫描、scope 去重及不完整审计显式失败 |
+| [audit-training-plan-state.mts](../../scripts/audit-training-plan-state.mts) | 独立 CLI，仅接受显式副本路径，无环境变量默认值、无 apply |
+| [training-plan-history-compatibility.test.ts](../../apps/api/test/training-plan-history-compatibility.test.ts) | 14 项历史兼容、迁移、写入、owner 和 CLI 回归 |
+| [training-plan-state-audit.test.ts](../../apps/api/test/training-plan-state-audit.test.ts) | 5 项审计正确性、错误处理、只读和隐私回归 |
+| [OPERATIONS.md](../../docs/OPERATIONS.md) | 检测用法、范围限制、时间字段语义和未实施的独立修复方案 |
+
+本目录仅新增本报告及合成测试日志、测试文件清单和校验信息，不包含真实数据库或健康数据。
+
+## 修复前证据与修复后行为
+
+按已确认 A-01 路径先新增测试、再修改源码，未重做完整审计。
+[before-fix-red.log](before-fix-red.log) 中有 6 项真实缺口：
+
+- schema 1 读取接受锁课与同日休息。
+- schema 2 删除 explicit_rest 后，仍接受锁课与同日 weekPlan rest。
+- schema 1 当前快照冲突仍被 inspect 接受。
+- schema 1 旧历史快照冲突仍被 inspect 接受。
+- legacy lock 能向休息日写入锁课。
+- resolver/保护预算未拒绝仅有 weekPlan rest 的冲突。
+
+该次红测共 8 项：1 通过、7 失败。额外 1 项失败来自新测试把 publication lease epoch
+也要求完全不变；既有合同允许其独立推进。新测试已改为严格比较全部业务行并核对 lease 释放，
+没有修改任何原有断言。身份迁移零写入测试仍比较全部表、DDL、审计、ID 和 revision。
+
+修复后 inspect/apply 返回 `session_migration_locked_rest_conflict`，附来源表、scope、revision、日期、
+锁定类型和时间字段，不再返回 ready。apply 重新执行同一检查；拒绝后所有数据库行和结构不变，事务退出。
+严格读取继续失败且不改原始字节；不选择锁课/休息、不删除 suppression、不自动修历史。
+legacy 写入冲突为 `training_session_date_occupied`，staged owner 冲突使业务发布整体回滚。
+
+关联回归发现既有合法行为：锁定的处方本身可以是 rest。初版防护误拦截它，已修正，原测试未改。
+“锁定休息本身 + 同日 weekPlan rest”继续可读写；但迁移会生成 explicit_rest，因此审计和身份迁移
+Preflight 仍报告该组合。任何锁定与 explicit_rest 共存均被拒绝。
+
+| 场景 | schema 1 | schema 2 |
+|---|---|---|
+| 合法跑课锁定、其他日期休息 | 可读；可迁移且保留锁 | 可读 |
+| 锁定休息本身及同日物化休息 | 保留合法读取；身份迁移先拒绝 | 无 explicit_rest 时可读 |
+| 跑课锁定与同日 weekPlan rest | 严格拒绝；inspect 拒绝；apply 零写入 | 严格拒绝 |
+| 锁定与 explicit_rest | 非 schema 1 合法字段，不作为合法数据归一化 | 严格拒绝，不静默修复 |
+| 历史审计 | 检测当前和历史 revision | 检测当前和历史 revision |
+
+## 历史状态检测与后续核查
+
+在仓库根目录，只对独立、一致的离线控制库副本运行：
+
+```bash
+node --import tsx scripts/audit-training-plan-state.mts \
+  --control-db-copy /absolute/offline/rai-control.sqlite
+```
+
+扫描 `mobile_training_state` 与 `mobile_training_state_history`；`affectedScopes` 去重。
+当前行和历史行分别计数，两个冲突来源分别输出。缺文件、缺表/列、非法 JSON、未知 schema 或无冲突但
+严格解析无效均明确失败，`complete:false`、`affectedScopes:null`，不能解读为零冲突。
+仅完整且无冲突时退出 0；有冲突或未完成检查退出 1。冲突行不宣称其他字段均有效。
+无 scope 的 goals 历史不猜测归属；本工具不替代 owner、冻结课程及迁移审计 digest 的完整验收。
+
+后续步骤：
+
+1. 取得一致副本并保留校验值；活动 WAL 数据库不能只复制主文件。
+2. 对副本审计所有 scope/revision，保留最小输出，再核对相关 goals 投影、历史、操作/发布回执和迁移审计。
+3. 逐日确认真实意图；无法解析、时间相同、证据矛盾或来源不可信时保持 unresolved，不自动决定。
+4. 另行设计、审查并授权修复 manifest、历史/身份/digest 关联处理和审计记录；在副本上验证单事务原子性、
+   故障回滚、幂等重放、严格读取及迁移 Preflight 后，才考虑生产窗口。
+
+`lockedAt` 的历史可信度不能由字段存在推定：旧 normalizer 会给缺失时间补当前时间。
+`availableAt` 是版本可用时间，身份迁移休息项来自整个快照的 `changed_at`，不是最后休息操作时间。
+完整未实施方案见 OPERATIONS 的 A-01 小节。
+
+## 验证结果
+
+环境：macOS / Darwin x86_64，Node v22.23.2；全部数据库测试使用临时合成数据。
+
+| 检查项目 | 结果 | 说明 |
+|---|---|---|
+| 类型检查 | PASS | `npm run typecheck`，两套 tsconfig，见 typecheck.log |
+| L1 定向测试 | PASS | 3 文件，27/27：A-01 新增 19 项 + 原 locked-rest 文件 8 项，见 l1.log |
+| L2 影响测试 | 初轮 FAIL；失败文件复验 PASS | 24 文件，初轮 345 PASS / 1 FAIL；修复合法 locked-rest 后原文件 8/8 PASS，已包含在 L1；未重跑整个 L2 批次，见 l2_initial.log |
+| L3 模块回归 | PASS | 全部 26 个 `training-plan-*.test.ts`，209/209，见 l3.log |
+| L4 全量测试 | NOT RUN | 未运行 npm test / test:all |
+| single-writer | PASS | `npm run check:training-plan-single-writer` |
+| 验收矩阵 | PASS | `npm run check:acceptance-matrix` |
+| 文档 | PASS | `npm run check:docs`、`npm run check:doc-refs`；行引用检查仍有既有告警，不证明内容漂移已核对 |
+| 最终差异 | PASS | git diff --check；原有 39 文件保留、37 文件内容不变 |
+| iOS 验证 | NOT RUN | 本轮未改 iOS；NOT VERIFIED — iOS source checks were not executed |
+| GitHub CI | NOT CHECKED | 未提交、未推送、未查询 CI |
+
+精确测试文件列表见 [l2-files.json](l2-files.json)、[l3-files.json](l3-files.json)。实际命令均为
+`node --import tsx --test --test-concurrency=2 <明确文件列表>`；L1 文件为上述两份新增测试和
+`apps/api/test/coach-loop-runtime-safety.test.ts`。未使用空列表或不存在的增量执行器。
+
+## 测试统计
+
+- 最终记录的 L1/L2/L3 批次共执行 582 次测试（含跨批次重复）；581 次通过、1 次初轮失败、0 跳过。
+- 去重覆盖 555 项测试；初轮唯一失败项已在未改断言的原文件复验通过，未遗留已知失败。
+- L1 11.733 秒；L2 初轮 392.058 秒；L3 45.616 秒；上述批次耗时相加 449.407 秒（不等于任务墙钟时间）。
+- 每批文件并发 2；L2 与部分验证有时间重叠。修复前红测和中间调试运行不计入上述最终批次统计。
+- 未覆盖：全仓回归、iOS/Xcode/真机、Linux 生产环境、真实生产副本数据兼容性。
+
+## 风险与剩余事项
+
+A-01 代码防护已完成，可进入代码审查；现有冲突数据仍保留，会继续阻断严格读取和身份迁移。
+真实生产副本尚未审计，不能证明生产零冲突；需要上述隔离核查及独立授权的修复阶段。
+L4、CI、真机和其他部署验收未完成，不满足合并/发布验收条件，不签收 V2 生产能力开启。
+原工作区其他任务改动保留，合并前还需审查组合差异。本阶段在 A-01 停止。

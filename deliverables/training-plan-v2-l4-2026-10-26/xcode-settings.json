@@ -1,0 +1,11 @@
+{
+  "name": "xcode-settings",
+  "argv": [
+    "python3",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/xcode-settings.py"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1793000021.688582,
+  "durationSeconds": 4.0680670738220215,
+  "exitCode": 0
+}

@@ -1,0 +1,12 @@
+{
+  "name": "smoke",
+  "argv": [
+    "npm",
+    "run",
+    "smoke:api"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792998908.249707,
+  "durationSeconds": 3.1854751110076904,
+  "exitCode": 0
+}

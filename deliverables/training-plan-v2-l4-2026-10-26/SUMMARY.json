@@ -1,0 +1,595 @@
+{
+  "head": "2e7c07bb66b3701c4e1b768c90f431b654584f5c",
+  "node": {
+    "files": 331,
+    "trackedFiles": 328,
+    "tests": 2854,
+    "passed": 2851,
+    "failed": 0,
+    "skipped": 3,
+    "cancelled": 0,
+    "exitCode": 0
+  },
+  "python": {
+    "passed": 32,
+    "failed": 0
+  },
+  "rust": {
+    "unitPassed": 2,
+    "parityPassed": 32,
+    "paritySkipped": 0
+  },
+  "swiftRegressionFiles": 33,
+  "iosSourceTypechecked": 103,
+  "fullAppSources": 106,
+  "simulatorBuild": "PASS",
+  "deviceBuild": "PASS",
+  "uiTestCompile": "PASS",
+  "uiTestExecution": "NOT RUN",
+  "uniqueAppSourceWarnings": 3,
+  "uiToolWarnings": 9,
+  "githubCI": "NOT CHECKED",
+  "actionlint": "NOT RUN: network timeout",
+  "workspace": {
+    "baselineFiles": 2651,
+    "unchangedFiles": 2651,
+    "changed": [],
+    "missing": [],
+    "newNonIgnoredFiles": [],
+    "removedNonIgnoredFiles": [],
+    "statusUnchanged": true,
+    "HEADUnchanged": true,
+    "diffCheckExitCode": 0,
+    "originalIOSandPodsFilesChecked": 495,
+    "originalIOSandPodsChanged": [],
+    "indexDiffEmpty": true
+  },
+  "commands": [
+    {
+      "name": "typecheck",
+      "argv": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997519.280339,
+      "durationSeconds": 26.14374589920044,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "typecheck.log",
+      "timeResource": {
+        "realSeconds": 26.11,
+        "userSeconds": 34.99,
+        "systemSeconds": 4.25,
+        "maxResidentSetBytes": 788447232
+      }
+    },
+    {
+      "name": "node-l4",
+      "argv": [
+        "npm",
+        "test"
+      ],
+      "envOverrides": {
+        "RAI_TEST_CONCURRENCY": "2"
+      },
+      "startedEpoch": 1792997560.3919811,
+      "durationSeconds": 1346.007069826126,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "node-l4.log",
+      "timeResource": {
+        "realSeconds": 1346.04,
+        "userSeconds": 1424.59,
+        "systemSeconds": 621.0,
+        "maxResidentSetBytes": 990396416
+      }
+    },
+    {
+      "name": "docs",
+      "argv": [
+        "npm",
+        "run",
+        "check:docs"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997634.806079,
+      "durationSeconds": 1.6877000331878662,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "docs.log",
+      "timeResource": {
+        "realSeconds": 1.66,
+        "userSeconds": 0.47,
+        "systemSeconds": 0.4,
+        "maxResidentSetBytes": 49737728
+      }
+    },
+    {
+      "name": "doc-refs",
+      "argv": [
+        "npm",
+        "run",
+        "check:doc-refs"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997636.7430432,
+      "durationSeconds": 1.5244946479797363,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "doc-refs.log",
+      "timeResource": {
+        "realSeconds": 1.5,
+        "userSeconds": 0.45,
+        "systemSeconds": 0.36,
+        "maxResidentSetBytes": 52723712
+      }
+    },
+    {
+      "name": "acceptance",
+      "argv": [
+        "npm",
+        "run",
+        "check:acceptance-matrix"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997638.494457,
+      "durationSeconds": 4.70488715171814,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "acceptance.log",
+      "timeResource": {
+        "realSeconds": 4.67,
+        "userSeconds": 1.07,
+        "systemSeconds": 0.73,
+        "maxResidentSetBytes": 89088000
+      }
+    },
+    {
+      "name": "scripts",
+      "argv": [
+        "npm",
+        "run",
+        "check:scripts"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997643.431136,
+      "durationSeconds": 1.3701171875,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "scripts.log",
+      "timeResource": {
+        "realSeconds": 1.35,
+        "userSeconds": 0.32,
+        "systemSeconds": 0.23,
+        "maxResidentSetBytes": 49639424
+      }
+    },
+    {
+      "name": "boundaries",
+      "argv": [
+        "npm",
+        "run",
+        "check:package-boundaries"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997645.0059588,
+      "durationSeconds": 1.1820993423461914,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "boundaries.log",
+      "timeResource": {
+        "realSeconds": 1.16,
+        "userSeconds": 0.35,
+        "systemSeconds": 0.26,
+        "maxResidentSetBytes": 49905664
+      }
+    },
+    {
+      "name": "boundaries-self",
+      "argv": [
+        "npm",
+        "run",
+        "check:package-boundaries",
+        "--",
+        "--self-test"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997646.330962,
+      "durationSeconds": 0.9249279499053955,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "boundaries-self.log",
+      "timeResource": {
+        "realSeconds": 0.89,
+        "userSeconds": 0.32,
+        "systemSeconds": 0.27,
+        "maxResidentSetBytes": 49774592
+      }
+    },
+    {
+      "name": "single-writer",
+      "argv": [
+        "npm",
+        "run",
+        "check:training-plan-single-writer"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997647.451298,
+      "durationSeconds": 2.921079158782959,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "single-writer.log",
+      "timeResource": {
+        "realSeconds": 2.43,
+        "userSeconds": 0.64,
+        "systemSeconds": 0.51,
+        "maxResidentSetBytes": 49688576
+      }
+    },
+    {
+      "name": "blob",
+      "argv": [
+        "node",
+        "scripts/check-blob-size.mjs"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997650.547979,
+      "durationSeconds": 2.910353899002075,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "blob.log",
+      "timeResource": {
+        "realSeconds": 1.83,
+        "userSeconds": 0.15,
+        "systemSeconds": 0.2,
+        "maxResidentSetBytes": 35876864
+      }
+    },
+    {
+      "name": "model-boundaries",
+      "argv": [
+        "npm",
+        "run",
+        "review:model-boundaries"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792997653.983327,
+      "durationSeconds": 24.521088123321533,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "model-boundaries.log",
+      "timeResource": {
+        "realSeconds": 23.47,
+        "userSeconds": 5.31,
+        "systemSeconds": 2.45,
+        "maxResidentSetBytes": 168144896
+      }
+    },
+    {
+      "name": "smoke",
+      "argv": [
+        "npm",
+        "run",
+        "smoke:api"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1792998908.249707,
+      "durationSeconds": 3.1854751110076904,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "smoke.log",
+      "timeResource": {
+        "realSeconds": 3.16,
+        "userSeconds": 2.74,
+        "systemSeconds": 1.02,
+        "maxResidentSetBytes": 182919168
+      }
+    },
+    {
+      "name": "ml-check",
+      "argv": [
+        "npm",
+        "run",
+        "ml:check"
+      ],
+      "envOverrides": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "startedEpoch": 1792998911.5484421,
+      "durationSeconds": 7.9137468338012695,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "ml-check.log",
+      "timeResource": {
+        "realSeconds": 7.89,
+        "userSeconds": 1.63,
+        "systemSeconds": 1.61,
+        "maxResidentSetBytes": 103055360
+      }
+    },
+    {
+      "name": "ml-test",
+      "argv": [
+        "npm",
+        "run",
+        "ml:test"
+      ],
+      "envOverrides": {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_ADDOPTS": "-o cache_dir=/tmp/rai-v2-l4-20261026-vczzvoi8/pytest-cache"
+      },
+      "startedEpoch": 1792998919.5823948,
+      "durationSeconds": 15.881115198135376,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "ml-test.log",
+      "timeResource": {
+        "realSeconds": 15.86,
+        "userSeconds": 9.02,
+        "systemSeconds": 3.25,
+        "maxResidentSetBytes": 125202432
+      }
+    },
+    {
+      "name": "rust-verify",
+      "argv": [
+        "npm",
+        "run",
+        "rust:verify"
+      ],
+      "envOverrides": {
+        "CARGO_TARGET_DIR": "/tmp/rai-v2-l4-20261026-vczzvoi8/rust-target",
+        "RAI_RUST_BINARY": "/tmp/rai-v2-l4-20261026-vczzvoi8/rust-target/release/rai-data-worker"
+      },
+      "startedEpoch": 1792998936.0885918,
+      "durationSeconds": 100.38790607452393,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "rust-verify.log",
+      "timeResource": {
+        "realSeconds": 100.36,
+        "userSeconds": 130.15,
+        "systemSeconds": 31.77,
+        "maxResidentSetBytes": 259616768
+      }
+    },
+    {
+      "name": "ios-gates",
+      "argv": [
+        "npm",
+        "run",
+        "check:ios-gates"
+      ],
+      "envOverrides": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "startedEpoch": 1792999036.614538,
+      "durationSeconds": 3.110835075378418,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "ios-gates.log",
+      "timeResource": {
+        "realSeconds": 2.98,
+        "userSeconds": 1.49,
+        "systemSeconds": 1.04,
+        "maxResidentSetBytes": 49786880
+      }
+    },
+    {
+      "name": "ios",
+      "argv": [
+        "npm",
+        "run",
+        "test:ios"
+      ],
+      "envOverrides": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "startedEpoch": 1792999039.860896,
+      "durationSeconds": 971.3239028453827,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "ios.log",
+      "timeResource": {
+        "realSeconds": 971.3,
+        "userSeconds": 683.05,
+        "systemSeconds": 158.69,
+        "maxResidentSetBytes": 6036328448
+      }
+    },
+    {
+      "name": "xcode-list",
+      "argv": [
+        "xcodebuild",
+        "-workspace",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI.xcworkspace",
+        "-list",
+        "-json"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000013.185802,
+      "durationSeconds": 8.391226053237915,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "xcode-list.log",
+      "timeResource": {
+        "realSeconds": 8.37,
+        "userSeconds": 2.24,
+        "systemSeconds": 3.5,
+        "maxResidentSetBytes": 107016192
+      }
+    },
+    {
+      "name": "xcode-settings",
+      "argv": [
+        "python3",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/xcode-settings.py"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000021.688582,
+      "durationSeconds": 4.0680670738220215,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "xcode-settings.log",
+      "timeResource": {
+        "realSeconds": 4.04,
+        "userSeconds": 1.73,
+        "systemSeconds": 1.06,
+        "maxResidentSetBytes": 110919680
+      }
+    },
+    {
+      "name": "app-simulator",
+      "argv": [
+        "xcodebuild",
+        "-workspace",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI.xcworkspace",
+        "-scheme",
+        "RAI",
+        "-sdk",
+        "iphonesimulator",
+        "-destination",
+        "generic/platform=iOS Simulator",
+        "-derivedDataPath",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/app-simulator",
+        "CODE_SIGNING_ALLOWED=NO",
+        "build"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000025.856435,
+      "durationSeconds": 165.13599395751953,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "app-simulator.log",
+      "timeResource": {
+        "realSeconds": 165.12,
+        "userSeconds": 2.24,
+        "systemSeconds": 1.64,
+        "maxResidentSetBytes": 112271360
+      }
+    },
+    {
+      "name": "app-device",
+      "argv": [
+        "xcodebuild",
+        "-workspace",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI.xcworkspace",
+        "-scheme",
+        "RAI",
+        "-sdk",
+        "iphoneos",
+        "-destination",
+        "generic/platform=iOS",
+        "-derivedDataPath",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device",
+        "CODE_SIGNING_ALLOWED=NO",
+        "build"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000193.99015,
+      "durationSeconds": 167.95188999176025,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "app-device.log",
+      "timeResource": {
+        "realSeconds": 167.93,
+        "userSeconds": 2.69,
+        "systemSeconds": 2.22,
+        "maxResidentSetBytes": 111296512
+      }
+    },
+    {
+      "name": "visual-compile",
+      "argv": [
+        "xcodebuild",
+        "-project",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/tests/VisualAcceptance.xcodeproj",
+        "-scheme",
+        "VisualAcceptance",
+        "-sdk",
+        "iphonesimulator",
+        "-destination",
+        "generic/platform=iOS Simulator",
+        "-derivedDataPath",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/visual-acceptance",
+        "CODE_SIGNING_ALLOWED=NO",
+        "build-for-testing"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000362.218336,
+      "durationSeconds": 34.74969482421875,
+      "exitCode": 0,
+      "cwd": "/Users/ta/running",
+      "log": "visual-compile.log",
+      "timeResource": {
+        "realSeconds": 34.72,
+        "userSeconds": 2.22,
+        "systemSeconds": 1.71,
+        "maxResidentSetBytes": 109207552
+      }
+    },
+    {
+      "name": "production-install",
+      "argv": [
+        "npm",
+        "ci",
+        "--omit=dev"
+      ],
+      "envOverrides": {
+        "ONNXRUNTIME_NODE_INSTALL": "skip"
+      },
+      "startedEpoch": 1793000397.165051,
+      "durationSeconds": 22.44121503829956,
+      "exitCode": 0,
+      "cwd": "/tmp/rai-v2-l4-20261026-vczzvoi8/production-source",
+      "log": "production-install.log",
+      "timeResource": {
+        "realSeconds": 22.42,
+        "userSeconds": 4.98,
+        "systemSeconds": 12.59,
+        "maxResidentSetBytes": 498368512
+      }
+    },
+    {
+      "name": "production-assert",
+      "argv": [
+        "python3",
+        "/tmp/rai-v2-l4-20261026-vczzvoi8/production-assert.py"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000419.737966,
+      "durationSeconds": 0.3325309753417969,
+      "exitCode": 0,
+      "cwd": "/tmp/rai-v2-l4-20261026-vczzvoi8/production-source",
+      "log": "production-assert.log",
+      "timeResource": {
+        "realSeconds": 0.13,
+        "userSeconds": 0.05,
+        "systemSeconds": 0.04,
+        "maxResidentSetBytes": 8171520
+      }
+    },
+    {
+      "name": "production-smoke",
+      "argv": [
+        "npm",
+        "run",
+        "smoke:api"
+      ],
+      "envOverrides": {},
+      "startedEpoch": 1793000420.2363489,
+      "durationSeconds": 6.839100122451782,
+      "exitCode": 0,
+      "cwd": "/tmp/rai-v2-l4-20261026-vczzvoi8/production-source",
+      "log": "production-smoke.log",
+      "timeResource": {
+        "realSeconds": 6.82,
+        "userSeconds": 4.66,
+        "systemSeconds": 3.0,
+        "maxResidentSetBytes": 202375168
+      }
+    }
+  ]
+}

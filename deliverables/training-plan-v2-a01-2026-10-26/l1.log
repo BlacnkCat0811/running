@@ -1,0 +1,178 @@
+TAP version 13
+# (node:86516) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: unsupported-race protection rejects both new and retained long runs in the last two days
+ok 1 - unsupported-race protection rejects both new and retained long runs in the last two days
+  ---
+  duration_ms: 922.835339
+  type: 'test'
+  ...
+# Subtest: today's locked rest is authoritative with or without a conflicting stored day
+ok 2 - today's locked rest is authoritative with or without a conflicting stored day
+  ---
+  duration_ms: 2977.04521
+  type: 'test'
+  ...
+# Subtest: a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+ok 3 - a complete locked course uses its own structure for execution and device evidence, without rewriting the stored day
+  ---
+  duration_ms: 2206.46561
+  type: 'test'
+  ...
+# Subtest: locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+ok 4 - locked short courses remain unchanged but cannot be silently upgraded to an automatic complete course
+  ---
+  duration_ms: 423.43632
+  type: 'test'
+  ...
+# Subtest: frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+ok 5 - frozen execution assessment and quality summary use the historical lock rather than a conflicting week row
+  ---
+  duration_ms: 239.165288
+  type: 'test'
+  ...
+# Subtest: HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+ok 6 - HTTP aggregates stay exactly seven days before opt-in, after publication and after restart; outside reservations still constrain budgets
+  ---
+  duration_ms: 975.623825
+  type: 'test'
+  ...
+# Subtest: an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+ok 7 - an eligible 30-minute extension replaces an unprotected 40-minute stored course and preserves its exact authorization on retry
+  ---
+  duration_ms: 1874.379684
+  type: 'test'
+  ...
+# Subtest: G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+ok 8 - G(guard): a control write during the coach-loop read fails closed with 503 coach_snapshot_changed
+  ---
+  duration_ms: 490.254914
+  type: 'test'
+  ...
+# (node:86517) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A-01: legal schema 1/2 locks and explicit rest remain readable without mutation
+ok 9 - A-01: legal schema 1/2 locks and explicit rest remain readable without mutation
+  ---
+  duration_ms: 32.819769
+  type: 'test'
+  ...
+# Subtest: A-01: schema 1 strict read rejects lock/rest without silently repairing history
+ok 10 - A-01: schema 1 strict read rejects lock/rest without silently repairing history
+  ---
+  duration_ms: 2.120712
+  type: 'test'
+  ...
+# Subtest: A-01: schema 2 strict read rejects lock/rest without silently repairing history
+ok 11 - A-01: schema 2 strict read rejects lock/rest without silently repairing history
+  ---
+  duration_ms: 0.471838
+  type: 'test'
+  ...
+# Subtest: A-01: current schema 1 conflict is diagnosed by inspect and apply writes nothing
+ok 12 - A-01: current schema 1 conflict is diagnosed by inspect and apply writes nothing
+  ---
+  duration_ms: 49.650976
+  type: 'test'
+  ...
+# Subtest: A-01: history schema 1 conflict is diagnosed by inspect and apply writes nothing
+ok 13 - A-01: history schema 1 conflict is diagnosed by inspect and apply writes nothing
+  ---
+  duration_ms: 40.204763
+  type: 'test'
+  ...
+# Subtest: A-01: legacy lock rejects a rest date before writing goals/history
+ok 14 - A-01: legacy lock rejects a rest date before writing goals/history
+  ---
+  duration_ms: 54.22157
+  type: 'test'
+  ...
+# Subtest: A-01: owner reconciliation rolls back a lock colliding with staged explicit rest
+ok 15 - A-01: owner reconciliation rolls back a lock colliding with staged explicit rest
+  ---
+  duration_ms: 74.808365
+  type: 'test'
+  ...
+# Subtest: A-01: resolver and protected budget reject an invalid typed lock/weekPlan rest before allocating
+ok 16 - A-01: resolver and protected budget reject an invalid typed lock/weekPlan rest before allocating
+  ---
+  duration_ms: 2.116633
+  type: 'test'
+  ...
+# Subtest: A-01: unified store refuses conflicting commands and strict database reads never alter stored bytes
+ok 17 - A-01: unified store refuses conflicting commands and strict database reads never alter stored bytes
+  ---
+  duration_ms: 43.608329
+  type: 'test'
+  ...
+# Subtest: A-01: legacy source migration classifies lock/rest as a conflict, never as an applicable state
+ok 18 - A-01: legacy source migration classifies lock/rest as a conflict, never as an applicable state
+  ---
+  duration_ms: 38.434978
+  type: 'test'
+  ...
+# Subtest: A-01: file-to-control bootstrap refuses a conflicting legacy lock and preserves the source file
+ok 19 - A-01: file-to-control bootstrap refuses a conflicting legacy lock and preserves the source file
+  ---
+  duration_ms: 36.412727
+  type: 'test'
+  ...
+# Subtest: A-01: a legal historical lock survives schema 1 to 2 migration with explicit rest on a different date
+ok 20 - A-01: a legal historical lock survives schema 1 to 2 migration with explicit rest on a different date
+  ---
+  duration_ms: 51.021792
+  type: 'test'
+  ...
+# Subtest: A-01: migration CLI dry-run/apply return structured conflict diagnostics and zero database writes
+ok 21 - A-01: migration CLI dry-run/apply return structured conflict diagnostics and zero database writes
+  ---
+  duration_ms: 1750.133626
+  type: 'test'
+  ...
+# Subtest: A-01: a legal legacy rest lock stays readable but identity migration refuses to invent conflicting explicit_rest
+ok 22 - A-01: a legal legacy rest lock stays readable but identity migration refuses to invent conflicting explicit_rest
+  ---
+  duration_ms: 49.637492
+  type: 'test'
+  ...
+# (node:86531) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A-01 audit: legal schema 1/2 history and locks report zero conflicts without file writes
+ok 23 - A-01 audit: legal schema 1/2 history and locks report zero conflicts without file writes
+  ---
+  duration_ms: 46.28858
+  type: 'test'
+  ...
+# Subtest: A-01 audit: both schemas, both conflict kinds and all historical scopes are reported with safe metadata
+ok 24 - A-01 audit: both schemas, both conflict kinds and all historical scopes are reported with safe metadata
+  ---
+  duration_ms: 31.200055
+  type: 'test'
+  ...
+# Subtest: A-01 audit: malformed JSON, unsupported schema and invalid state cannot be reported as clean
+ok 25 - A-01 audit: malformed JSON, unsupported schema and invalid state cannot be reported as clean
+  ---
+  duration_ms: 30.239319
+  type: 'test'
+  ...
+# Subtest: A-01 audit: missing file and incompatible table schema are explicit failures and never create a DB
+ok 26 - A-01 audit: missing file and incompatible table schema are explicit failures and never create a DB
+  ---
+  duration_ms: 21.344832
+  type: 'test'
+  ...
+# Subtest: A-01 audit CLI: explicit copy path, no environment dependency, nonzero on conflicts or incomplete audit; no apply mode
+ok 27 - A-01 audit CLI: explicit copy path, no environment dependency, nonzero on conflicts or incomplete audit; no apply mode
+  ---
+  duration_ms: 3384.031941
+  type: 'test'
+  ...
+1..27
+# tests 27
+# suites 0
+# pass 27
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11733.396268

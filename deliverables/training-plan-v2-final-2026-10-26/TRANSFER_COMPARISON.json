@@ -1,0 +1,307 @@
+{
+  ".gitignore": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "AGENTS.md": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/data.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/mobile-goals.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/schemas.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/server.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/session-structure.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-coordinator.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-execution-commands.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-execution-match.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-input-identity.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-routes.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-commands.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-migration.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-policy.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-state.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-store.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/data.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/direct-sync-handshake-capability.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/helpers/training-plan-crash-child.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/phase5-training-plan.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/schemas.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/session-structure.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-coordinator.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-execution-commands.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-execution-match.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-input-identity.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-commands.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-migration.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-policy.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-state.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-v2-route.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/APIClient.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/APIModels.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/NativeAppModel.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/PlanStatePolicy.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/Skins/Technology/TechPlanView.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/TrainingPlanExecutionPolicy.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/TrainingPlanStore.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/ModelRegression.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanExecutionRegression.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanStoreRegression.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanV2Regression.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/run-model-tests.sh": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "docs/OPERATIONS.md": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "packages/api-contracts/src/handshake-registry.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "packages/api-contracts/src/index.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "packages/api-contracts/src/training-plan-closed-loop.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "scripts/bench-training-plan-closed-loop.mjs": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "scripts/migrate-training-planner.mts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/src/training-plan-state-audit.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-execution-cursor-errors.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-history-compatibility.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/api/test/training-plan-state-audit.test.ts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanSessionEditorRegression.swift": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "apps/ios/tests/fixtures/training-session-distance-v1.json": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  },
+  "scripts/audit-training-plan-state.mts": {
+    "sha256Match": true,
+    "modeMatch": true,
+    "crlf": false
+  }
+}

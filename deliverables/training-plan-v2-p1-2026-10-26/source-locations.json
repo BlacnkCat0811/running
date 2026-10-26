@@ -1,0 +1,105 @@
+{
+  "apps/api/src/training-plan-execution-commands.ts": {
+    "private assertExecutionAuthority": [
+      136
+    ],
+    "private assessment": [
+      192
+    ],
+    "reconcileSourceChanges():": [
+      400
+    ],
+    "const factsBefore = facts.fingerprint()": [
+      408
+    ],
+    "rai-training-execution-reconcile-v2": [
+      428
+    ],
+    "ReconciliationNoChange": [
+      23,
+      485,
+      493
+    ],
+    "reconcile: () => withFactsLease": [
+      554
+    ]
+  },
+  "apps/api/src/training-plan-session-migration.ts": {
+    "suppressions = days.filter": [
+      191
+    ]
+  },
+  "apps/api/src/training-plan-session-state.ts": {
+    "lockedKind !== \"rest\"": [
+      34
+    ]
+  },
+  "apps/api/src/data.ts": {
+    "executionWorkout(id:": [
+      1976
+    ]
+  },
+  "apps/ios/RAI/NativeAppModel.swift": {
+    "var canLinkTrainingExecutions": [
+      1660
+    ],
+    "func previewTrainingSession": [
+      1902
+    ],
+    "func confirmTrainingSession": [
+      1912
+    ],
+    "func recoverTrainingPlanCommand": [
+      1975
+    ]
+  },
+  "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift": {
+    "private var draft:": [
+      66
+    ],
+    "private var draftIssue:": [
+      108
+    ],
+    "\u91cd\u65b0\u8bfb\u53d6\u5e76\u91cd\u5efa\u8349\u7a3f": [
+      220
+    ],
+    "private func initialize(reload:": [
+      285
+    ]
+  },
+  "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift": {
+    "struct DraftIdentity": [
+      9
+    ],
+    "static func compatibleDistance": [
+      75
+    ]
+  },
+  "apps/api/test/training-plan-execution-commands.test.ts": {
+    "EXEC-01:": [
+      599,
+      614
+    ],
+    "EXEC-02:": [
+      636,
+      668,
+      681
+    ],
+    "EXEC-03: recovery": [
+      798
+    ],
+    "EXEC-03: legacy": [
+      825
+    ]
+  },
+  "apps/ios/tests/ModelRegression.swift": {
+    "EDIT-01: production model": [
+      2828
+    ]
+  },
+  "packages/api-contracts/src/handshake-registry.ts": {
+    "key: \"trainingPlanSessionDistanceOmissionContractVersion\"": [
+      107
+    ]
+  }
+}

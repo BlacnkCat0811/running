@@ -1,0 +1,148 @@
+TAP version 13
+# (node:18426) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A-01: legal schema 1/2 locks and explicit rest remain readable without mutation
+ok 1 - A-01: legal schema 1/2 locks and explicit rest remain readable without mutation
+  ---
+  duration_ms: 38.321229
+  type: 'test'
+  ...
+# Subtest: A-01: schema 1 strict read rejects lock/rest without silently repairing history
+ok 2 - A-01: schema 1 strict read rejects lock/rest without silently repairing history
+  ---
+  duration_ms: 0.598638
+  type: 'test'
+  ...
+# Subtest: A-01: schema 2 strict read rejects lock/rest without silently repairing history
+ok 3 - A-01: schema 2 strict read rejects lock/rest without silently repairing history
+  ---
+  duration_ms: 0.534658
+  type: 'test'
+  ...
+# Subtest: A-01: current schema 1 conflict is diagnosed by inspect and apply writes nothing
+ok 4 - A-01: current schema 1 conflict is diagnosed by inspect and apply writes nothing
+  ---
+  duration_ms: 88.40736
+  type: 'test'
+  ...
+# Subtest: A-01: history schema 1 conflict is diagnosed by inspect and apply writes nothing
+ok 5 - A-01: history schema 1 conflict is diagnosed by inspect and apply writes nothing
+  ---
+  duration_ms: 35.536409
+  type: 'test'
+  ...
+# Subtest: A-01: legacy lock rejects a rest date before writing goals/history
+ok 6 - A-01: legacy lock rejects a rest date before writing goals/history
+  ---
+  duration_ms: 32.658054
+  type: 'test'
+  ...
+# Subtest: A-01: owner reconciliation rolls back a lock colliding with staged explicit rest
+ok 7 - A-01: owner reconciliation rolls back a lock colliding with staged explicit rest
+  ---
+  duration_ms: 51.524365
+  type: 'test'
+  ...
+# Subtest: A-01: resolver and protected budget reject an invalid typed lock/weekPlan rest before allocating
+ok 8 - A-01: resolver and protected budget reject an invalid typed lock/weekPlan rest before allocating
+  ---
+  duration_ms: 1.3284
+  type: 'test'
+  ...
+# Subtest: A-01: unified store refuses conflicting commands and strict database reads never alter stored bytes
+ok 9 - A-01: unified store refuses conflicting commands and strict database reads never alter stored bytes
+  ---
+  duration_ms: 36.621741
+  type: 'test'
+  ...
+# Subtest: A-01: legacy source migration classifies lock/rest as a conflict, never as an applicable state
+ok 10 - A-01: legacy source migration classifies lock/rest as a conflict, never as an applicable state
+  ---
+  duration_ms: 29.547031
+  type: 'test'
+  ...
+# Subtest: A-01: file-to-control bootstrap refuses a conflicting legacy lock and preserves the source file
+ok 11 - A-01: file-to-control bootstrap refuses a conflicting legacy lock and preserves the source file
+  ---
+  duration_ms: 35.278369
+  type: 'test'
+  ...
+# Subtest: A-01: a legal historical lock survives schema 1 to 2 migration with explicit rest on a different date
+ok 12 - A-01: a legal historical lock survives schema 1 to 2 migration with explicit rest on a different date
+  ---
+  duration_ms: 43.214021
+  type: 'test'
+  ...
+# Subtest: A-01: migration CLI dry-run/apply return structured conflict diagnostics and zero database writes
+ok 13 - A-01: migration CLI dry-run/apply return structured conflict diagnostics and zero database writes
+  ---
+  duration_ms: 1640.067687
+  type: 'test'
+  ...
+# Subtest: A-01-01: legal rest lock migrates deterministically without duplicate explicit_rest and keeps history
+not ok 14 - A-01-01: legal rest lock migrates deterministically without duplicate explicit_rest and keeps history
+  ---
+  duration_ms: 40.086382
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:11456'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:229:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# (node:18427) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A-01 audit: legal schema 1/2 history and locks report zero conflicts without file writes
+ok 15 - A-01 audit: legal schema 1/2 history and locks report zero conflicts without file writes
+  ---
+  duration_ms: 46.25742
+  type: 'test'
+  ...
+# Subtest: A-01 audit: both schemas, both conflict kinds and all historical scopes are reported with safe metadata
+ok 16 - A-01 audit: both schemas, both conflict kinds and all historical scopes are reported with safe metadata
+  ---
+  duration_ms: 32.014862
+  type: 'test'
+  ...
+# Subtest: A-01 audit: malformed JSON, unsupported schema and invalid state cannot be reported as clean
+ok 17 - A-01 audit: malformed JSON, unsupported schema and invalid state cannot be reported as clean
+  ---
+  duration_ms: 49.579207
+  type: 'test'
+  ...
+# Subtest: A-01 audit: missing file and incompatible table schema are explicit failures and never create a DB
+ok 18 - A-01 audit: missing file and incompatible table schema are explicit failures and never create a DB
+  ---
+  duration_ms: 28.068097
+  type: 'test'
+  ...
+# Subtest: A-01 audit CLI: explicit copy path, no environment dependency, nonzero on conflicts or incomplete audit; no apply mode
+ok 19 - A-01 audit CLI: explicit copy path, no environment dependency, nonzero on conflicts or incomplete audit; no apply mode
+  ---
+  duration_ms: 2227.812202
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 18
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2958.372549

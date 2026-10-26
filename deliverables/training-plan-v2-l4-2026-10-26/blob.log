@@ -1,0 +1,17 @@
+blob 体积闸门：2410 个已跟踪文件全部 ≤ 1500000 bytes
+        1.83 real         0.15 user         0.20 sys
+            35876864  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               15413  page reclaims
+                  75  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   6  messages sent
+                   6  messages received
+                   0  signals received
+                  12  voluntary context switches
+                 539  involuntary context switches
+            12644352  peak memory footprint

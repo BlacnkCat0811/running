@@ -1,0 +1,2 @@
+main/RedSkipRegression.swift:248: Precondition failed: I-01: a nonempty candidate page must issue zero Skip requests
+/tmp/rai-i01-red-model.sh: line 43:  2108 Illegal instruction: 4  "$tmp/model-tests"

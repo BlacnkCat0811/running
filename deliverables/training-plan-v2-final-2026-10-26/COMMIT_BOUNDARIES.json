@@ -1,0 +1,15 @@
+{
+  "strategy": "B08 is isolated with exact frozen fragments; remaining A01, distance, Skip, structure and P1 changes are atomic because command, DTO, UI, fixtures and shared regression units depend on one another. Actor change remains separate. No historical intermediate defect is recreated.",
+  "files": [
+    "apps/api/src/mobile-goals.ts",
+    "apps/api/src/server.ts",
+    "apps/api/src/data.ts",
+    "apps/api/src/training-plan-session-commands.ts",
+    "apps/ios/RAI/NativeAppModel.swift",
+    "apps/ios/RAI/APIModels.swift",
+    "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift",
+    "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift",
+    "apps/ios/tests/ModelRegression.swift",
+    "packages/api-contracts/src/training-plan-closed-loop.ts"
+  ]
+}

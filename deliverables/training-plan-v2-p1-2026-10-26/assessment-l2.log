@@ -1,0 +1,70 @@
+TAP version 13
+# Subtest: AC2-01/04: observed light running and reconstructed groups cannot certify intervals
+ok 1 - AC2-01/04: observed light running and reconstructed groups cannot certify intervals
+  ---
+  duration_ms: 30.653406
+  type: 'test'
+  ...
+# Subtest: AC2-02/03: no record is unknown; strong dose with no signal stays unconfirmed
+ok 2 - AC2-02/03: no record is unknown; strong dose with no signal stays unconfirmed
+  ---
+  duration_ms: 1.431165
+  type: 'test'
+  ...
+# Subtest: AC2-05: 89.9/90% per-group dose and 79.9/80% signal coverage boundaries are independent
+ok 3 - AC2-05: 89.9/90% per-group dose and 79.9/80% signal coverage boundaries are independent
+  ---
+  duration_ms: 4.333864
+  type: 'test'
+  ...
+# Subtest: AC2-06: recovery run too fast is too hard, never improved completion credit
+ok 4 - AC2-06: recovery run too fast is too hard, never improved completion credit
+  ---
+  duration_ms: 3.968375
+  type: 'test'
+  ...
+# Subtest: AC2-07: one associated run is not combined with another; many obligations cannot reuse a run
+ok 5 - AC2-07: one associated run is not combined with another; many obligations cannot reuse a run
+  ---
+  duration_ms: 4.105395
+  type: 'test'
+  ...
+# Subtest: AC2-08: late training/signals, retracted receipts and after-the-run prescriptions cannot rewrite past evidence
+ok 6 - AC2-08: late training/signals, retracted receipts and after-the-run prescriptions cannot rewrite past evidence
+  ---
+  duration_ms: 1.745343
+  type: 'test'
+  ...
+# Subtest: actual work cannot pool one long group into four reps; missing recoveries and partial steps remain bounded
+ok 7 - actual work cannot pool one long group into four reps; missing recoveries and partial steps remain bounded
+  ---
+  duration_ms: 3.336147
+  type: 'test'
+  ...
+# Subtest: corrupt/overlapping signals cannot fake 80% coverage; interval HR without lag policy does not confirm
+ok 8 - corrupt/overlapping signals cannot fake 80% coverage; interval HR without lag policy does not confirm
+  ---
+  duration_ms: 2.356302
+  type: 'test'
+  ...
+# Subtest: rest is not applicable; input stays immutable and candidate conclusions are deterministic
+ok 9 - rest is not applicable; input stays immutable and candidate conclusions are deterministic
+  ---
+  duration_ms: 10.59266
+  type: 'test'
+  ...
+# Subtest: candidate quality summary preserves observed semantics, unknown denominator and one frozen fact clock
+ok 10 - candidate quality summary preserves observed semantics, unknown denominator and one frozen fact clock
+  ---
+  duration_ms: 7.460128
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 827.221082

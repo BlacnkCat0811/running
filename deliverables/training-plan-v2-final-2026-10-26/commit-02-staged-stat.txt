@@ -1,0 +1,14 @@
+ apps/api/src/training-plan-coordinator.ts          |  15 ++-
+ apps/api/src/training-plan-input-identity.ts       |  35 +++++-
+ apps/api/src/training-plan-routes.ts               |  17 +--
+ apps/api/test/data.test.ts                         |  45 +++++++
+ apps/api/test/training-plan-coordinator.test.ts    |  23 ++++
+ apps/api/test/training-plan-input-identity.test.ts |  34 +++++-
+ apps/api/test/training-plan-v2-route.test.ts       |  31 ++++-
+ apps/ios/RAI/PlanStatePolicy.swift                 |  82 ++++++++++++-
+ apps/ios/RAI/TrainingPlanStore.swift               |   6 +-
+ apps/ios/tests/TrainingPlanStoreRegression.swift   |  37 ++++++
+ apps/ios/tests/TrainingPlanV2Regression.swift      | 131 ++++++++++++++++++++-
+ docs/IOS_NATIVE_API_CONTRACT.md                    |  10 +-
+ packages/api-contracts/src/index.ts                |   6 +
+ 13 files changed, 444 insertions(+), 28 deletions(-)

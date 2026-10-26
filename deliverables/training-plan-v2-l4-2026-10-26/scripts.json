@@ -1,0 +1,12 @@
+{
+  "name": "scripts",
+  "argv": [
+    "npm",
+    "run",
+    "check:scripts"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997643.431136,
+  "durationSeconds": 1.3701171875,
+  "exitCode": 0
+}

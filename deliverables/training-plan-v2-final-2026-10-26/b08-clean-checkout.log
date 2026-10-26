@@ -1,0 +1,238 @@
+TAP version 13
+# (node:69709) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: recent weekly volume uses four complete calendar weeks without dropping empty weeks
+ok 1 - recent weekly volume uses four complete calendar weeks without dropping empty weeks
+  ---
+  duration_ms: 24.919568
+  type: 'test'
+  ...
+# Subtest: recent weekly volume keeps a stable Monday boundary across weekdays and years
+ok 2 - recent weekly volume keeps a stable Monday boundary across weekdays and years
+  ---
+  duration_ms: 0.661297
+  type: 'test'
+  ...
+# Subtest: recovery trends batch date ranges without losing gaps, leap days or timezone isolation
+ok 3 - recovery trends batch date ranges without losing gaps, leap days or timezone isolation
+  ---
+  duration_ms: 426.402548
+  type: 'test'
+  ...
+# Subtest: maps active SQLite results into Web API DTOs
+ok 4 - maps active SQLite results into Web API DTOs
+  ---
+  duration_ms: 1149.175415
+  type: 'test'
+  ...
+# Subtest: diagnostics aggregates tombstone and supersede counts from import batch summaries
+ok 5 - diagnostics aggregates tombstone and supersede counts from import batch summaries
+  ---
+  duration_ms: 663.202927
+  type: 'test'
+  ...
+# Subtest: uses stored Shanghai local dates for trend windows and context
+ok 6 - uses stored Shanghai local dates for trend windows and context
+  ---
+  duration_ms: 721.304027
+  type: 'test'
+  ...
+# Subtest: omits kilometer splits when running-speed coverage cannot represent the workout
+ok 7 - omits kilometer splits when running-speed coverage cannot represent the workout
+  ---
+  duration_ms: 837.669768
+  type: 'test'
+  ...
+# Subtest: does not double-count overlapping running-speed records in kilometer splits
+ok 8 - does not double-count overlapping running-speed records in kilometer splits
+  ---
+  duration_ms: 904.987735
+  type: 'test'
+  ...
+# Subtest: includes metric intervals crossing the workout start in the first kilometer split
+ok 9 - includes metric intervals crossing the workout start in the first kilometer split
+  ---
+  duration_ms: 766.082012
+  type: 'test'
+  ...
+# Subtest: infers intervals for point and invalid end timestamps inside a workout
+ok 10 - infers intervals for point and invalid end timestamps inside a workout
+  ---
+  duration_ms: 754.089302
+  type: 'test'
+  ...
+# Subtest: refreshes cached summaries after another connection commits
+ok 11 - refreshes cached summaries after another connection commits
+  ---
+  duration_ms: 1200.472346
+  type: 'test'
+  ...
+# Subtest: bounds workout route and metric samples in SQL while preserving totals and endpoints
+ok 12 - bounds workout route and metric samples in SQL while preserving totals and endpoints
+  ---
+  duration_ms: 2225.51364
+  type: 'test'
+  ...
+# Subtest: record type audit is answered by a covering type-prefixed index
+ok 13 - record type audit is answered by a covering type-prefixed index
+  ---
+  duration_ms: 579.519245
+  type: 'test'
+  ...
+# Subtest: PR5 C3：软删的训练从**事实侧**汇总里消失，数字等于删除前减去该训练
+ok 14 - PR5 C3：软删的训练从**事实侧**汇总里消失，数字等于删除前减去该训练
+  ---
+  duration_ms: 739.720744
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: record-only raw generation and canonical updated_at rewrites do not move the desired input key
+ok 15 - B08/S04-01: record-only raw generation and canonical updated_at rewrites do not move the desired input key
+  ---
+  duration_ms: 642.575742
+  type: 'test'
+  ...
+# Subtest: 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+ok 16 - 刷新决策：未迁移/暂停/当前都不刷新；缺少上下文摘要与配置漂移要刷新
+  ---
+  duration_ms: 40.450051
+  type: 'test'
+  ...
+# Subtest: B08/S04-01/03: analysis pending blocks every reason that would otherwise publish
+ok 17 - B08/S04-01/03: analysis pending blocks every reason that would otherwise publish
+  ---
+  duration_ms: 4.139604
+  type: 'test'
+  ...
+# Subtest: 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+ok 18 - 七日窗口（D5-D）：任一已发布日期命中即 current，缺失日期不补成休息
+  ---
+  duration_ms: 0.428089
+  type: 'test'
+  ...
+# Subtest: 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+ok 19 - 自动刷新操作键可推导：同输入同键，日期/revision/原因变化都变键
+  ---
+  duration_ms: 7.959401
+  type: 'test'
+  ...
+# Subtest: 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+ok 20 - 协调器单飞：并发的两次 tick 只跑一次刷新；跳过的那次不丢下一次决策
+  ---
+  duration_ms: 4.316924
+  type: 'test'
+  ...
+# Subtest: 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+ok 21 - 协调器：不需要刷新的 scope 不调用刷新，也不写任何东西
+  ---
+  duration_ms: 0.227899
+  type: 'test'
+  ...
+# Subtest: B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats
+ok 22 - B08/S04-01/03: a changed desired input triggers one input_changed refresh; the durable cursor stops repeats
+  ---
+  duration_ms: 0.951956
+  type: 'test'
+  ...
+# Subtest: B08: the automatic operation key changes with the input identity, not only the state revision
+ok 23 - B08: the automatic operation key changes with the input identity, not only the state revision
+  ---
+  duration_ms: 0.251969
+  type: 'test'
+  ...
+# (node:69713) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B08/S04-01: the same inputs under an advancing wall clock produce the same key; output revisions are excluded
+ok 24 - B08/S04-01: the same inputs under an advancing wall clock produce the same key; output revisions are excluded
+  ---
+  duration_ms: 56.493632
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: semantic fact/release/config/override/execution changes move the key
+ok 25 - B08/S04-01: semantic fact/release/config/override/execution changes move the key
+  ---
+  duration_ms: 3.267497
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: raw import generation and updated_at are not content identity
+ok 26 - B08/S04-01: raw import generation and updated_at are not content identity
+  ---
+  duration_ms: 5.689249
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: record-only updates and unrelated record fields do not enter the facts digest
+ok 27 - B08/S04-01: record-only updates and unrelated record fields do not enter the facts digest
+  ---
+  duration_ms: 0.648167
+  type: 'test'
+  ...
+# Subtest: B08/S04-01: automatic pending prescriptions are output, protected courses and suppressions are user decisions
+ok 28 - B08/S04-01: automatic pending prescriptions are output, protected courses and suppressions are user decisions
+  ---
+  duration_ms: 0.529968
+  type: 'test'
+  ...
+# (node:69715) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+ok 29 - 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+  ---
+  duration_ms: 2.449601
+  type: 'test'
+  ...
+# Subtest: v2 投影：模式按业务日期派生，读取不带执行授权
+ok 30 - v2 投影：模式按业务日期派生，读取不带执行授权
+  ---
+  duration_ms: 11.644788
+  type: 'test'
+  ...
+# Subtest: v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+ok 31 - v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+  ---
+  duration_ms: 0.317759
+  type: 'test'
+  ...
+# Subtest: v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+ok 32 - v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+  ---
+  duration_ms: 12.515863
+  type: 'test'
+  ...
+# Subtest: 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+ok 33 - 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+  ---
+  duration_ms: 521.115171
+  type: 'test'
+  ...
+# Subtest: 路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖
+ok 34 - 路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖
+  ---
+  duration_ms: 10.169523
+  type: 'test'
+  ...
+# Subtest: 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+ok 35 - 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+  ---
+  duration_ms: 14.270628
+  type: 'test'
+  ...
+# Subtest: 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+ok 36 - 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+  ---
+  duration_ms: 73.454158
+  type: 'test'
+  ...
+# Subtest: 未迁移的 store 读返回 null（不是伪造的空状态）
+ok 37 - 未迁移的 store 读返回 null（不是伪造的空状态）
+  ---
+  duration_ms: 44.531437
+  type: 'test'
+  ...
+1..37
+# tests 37
+# suites 0
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 14900.728411

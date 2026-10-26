@@ -1,0 +1,23 @@
+{
+  "discoveredCount": 331,
+  "trackedCount": 331,
+  "newTests": [
+    {
+      "path": "apps/api/test/training-plan-execution-cursor-errors.test.ts",
+      "tracked": true,
+      "discovered": true
+    },
+    {
+      "path": "apps/api/test/training-plan-history-compatibility.test.ts",
+      "tracked": true,
+      "discovered": true
+    },
+    {
+      "path": "apps/api/test/training-plan-state-audit.test.ts",
+      "tracked": true,
+      "discovered": true
+    }
+  ],
+  "missingTracked": [],
+  "evidenceTestCopies": []
+}

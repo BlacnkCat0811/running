@@ -1,0 +1,11 @@
+{
+  "name": "blob",
+  "argv": [
+    "node",
+    "scripts/check-blob-size.mjs"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997650.547979,
+  "durationSeconds": 2.910353899002075,
+  "exitCode": 0
+}

@@ -1,0 +1,23 @@
+{
+  "app-simulator": [
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:39: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:91: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:308:100: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context"
+  ],
+  "app-device": [
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:39: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:307:91: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI/Skins/Technology/TechTrainingSessionEditor.swift:308:100: warning: call to main actor-isolated initializer 'init(_:)' in a synchronous nonisolated context"
+  ],
+  "visual-compile": [
+    "2026-10-26 15:39:55.592 appintentsmetadataprocessor[54987:11276752] warning: Metadata extraction skipped. No AppIntents.framework dependency found.",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCUnit.framework/XCUnit (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCUIAutomation.framework/XCUIAutomation (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestSupport.framework/XCTestSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTestCore.framework/XCTestCore (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/XCTest.framework/XCTest (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/PrivateFrameworks/XCTAutomationSupport.framework/XCTAutomationSupport (in target 'VisualAcceptance' from project 'VisualAcceptance')",
+    "warning: not stripping binary because it is signed: /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks/Testing.framework/Testing (in target 'VisualAcceptance' from project 'VisualAcceptance')"
+  ]
+}

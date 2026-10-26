@@ -1,0 +1,11 @@
+{
+  "name": "production-assert",
+  "argv": [
+    "python3",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/production-assert.py"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1793000419.737966,
+  "durationSeconds": 0.3325309753417969,
+  "exitCode": 0
+}

@@ -1,0 +1,12 @@
+{
+  "name": "doc-refs",
+  "argv": [
+    "npm",
+    "run",
+    "check:doc-refs"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997636.7430432,
+  "durationSeconds": 1.5244946479797363,
+  "exitCode": 0
+}

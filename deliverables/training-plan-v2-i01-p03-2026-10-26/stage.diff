@@ -1,0 +1,577 @@
+--- before/apps/api/src/mobile-goals.ts
++++ after/apps/api/src/mobile-goals.ts
+@@ -308,6 +308,7 @@
+   private stagedSessionFields: { sessions: TrainingPlanSessionState["sessions"]; suppressions: TrainingPlanSessionState["suppressions"];
+     archivedSessionIds: readonly string[] } | null = null;
+   private publicationTransaction = false;
++  private publicationCommitChecks: Array<() => void> = [];
+   private readonly filePath: string;
+   private readonly controlDatabase: DatabaseSync | null;
+   private cached: StoredGoals | null = null;
+@@ -624,6 +625,15 @@
+     }
+   }
+ 
++  /** Register a final cross-store check after all business/result writes and owner reconciliation.
++   * The caller must hold the existing main-DB mutation lease through COMMIT:
++   * this control transaction alone cannot prevent a main-library writer.
++   */
++  beforePublicationCommit(check: () => void): void {
++    if (!this.publicationTransaction) throw new Error("Commit checks require a publication transaction");
++    this.publicationCommitChecks.push(check);
++  }
++
+   /** Commits the guard marker before the guarded business transaction starts. */
+   private beginPublicationMarker(): void {
+     const database = this.controlDatabase!;
+@@ -662,6 +672,7 @@
+     try {
+       const result = fn();
+       this.reconcileTrainingPlanOwner();
++      for (const check of this.publicationCommitChecks) check();
+       database.exec("COMMIT");
+       return result;
+     } catch (error) {
+@@ -671,6 +682,7 @@
+       throw mapDatabaseBusy(error);
+     } finally {
+       this.publicationTransaction = false;
++      this.publicationCommitChecks = [];
+       this.stagedCoachReceipt = null;
+       this.stagedSessionFields = null;
+     }
+--- before/apps/api/src/training-plan-execution-commands.ts
++++ after/apps/api/src/training-plan-execution-commands.ts
+@@ -11,7 +11,7 @@
+ import { parseTrainingPlanState, type TrainingPlanSessionState } from "./training-plan-store.js";
+ import { isValidLocalDate } from "./local-date.js";
+ import { sessionId, sessionRevision, TrainingPlanSessionStateError } from "./training-plan-session-state.js";
+-import { lifecycleForAssessment, pageExecutionCandidates, resolveExecutionRange, shiftLocalDate, type ExecutionFact } from "./training-plan-execution-match.js";
++import { factsInRange, lifecycleForAssessment, pageExecutionCandidates, resolveExecutionRange, shiftLocalDate, type ExecutionFact } from "./training-plan-execution-match.js";
+ import type { TrainingPlanExecutionRow } from "./training-plan-execution-repository.js";
+ import { internalErrorLogDetail } from "./training-plan-commands.js";
+ 
+@@ -228,11 +228,13 @@
+     const request = parseTrainingExecutionRequest(raw);
+     const replay = this.replay(request);
+     if (replay !== null) return replay;
+-    const needsFacts = request.draft.action === "confirm" || request.draft.action === "correct";
++    const needsFacts = request.draft.action !== "retract";
+     const facts = needsFacts ? this.facts() : null;
+     return new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, request, () => {
+       const current = this.current(request);
+-      const fingerprint = facts?.fingerprint() ?? "";
++      // Skip takes its fingerprint after the pending/link guards below, so an
++      // already completed course keeps the existing rejection semantics.
++      const fingerprint = request.draft.action === "skip" ? "" : facts?.fingerprint() ?? "";
+       const draft = request.draft as TrainingPlanExecutionDraft;
+       const linksExecution = draft.action !== "retract";
+       const session = linksExecution ? this.executableSession(current.state, request.sessionId)
+@@ -256,6 +258,25 @@
+         if (currentExecution?.execution.association === "confirmed") {
+           conflict("training_execution_link_conflict", "已确认实际训练的课程不能跳过；请先撤回关联。");
+         }
++        const skipFacts = facts!;
++        const before = skipFacts.fingerprint();
++        // Same unpaginated default ±2-day window as the candidate page. A wider
++        // user search must not silently redefine the server's Skip eligibility.
++        const range = resolveExecutionRange(target.prescription.localDate);
++        const candidates = factsInRange(skipFacts.candidates(range.rangeStart, range.rangeEnd), range);
++        const assertUnchanged = () => {
++          if (skipFacts.fingerprint() !== before) {
++            conflict("training_execution_source_changed", "跳过提交前训练事实发生变化，请刷新候选后重试。");
++          }
++        };
++        assertUnchanged();
++        if (candidates.length > 0) {
++          conflict("training_execution_candidates_present", "课程候选窗口内已有实际跑步，不能跳过；请刷新候选并确认关联。");
++        }
++        // Runs after state/history/operation-result writes, immediately before
++        // the control COMMIT. The HTTP owner holds the shared facts lease until
++        // publish returns; no supported main-DB writer can enter this gap.
++        this.store.beforePublicationCommit(assertUnchanged);
+         target.lifecycle = "skipped";
+         target.sessionRevision += 1;
+         target.availableAt = now;
+@@ -449,9 +470,10 @@
+       const replay = service.replay(body);
+       if (replay !== null) return replay;
+       admit(request);
+-      // Retract/skip are metadata-only: they remain available while a sync holds
+-      // the facts lease, and must not be blocked by an import in progress.
+-      return body.draft.action === "retract" || body.draft.action === "skip"
++      // Skip must hold the same mutation lease as fact writers across candidate
++      // validation and the entire control publication (including COMMIT).
++      // Retract uses saved identity and remains metadata-only.
++      return body.draft.action === "retract"
+         ? await service.submit(body) : await withFactsLease(async () => service.submit(body));
+     } catch (error) {
+       if (error instanceof PlanOperationError) return reply.code(error.statusCode).send({ code: error.code, message: error.message });
+--- before/apps/api/test/training-plan-execution-commands.test.ts
++++ after/apps/api/test/training-plan-execution-commands.test.ts
+@@ -6,10 +6,15 @@
+ import { join } from "node:path";
+ import { DatabaseSync } from "node:sqlite";
+ import type { MobilePlannedDay, TrainingPlanExecutionCommandRequest, TrainingPlanSession } from "@rai/api-contracts";
++import type { FastifyReply, FastifyRequest } from "fastify";
++import { RaiDatabase } from "@rai/storage-sqlite";
++import { ReadStoreManager } from "../src/read-store-manager.js";
++import { MutationCoordinator } from "../src/mutation-coordinator.js";
++import { TaskAdmissionScheduler } from "../src/task-admission.js";
+ import { MobileGoalsStore } from "../src/mobile-goals.js";
+ import { parseTrainingPlanState, TrainingPlanStore, type TrainingPlanSessionState } from "../src/training-plan-store.js";
+ import {
+-  TrainingPlanExecutionCommandService, parseTrainingExecutionRequest, type ExecutionCommandFacts
++  TrainingPlanExecutionCommandService, createTrainingExecutionCommandHandlers, parseTrainingExecutionRequest, type ExecutionCommandFacts
+ } from "../src/training-plan-execution-commands.js";
+ import { executionFactDigest, type ExecutionFact } from "../src/training-plan-execution-match.js";
+ import { PlanOperationError } from "../src/plan-publication.js";
+@@ -228,9 +233,12 @@
+ test("B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run", () => {
+   const f = setup();
+   try {
++    const priorFacts = f.facts();
++    f.setFacts([]);
+     const skipped = f.execute({ action: "skip", reason: "临时出差" }, "synthetic-interval-session");
+     assert.equal(skipped.session!.lifecycle, "skipped");
+     assert.equal(skipped.execution, null);
++    f.setFacts(priorFacts);
+     assert.throws(() => f.execute({ action: "confirm", trainingSessionId: "run-hard",
+       sourceFactDigest: f.facts()[1]!.sourceFactDigest }, "synthetic-interval-session"), code("training_session_not_editable"));
+     f.execute({ action: "confirm", trainingSessionId: "run-easy", sourceFactDigest: f.facts()[0]!.sourceFactDigest });
+@@ -409,3 +417,166 @@
+       "the run freezes the revision that was actually published before it started");
+   } finally { f.close(); }
+ });
++
++// I-01/P-03: real main-library facts and control publications use separate SQLite files.
++async function skipFixture() {
++  const f = setup();
++  const main = await RaiDatabase.open(join(f.root, "facts.sqlite"));
++  const reads = new ReadStoreManager(join(f.root, "facts.sqlite"));
++  const provider: ExecutionCommandFacts = {
++    fingerprint: () => reads.dataVersionFingerprint(),
++    candidates: (start, end) => reads.use(store => store.executionCandidateFacts(start, end)),
++    workout: () => null
++  };
++  const service = new TrainingPlanExecutionCommandService(f.goals, () => scope, () => businessDate, () => provider, () => f.now());
++  const control = (f.goals as unknown as { controlDatabase: DatabaseSync }).controlDatabase;
++  const addRun = (startedAt = "2026-10-28T00:00:00.000Z") => {
++    const endedAt = new Date(Date.parse(startedAt) + 1800_000).toISOString();
++    main.database.prepare(`INSERT INTO workouts(id,activity_type,source_name,source_category,source_version,device,
++      start_at,end_at,duration_seconds,indoor,metadata_json,raw_attributes_json,is_canonical)
++      VALUES ('skip-workout','HKWorkoutActivityTypeRunning','Fixture','apple_watch','1','Watch',?,?,1800,0,'{}','{}',1)`)
++      .run(startedAt, endedAt);
++    main.database.prepare(`INSERT INTO training_sessions(id,activity_type,anchor_start_at,anchor_end_at,
++      anchor_distance_km,canonical_workout_id,status) VALUES ('skip-run','HKWorkoutActivityTypeRunning',?,?,5,'skip-workout','active')`)
++      .run(startedAt, endedAt);
++  };
++  const snapshot = () => Object.fromEntries(["mobile_training_state", "mobile_training_state_history",
++    "mobile_training_session_history", "mobile_training_execution", "mobile_training_execution_history",
++    "mobile_plan_operations"].map(table => [table, f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
++  return { ...f, main, reads, provider, service, control, addRun, snapshot,
++    close: () => { reads.close(); main.close(); f.close(); } };
++}
++
++test("P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes", async () => {
++  const f = await skipFixture();
++  try {
++    const page = f.service.candidates(f.session().sessionId, { planInstanceId: f.state().planInstanceId });
++    assert.equal(page.candidates.length, 0);
++    const request = f.body({ action: "skip", reason: "empty page" });
++    const before = f.snapshot();
++    f.addRun();
++    assert.throws(() => f.service.submit(request), code("training_execution_candidates_present"));
++    assert.deepEqual(f.snapshot(), before);
++    assert.equal(f.session().lifecycle, "pending");
++    assert.equal((f.goals.publicationResult(key, request.operationId) as { status: string }).status, "notFound");
++  } finally { f.close(); }
++});
++
++for (const point of ["candidate read", "operation receipt"] as const) {
++  test(`P-03: a real main-DB version change at ${point} rolls back the whole Skip publication`, async () => {
++    const f = await skipFixture();
++    try {
++      const before = f.snapshot();
++      const request = f.body({ action: "skip", reason: "race" });
++      if (point === "candidate read") {
++        const original = f.provider.candidates;
++        f.provider.candidates = (start, end) => { const rows = original(start, end); f.addRun(); return rows; };
++      } else {
++        // Runs after state/history and result insertion, immediately before the real COMMIT.
++        f.control.function("p03_arriving_fact", () => { f.addRun(); return 1; });
++        f.control.exec(`CREATE TRIGGER p03_arriving_fact AFTER INSERT ON mobile_plan_operations
++          BEGIN SELECT p03_arriving_fact(); END`);
++      }
++      assert.throws(() => f.service.submit(request), code("training_execution_source_changed"));
++      assert.deepEqual(f.snapshot(), before, "no skipped state or partial receipt survives the cross-store conflict");
++      assert.equal(f.reads.use(store => store.executionCandidateFacts("2026-10-26", "2026-10-30")).length, 1);
++    } finally { f.close(); }
++  });
++}
++
++test("P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected", async () => {
++  const f = await skipFixture();
++  try {
++    const request = f.body({ action: "skip", reason: "休息" });
++    const result = f.service.submit(request);
++    assert.equal(result.session!.lifecycle, "skipped");
++    const after = f.snapshot();
++    f.addRun();
++    f.provider.fingerprint = () => { throw new Error("replay must not read facts"); };
++    assert.deepEqual(f.service.submit(request), result);
++    assert.deepEqual(f.snapshot(), after);
++    assert.throws(() => f.service.submit(f.body({ action: "skip", reason: "again" })), code("training_session_not_editable"));
++    assert.deepEqual(f.snapshot(), after);
++  } finally { f.close(); }
++});
++
++for (const failure of ["state", "receipt", "commit"] as const) {
++  test(`P-03: SQLite ${failure} failure leaves no Skip or partial operation`, async () => {
++    const f = await skipFixture();
++    try {
++      const request = f.body({ action: "skip", reason: "rollback" });
++      const before = f.snapshot();
++      if (failure === "commit") {
++        f.control.exec(`PRAGMA foreign_keys=ON;
++          CREATE TABLE p03_parent(id TEXT PRIMARY KEY);
++          CREATE TABLE p03_fault(ref TEXT REFERENCES p03_parent(id) DEFERRABLE INITIALLY DEFERRED);
++          CREATE TRIGGER p03_fault AFTER INSERT ON mobile_plan_operations BEGIN INSERT INTO p03_fault VALUES ('missing'); END`);
++      } else {
++        const table = failure === "state" ? "mobile_training_state" : "mobile_plan_operations";
++        const event = failure === "state" ? "UPDATE" : "INSERT";
++        f.control.exec(`CREATE TRIGGER p03_fault BEFORE ${event} ON ${table} BEGIN SELECT RAISE(ABORT,'P03 injected failure'); END`);
++      }
++      assert.throws(() => f.service.submit(request), failure === "commit" ? /FOREIGN KEY/ : /P03 injected failure/);
++      assert.deepEqual(f.snapshot(), before);
++    } finally { f.close(); }
++  });
++}
++
++test("P-03: confirmed association and its immutable history survive a stale Skip", async () => {
++  const f = await skipFixture();
++  try {
++    const stale = f.body({ action: "skip", reason: "stale" });
++    f.addRun();
++    const fact = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    f.service.submit(f.body({ action: "confirm", trainingSessionId: fact.trainingSessionId, sourceFactDigest: fact.sourceFactDigest }));
++    const before = f.snapshot();
++    assert.throws(() => f.service.submit(stale), code("training_state_revision_conflict"));
++    assert.throws(() => f.service.submit(f.body({ action: "skip", reason: "already confirmed" })), code("training_session_not_editable"));
++    assert.deepEqual(f.snapshot(), before);
++    assert.equal(f.goals.trainingPlanExecution(key, f.session().sessionId)!.execution.association, "confirmed");
++  } finally { f.close(); }
++});
++
++test("P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease", async () => {
++  const f = await skipFixture();
++  try {
++    const mutations = new MutationCoordinator(), admission = new TaskAdmissionScheduler(mutations);
++    const worker = admission.owner("fact-writer");
++    const releaseWorker = worker.acquire()!;
++    const request = f.body({ action: "skip", reason: "race" });
++    let leases = 0, admitted = true;
++    const handlers = createTrainingExecutionCommandHandlers(f.service, () => { assert.ok(admitted); }, async fn => {
++      leases++;
++      const release = await mutations.acquireWhenAvailable("execution");
++      try { assert.equal(worker.acquire(), null, "fact writer cannot change either DB through the coordinated lane"); return await fn(); }
++      finally { release(); worker.withdraw(); }
++    });
++    const req = (body: TrainingPlanExecutionCommandRequest) => ({ body, log: { error() {} } }) as unknown as FastifyRequest;
++    const reply = () => ({ statusCode: 200, body: null as unknown, header() { return this; },
++      code(value: number) { this.statusCode = value; return this; }, send(value: unknown) { this.body = value; return value; } });
++    const skipReply = reply();
++    const pendingSkip = handlers.submit(req(request), skipReply as unknown as FastifyReply);
++    f.addRun(); releaseWorker();
++    const fact = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    const confirmReply = reply();
++    const pendingConfirm = handlers.submit(req(f.body({ action: "confirm", trainingSessionId: fact.trainingSessionId,
++      sourceFactDigest: fact.sourceFactDigest })), confirmReply as unknown as FastifyReply);
++    await Promise.all([pendingSkip, pendingConfirm]);
++    assert.equal(leases, 2);
++    assert.equal(confirmReply.statusCode, 200);
++    assert.equal(skipReply.statusCode, 409);
++    assert.ok(["training_execution_candidates_present", "training_state_revision_conflict"].includes((skipReply.body as {code:string}).code));
++    assert.equal(f.session().lifecycle, "partial", "the real 5 km run confirms identity but falls short of the 8 km prescription");
++    const confirmed = f.goals.trainingPlanExecution(key, f.session().sessionId)!;
++    assert.equal(confirmed.execution.trainingSessionId, "skip-run");
++    // A separate empty course can still commit and replay with the gate closed.
++    f.main.database.prepare("UPDATE training_sessions SET anchor_start_at='2026-01-01T00:00:00Z'").run();
++    const skip = f.body({ action: "skip", reason: "empty" }, "synthetic-interval-session");
++    const result = await handlers.submit(req(skip), reply() as unknown as FastifyReply);
++    const before = f.snapshot(), leaseCount = leases;
++    admitted = false;
++    assert.deepEqual(await handlers.submit(req(skip), reply() as unknown as FastifyReply), result);
++    assert.equal(leases, leaseCount);
++    assert.deepEqual(f.snapshot(), before);
++  } finally { f.close(); }
++});
+--- before/apps/ios/RAI/NativeAppModel.swift
++++ after/apps/ios/RAI/NativeAppModel.swift
+@@ -1731,7 +1731,12 @@
+                 cursor: cursor, baseURL: baseURL, token: self.session.apiToken)
+             guard executionCandidateRequests[sessionId] == request, !Task.isCancelled,
+                   trainingPlanStore.unified?.stateRevision == snapshot.stateRevision,
+-                  trainingPlanStore.unified?.sessions?.planInstanceId == sessions.planInstanceId else { return false }
++                  trainingPlanStore.unified?.sessions?.planInstanceId == sessions.planInstanceId else {
++                if executionCandidateRequests[sessionId] == request {
++                    executionCandidateIssues[sessionId] = "候选读取已失效，请重新读取后再决定是否跳过。"
++                }
++                return false
++            }
+             if let reason = TrainingPlanExecutionPolicy.validate(response, identity: identity,
+                 planInstanceId: sessions.planInstanceId, sessionId: sessionId,
+                 sessionRevision: session.sessionRevision, executionRevision: execution?.executionRevision ?? 0,
+@@ -1804,30 +1809,41 @@
+             target: target, sessionId: sessionId)
+     }
+ 
++    /// Shared by the button and command path; failed/in-flight reads never
++    /// authorize Skip using the last successful (possibly empty) page.
++    private func skipTrainingSessionIssue(sessionId: String) -> String? {
++        guard let (session, target) = executionTarget(for: sessionId) else {
++            return "请先刷新训练安排。"
++        }
++        if executionCandidateLoading.contains(sessionId) { return "候选正在加载，请等待读取完成后再决定是否跳过。" }
++        if let issue = executionCandidateIssues[sessionId] { return issue }
++        guard let page = executionCandidates[sessionId] else {
++            return "请先读取候选实际训练，再决定是否跳过。"
++        }
++        guard page.scope == trainingPlanStore.unified?.scope else { return "执行候选属于其他数据域，请重新读取。" }
++        if let reason = TrainingPlanExecutionPolicy.candidatePageMismatch(page,
++            planInstanceId: target.planInstanceId, sessionId: target.sessionId,
++            sessionRevision: target.sessionRevision, executionRevision: target.executionRevision,
++            stateRevision: target.stateRevision) { return reason }
++        guard TrainingPlanExecutionPolicy.canSkip(session: session,
++            execution: trainingPlanStore.sessionExecution(for: sessionId),
++            hasCandidates: !page.candidates.isEmpty) else {
++            return "当前课程或候选状态不允许跳过；请重新读取课程与实际。"
++        }
++        return nil
++    }
++
++    func canSkipTrainingSession(sessionId: String) -> Bool {
++        canEditTrainingExecutions && skipTrainingSessionIssue(sessionId: sessionId) == nil
++    }
++
+     @discardableResult
+     func skipTrainingSession(sessionId: String, reason: String) async -> Bool {
+         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+         guard canEditTrainingExecutions, !trimmed.isEmpty,
+-              let (session, target) = executionTarget(for: sessionId) else { return false }
+-        let execution = trainingPlanStore.sessionExecution(for: sessionId)
+-        // Skip is allowed only after the candidate page was actually read and
+-        // still matches the current snapshot: an unread/unknown window must not
+-        // be treated as "no run", and a page from an older state revision must
+-        // not authorize a command against the current one.
+-        guard let page = executionCandidates[sessionId] else {
+-            executionCandidateIssues[sessionId] = "请先读取候选实际训练，再决定是否跳过。"
+-            return false
+-        }
+-        if let reason = TrainingPlanExecutionPolicy.candidatePageMismatch(page,
+-            planInstanceId: target.planInstanceId, sessionId: target.sessionId,
+-            sessionRevision: target.sessionRevision, executionRevision: target.executionRevision,
+-            stateRevision: target.stateRevision) {
+-            executionCandidateIssues[sessionId] = reason
+-            return false
+-        }
+-        guard TrainingPlanExecutionPolicy.canSkip(session: session, execution: execution,
+-                                                  hasCandidates: page.candidates.isEmpty) else {
+-            executionCandidateIssues[sessionId] = "当前课程或候选状态不允许跳过；请重新读取课程与实际。"
++              let (_, target) = executionTarget(for: sessionId) else { return false }
++        if let issue = skipTrainingSessionIssue(sessionId: sessionId) {
++            executionCandidateIssues[sessionId] = issue
+             return false
+         }
+         return await submitExecution(.skip(reason: trimmed), target: target, sessionId: sessionId)
+@@ -1836,6 +1852,9 @@
+     private func submitExecution(_ draft: TrainingPlanExecutionDraft, target: TrainingPlanExecutionTarget,
+                                  sessionId: String) async -> Bool {
+         guard let context = commandContext else { return false }
++        // Skip must require a fresh candidate read after rejection as well as
++        // success: a server fact conflict can leave state revisions unchanged.
++        if case .skip = draft { executionCandidates[sessionId] = nil }
+         // A submission invalidates reads that started before the user chose a
+         // candidate; the captured target (not a later read) is what gets submitted.
+         cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
+--- before/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift
++++ after/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift
+@@ -39,8 +39,7 @@
+         "\(session.sessionId)|\(current.sessionRevision)|\(execution?.executionRevision ?? 0)|\(capability)|\(native.canEditTrainingExecutions)|\(native.trainingPlanStore.unified?.stateRevision ?? 0)"
+     }
+     private var canSkip: Bool {
+-        TrainingPlanExecutionPolicy.canSkip(session: current, execution: execution,
+-            hasCandidates: page.map { !$0.candidates.isEmpty })
++        native.canSkipTrainingSession(sessionId: session.sessionId)
+     }
+ 
+     var body: some View {
+--- before/apps/ios/RAI/TrainingPlanExecutionPolicy.swift
++++ after/apps/ios/RAI/TrainingPlanExecutionPolicy.swift
+@@ -428,6 +428,8 @@
+     /// lets the caller fall back to the server's own message instead of hiding it.
+     static func serverErrorMessage(_ code: String) -> String? {
+         switch code {
++        case "training_execution_candidates_present":
++            return "候选窗口内已有实际跑步，未跳过课程；请刷新候选并确认关联。"
+         case "training_execution_source_changed":
+             return "源训练记录已变化，当前关联失效；原处方与旧评价保留，请重读后重新确认或撤回。"
+         case "training_execution_link_conflict":
+--- before/apps/ios/tests/ModelRegression.swift
++++ after/apps/ios/tests/ModelRegression.swift
+@@ -2734,7 +2734,6 @@
+          "prescription": prescription, "recommendation": NSNull(), "userOverride": NSNull(),
+          "protection": "automatic", "lifecycle": "pending", "availableAt": "2026-10-08T00:00:00.000Z",
+          "supersededBySessionId": NSNull()]], "suppressions": [], "publishedInputKey": NSNull(), "executions": []] as [String: Any]
+-    let unifiedJSON = String(decoding: try JSONSerialization.data(withJSONObject: unified), as: UTF8.self)
+     let expanded = TrainingPlanExecutionPolicy.expandedRange(sessionDate: "2026-10-09")!
+     let formatter = ISO8601DateFormatter()
+     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+@@ -2748,13 +2747,50 @@
+     }
+     var candidateQueries: [[String: String]] = []
+     var returnWrongRange = false
++    var candidateFailure = false
++    var candidateDelay: Double = 0
++    var commandCount = 0
++    var rejectSkip = true
++    var skipCommitted = false
++    var candidateStateRevision = 2
++    var validSkipReason = false
++    let skipRequests = RequestLog()
+     let path = "/v1/mobile/training-plan/sessions/paging-course/execution-candidates"
+     StubProtocol.handler = { request in
+         if request.url!.path == "/v1/handshake" { return (200, capabilities, 0) }
+         if request.url!.path == "/v1/mobile/training-plan-state" {
+-            return (200, request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" ? unifiedJSON : legacyState, 0)
++            var value = unified
++            value["stateRevision"] = candidateStateRevision
++            if skipCommitted {
++                var sessions = value["sessions"] as! [String: Any]
++                var courses = sessions["sessions"] as! [[String: Any]]
++                courses[0]["lifecycle"] = "skipped"; courses[0]["sessionRevision"] = 2
++                sessions["sessions"] = courses; value["sessions"] = sessions
++            }
++            let response = String(decoding: try! JSONSerialization.data(withJSONObject: value), as: UTF8.self)
++            return (200, request.value(forHTTPHeaderField: "X-RAI-Training-Contract") == "2" ? response : legacyState, 0)
++        }
++        if request.url!.path == "/v1/mobile/training-plan/execution-commands" {
++            commandCount += 1
++            if rejectSkip {
++                return (409, "{\"code\":\"training_execution_candidates_present\",\"message\":\"候选已变化，请刷新\"}", 0)
++            }
++            skipRequests.record(request)
++            let body = try! JSONSerialization.jsonObject(with: skipRequests.lastBody(method: "POST",
++                path: "/v1/mobile/training-plan/execution-commands")!) as! [String: Any]
++            let draft = body["draft"] as! [String: Any]
++            validSkipReason = draft["action"] as? String == "skip" && draft["reason"] as? String == "休息"
++            var course = ((unified["sessions"] as! [String: Any])["sessions"] as! [[String: Any]])[0]
++            course["lifecycle"] = "skipped"; course["sessionRevision"] = 2
++            candidateStateRevision += 1
++            let response: [String: Any] = ["contractVersion": 1, "operationId": body["operationId"]!,
++                "stateRevision": candidateStateRevision, "goalsRevision": 12, "planInstanceId": "paging-plan", "outcome": "changed",
++                "session": course, "execution": NSNull(), "planUpdate": "pending", "warnings": []]
++            skipCommitted = true
++            return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), 0)
+         }
+         guard request.url!.path == path else { return (503, "{}", 0) }
++        if candidateFailure { return (503, "{\"message\":\"候选加载失败\"}", 0) }
+         let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+             .compactMap { item in item.value.map { (item.name, $0) } })
+         candidateQueries.append(query)
+@@ -2764,17 +2800,22 @@
+             return date >= from && date <= through && (query["cursor"] == nil || (row["trainingSessionId"] as! String) > "run-49")
+         }
+         let response: [String: Any] = ["contractVersion": 1, "scope": ["serverId": "server", "athleteId": "athlete", "datasetEpoch": "epoch"],
+-            "stateRevision": 2, "planInstanceId": "paging-plan", "sessionId": "paging-course", "sessionRevision": 1, "executionRevision": 0,
++            "stateRevision": candidateStateRevision, "planInstanceId": "paging-plan", "sessionId": "paging-course", "sessionRevision": 1, "executionRevision": 0,
+             "rangeStart": returnWrongRange ? "2026-10-07" : from, "rangeEnd": returnWrongRange ? "2026-10-11" : through,
+             "candidates": Array(visible.prefix(50)), "nextCursor": visible.count > 50 ? "next-page" as Any : NSNull()]
+-        return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), 0)
++        return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), candidateDelay)
+     }
+     await model.bootstrap()
+     let read = await model.refreshUnifiedTrainingPlan()
+     check(read && model.canEditTrainingExecutions, "paging fixture negotiates current session/execution reads")
++    let unreadSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
++    check(!unreadSkip && commandCount == 0 && model.executionCandidateIssue(for: "paging-course") != nil,
++          "I-01: unread candidates cannot authorize Skip or issue a command")
+     let first = await model.loadExecutionCandidates(for: "paging-course", widened: true)
+     check(first && model.executionCandidates(for: "paging-course")?.candidates.count == 50,
+           "widened candidate search loads the first 50 of 62 actual runs")
++    let nonemptySkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
++    check(!nonemptySkip && commandCount == 0, "I-01: a nonempty candidate page must issue zero Skip requests")
+     let second = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+     check(second && model.executionCandidates(for: "paging-course")?.candidates.count == 62 &&
+           model.executionCandidates(for: "paging-course")?.nextCursor == nil,
+@@ -2792,5 +2833,36 @@
+     let wrongRange = await model.loadExecutionCandidates(for: "paging-course", cursor: "next-page")
+     check(!wrongRange && model.executionCandidates(for: "paging-course")?.candidates.count == 50,
+           "a mismatched response range cannot silently truncate the candidate list")
++    returnWrongRange = false
++    rows = []
++    _ = await model.loadExecutionCandidates(for: "paging-course")
++    candidateFailure = true
++    let failedRead = await model.loadExecutionCandidates(for: "paging-course")
++    let failedSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
++    check(!failedRead && !failedSkip && commandCount == 0 && model.executionCandidateIssue(for: "paging-course") != nil,
++          "I-01: failed reload must not authorize Skip using a previous empty page")
++    candidateFailure = false; candidateDelay = 0.15
++    let loading = Task { await model.loadExecutionCandidates(for: "paging-course") }
++    try await Task.sleep(for: .milliseconds(10))
++    check(model.isExecutionCandidateLoading("paging-course"), "candidate reload is in flight")
++    let loadingSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
++    check(!loadingSkip && commandCount == 0, "I-01: an in-flight reload cannot authorize Skip")
++    _ = await loading.value
++    candidateDelay = 0
++    let rejectedSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
++    check(!rejectedSkip && commandCount == 1 && model.executionCandidates(for: "paging-course") == nil &&
++          model.trainingPlanPublisher.message?.contains("候选") == true,
++          "I-01/P-03: an empty loaded page sends exactly one Skip; a server candidate conflict is shown without automatic retry")
++    _ = await model.loadExecutionCandidates(for: "paging-course")
++    candidateStateRevision += 1
++    _ = await model.refreshUnifiedTrainingPlan()
++    let stalePageSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
++    check(!stalePageSkip && commandCount == 1 && model.executionCandidateIssue(for: "paging-course")?.contains("计划状态") == true,
++          "I-01: a page from an older state revision cannot authorize Skip against a fresh snapshot")
++    _ = await model.loadExecutionCandidates(for: "paging-course")
++    rejectSkip = false
++    let successfulSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: " 休息 ")
++    check(successfulSkip && commandCount == 2 && skipCommitted && validSkipReason,
++          "I-01: a legal empty page completes Skip with one request and a confirmed read")
+     CacheStore.resetScheduleSafety()
+ }
+--- before/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
++++ after/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
+@@ -131,6 +131,13 @@
+ 存在执行当前行的课程在自动重算中继续保留身份与处方，并先计入生成预算；撤回或失效不使课程被自动归档或替换。
+ 这不改变其 automatic/user_protected 标记，也不授予执行许可，确保统一读取与人工纠错入口始终可达。
+ skip 仅用于尚未执行且未确认关联的 pending 课；不能用 skip 覆盖一次真实完成。
++Skip 提交持有现有主库写入协调租约至控制库 COMMIT，事务内重新读取默认 ±2 天窗口的全部真实候选；
++存在候选返回 `409 training_execution_candidates_present`，不写 skipped 或操作回执。
++候选读取前后以及状态/历史/回执写入、owner reconciliation 后、COMMIT 前复核主库 inode/data_version；
++变化返回 `409 training_execution_source_changed` 并回滚整笔控制事务。主库与控制库仍是独立数据库，
++阻止受支持写者进入校验至提交间隙的是共享 mutation lease 与既有 API/CLI 发布锁，不是跨库原子事务。
++已提交 operationId 的原结果重放仍早于能力、租约和事实检查；不同键重复 Skip 按既有不可编辑合同拒绝。
++本阶段实现和验证证据见 [I-01/P-03 记录](../deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md)。
+ 仅同日、近距离、同结构或排期对象 workoutID 不构成实际身份凭据；缺可验证来源映射时一律 needs_confirmation。
+ 第一版不做概率自动确认，不合并同日跑步；一条实际跑步最多确认一堂课。
+ 
+@@ -157,6 +164,7 @@
+ | 409 | `training_session_not_editable` | 完成/部分完成/跳过/取消/已替换课不可直接编辑 |
+ | 404 | `training_session_not_found` | 当前 scope/实例内课程不存在，不等同路由不支持 |
+ | 409 | `training_execution_source_changed` / `training_execution_link_conflict` | 源事实摘要改变或实际跑步已认领 |
++| 409 | `training_execution_candidates_present` | Skip 窗口已有真实候选；刷新后确认关联 |
+ | 422 | `training_session_safety_rejected` | 新增/加量/结构不能通过现有安全约束 |
+ | 503 | `training_session_storage_unavailable` | 存储/恢复不可用，保留未知提交账目 |
+ 
+--- before/packages/api-contracts/src/training-plan-closed-loop.ts
++++ after/packages/api-contracts/src/training-plan-closed-loop.ts
+@@ -229,6 +229,7 @@
+   training_session_not_editable: 409,
+   training_session_not_found: 404,
+   training_execution_source_changed: 409,
++  training_execution_candidates_present: 409,
+   training_execution_link_conflict: 409,
+   training_session_safety_rejected: 422,
+   training_session_storage_unavailable: 503

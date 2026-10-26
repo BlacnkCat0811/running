@@ -1,0 +1,54 @@
+iOS 类型检查通过
+All model regression checks passed.
+Training plan v2 wire negotiation: 6 checks passed
+Training plan v2 contract regression: 142 checks passed
+TrainingPlanPublisher regression passed
+TrainingPlanSessionEditor regression: 79 checks passed
+Training plan execution regression: 80 checks passed
+Plan scheduling regression: 88 checks passed
+Plan watch context regression: 35 checks passed
+TrainingPlanStore regression: 70 checks passed
+User experience policy, reminders and feedback round-trip checks passed
+All coordinate conversion checks passed.
+All workout plan mapper checks passed.
+Direct sync receipt regression: 153 checks passed
+All ServerSession regression checks passed.
+Health sync cancellation regression tests passed
+Health sync archive regression tests passed
+Health sync archive execution-boundary checks: 19 checks, 0 failed
+Health sync resume regression tests passed
+Health sync lifecycle regression tests passed
+Sync atomic unit regression tests passed
+Sync task migration regression tests passed
+HealthKit record cursor regression: 96 checks passed
+Background sync policy regression tests passed
+17 workout window paging regression checks passed
+26 workout window page store regression checks passed
+71 intent journal regression checks passed
+55 background recovery regression checks passed
+Health sync blocked-recovery regression tests passed
+77 sync-state commit regression checks passed
+73 route sync state machine checks passed
+44 route commit settlement / query policy checks passed
+122 checks passed
+241 route state persistence regression checks passed
+OK: 12 checks
+HealthKit record sync wiring: 126 checks, 0 failed
+[RAI] sync journal schema failed (sqlite 5) at /var/folders/vg/p3r7kjyj4f565xd63ls097v40000gn/T/rai-store-regression-87B64961-812B-4DA3-A962-872F07A6219D/migration/sync.sqlite
+127 store regression checks passed
+Technology presentation: 266 checks passed
+Today compact recovery / linear ability presentation checks passed
+Token checks do not replace rendered-view accessibility auditing.
+Athletic skin: dark surfaces/night maps, scaled type roles, native symbols, original layout and progress semantics passed
+Today layout checks passed (order, paired summaries, sync visibility, recovery icons)
+Compact card heights, minute chart coordinates, structured steps, map consent and map gesture lock checks passed
+Workout detail layout checks passed (expandable weather summary, no duplicate panels, tap charts, kilometer markers)
+Background capability checks: 342 checks, 0 failed
+Export determinism checks: 14 checks, 0 failed
+Direct-sync status copy checks passed (55 checks: §10.3 copy verbatim from one entry, legacy copy absent, §10.2 gate order and intent acknowledgement, gate is mounted)
+Direct-sync contract parity checks passed (22 checks: status enums verbatim and in order, factsAnalysisContractVersion identical, lane refusal codes pinned, gate is mounted)
+OK: analysis terminal-state reconciliation gate (52 checks).
+    the behavioural assertions run on macOS via apps/ios/tests/DirectSyncReceiptRegression.swift (H).
+retired-plan outbound gate passed (653 checks)
+PR5 facts/analysis checks passed (24 checks: C9 key set **and optionality**, C2 block disjointness, capability naming)
+iOS 门禁通过（类型检查 + 纯逻辑回归）

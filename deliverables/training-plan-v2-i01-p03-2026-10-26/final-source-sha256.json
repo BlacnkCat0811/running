@@ -1,0 +1,11 @@
+{
+  "apps/api/src/mobile-goals.ts": "b6735038279120490957227611f6d42913572cfc07a34d221def6348c1a0a252",
+  "apps/api/src/training-plan-execution-commands.ts": "572319cc89d5bcf3f2de95dff0afc21f1b6bc69ace77751d75af70a7a1a51fe2",
+  "apps/api/test/training-plan-execution-commands.test.ts": "63cf3830ad615aa5cf74511a031d27f4eead335711517d8948be8d215852c0b6",
+  "apps/ios/RAI/NativeAppModel.swift": "4fece02131a077844df94cc47cb871dcad3d6368954ab2279a45a511aa00b0aa",
+  "apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift": "21f2379be780169971638b3877605ca680ff2c86a7d01e0da3ddad8a045bdd79",
+  "apps/ios/RAI/TrainingPlanExecutionPolicy.swift": "26819881733ea9ed34d3cfeea883cbafd00d0360778e54a1e5179b0aaa95c7fb",
+  "apps/ios/tests/ModelRegression.swift": "99b3e1bbefd4c93f42ae13829db001d718c11c81f1d52c847eb7b1f1b670d1cc",
+  "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md": "6b74ce9a5897b4b45928938b2286a04f86ab8ac28632df806d47c45da16b14e9",
+  "packages/api-contracts/src/training-plan-closed-loop.ts": "72770bbfe0fd78abe4afaa599201ad00eacf6c0d81ac5842ba9cb4475723238f"
+}

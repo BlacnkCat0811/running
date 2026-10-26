@@ -1,0 +1,22 @@
+{
+  "name": "app-device",
+  "argv": [
+    "xcodebuild",
+    "-workspace",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/RAI.xcworkspace",
+    "-scheme",
+    "RAI",
+    "-sdk",
+    "iphoneos",
+    "-destination",
+    "generic/platform=iOS",
+    "-derivedDataPath",
+    "/tmp/rai-v2-l4-20261026-vczzvoi8/app-device",
+    "CODE_SIGNING_ALLOWED=NO",
+    "build"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1793000193.99015,
+  "durationSeconds": 167.95188999176025,
+  "exitCode": 0
+}

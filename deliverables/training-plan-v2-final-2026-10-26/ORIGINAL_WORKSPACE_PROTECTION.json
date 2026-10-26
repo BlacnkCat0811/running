@@ -1,0 +1,13 @@
+{
+  "baselineHead": "2e7c07bb66b3701c4e1b768c90f431b654584f5c",
+  "branch": "main",
+  "head": "2e7c07bb66b3701c4e1b768c90f431b654584f5c",
+  "manifestFiles": 2651,
+  "changed": [],
+  "missing": [],
+  "statusLines": 294,
+  "modified": 53,
+  "untracked": 241,
+  "staged": [],
+  "checkedAt": "2026-10-26T17:21:27+08:00"
+}

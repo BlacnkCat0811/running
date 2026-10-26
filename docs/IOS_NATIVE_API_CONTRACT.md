@@ -60,6 +60,7 @@ Web SPA 退役后不存在匿名业务读。
 | `trainingPlanCommandContractVersion` | `2`（条件） | 统一训练写命令能力。仅在 `RAI_TRAINING_PLAN_COMMAND_MODE` 为 `validation` 或 `production` 且客户端发送 `X-RAI-Client-Training-Commands: 2` 时宣告；命令路由本身也要求同一请求头，缺位 ⇒ 只读，不得用 `coachLoopContractVersion` 猜测。生产启用是独立发布动作（D20/D5-E） |
 | `trainingPlanSessionContractVersion` | `1`（条件） | 课程身份只读扩展；仅 schema 2、owner-ready 的 scope 宣告。缺位时 `X-RAI-Training-Sessions: 1` 返回 409，不得当作空课程 |
 | `trainingPlanSessionCommandContractVersion` | `1`（条件） | 课程编辑命令；仅 `RAI_TRAINING_PLAN_SESSION_COMMAND_MODE` 为 `validation` 或 `production` + schema 2/owner-ready + publication + `X-RAI-Client-Training-Session-Commands: 1` 时宣告 |
+| `trainingPlanSessionDistanceOmissionContractVersion` | `1`（条件） | 课程 add/edit 省略距离的独立能力；仅在课程命令 1 可用且同请求发送 `X-RAI-Client-Training-Session-Distance-Omission: 1` 时宣告；不能由课程命令能力推导 |
 | `trainingPlanExecutionCommandContractVersion` | `1`（条件） | 执行关联命令；仅 `RAI_TRAINING_PLAN_EXECUTION_COMMAND_MODE` 为 `validation` 或 `production` + schema 2/owner-ready + publication + `X-RAI-Client-Training-Execution-Commands: 1` 时宣告；与课程写独立 |
 | `trainingPlanUpdateContractVersion` | `1`（条件） | 四阶段更新只读扩展；随 `trainingPlanSessionContractVersion` 宣告，不授权自动发布；缺位/未知时 `X-RAI-Training-Updates` 返回 409 |
 | `coachLoopContractVersion` | `1` | 新教练闭环合同 |
@@ -85,6 +86,13 @@ Web SPA 退役后不存在匿名业务读。
 
 兼容规则：老服务端省略某能力位 ⇒ 客户端按「不支持」保守回落，不得假设服务端具备该能力；
 能力位只用于选实现路径，不改变数据集身份。
+
+距离省略是独立能力位，不包含在课程命令 1 中。只有精确收到
+`trainingPlanSessionDistanceOmissionContractVersion == 1` 且课程命令 1 可用时，客户端才可发送依赖
+「由服务端保留或测量距离」的 add/edit；缺位或未知版本时必须发送显式合法距离、纯时间 `null`，
+或对无法显式表达的内容变更提示升级。握手响应对该协商头设置对应 `Vary` 与 `Cache-Control: no-store`；
+统一读的 `Vary` 仍由 `X-RAI-Training-Contract`、`X-RAI-Training-Sessions`、`X-RAI-Training-Updates` 组成，
+不混入写能力头。
 
 全部握手键的语义、宣告前提、消费者与缺位行为登记在
 `packages/api-contracts/src/handshake-registry.ts`；`apps/api/test/handshake-registry.test.ts`

@@ -1,0 +1,307 @@
+{
+  ".gitignore": {
+    "sha256": "b2b960f1e96a89b2569072a948846ddc8935d968bbc14ce6c5c01d947785bc04",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "AGENTS.md": {
+    "sha256": "2df97360c6034d7517e5a04b45c24e71bba3d53d30f699060df531e2390af1e7",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/data.ts": {
+    "sha256": "08429ce911f919b2f3fe2002384cc24775a6fdc3eaa358304d2cf10a3781d5fc",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/mobile-goals.ts": {
+    "sha256": "b6735038279120490957227611f6d42913572cfc07a34d221def6348c1a0a252",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/schemas.ts": {
+    "sha256": "559f5b25f082fdd81e49b8e0ddf243326eb823420e403afd6cca5b9fc2241ede",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/server.ts": {
+    "sha256": "bfb7fac5ebad022d31095e475d9080c4764a7b9a2b6ac58bec916f476597ff65",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/session-structure.ts": {
+    "sha256": "a754e3e5c657a63ee9bc505ddd2c5560a3ca3e32f1b0e263b77ecc3c0cb8dd32",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-coordinator.ts": {
+    "sha256": "7c27bfa6efe1132f48ec5e81f74ce335d3d56f7f9cfcf469f9a5f02070c58976",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-execution-commands.ts": {
+    "sha256": "1d77f45b6dbfae645f3eb724e70269ced5f95711a90a15d9a682d354de2f13d7",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-execution-match.ts": {
+    "sha256": "dffb4c9c86c90e77a58045b581af80964fe8d4b4e4ddbc0c64511bfe5a295c2a",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-input-identity.ts": {
+    "sha256": "42ac1e0745ac5414b0f14c2184f7cb9287afba966856660380dc8cb826a7f019",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-routes.ts": {
+    "sha256": "297c30af0dcb5f68909faa1f6f65d7d7ccc6dc9880bdacbd0a5ec5709c2fb1ab",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-commands.ts": {
+    "sha256": "ea6ee05a7dfed4d0f6bdcea2133e54a90cec19f989fe68fb74ccfeec804f6c0a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-migration.ts": {
+    "sha256": "db4f43a35a8f8fbdb4e2f70f7d46ab827f4ce9bf2a89311e03ef5c36f2c604fc",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-policy.ts": {
+    "sha256": "4211c851c16c8800eaa6dad2cfa01891e4488c0b0493d6fc7c5190139d0201e4",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-session-state.ts": {
+    "sha256": "a9e24c340d9093fb7b29cbbec2830fa2a950991e055d70cdbc1c9a7d719182ae",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-store.ts": {
+    "sha256": "6c8e80dccaa7904f1fca80acb3bdecb4b7b56c94a3f1c78e0f83bc017ce89520",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/api/test/data.test.ts": {
+    "sha256": "dbb32a9e132080d005b1f0768d90b23d30ac86fba58db1114c7ad4cb0974be2c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/direct-sync-handshake-capability.test.ts": {
+    "sha256": "9b0ca67ce83f0862a0476785c7c1c3846b529361728a8a5bd9d46d989026a2df",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/helpers/training-plan-crash-child.ts": {
+    "sha256": "95bc3ffaf7139e90c8b48fcd8f1ad13fa1c770c7a844cddd78b767b93defd28c",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/phase5-training-plan.test.ts": {
+    "sha256": "bb998e55d40637a78a15bbd99983acd3821c6cd7ed585666e1126a6133aa3dca",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/schemas.test.ts": {
+    "sha256": "c60ea5b38221991f38068a1e3f52d0acda4aca0f8aa0c9abbe354595c994905e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/session-structure.test.ts": {
+    "sha256": "a7fd8fac76987c9286d722a4b0926bbc9e547456891f238e339cd26bbfcb420d",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-coordinator.test.ts": {
+    "sha256": "9ccbfabf04f4a4f4f6050d5eaf0310692610b1a4dc5c1dab26f119307eb06120",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-execution-commands.test.ts": {
+    "sha256": "a7e4272b4f896b3a742c0fbc2c260b40fa0724b31f9fa59637d57e1e2e77ab2d",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-execution-match.test.ts": {
+    "sha256": "0baf1b8c4071217af68994ca2a14c07c08116ed763c4d9a9e224fcebc8ee4aaa",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-input-identity.test.ts": {
+    "sha256": "37b9e6ed00b4cfaff4396a18d00afefdd878585d72554fd1a161d639ac703308",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-commands.test.ts": {
+    "sha256": "23d3ccdd305f0639f210f7bebb3f90e15084b7af8d5ef97b9742f3de8695a6a2",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-migration.test.ts": {
+    "sha256": "c2ce783dd402f7ee791f301bbcc0c0bda3dfaa74e70596364925f6546af3d901",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-policy.test.ts": {
+    "sha256": "834e2fcfd491dc644de38f17fdfc19be5c6300b482b35901ebe92ac794f936a3",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-session-state.test.ts": {
+    "sha256": "fe6b4a761e3931e2605b7e2274ef4a276f16d75eddb035310944b3e8bbe7743e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-v2-route.test.ts": {
+    "sha256": "1c148561bfa2c4a13111bd56dc3f8464f3d6d66ef53fa4edf4167bf0388af992",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/ios/RAI/APIClient.swift": {
+    "sha256": "4ad54e7745cd6f5af6e226915b515cd6a0115f8a90b00dfcee79b12bf3db2cac",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/APIModels.swift": {
+    "sha256": "ecebc6d321f996d78782531efba7af151d750bb4cb9eb7fb11fe3b3656e0feca",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/NativeAppModel.swift": {
+    "sha256": "88b9aced0c6bf0120974d8cfb1876f0390f06b6e65c4872e5548f9f26b1708b7",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/PlanStatePolicy.swift": {
+    "sha256": "b85420ca404eb8e1cbb670bb3a772e240e010acfce3e977833ba7f5f78d2cb5f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/Skins/Technology/TechPlanView.swift": {
+    "sha256": "a936a7f2b41c18ce3bbcce732b4c2fb68703760bed5aa358ad35c7f5d3bda1fe",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift": {
+    "sha256": "8dfc53e346c076ed7c8392283bb4ca08b52b55cb628d3f0024e6ad364792c6fe",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift": {
+    "sha256": "7b2e1a474ca942fe01ee41b4d19646a38d7a5ae75f67d49ec954b615d07027c5",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/TrainingPlanExecutionPolicy.swift": {
+    "sha256": "97a8bacfeb2ed565439ae2ad4787f56210dc709bb4df53ad9956966dbe46d20f",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/TrainingPlanStore.swift": {
+    "sha256": "b8cb405c0587da15a24756b0e66ed39f8de0da41cc8f999d1682b20455f24e58",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/tests/ModelRegression.swift": {
+    "sha256": "79c480b9b7fa7bf715899d01e6396a1f948e9eddeca8b76afba010b3b957a2c0",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanExecutionRegression.swift": {
+    "sha256": "0535186aa95ed6210f09bdea72eeab66d24fac81307961be0697cfb4d1280a2a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanStoreRegression.swift": {
+    "sha256": "146bce658ddb1d3c3f96306a2edce7936b115134976ca5d9e24ca38d0016a905",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanV2Regression.swift": {
+    "sha256": "692d546cc2293df23fce73e0e6de4fad6ba04d46e356e17dbcc790b849198a54",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/ios/tests/run-model-tests.sh": {
+    "sha256": "ece613226e17358cbc43c31a96277a87dacf3134c30a1e878add81007e5d52ec",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "docs/OPERATIONS.md": {
+    "sha256": "827e7723a05ff93dcdcea5cda55166ccb59783abb9b41006705ef91edae8c686",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md": {
+    "sha256": "c3e8c7eee2f4ff319c9bd6710a48c39169829bdc4a818464818f51d7783f59e3",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "packages/api-contracts/src/handshake-registry.ts": {
+    "sha256": "f900a9e439567c55e19b61d3f137d21c2abae9d452b0e5a154921108b202cc3f",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "packages/api-contracts/src/index.ts": {
+    "sha256": "11a4e9dae8c4c34c297bb6017e4d63285fd9bbb940be1b49a5624eea478dbdeb",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "packages/api-contracts/src/training-plan-closed-loop.ts": {
+    "sha256": "0e9d39a96543275a83a4c4af09cf18f4d78c7d4aa87251fecce0e0a251814349",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "scripts/bench-training-plan-closed-loop.mjs": {
+    "sha256": "f848e72af044fa508d646dc1fb59d28203b7b7ad28bafb3d9de187a27205c598",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "scripts/migrate-training-planner.mts": {
+    "sha256": "62a33b389f6285e14172bcb6c2a752be98943f9a6de315dd4c6812ef6ddb26fe",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/api/src/training-plan-state-audit.ts": {
+    "sha256": "4c7b42314c47bd0fe519bf65b7e49adbf60d5b4e3506dfb4ccf7e66bf7e2c0e1",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-execution-cursor-errors.test.ts": {
+    "sha256": "3de6576a872e9684c5f1b1471a241fd64bb56506d3dcfebd5f8328b6f560f64a",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-history-compatibility.test.ts": {
+    "sha256": "283ec9975d6815129435b8caa9eff3643d92127156dd1a417c6a3c8d91567e84",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/api/test/training-plan-state-audit.test.ts": {
+    "sha256": "473682042687382c34cdb522553a20739c5aad96056c040037be01d55875f65e",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift": {
+    "sha256": "662075a793a1c063b49e0135e7d093bbac13538acda9fd45f3daf02debee6671",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/ios/tests/TrainingPlanSessionEditorRegression.swift": {
+    "sha256": "48c736d9fff558c2a7f6dfe4beb24473af45c25da40744c94354fdc3800feebf",
+    "mode": "0o600",
+    "crlf": false
+  },
+  "apps/ios/tests/fixtures/training-session-distance-v1.json": {
+    "sha256": "24667252898aa4c1a237eb3eed2434e3b72624551beadbf76f622499dfa91156",
+    "mode": "0o644",
+    "crlf": false
+  },
+  "scripts/audit-training-plan-state.mts": {
+    "sha256": "bca5a38eb1840b99109140f08d23a285c5ac9fa1a4bc889a81f8305166a72c6f",
+    "mode": "0o644",
+    "crlf": false
+  }
+}

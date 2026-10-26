@@ -1,0 +1,7 @@
+{
+  "platform": "macOS-26.6.2-x86_64-i386-64bit",
+  "architecture": "x86_64",
+  "node": "v22.23.2",
+  "swift": "Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)\nTarget: x86_64-apple-macosx26.0",
+  "concurrency": 2
+}

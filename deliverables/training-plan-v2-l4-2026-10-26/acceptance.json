@@ -1,0 +1,12 @@
+{
+  "name": "acceptance",
+  "argv": [
+    "npm",
+    "run",
+    "check:acceptance-matrix"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997638.494457,
+  "durationSeconds": 4.70488715171814,
+  "exitCode": 0
+}

@@ -1,0 +1,276 @@
+TAP version 13
+# (node:18713) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+ok 1 - B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 1069.794458
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+ok 2 - B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 805.079763
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+ok 3 - B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+  ---
+  duration_ms: 128.839576
+  type: 'test'
+  ...
+# Subtest: B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+ok 4 - B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+  ---
+  duration_ms: 122.168049
+  type: 'test'
+  ...
+# Subtest: B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+ok 5 - B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+  ---
+  duration_ms: 114.205999
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+ok 6 - B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+  ---
+  duration_ms: 134.842473
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+ok 7 - B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+  ---
+  duration_ms: 78.954449
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+ok 8 - B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+  ---
+  duration_ms: 60.812825
+  type: 'test'
+  ...
+# Subtest: B06: strict wire parsing rejects malformed execution drafts before any write
+ok 9 - B06: strict wire parsing rejects malformed execution drafts before any write
+  ---
+  duration_ms: 43.390321
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+ok 10 - B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+  ---
+  duration_ms: 90.753066
+  type: 'test'
+  ...
+# Subtest: P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+ok 11 - P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+  ---
+  duration_ms: 195.019191
+  type: 'test'
+  ...
+# Subtest: P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+ok 12 - P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+  ---
+  duration_ms: 64.668542
+  type: 'test'
+  ...
+# Subtest: P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+ok 13 - P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+  ---
+  duration_ms: 57.783628
+  type: 'test'
+  ...
+# Subtest: P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+ok 14 - P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+  ---
+  duration_ms: 77.317736
+  type: 'test'
+  ...
+# Subtest: P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+ok 15 - P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+  ---
+  duration_ms: 189.003923
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+ok 16 - P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+  ---
+  duration_ms: 203.195071
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+ok 17 - P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+  ---
+  duration_ms: 187.546599
+  type: 'test'
+  ...
+# Subtest: P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+ok 18 - P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+  ---
+  duration_ms: 238.226072
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite state failure leaves no Skip or partial operation
+ok 19 - P-03: SQLite state failure leaves no Skip or partial operation
+  ---
+  duration_ms: 182.722216
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite receipt failure leaves no Skip or partial operation
+ok 20 - P-03: SQLite receipt failure leaves no Skip or partial operation
+  ---
+  duration_ms: 190.634768
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite commit failure leaves no Skip or partial operation
+ok 21 - P-03: SQLite commit failure leaves no Skip or partial operation
+  ---
+  duration_ms: 202.589473
+  type: 'test'
+  ...
+# Subtest: P-03: confirmed association and its immutable history survive a stale Skip
+ok 22 - P-03: confirmed association and its immutable history survive a stale Skip
+  ---
+  duration_ms: 277.803391
+  type: 'test'
+  ...
+# Subtest: P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+ok 23 - P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+  ---
+  duration_ms: 267.559374
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new confirm with stable 409 and zero business writes
+not ok 24 - EXEC-01: paused rejects new confirm with stable 409 and zero business writes
+  ---
+  duration_ms: 84.867422
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:4419'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:605:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: EXEC-01: paused rejects new correct with stable 409 and zero business writes
+not ok 25 - EXEC-01: paused rejects new correct with stable 409 and zero business writes
+  ---
+  duration_ms: 75.585972
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:4419'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:605:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: EXEC-01: paused rejects new skip with stable 409 and zero business writes
+not ok 26 - EXEC-01: paused rejects new skip with stable 409 and zero business writes
+  ---
+  duration_ms: 63.945034
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:4419'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:605:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: EXEC-01: paused permits saved-identity Retract and committed Confirm replay without authorizing execution
+ok 27 - EXEC-01: paused permits saved-identity Retract and committed Confirm replay without authorizing execution
+  ---
+  duration_ms: 88.651914
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new confirm with stable 409 and zero business writes
+not ok 28 - EXEC-01: ended rejects new confirm with stable 409 and zero business writes
+  ---
+  duration_ms: 77.981652
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:4419'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:605:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: EXEC-01: ended rejects new correct with stable 409 and zero business writes
+not ok 29 - EXEC-01: ended rejects new correct with stable 409 and zero business writes
+  ---
+  duration_ms: 79.397557
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:4419'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:605:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: EXEC-01: ended rejects new skip with stable 409 and zero business writes
+not ok 30 - EXEC-01: ended rejects new skip with stable 409 and zero business writes
+  ---
+  duration_ms: 60.198408
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:4419'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:605:14)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: EXEC-01: ended permits saved-identity Retract and committed Confirm replay without authorizing execution
+ok 31 - EXEC-01: ended permits saved-identity Retract and committed Confirm replay without authorizing execution
+  ---
+  duration_ms: 130.652083
+  type: 'test'
+  ...
+1..31
+# tests 31
+# suites 0
+# pass 25
+# fail 6
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6603.606098

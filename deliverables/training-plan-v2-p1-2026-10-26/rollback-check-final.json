@@ -1,0 +1,11 @@
+{
+  "command": [
+    "git",
+    "apply",
+    "--reverse",
+    "--check",
+    "deliverables/training-plan-v2-p1-2026-10-26/P1.patch"
+  ],
+  "exitCode": 0,
+  "seconds": 0.054
+}

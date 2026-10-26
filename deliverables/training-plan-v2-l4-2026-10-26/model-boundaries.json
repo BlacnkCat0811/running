@@ -1,0 +1,12 @@
+{
+  "name": "model-boundaries",
+  "argv": [
+    "npm",
+    "run",
+    "review:model-boundaries"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997653.983327,
+  "durationSeconds": 24.521088123321533,
+  "exitCode": 0
+}

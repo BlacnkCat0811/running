@@ -44,18 +44,37 @@
 ## 2. 处方、单位与时间
 
 沿用 `MobileSessionStructure` 的 warmup / blocks / cooldown。结构目标使用整米、整秒；配速为整数秒/km，
-心率为整数 bpm。步数、循环次数及范围遵守现有 session-structure 限额；单日最多 80km，仍须通过周预算/赛前/恢复政策。
+心率为整数 bpm。每课程最多 8 个 blocks，每个 block 最多 8 个 steps、iterations 为 1–20；warmup/cooldown 各自独立，不计入 block 的 steps 数量。单步最多 100,000 米或 14,400 秒；完整课程含所有重复、热身和放松，服务端测量最多 80 km / 4 小时，仍须通过周预算/赛前/恢复政策。
 新增命令严格拒绝非法值，不能依赖旧宽松 normalize 把错误字段删除/截断后当成功。
 pace 范围为 120–1200 秒/km，heart_rate 为 1–240 bpm；每个非空 alert 至少一端非空，两端都有值时 lower ≤ upper。
 新处方必须有可测定剂量，不能用 open 工作步骤规避预算校验；旧 open/无结构处方仍按兼容合同读取。
 
-`edit.patch` 未提供的字段保留，`reason:null` 明确清空说明，空字符串不是 null。
+`edit.patch` 未提供的字段保留；距离在结构/类型变化时的省略规则见下文。`reason:null` 明确清空说明，空字符串不是 null。
 `kind:null`、`structure:null` 非法；清除目标用完整结构内的 `alert:null`。
 配速/强度修改必须修改真实 work 步骤的 alert；每步最多一个 pace 或 heart_rate 目标。
 配速 lower 为数值较小的秒/km、upper 为较大值，拒绝颠倒范围；清空 warmup/cooldown 用其 null，不能丢弃 blocks。
-距离通过结构测量，`distanceKm` 为兼容展示值；距离结构与显示距离须一致（整米比较，不做静默缩放）。
-纯时间结构没有可靠距离时可显式 `distanceKm:null`；距离步骤仍存在时 null 非法。
-修改距离必须同时提交一致结构；旧无结构课可读，编辑剂量/类型/目标或 add 时须提供合法结构。
+距离合同区分三个量（D-01/D-02）：
+
+- persisted distance：处方中的 `distanceKm`，保留既有自动课程的 0.1 km 存储精度；不是独立于结构的剂量事实。
+- measured distance / duration：仅 TypeScript `measureStructure` 按当前 `pacesFromZones` 计算。距离段为米/1000，时间段按用途/课程类型的服务端配速折算；warmup/recovery/cooldown 与每次重复均计入。它们是派生值，不新增持久化字段。
+- display distance：展示层可按 0.1 km 格式化，不得将展示值回写成新的精确剂量。编辑器对纯距离显式输入保留整米精度。
+
+add 可省略 `distanceKm`；edit 在结构或类型发生变化时也可省略距离，由服务端测量并在预览的有效处方中返回：
+有距离段时取测量值到整米，无距离段时为 `null`。edit 的结构与类型未变化且省略距离时保留 persisted distance，
+不会仅因打开编辑器将历史 0.1 km 值改写为整米值。响应 DTO 形状、候选绑定原始草稿、120 秒有效期、scope/实例/修订/事实检查与原子提交均不变。
+显式非 null 距离必须为正且不超过 80 km，并与完整结构测量值按整米比较；不能仅累计 mixed 的距离段。
+唯一舍入兼容边界是已有 edit 的类型、完整结构（含目标）和距离均未变化，且距离等于当前服务端测量的 0.1 km 舍入值；
+add、结构/类型变化、修改后的舍入值均不适用该例外。测量剂量始终受 80 km / 4 小时和现有安全政策约束。
+纯时间结构可显式 `distanceKm:null`；仍有距离步骤时显式 null 非法。0 不能用于请求服务端测量。
+旧客户端的合法整米 payload 和原样历史 payload 继续有效；结构变化后显式发送旧舍入值仍拒绝，需发送完整测量值或省略距离重新预览。
+旧无结构课可读，编辑剂量/类型/目标或 add 时须提供合法结构。iOS 不复制服务端配速模型，mixed 草稿省略距离，基础错误显示具体原因，最终剂量以服务端预览为准。
+固定课程、红测与分级验证见 [D-01/D-02 实施记录](../deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md)。
+D-03 数量校验只收紧新写入边界：add、edit 显式提供的结构均须合法；edit 修改 kind/distanceKm 时，合并后的完整结构也须合法，不能继承超限结构绕过。非法结构返回 `422 training_session_command_invalid`，不截断、不产生业务写入或操作回执。
+历史版本可能已保存每区块超过 8 steps 的课程；公共 normalizer、严格历史读取、身份迁移与历史回放保留全部步骤，不自动修剪处方。此类历史课程仍可 move/cancel/unlock 或仅修改 reason；编辑训练内容必须提供完整合法结构（即使显式重发的超限结构与历史相同也拒绝）。合法旧课程仍沿用 D-01/D-02 的距离兼容规则。
+课程命令 Fastify body Schema 与 OpenAPI 共用同一对象；原始请求先无损解析，再进行 Schema 验证。仅已提交且请求摘要完全匹配的历史 Submit 可在新写数量校验、能力和事实门之前返回原回执；未提交请求不能使用此例外。应用服务直接调用仍执行同等写入校验。
+iOS 编辑器仅检查上述结构数量及既有基础剂量输入，不复刻服务端 mixed 剂量测量；超限历史结构可解码查看，但不能作为内容编辑草稿重新提交。已有 move/cancel/unlock 动作继续可用，说明字段单独编辑的兼容能力由服务端 patch 合同提供。
+数量边界、历史兼容和分级验证证据见 [D-03 实施记录](../deliverables/training-plan-v2-d03-2026-10-26/REPORT.md)。
+2026-10-26 的锁定休息、执行授权/事实一致性、编辑器过期草稿及能力协商收敛见 [P1 实施记录](../deliverables/training-plan-v2-p1-2026-10-26/REPORT.md)。
 新 add 不接受 rest，休息走 set_rest；空 patch 拒绝。日期变更仅走 move，不能夹在 edit 中。
 明确改期可以保留与可跑日偏好冲突的用户意图，不能绕过伤病/恢复/容量等有效执行限制；冲突必须在预览解释。
 用户明确缩短课程不套用自动生成的完整剂量保证；不能自动加长回算法默认剂量。
@@ -75,10 +94,15 @@ pace 范围为 120–1200 秒/km，heart_rate 为 1–240 bpm；每个非空 ale
 | --- | --- | --- |
 | `trainingPlanSessionContractVersion` | `X-RAI-Training-Sessions` | unified read 2 顶层可选 `sessions`，含实例、课程、抑制、publishedInputKey；依赖 sync 1/API v1/read 2 |
 | `trainingPlanSessionCommandContractVersion` | `X-RAI-Client-Training-Session-Commands` | 课程 preview/submit；依赖精确课程读 1 + publication 1 |
+| `trainingPlanSessionDistanceOmissionContractVersion` | `X-RAI-Client-Training-Session-Distance-Omission` | add/edit 省略距离；依赖课程命令 1，不能由旧能力推导 |
 | `trainingPlanExecutionCommandContractVersion` | `X-RAI-Client-Training-Execution-Commands` | 候选查询/确认/纠错/撤回/跳过；写依赖课程读 1 + publication 1 |
 | `trainingPlanUpdateContractVersion` | `X-RAI-Training-Updates` | unified read 2 顶层可选 `update`，四阶段；依赖课程读 1，不授权服务器自动发布 |
 
 配置命令 2 与新命令 1 独立，不能推导彼此。课程写/关联写各有独立服务器开关，自动发布另有开关。
+距离省略能力只在课程写可用且同请求精确协商两个课程写头（各为 `1`）时宣告，handshake 为 no-store 并增加对应 Vary。
+旧服务器省略该新键；新客户端缺位/未知版本时不发送需要新语义的距离省略请求。纯距离显式数值、纯时间显式 null、
+原样历史显式距离及 reason-only 等旧合法 patch 继续兼容；无法显式表达的新 mixed/内容变更提示升级，不在 iOS 重算配速剂量。
+已持久化操作仍先查询原结果；已提交结果可读，notFound 后仅在当前能力支持原 payload 时重放，不能改写原字节或换 UUID。
 当前写模式可显式选择 `validation` 或 `production`，默认关闭；生产部署和启用仍须独立记录，不能冒充 G5/G6 已验收。
 2026-10-25 用户明确要求部署最新版本时再启用，本轮只准备生产模式，不修改运行服务。B01/B02 中 production/validation 均省略全部四键为历史状态。
 B03/G1 起仅在已完成受控身份迁移（schema 2）且 owner-ready 的 scope 宣告课程只读扩展；
@@ -105,6 +129,8 @@ B04 起课程命令使用独立开关及精确请求协商；B06/B08 已实现�
 | POST `/v1/mobile/training-plan/execution-commands` | contractVersion 1、operationId、operationScope、expectedStateRevision、planInstanceId、sessionId、sessionRevision、executionRevision、draft |
 
 课程 draft 精确为 move / edit / add / cancel / set_rest / unlock。已有课程动作带 sessionId/sessionRevision；
+iOS 表单打开时固定 scope、planInstanceId、stateRevision、sessionId/sessionRevision 及原始处方；后台刷新改变身份或修订后，
+旧草稿不能预览或保存。重新读取入口明确重建表单，不将旧输入绑定到新修订；模型层再次验证表单身份。
 add 和 set_rest 不发送伪造 ID。preview 不需要 operationId、零持久写；submit 必须带持久 UUID。
 候选 TTL 120 秒，绑定精确 draft、scope、state/session revision、实例、业务日、事实/分析/保护/关联版本、政策、影响清单和到期时间。
 submit 不得重新生成另一份课表再宣称是原候选；新 add 的 ID 必须在预览绑定，重放保持同一 ID。
@@ -113,11 +139,27 @@ submit 不得重新生成另一份课表再宣称是原候选；新 add 的 ID �
 关联 draft 为 confirm / correct（目标 trainingSessionId/sourceFactDigest）、retract（原 ID/摘要）、skip（明确 reason）。
 correct 在同一事务验证并释放原唯一占位后认领目标；executionRevision 的 CAS 绑定原关联，目标摘要绑定新事实。
 源删除后 retract 可用当前保存摘要撤回失效关联，不要求删除的主库行仍存在；确认/纠正必须重新核验实时源事实。
+服务层统一授权：runState active 且未 ended 时，Confirm/Correct/Skip 才可新增提交；paused/ended 返回
+`409 training_execution_not_active`，业务、历史和回执零写入。历史 Correct 同样会建立新认领，不能豁免；
+Retract 只按保存身份撤销历史结论，paused/ended 仍可用，保持运行状态且不授予新许可。已提交 operationId 精确重放不受新状态门影响。
 confirm 仅认领未关联/待确认课；已确认的替换用 correct，不容许另一 confirm 抢占。
 retract/事实失效使当前有效完成结论撤回，追加当前 pending 修订并保留原完成处方/评价历史；不是抹掉旧完成记录。
 存在执行当前行的课程在自动重算中继续保留身份与处方，并先计入生成预算；撤回或失效不使课程被自动归档或替换。
 这不改变其 automatic/user_protected 标记，也不授予执行许可，确保统一读取与人工纠错入口始终可达。
 skip 仅用于尚未执行且未确认关联的 pending 课；不能用 skip 覆盖一次真实完成。
+Skip 提交持有现有主库写入协调租约至控制库 COMMIT，事务内重新读取默认 ±2 天窗口的全部真实候选；
+存在候选返回 `409 training_execution_candidates_present`，不写 skipped 或操作回执。
+候选读取前后以及状态/历史/回执写入、owner reconciliation 后、COMMIT 前复核主库 inode/data_version；
+变化返回 `409 training_execution_source_changed` 并回滚整笔控制事务。主库与控制库仍是独立数据库，
+阻止受支持写者进入校验至提交间隙的是共享 mutation lease 与既有 API/CLI 发布锁，不是跨库原子事务。
+Confirm/Correct 与后台 Reconcile 采用同一边界，各入口只获取一次租约，覆盖完整控制库 COMMIT。
+候选、workout assessment 的 ID、起止、距离、记录时长和 evidence digest 必须一致；记录时长不以墙钟时差替代。
+评价后及状态/历史/回执写入后的最终检查均拒绝事实变化，Correct no_change 的新回执也受最终检查约束。
+Reconcile 在事务内再次检查运行状态、计划实例和状态修订，事实恢复或更新不会留下错误失效历史。
+事实指纹覆盖 Reconcile 预扫描到最终 COMMIT；无变化核对回滚内部尝试，不保存 changed:0 业务回执，避免掩盖后续失效。
+后台核对键使用内部 reconcile-v2 命名空间，避开历史 v1 无变化回执；旧回执保持原样可查询，用户 operationId 的重放合同不变。
+已提交 operationId 的原结果重放仍早于能力、租约和事实检查；不同键重复 Skip 按既有不可编辑合同拒绝。
+本阶段实现和验证证据见 [I-01/P-03 记录](../deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md)。
 仅同日、近距离、同结构或排期对象 workoutID 不构成实际身份凭据；缺可验证来源映射时一律 needs_confirmation。
 第一版不做概率自动确认，不合并同日跑步；一条实际跑步最多确认一堂课。
 
@@ -144,6 +186,8 @@ skip 仅用于尚未执行且未确认关联的 pending 课；不能用 skip 覆
 | 409 | `training_session_not_editable` | 完成/部分完成/跳过/取消/已替换课不可直接编辑 |
 | 404 | `training_session_not_found` | 当前 scope/实例内课程不存在，不等同路由不支持 |
 | 409 | `training_execution_source_changed` / `training_execution_link_conflict` | 源事实摘要改变或实际跑步已认领 |
+| 409 | `training_execution_candidates_present` | Skip 窗口已有真实候选；刷新后确认关联 |
+| 409 | `training_execution_not_active` | paused/ended 禁止 Confirm/Correct/Skip；历史 Retract 可用 |
 | 422 | `training_session_safety_rejected` | 新增/加量/结构不能通过现有安全约束 |
 | 503 | `training_session_storage_unavailable` | 存储/恢复不可用，保留未知提交账目 |
 

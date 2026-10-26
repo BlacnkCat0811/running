@@ -1,0 +1,143 @@
+# D-03 课程结构合同一致性修复
+
+交付整理版：测试结果保持原样；原始报告见 [REPORT.source.txt](REPORT.source.txt)，来源哈希及未入库材料见 [精选清单](../training-plan-v2-final-2026-10-26/EVIDENCE_ALLOWLIST.json)。绝对路径只记录历史执行环境，不作为当前运行入口。
+
+
+日期：2026-10-26（Asia/Shanghai）。模式：IMPLEMENT。
+起始 HEAD：`2e7c07bb66b3701c4e1b768c90f431b654584f5c`，分支 `main`。
+
+## 任务结果
+
+已修复课程命令每区块可写入第 9 个 Step 的漏洞。新增与内容编辑严格拒绝超限结构，历史读取、身份迁移和不可变回执回放继续保留原处方。
+没有修改数据库结构、迁移代码、训练算法或依赖；没有连接生产数据库、执行生产迁移、提交、推送或部署。
+后端最终 L1/L2/L3、iOS 源码类型检查及聚合纯逻辑回归均已真实执行并通过。
+
+## 修复前证据
+
+- [Node 红测](red-node.log)：14 tests，10 pass，4 fail，0 skipped；退出码 1，墙钟 2.169 秒。
+  新增和编辑 9 Steps 均未抛出预期错误；API Preview 实际返回 200；历史超限处方可通过内容编辑继续传播。
+- [Swift 红测](red-swift.log)：编译成功后在 `D-03: nine steps cannot reach preview` 断言处失败；退出码 132，墙钟 28.809 秒。
+- 复现使用隔离临时 SQLite 和合成课程，不读取真实健康数据。
+- 旧命令确实能接受 9 Steps，因此历史库可能存在此类课程；本轮未审计生产数据，不能据此宣称生产库实际含有超限课程。
+
+## 结构数量与剂量合同
+
+| 边界 | 上限/规则 | 权威校验 |
+|---|---|---|
+| 单课程 blocks | 8 | 共用 TS 常量、请求 Schema、服务层 |
+| 单 block steps | 8 | `MAX_STEPS_PER_BLOCK`、请求 Schema、服务层 |
+| 单 block iterations | 整数 1–20 | 既有无损解析、Schema、服务层 |
+| 单步距离 | 整米，1–100,000 m | 既有无损解析与 Schema |
+| 单步时间 | 整秒，1–14,400 s | 既有无损解析与 Schema |
+| 单课程总距离 | 最多 80 km | 既有 `measureStructure` |
+| 单课程总时长 | 最多 14,400 s | 既有 `measureStructure` |
+
+warmup/cooldown 各自独立，不占 blocks 内的 steps 数量；总剂量包含热身、放松和全部重复。
+单步字段合法不等于总剂量合法，例如单步 100,000 m 可通过字段解析，但不能通过 80 km 课程写入上限。
+本轮没有修改任何上述既有业务上限、mixed 测量算法、安全政策或周预算规则。
+
+## 实现与 API Schema
+
+- `sessionStructureWithinWriteLimits` 只用于已经无损解析的写入结构，复用同一份 TS 常量；公共 legacy normalizer 不新增 steps 截断或拒读逻辑。
+- `preview` 在读取事实前检查显式结构；`submit` 在已提交回执重放之后、候选校验之前执行同等检查。
+- add 和内容 edit 的合并结果在 apply 中再次检查，防止仅改 kind/distanceKm 继承历史超限结构绕过。
+- 两条 Fastify 课程命令路由挂载 body Schema，与 OpenAPI 使用完全相同的对象。
+- preValidation 先无损解析原始请求，避免 AJV 将错误输入转换或删除；生产 `removeAdditional: false` 保持原设置。
+- `attachValidation` 将 Schema 错误留给命令处理器，只有请求摘要完全匹配的已提交操作可先返回原回执；新请求的 Schema 错误仍被拒绝。
+- 拒绝沿用 `422 training_session_command_invalid`；合同版本错误仍为 `training_session_contract_required`。错误响应保留 `Cache-Control: no-store`。
+- 对所有控制库业务、历史、回执及 guard 表做逐表完整快照比较，验证非法 Preview/Submit 不产生部分写入或回执。
+
+## 历史兼容策略
+
+| 操作 | 历史 9 Steps 的处理 |
+|---|---|
+| normalizer、严格状态读取、goals 读取 | 完整保留，不能静默丢弃第 9 步 |
+| 身份迁移 dry-run/apply/replay | 兼容读取、保留原历史行和全部步骤；合成库验证 |
+| move、cancel、unlock | 沿用原动作合同及保护/事实门，不因新增数量上限而拒绝读取或改写处方 |
+| edit 仅修改 reason | 可用，原结构保留 |
+| edit 显式重发 9 Steps，即使与旧结构相同 | 作为内容写入拒绝 |
+| edit 仅改 kind/distanceKm，继承 9 Steps | 拒绝 |
+| edit 提供完整合法替代结构 | 可用，追加新修订；原历史行不重写 |
+| 新 add | 必须满足完整写入上限 |
+| 旧已提交 operationId 的精确重试 | 返回旧不可变回执，零写入；新 operationId 不享受此例外 |
+
+历史数据未做自动修剪、删除或剂量重算。迁移测试使用非空说明字段，因为既有 schema 1 读取会省略 `reason:null`；这与 Step 数量无关，未改动既有业务行为或旧断言。
+
+## iOS
+
+- 编辑器 policy 增加 8 Blocks / 每 Block 8 Steps 基础检查，复用本地集中常量；既有 20 iterations 控件引用同一 policy 常量。
+- 超限历史 DTO 仍能完整解码，内容编辑显示明确错误；move/cancel/unlock 不经过内容校验。
+- 说明单独编辑仍是服务端 patch 能力；当前原生内容编辑器发送完整内容，不将历史超限原结构作为合法内容重新提交。
+- 没有在 Swift 中复制服务端配速、时间转距离或 mixed 总剂量算法。
+- [Swift 定向绿测](swift-targeted.log)：62 checks passed，退出码 0，22.177 秒。
+- D-01/D-02 共用距离 Fixture 保持原哈希，Node 生成、测量、编辑与 Swift Fixture 回归继续执行。
+
+## 修改文件
+
+本轮相对于任务开始时工作树，仅叠加修改下列 12 个文件；[独立补丁](D03.patch) 不包含前三轮原有改动。
+
+| 文件 | 目的 |
+|---|---|
+| `apps/api/src/session-structure.ts` | 共用数量常量和严格写入数量谓词，保留 legacy normalizer |
+| `apps/api/src/schemas.ts` | Step 上限引用共用常量，导出与 OpenAPI 共用的两份 body Schema |
+| `apps/api/src/training-plan-session-commands.ts` | 服务层及合并结果严格校验，Schema 错误和历史重放顺序 |
+| `apps/api/src/server.ts` | 两条课程命令路由挂载 Schema/options |
+| `apps/api/test/session-structure.test.ts` | strict write 与 legacy read 数量边界 |
+| `apps/api/test/schemas.test.ts` | Preview/Submit、add/edit 数量矩阵及共用 Schema/生产挂载断言 |
+| `apps/api/test/training-plan-session-commands.test.ts` | 数量、剂量、零写入、旧课程编辑、历史回执和错误语义 |
+| `apps/api/test/training-plan-session-migration.test.ts` | 合成历史 9 Steps 迁移与回放不丢失 |
+| `apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift` | 结构数量本地检查和具体错误提示 |
+| `apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift` | iterations 控件使用 policy 上限 |
+| `apps/ios/tests/TrainingPlanSessionEditorRegression.swift` | 8/9 Steps、8/9 Blocks、20/21 iterations、历史解码与拒写 |
+| `docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md` | 明确写入限额、历史兼容和回放例外 |
+
+[工作区保护证据](workspace-preservation.json)：原有文件未删除；除授权叠加的文件外，原有修改及交付证据哈希不变。未触碰 A-01、I-01/P-03 的独立实现文件；叠加到共享文件的差异见独立补丁。
+
+## 测试过程与非最终失败
+
+- 红测为故意复现，不计作最终绿测。
+- 新增测试初期出现 TypeScript Fixture 类型问题，已修正并完整重跑 `npm run typecheck`，没有改变生产业务规则。
+- `l1-expanded` 初次为 29/30：新迁移 Fixture 的 `reason:null` 与既有 schema 1 省略语义不同；改用非空合成说明后完整重跑同一 4 文件 D-03 批次，30/30。
+- [L2 首轮](l2-first-failure.log) 为 184/185：原测试使用 Fastify 默认 `removeAdditional:true`，挂载 oneOf 后删除了 move 字段。测试配置对齐生产的 `removeAdditional:false`，原断言保留；完整 12 文件批次重新执行。
+- 最终代码又补充 preValidation 错误响应的 no-store 断言，重新执行 L1、完整 L2 和类型检查。
+- 没有删除旧测试、削弱旧断言、增加超时、忽略退出码或将未执行当作通过。
+
+## 验证结果与统计
+
+环境：macOS / x64，Node v22.23.2，Apple Swift 6.3.2；使用 `/Applications/Xcode.app/Contents/Developer`。
+每条原始命令、退出码和墙钟耗时分别保存在同名 `.json` / `.log` 文件；[L3 明确文件列表](l3-files.json) 共 42 个。
+
+| 检查项目 | 结果 | 命令/范围、统计、墙钟耗时、退出码 |
+|---|---|---|
+| 类型检查 | PASS | `npm run typecheck`；73.903 s；exit 0；[日志](typecheck-final.log) |
+| L1 定向测试 | PASS | D-03，4 文件，30/30，0 skip；8.436 s；exit 0；[日志](l1-final.log) |
+| L2 影响测试 | PASS | 12 文件，185/185，0 skip；36.358 s；exit 0；[日志](l2-final.log) |
+| L3 模块回归 | PASS | 42 文件，422/422，0 skip；441.122 s；exit 0；[日志](l3.log) |
+| L4 全量测试 | NOT RUN | 本阶段未运行 `npm test` 或 `npm run test:all` |
+| Swift 定向回归 | PASS | 62 checks；22.177 s；exit 0；[日志](swift-targeted.log) |
+| iOS 聚合验证 | PASS | `npm run test:ios`；103 文件真实类型检查（既有 3 个 AMap SDK 文件排除），聚合纯逻辑回归通过；1127.791 s；exit 0；[日志](ios.log) |
+| iOS 跨平台门禁 | PASS | `npm run check:ios-gates`；11 支执行，2 支手工判据明确排除；5.084 s；exit 0 |
+| 文档链接 | PASS | `npm run check:docs`；122 文件、1039 链接、0 problems；1.435 s；exit 0 |
+| 文档行引用 | PASS（有告警） | `npm run check:doc-refs`；153 处、0 越界/无法解析；8 处空行告警，内容漂移缺基线未验证；1.692 s；exit 0 |
+| 验收矩阵 | PASS | `npm run check:acceptance-matrix`；80 cited、0 missing；2.709 s；exit 0；标题引用不等于完整验收 |
+| GitHub CI | NOT CHECKED | 按用户限定不检查/改造 CI |
+
+测试统计：
+
+- 最终后端批次累计执行 637 次（30 + 185 + 422，包含批次重叠）；637 pass、0 fail、0 skipped、0 cancelled。
+- 后端三批墙钟耗时合计 485.916 秒；这是各命令耗时之和，不能当作并行工作总历时。
+- 所有后端批次显式 `--test-concurrency=2`；未通过增大并发或超时取得绿灯。
+- Swift 编辑器定向 62 项检查；iOS 聚合还执行了训练计划合同 142、执行关联 75、Store 70 等检查，均在日志中列明。聚合脚本没有统一用例总数，本报告不将 PASS 输出行数冒充测试用例数，也不与 Node 数量相加。
+- iOS 聚合耗时 1127.791 秒，Swift 定向 22.177 秒；最终类型检查、后端三批、Swift 定向、iOS 聚合与独立门禁/文档命令耗时合计 1720.707 秒（命令累计，存在并行与重复覆盖，不是任务总历时）。
+- 未覆盖：L4、GitHub CI、完整 Xcode App 构建、真机与 Simulator 视觉/AMap SDK 手工验收；生产数据分布未审计。
+- 是否测试假绿：未发现本轮验证被假绿处理。最终 Node 批次均非空且真实退出 0，无 skip；iOS 源码检查与纯逻辑聚合真实执行并退出 0。3 个 SDK 源码文件、2 支需手工环境的门禁排除项单列，未将其认作通过。
+
+## 风险与剩余事项
+
+- 本阶段不运行 L4 全仓回归，不宣称生产验收或发布就绪。
+- 合并前仍需训练计划 V2 整体变更审查及必要的 L4；GitHub CI 按本轮范围未检查。
+- 未进行真机、Simulator 视觉验收、AMap SDK 验证或完整 Xcode App 构建；纯逻辑及源码检查不能代替这些验收。
+- 未审计/修复生产历史数据，不能推断生产中超限课程的实际数量。
+- 保留所有前三轮未提交修改；本轮不自动进入下一项修复。
+
+D-03 实施目标已达到；具备本轮交付条件，但尚不满足整体合并/生产发布验收条件。下一阶段应为全部训练计划 V2 变更的整体审查及综合验收，本轮停止。

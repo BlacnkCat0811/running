@@ -1,0 +1,406 @@
+TAP version 13
+# (node:18791) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+ok 1 - 预览不写任何行，且候选绑定动作/草稿/revision/过期时间
+  ---
+  duration_ms: 77.335165
+  type: 'test'
+  ...
+# Subtest: 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+ok 2 - 草稿不完整/跨域/陈旧 revision 都被显式拒绝
+  ---
+  duration_ms: 41.389217
+  type: 'test'
+  ...
+# Subtest: 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+ok 3 - 提交：统一状态+历史+旧 goals 镜像同一事务，且计划被标记待刷新
+  ---
+  duration_ms: 76.0351
+  type: 'test'
+  ...
+# Subtest: 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+ok 4 - 同 operationId 重放返回原结果、不重复写；换请求内容被拒绝
+  ---
+  duration_ms: 52.273458
+  type: 'test'
+  ...
+# Subtest: 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+ok 5 - 过期候选与篡改候选被拒绝（先重放查询、后过期判定）
+  ---
+  duration_ms: 61.857237
+  type: 'test'
+  ...
+# Subtest: 暂停/恢复只改运行意愿；结束后的节目不能恢复
+ok 6 - 暂停/恢复只改运行意愿；结束后的节目不能恢复
+  ---
+  duration_ms: 136.005789
+  type: 'test'
+  ...
+# Subtest: 未迁移的 scope 不能预览或提交
+ok 7 - 未迁移的 scope 不能预览或提交
+  ---
+  duration_ms: 35.982693
+  type: 'test'
+  ...
+# Subtest: migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening
+ok 8 - migrated run-coach preferences survive commands, automatic refresh, projection writes and reopening
+  ---
+  duration_ms: 94.027113
+  type: 'test'
+  ...
+# Subtest: generation latch: facts changed during generation cannot be stamped with the new version
+ok 9 - generation latch: facts changed during generation cannot be stamped with the new version
+  ---
+  duration_ms: 81.40835
+  type: 'test'
+  ...
+# Subtest: facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first
+ok 10 - facts readiness: HTTP generation rejects before reads, after generation and at commit; releases the lane and replays first
+  ---
+  duration_ms: 289.767516
+  type: 'test'
+  ...
+# Subtest: HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+ok 11 - HTTP set_race_goal: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 116.399077
+  type: 'test'
+  ...
+# Subtest: HTTP pause: durable replay precedes revision/TTL/generation, including restart
+ok 12 - HTTP pause: durable replay precedes revision/TTL/generation, including restart
+  ---
+  duration_ms: 92.311119
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals: all business rows roll back and lane can retry
+ok 13 - publication abort at mobile_goals: all business rows roll back and lane can retry
+  ---
+  duration_ms: 58.734664
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_goals_history: all business rows roll back and lane can retry
+ok 14 - publication abort at mobile_goals_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 53.409793
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state: all business rows roll back and lane can retry
+ok 15 - publication abort at mobile_training_state: all business rows roll back and lane can retry
+  ---
+  duration_ms: 66.629174
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+ok 16 - publication abort at mobile_training_state_history: all business rows roll back and lane can retry
+  ---
+  duration_ms: 66.122146
+  type: 'test'
+  ...
+# Subtest: publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+ok 17 - publication abort at mobile_plan_operations: all business rows roll back and lane can retry
+  ---
+  duration_ms: 79.728036
+  type: 'test'
+  ...
+# Subtest: 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+ok 18 - 刷新：生成在事务外、提交在事务内；计划与统一状态一起落库
+  ---
+  duration_ms: 64.375873
+  type: 'test'
+  ...
+# Subtest: 刷新：事实在生成期间变化 → 409，且不写任何行
+ok 19 - 刷新：事实在生成期间变化 → 409，且不写任何行
+  ---
+  duration_ms: 59.405571
+  type: 'test'
+  ...
+# Subtest: 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+ok 20 - 刷新：空计划不写行、准入释放，后续合法请求仍可继续
+  ---
+  duration_ms: 46.25314
+  type: 'test'
+  ...
+# Subtest: 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+ok 21 - 刷新：暂停状态拒绝生成；重放返回原结果不重复写
+  ---
+  duration_ms: 85.925173
+  type: 'test'
+  ...
+# Subtest: 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+ok 22 - 单次命令：配置+计划同一操作发布，指纹不一致则整体拒绝
+  ---
+  duration_ms: 75.051504
+  type: 'test'
+  ...
+# Subtest: 命令体形状错误返回 422 training_command_invalid，而不是 500
+ok 23 - 命令体形状错误返回 422 training_command_invalid，而不是 500
+  ---
+  duration_ms: 56.628721
+  type: 'test'
+  ...
+# Subtest: 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+ok 24 - 暂停命令不发布课表：planRefreshRequired 为真且 plan 为空
+  ---
+  duration_ms: 41.886996
+  type: 'test'
+  ...
+# Subtest: B08/S04-03: an identical refresh advances only the evaluation cursor; a real content change publishes once
+ok 25 - B08/S04-03: an identical refresh advances only the evaluation cursor; a real content change publishes once
+  ---
+  duration_ms: 58.482235
+  type: 'test'
+  ...
+# (node:18792) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+ok 26 - B06/S03-04: retract followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 246.359252
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+ok 27 - B06/S03-04: source_changed followed by refresh keeps the execution's course readable and correctable
+  ---
+  duration_ms: 254.332752
+  type: 'test'
+  ...
+# Subtest: B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+ok 28 - B06/S03-01: confirm links one ended run, keeps dose/stimulus separate and advances only the course lifecycle it changes
+  ---
+  duration_ms: 139.257207
+  type: 'test'
+  ...
+# Subtest: B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+ok 29 - B06/S03-03: explicit dose shortfall is partial; unknown dose stays completed with an unknown assessment
+  ---
+  duration_ms: 96.279015
+  type: 'test'
+  ...
+# Subtest: B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+ok 30 - B06/S03-01/04: correct replaces the link atomically, retract restores pending and history keeps the completed revision
+  ---
+  duration_ms: 149.50197
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+ok 31 - B06/S03-04: one run cannot confirm two courses; source corrections and CAS mismatches write nothing
+  ---
+  duration_ms: 191.515934
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+ok 32 - B06/S03-04: skip is an explicit pending-only decision and never covers a confirmed run
+  ---
+  duration_ms: 129.782862
+  type: 'test'
+  ...
+# Subtest: B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+ok 33 - B06/S03-02: candidate reads are date-filtered, paged and never claim identity without a confirmed link
+  ---
+  duration_ms: 133.01657
+  type: 'test'
+  ...
+# Subtest: B06: strict wire parsing rejects malformed execution drafts before any write
+ok 34 - B06: strict wire parsing rejects malformed execution drafts before any write
+  ---
+  duration_ms: 49.581257
+  type: 'test'
+  ...
+# Subtest: B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+ok 35 - B06/S03-04: a deleted/corrected source invalidates the current link with a new revision, never by guessing on GET
+  ---
+  duration_ms: 105.750061
+  type: 'test'
+  ...
+# Subtest: P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+ok 36 - P1.2: superseded and cancelled courses cannot be confirmed, corrected, skipped or used for candidates
+  ---
+  duration_ms: 135.828969
+  type: 'test'
+  ...
+# Subtest: P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+ok 37 - P2.1: correct always re-reads the live source; a deleted/corrected fact is source_changed, never no_change
+  ---
+  duration_ms: 71.531267
+  type: 'test'
+  ...
+# Subtest: P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+ok 38 - P2.2: reconcile re-reads facts in the transaction and skips a source that recovered before commit
+  ---
+  duration_ms: 61.227934
+  type: 'test'
+  ...
+# Subtest: P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+ok 39 - P1.5: an edit previewed before the run but committed after it is not the pre-run prescription
+  ---
+  duration_ms: 122.765978
+  type: 'test'
+  ...
+# Subtest: P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+ok 40 - P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+  ---
+  duration_ms: 252.317331
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+ok 41 - P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+  ---
+  duration_ms: 243.388143
+  type: 'test'
+  ...
+# Subtest: P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+ok 42 - P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+  ---
+  duration_ms: 265.99609
+  type: 'test'
+  ...
+# Subtest: P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+ok 43 - P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+  ---
+  duration_ms: 274.374669
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite state failure leaves no Skip or partial operation
+ok 44 - P-03: SQLite state failure leaves no Skip or partial operation
+  ---
+  duration_ms: 182.410858
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite receipt failure leaves no Skip or partial operation
+ok 45 - P-03: SQLite receipt failure leaves no Skip or partial operation
+  ---
+  duration_ms: 186.851882
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite commit failure leaves no Skip or partial operation
+ok 46 - P-03: SQLite commit failure leaves no Skip or partial operation
+  ---
+  duration_ms: 235.831242
+  type: 'test'
+  ...
+# Subtest: P-03: confirmed association and its immutable history survive a stale Skip
+ok 47 - P-03: confirmed association and its immutable history survive a stale Skip
+  ---
+  duration_ms: 229.774363
+  type: 'test'
+  ...
+# Subtest: P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+ok 48 - P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+  ---
+  duration_ms: 332.345686
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new confirm with stable 409 and zero business writes
+ok 49 - EXEC-01: paused rejects new confirm with stable 409 and zero business writes
+  ---
+  duration_ms: 62.557234
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new correct with stable 409 and zero business writes
+ok 50 - EXEC-01: paused rejects new correct with stable 409 and zero business writes
+  ---
+  duration_ms: 92.230255
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused rejects new skip with stable 409 and zero business writes
+ok 51 - EXEC-01: paused rejects new skip with stable 409 and zero business writes
+  ---
+  duration_ms: 73.805349
+  type: 'test'
+  ...
+# Subtest: EXEC-01: paused permits saved-identity Retract and committed Confirm replay without authorizing execution
+ok 52 - EXEC-01: paused permits saved-identity Retract and committed Confirm replay without authorizing execution
+  ---
+  duration_ms: 96.195766
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new confirm with stable 409 and zero business writes
+ok 53 - EXEC-01: ended rejects new confirm with stable 409 and zero business writes
+  ---
+  duration_ms: 55.916443
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new correct with stable 409 and zero business writes
+ok 54 - EXEC-01: ended rejects new correct with stable 409 and zero business writes
+  ---
+  duration_ms: 73.658578
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended rejects new skip with stable 409 and zero business writes
+ok 55 - EXEC-01: ended rejects new skip with stable 409 and zero business writes
+  ---
+  duration_ms: 137.766053
+  type: 'test'
+  ...
+# Subtest: EXEC-01: ended permits saved-identity Retract and committed Confirm replay without authorizing execution
+ok 56 - EXEC-01: ended permits saved-identity Retract and committed Confirm replay without authorizing execution
+  ---
+  duration_ms: 113.98337
+  type: 'test'
+  ...
+# (node:18819) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+ok 57 - 合同协商只接受 1 或 2，未知版本显式拒绝而不是回退
+  ---
+  duration_ms: 2.50178
+  type: 'test'
+  ...
+# Subtest: v2 投影：模式按业务日期派生，读取不带执行授权
+ok 58 - v2 投影：模式按业务日期派生，读取不带执行授权
+  ---
+  duration_ms: 3.627446
+  type: 'test'
+  ...
+# Subtest: v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+ok 59 - v2 投影：结束后不复活、结束时准入待确认、计划陈旧可判定
+  ---
+  duration_ms: 0.287479
+  type: 'test'
+  ...
+# Subtest: v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+ok 60 - v2 投影：只返回业务日起七日内的已发布意图，并按日期排序
+  ---
+  duration_ms: 13.912719
+  type: 'test'
+  ...
+# Subtest: 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+ok 61 - 路由：v2 返回统一投影，v1 原样走旧处理器，未知版本 409
+  ---
+  duration_ms: 248.336124
+  type: 'test'
+  ...
+# Subtest: 路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖
+ok 62 - 路由：sessions + updates 同时协商时 Vary 保留全部三值，不被 sessions 分支覆盖
+  ---
+  duration_ms: 7.687062
+  type: 'test'
+  ...
+# Subtest: 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+ok 63 - 路由：未迁移的 scope 是显式的 409，不静默回退；存储不可读是 503
+  ---
+  duration_ms: 10.322052
+  type: 'test'
+  ...
+# Subtest: 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+ok 64 - 存储→路由端到端：迁移后读出统一状态，且两次读取不写任何行
+  ---
+  duration_ms: 45.563532
+  type: 'test'
+  ...
+# Subtest: 未迁移的 store 读返回 null（不是伪造的空状态）
+ok 65 - 未迁移的 store 读返回 null（不是伪造的空状态）
+  ---
+  duration_ms: 29.590961
+  type: 'test'
+  ...
+1..65
+# tests 65
+# suites 0
+# pass 65
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7109.182115

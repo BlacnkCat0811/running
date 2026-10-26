@@ -1,0 +1,819 @@
+TAP version 13
+# (node:83686) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A-01: legal schema 1/2 locks and explicit rest remain readable without mutation
+ok 1 - A-01: legal schema 1/2 locks and explicit rest remain readable without mutation
+  ---
+  duration_ms: 24.51036
+  type: 'test'
+  ...
+# Subtest: A-01: schema 1 strict read rejects lock/rest without silently repairing history
+not ok 2 - A-01: schema 1 strict read rejects lock/rest without silently repairing history
+  ---
+  duration_ms: 3.659296
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:2821'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:53:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: A-01: schema 2 strict read rejects lock/rest without silently repairing history
+not ok 3 - A-01: schema 2 strict read rejects lock/rest without silently repairing history
+  ---
+  duration_ms: 3.355027
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:2821'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:58:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: A-01: current schema 1 conflict is diagnosed by inspect and apply writes nothing
+not ok 4 - A-01: current schema 1 conflict is diagnosed by inspect and apply writes nothing
+  ---
+  duration_ms: 46.307199
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:3383'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception (migrationConflict).'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:77:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: A-01: history schema 1 conflict is diagnosed by inspect and apply writes nothing
+not ok 5 - A-01: history schema 1 conflict is diagnosed by inspect and apply writes nothing
+  ---
+  duration_ms: 33.383917
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:3383'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception (migrationConflict).'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:77:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: A-01: legacy lock rejects a rest date before writing goals/history
+not ok 6 - A-01: legacy lock rejects a rest date before writing goals/history
+  ---
+  duration_ms: 34.309963
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:4658'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:88:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: A-01: owner reconciliation rolls back a lock colliding with staged explicit rest
+not ok 7 - A-01: owner reconciliation rolls back a lock colliding with staged explicit rest
+  ---
+  duration_ms: 52.794556
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:5070'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    ... Skipped lines
+    
+      [
+        {
+          name: 'idx_mobile_plan_pushes_pushed_at',
+          rows: null,
+          sql: 'CREATE INDEX idx_mobile_plan_pushes_pushed_at\n' +
+    ...
+            [Object: null prototype] {
+    +         epoch: 1,
+    -         epoch: 0,
+              id: 1,
+              pending_since: null
+            }
+          ],
+          sql: 'CREATE TABLE mobile_publication_guard (\n' +
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0:
+      name: 'idx_mobile_plan_pushes_pushed_at'
+      sql: |-
+        CREATE INDEX idx_mobile_plan_pushes_pushed_at
+                ON mobile_plan_pushes(pushed_at)
+      rows: ~
+    1:
+      name: 'idx_mobile_plan_pushes_scope_idempotency'
+      sql: |-
+        CREATE UNIQUE INDEX idx_mobile_plan_pushes_scope_idempotency
+                ON mobile_plan_pushes(scope_key, idempotency_key)
+                WHERE scope_key IS NOT NULL AND idempotency_key IS NOT NULL
+      rows: ~
+    2:
+      name: 'idx_mobile_plan_pushes_unscoped_idempotency'
+      sql: |-
+        CREATE UNIQUE INDEX idx_mobile_plan_pushes_unscoped_idempotency
+                ON mobile_plan_pushes(idempotency_key)
+                WHERE scope_key IS NULL AND idempotency_key IS NOT NULL
+      rows: ~
+    3:
+      name: 'idx_mobile_plan_pushes_workout'
+      sql: |-
+        CREATE INDEX idx_mobile_plan_pushes_workout
+                ON mobile_plan_pushes(workout_id, scheduled_at)
+      rows: ~
+    4:
+      name: 'idx_training_execution_confirmed_run'
+      sql: |-
+        CREATE UNIQUE INDEX idx_training_execution_confirmed_run
+              ON mobile_training_execution(scope, training_session_id)
+              WHERE association_status = 'confirmed' AND training_session_id IS NOT NULL
+      rows: ~
+    5:
+      name: 'idx_training_execution_history_time'
+      sql: |-
+        CREATE INDEX idx_training_execution_history_time
+              ON mobile_training_execution_history(scope, available_at, session_id, execution_revision)
+      rows: ~
+    6:
+      name: 'idx_training_execution_instance'
+      sql: |-
+        CREATE INDEX idx_training_execution_instance
+              ON mobile_training_execution(scope, plan_instance_id, session_id)
+      rows: ~
+    7:
+      name: 'idx_training_session_history_date'
+      sql: |-
+        CREATE INDEX idx_training_session_history_date
+              ON mobile_training_session_history(scope, local_date, available_at, session_id, session_revision)
+      rows: ~
+    8:
+      name: 'idx_training_session_history_identity'
+      sql: |-
+        CREATE UNIQUE INDEX idx_training_session_history_identity
+              ON mobile_training_session_history(scope, session_id, session_revision)
+      rows: ~
+    9:
+      name: 'idx_training_session_history_time'
+      sql: |-
+        CREATE INDEX idx_training_session_history_time
+              ON mobile_training_session_history(scope, plan_instance_id, session_id, available_at, session_revision)
+      rows: ~
+    10:
+      name: 'mobile_coach_loop_receipts'
+      sql: |-
+        CREATE TABLE mobile_coach_loop_receipts (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+                operation_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+                UNIQUE(scope,operation_id)
+              )
+      rows:
+    11:
+      name: 'mobile_control_schema'
+      sql: |-
+        CREATE TABLE mobile_control_schema (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+              )
+      rows:
+        0:
+          version: 1
+          applied_at: '2026-10-26T02:54:04.371Z'
+        1:
+          version: 2
+          applied_at: '2026-10-26T02:54:04.372Z'
+        2:
+          version: 3
+          applied_at: '2026-10-26T02:54:04.374Z'
+        3:
+          version: 4
+          applied_at: '2026-10-26T02:54:04.375Z'
+        4:
+          version: 5
+          applied_at: '2026-10-26T02:54:04.377Z'
+    12:
+      name: 'mobile_goals'
+      sql: |-
+        CREATE TABLE mobile_goals (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                revision INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+              )
+      rows:
+        0:
+          singleton: 1
+          revision: 1
+          payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+          updated_at: '2026-10-26T02:54:04.382Z'
+    13:
+      name: 'mobile_goals_history'
+      sql: |-
+        CREATE TABLE mobile_goals_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                revision INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                changed_at TEXT NOT NULL
+              )
+      rows:
+        0:
+          id: 1
+          revision: 0
+          payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+          changed_at: '1970-01-01T00:00:00.000Z'
+        1:
+          id: 2
+          revision: 1
+          payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+          changed_at: '2026-10-26T02:54:04.382Z'
+    14:
+      name: 'mobile_plan_operations'
+      sql: |-
+        CREATE TABLE mobile_plan_operations (
+                scope TEXT NOT NULL, operation_id TEXT NOT NULL, request_digest TEXT NOT NULL,
+                result_json TEXT, expires_at TEXT NOT NULL, PRIMARY KEY(scope, operation_id)
+              )
+      rows:
+    15:
+      name: 'mobile_plan_pushes'
+      sql: |-
+        CREATE TABLE mobile_plan_pushes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_date TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                pushed_at TEXT NOT NULL
+              , scope_key TEXT, idempotency_key TEXT, workout_id TEXT, scheduled_at TEXT)
+      rows:
+    16:
+      name: 'mobile_publication_guard'
+      sql: |-
+        CREATE TABLE mobile_publication_guard (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              epoch INTEGER NOT NULL DEFAULT 0,
+              pending_since TEXT
+            )
+      rows:
+        0:
+          id: 1
+          epoch: 0
+          pending_since: ~
+    17:
+      name: 'mobile_training_execution'
+      sql: |-
+        CREATE TABLE mobile_training_execution (
+              scope TEXT NOT NULL,
+              plan_instance_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              execution_revision INTEGER NOT NULL CHECK (execution_revision > 0),
+              association_status TEXT NOT NULL CHECK (association_status IN ('unlinked','pending_confirmation','confirmed','invalidated')),
+              training_session_id TEXT,
+              prescription_session_revision INTEGER NOT NULL CHECK (prescription_session_revision > 0),
+              source_fact_digest TEXT,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              available_at TEXT NOT NULL,
+              PRIMARY KEY (scope, session_id),
+              CHECK (json_extract(payload_json,'$.sessionId') IS session_id),
+              CHECK (json_extract(payload_json,'$.executionRevision') IS execution_revision),
+              CHECK (json_extract(payload_json,'$.association') IS association_status),
+              CHECK (json_extract(payload_json,'$.availableAt') IS available_at),
+              CHECK (association_status <> 'confirmed' OR (training_session_id IS NOT NULL AND source_fact_digest IS NOT NULL)),
+              CHECK (association_status <> 'unlinked' OR (training_session_id IS NULL AND source_fact_digest IS NULL)),
+              CHECK (length(available_at) = 24 AND substr(available_at,24,1) = 'Z')
+            )
+      rows:
+    18:
+      name: 'mobile_training_execution_history'
+      sql: |-
+        CREATE TABLE mobile_training_execution_history (
+              scope TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              execution_revision INTEGER NOT NULL CHECK (execution_revision > 0),
+              reason TEXT NOT NULL,
+              available_at TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              PRIMARY KEY (scope, session_id, execution_revision),
+              CHECK (json_extract(payload_json,'$.sessionId') IS session_id),
+              CHECK (json_extract(payload_json,'$.executionRevision') IS execution_revision),
+              CHECK (length(available_at) = 24 AND substr(available_at,24,1) = 'Z')
+            )
+      rows:
+    19:
+      name: 'mobile_training_migration_audit'
+      sql: |-
+        CREATE TABLE mobile_training_migration_audit (
+              scope TEXT NOT NULL,
+              migration_version INTEGER NOT NULL,
+              source_digest TEXT NOT NULL,
+              result_digest TEXT NOT NULL,
+              status TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (scope, migration_version)
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          migration_version: 1
+          source_digest: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+          result_digest: '0384ad5d957d6a7feb1df8a400f3a2f9710feb74ef2fe4acc0b91cdb1a65a920'
+          status: 'applied'
+          payload_json: '{"revision":1,"state":{"schemaVersion":1,"migrationVersion":1,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z"}}'
+          created_at: '2026-10-25T02:00:00.000Z'
+        1:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          migration_version: 2
+          source_digest: 'dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac'
+          result_digest: '442c14d19343ddb638a13ff63b671458258d114bd56c4970e825a5657bcca250'
+          status: 'applied'
+          payload_json: '{"revision":2,"state":{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessions":[{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}],"suppressions":[{"localDate":"2026-10-30","reason":"explicit_rest","sessionId":null,"availableAt":"2026-10-25T02:00:00.000Z"}],"publishedInputKey":null},"mappingVersion":1,"mappingDigest":"1d63ef281e48ddcd6d204583794133e1236efcd73f00d39afe42e0a923220b20","identityMappings":[{"sourceRevision":1,"localDate":"2026-10-29","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1}],"historySnapshots":1}'
+          created_at: '2026-10-26T02:54:04.388Z'
+    20:
+      name: 'mobile_training_plan_evaluation'
+      sql: |-
+        CREATE TABLE mobile_training_plan_evaluation (
+              scope TEXT PRIMARY KEY,
+              input_key TEXT NOT NULL,
+              state_revision INTEGER NOT NULL CHECK (state_revision >= 0),
+              business_date TEXT NOT NULL,
+              policy_hash TEXT,
+              execution_digest TEXT NOT NULL,
+              operation_id TEXT,
+              evaluated_at TEXT NOT NULL,
+              CHECK (length(input_key) > 0),
+              CHECK (length(execution_digest) = 64)
+            )
+      rows:
+    21:
+      name: 'mobile_training_session_history'
+      sql: |-
+        CREATE TABLE mobile_training_session_history (
+              scope TEXT NOT NULL,
+              plan_instance_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              session_revision INTEGER NOT NULL CHECK (session_revision > 0),
+              state_revision INTEGER NOT NULL CHECK (state_revision >= 0),
+              local_date TEXT NOT NULL,
+              available_at TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              PRIMARY KEY (scope, plan_instance_id, session_id, session_revision),
+              CHECK (json_type(payload_json,'$.protection') IS 'text' AND json_extract(payload_json,'$.protection') IN ('automatic','user_protected')),
+              CHECK (json_type(payload_json,'$.lifecycle') IS 'text' AND json_extract(payload_json,'$.lifecycle') IN ('pending','completed','partial','skipped','cancelled')),
+              CHECK (json_extract(payload_json,'$.planInstanceId') IS plan_instance_id),
+              CHECK (json_extract(payload_json,'$.sessionId') IS session_id),
+              CHECK (json_extract(payload_json,'$.sessionRevision') IS session_revision),
+              CHECK (json_extract(payload_json,'$.prescription.localDate') IS local_date),
+              CHECK (json_extract(payload_json,'$.availableAt') IS available_at),
+              CHECK (length(available_at)=24 AND substr(available_at,24,1)='Z')
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          plan_instance_id: 'plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73'
+          session_id: 'session-cd909390-da7f-4847-a0f6-471171efc9af'
+          session_revision: 1
+          state_revision: 2
+          local_date: '2026-10-29'
+          available_at: '2026-10-25T02:00:00.000Z'
+          payload_json: '{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}'
+    22:
+      name: 'mobile_training_state'
+      sql: |-
+        CREATE TABLE mobile_training_state (
+              scope TEXT PRIMARY KEY,
+              revision INTEGER NOT NULL CHECK (revision >= 0),
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              updated_at TEXT NOT NULL
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          revision: 2
+          payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessions":[{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}],"suppressions":[{"localDate":"2026-10-30","reason":"explicit_rest","sessionId":null,"availableAt":"2026-10-25T02:00:00.000Z"}],"publishedInputKey":null}'
+          updated_at: '2026-10-26T02:54:04.391Z'
+    23:
+      name: 'mobile_training_state_history'
+      sql: |-
+        CREATE TABLE mobile_training_state_history (
+              scope TEXT NOT NULL,
+              revision INTEGER NOT NULL,
+              event_type TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              changed_at TEXT NOT NULL,
+              PRIMARY KEY (scope, revision)
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          revision: 1
+          event_type: 'migration_created'
+          payload_json: '{"schemaVersion":1,"migrationVersion":1,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z"}'
+          changed_at: '2026-10-25T02:00:00.000Z'
+        1:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          revision: 2
+          event_type: 'session_identity_migration'
+          payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessions":[{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}],"suppressions":[{"localDate":"2026-10-30","reason":"explicit_rest","sessionId":null,"availableAt":"2026-10-25T02:00:00.000Z"}],"publishedInputKey":null}'
+          changed_at: '2026-10-26T02:54:04.391Z'
+  actual:
+    0:
+      name: 'idx_mobile_plan_pushes_pushed_at'
+      sql: |-
+        CREATE INDEX idx_mobile_plan_pushes_pushed_at
+                ON mobile_plan_pushes(pushed_at)
+      rows: ~
+    1:
+      name: 'idx_mobile_plan_pushes_scope_idempotency'
+      sql: |-
+        CREATE UNIQUE INDEX idx_mobile_plan_pushes_scope_idempotency
+                ON mobile_plan_pushes(scope_key, idempotency_key)
+                WHERE scope_key IS NOT NULL AND idempotency_key IS NOT NULL
+      rows: ~
+    2:
+      name: 'idx_mobile_plan_pushes_unscoped_idempotency'
+      sql: |-
+        CREATE UNIQUE INDEX idx_mobile_plan_pushes_unscoped_idempotency
+                ON mobile_plan_pushes(idempotency_key)
+                WHERE scope_key IS NULL AND idempotency_key IS NOT NULL
+      rows: ~
+    3:
+      name: 'idx_mobile_plan_pushes_workout'
+      sql: |-
+        CREATE INDEX idx_mobile_plan_pushes_workout
+                ON mobile_plan_pushes(workout_id, scheduled_at)
+      rows: ~
+    4:
+      name: 'idx_training_execution_confirmed_run'
+      sql: |-
+        CREATE UNIQUE INDEX idx_training_execution_confirmed_run
+              ON mobile_training_execution(scope, training_session_id)
+              WHERE association_status = 'confirmed' AND training_session_id IS NOT NULL
+      rows: ~
+    5:
+      name: 'idx_training_execution_history_time'
+      sql: |-
+        CREATE INDEX idx_training_execution_history_time
+              ON mobile_training_execution_history(scope, available_at, session_id, execution_revision)
+      rows: ~
+    6:
+      name: 'idx_training_execution_instance'
+      sql: |-
+        CREATE INDEX idx_training_execution_instance
+              ON mobile_training_execution(scope, plan_instance_id, session_id)
+      rows: ~
+    7:
+      name: 'idx_training_session_history_date'
+      sql: |-
+        CREATE INDEX idx_training_session_history_date
+              ON mobile_training_session_history(scope, local_date, available_at, session_id, session_revision)
+      rows: ~
+    8:
+      name: 'idx_training_session_history_identity'
+      sql: |-
+        CREATE UNIQUE INDEX idx_training_session_history_identity
+              ON mobile_training_session_history(scope, session_id, session_revision)
+      rows: ~
+    9:
+      name: 'idx_training_session_history_time'
+      sql: |-
+        CREATE INDEX idx_training_session_history_time
+              ON mobile_training_session_history(scope, plan_instance_id, session_id, available_at, session_revision)
+      rows: ~
+    10:
+      name: 'mobile_coach_loop_receipts'
+      sql: |-
+        CREATE TABLE mobile_coach_loop_receipts (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+                operation_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+                UNIQUE(scope,operation_id)
+              )
+      rows:
+    11:
+      name: 'mobile_control_schema'
+      sql: |-
+        CREATE TABLE mobile_control_schema (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+              )
+      rows:
+        0:
+          version: 1
+          applied_at: '2026-10-26T02:54:04.371Z'
+        1:
+          version: 2
+          applied_at: '2026-10-26T02:54:04.372Z'
+        2:
+          version: 3
+          applied_at: '2026-10-26T02:54:04.374Z'
+        3:
+          version: 4
+          applied_at: '2026-10-26T02:54:04.375Z'
+        4:
+          version: 5
+          applied_at: '2026-10-26T02:54:04.377Z'
+    12:
+      name: 'mobile_goals'
+      sql: |-
+        CREATE TABLE mobile_goals (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                revision INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+              )
+      rows:
+        0:
+          singleton: 1
+          revision: 1
+          payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+          updated_at: '2026-10-26T02:54:04.382Z'
+    13:
+      name: 'mobile_goals_history'
+      sql: |-
+        CREATE TABLE mobile_goals_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                revision INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                changed_at TEXT NOT NULL
+              )
+      rows:
+        0:
+          id: 1
+          revision: 0
+          payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+          changed_at: '1970-01-01T00:00:00.000Z'
+        1:
+          id: 2
+          revision: 1
+          payload_json: '{"easyDurationFloorFraction":0.7,"qualitySessionCap":2,"raceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null}],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,"weekPlanPreservedDate":null,"runCoach":null}'
+          changed_at: '2026-10-26T02:54:04.382Z'
+    14:
+      name: 'mobile_plan_operations'
+      sql: |-
+        CREATE TABLE mobile_plan_operations (
+                scope TEXT NOT NULL, operation_id TEXT NOT NULL, request_digest TEXT NOT NULL,
+                result_json TEXT, expires_at TEXT NOT NULL, PRIMARY KEY(scope, operation_id)
+              )
+      rows:
+    15:
+      name: 'mobile_plan_pushes'
+      sql: |-
+        CREATE TABLE mobile_plan_pushes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                local_date TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                pushed_at TEXT NOT NULL
+              , scope_key TEXT, idempotency_key TEXT, workout_id TEXT, scheduled_at TEXT)
+      rows:
+    16:
+      name: 'mobile_publication_guard'
+      sql: |-
+        CREATE TABLE mobile_publication_guard (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              epoch INTEGER NOT NULL DEFAULT 0,
+              pending_since TEXT
+            )
+      rows:
+        0:
+          id: 1
+          epoch: 1
+          pending_since: ~
+    17:
+      name: 'mobile_training_execution'
+      sql: |-
+        CREATE TABLE mobile_training_execution (
+              scope TEXT NOT NULL,
+              plan_instance_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              execution_revision INTEGER NOT NULL CHECK (execution_revision > 0),
+              association_status TEXT NOT NULL CHECK (association_status IN ('unlinked','pending_confirmation','confirmed','invalidated')),
+              training_session_id TEXT,
+              prescription_session_revision INTEGER NOT NULL CHECK (prescription_session_revision > 0),
+              source_fact_digest TEXT,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              available_at TEXT NOT NULL,
+              PRIMARY KEY (scope, session_id),
+              CHECK (json_extract(payload_json,'$.sessionId') IS session_id),
+              CHECK (json_extract(payload_json,'$.executionRevision') IS execution_revision),
+              CHECK (json_extract(payload_json,'$.association') IS association_status),
+              CHECK (json_extract(payload_json,'$.availableAt') IS available_at),
+              CHECK (association_status <> 'confirmed' OR (training_session_id IS NOT NULL AND source_fact_digest IS NOT NULL)),
+              CHECK (association_status <> 'unlinked' OR (training_session_id IS NULL AND source_fact_digest IS NULL)),
+              CHECK (length(available_at) = 24 AND substr(available_at,24,1) = 'Z')
+            )
+      rows:
+    18:
+      name: 'mobile_training_execution_history'
+      sql: |-
+        CREATE TABLE mobile_training_execution_history (
+              scope TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              execution_revision INTEGER NOT NULL CHECK (execution_revision > 0),
+              reason TEXT NOT NULL,
+              available_at TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              PRIMARY KEY (scope, session_id, execution_revision),
+              CHECK (json_extract(payload_json,'$.sessionId') IS session_id),
+              CHECK (json_extract(payload_json,'$.executionRevision') IS execution_revision),
+              CHECK (length(available_at) = 24 AND substr(available_at,24,1) = 'Z')
+            )
+      rows:
+    19:
+      name: 'mobile_training_migration_audit'
+      sql: |-
+        CREATE TABLE mobile_training_migration_audit (
+              scope TEXT NOT NULL,
+              migration_version INTEGER NOT NULL,
+              source_digest TEXT NOT NULL,
+              result_digest TEXT NOT NULL,
+              status TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (scope, migration_version)
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          migration_version: 1
+          source_digest: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+          result_digest: '0384ad5d957d6a7feb1df8a400f3a2f9710feb74ef2fe4acc0b91cdb1a65a920'
+          status: 'applied'
+          payload_json: '{"revision":1,"state":{"schemaVersion":1,"migrationVersion":1,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z"}}'
+          created_at: '2026-10-25T02:00:00.000Z'
+        1:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          migration_version: 2
+          source_digest: 'dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac'
+          result_digest: '442c14d19343ddb638a13ff63b671458258d114bd56c4970e825a5657bcca250'
+          status: 'applied'
+          payload_json: '{"revision":2,"state":{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessions":[{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}],"suppressions":[{"localDate":"2026-10-30","reason":"explicit_rest","sessionId":null,"availableAt":"2026-10-25T02:00:00.000Z"}],"publishedInputKey":null},"mappingVersion":1,"mappingDigest":"1d63ef281e48ddcd6d204583794133e1236efcd73f00d39afe42e0a923220b20","identityMappings":[{"sourceRevision":1,"localDate":"2026-10-29","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1}],"historySnapshots":1}'
+          created_at: '2026-10-26T02:54:04.388Z'
+    20:
+      name: 'mobile_training_plan_evaluation'
+      sql: |-
+        CREATE TABLE mobile_training_plan_evaluation (
+              scope TEXT PRIMARY KEY,
+              input_key TEXT NOT NULL,
+              state_revision INTEGER NOT NULL CHECK (state_revision >= 0),
+              business_date TEXT NOT NULL,
+              policy_hash TEXT,
+              execution_digest TEXT NOT NULL,
+              operation_id TEXT,
+              evaluated_at TEXT NOT NULL,
+              CHECK (length(input_key) > 0),
+              CHECK (length(execution_digest) = 64)
+            )
+      rows:
+    21:
+      name: 'mobile_training_session_history'
+      sql: |-
+        CREATE TABLE mobile_training_session_history (
+              scope TEXT NOT NULL,
+              plan_instance_id TEXT NOT NULL,
+              session_id TEXT NOT NULL,
+              session_revision INTEGER NOT NULL CHECK (session_revision > 0),
+              state_revision INTEGER NOT NULL CHECK (state_revision >= 0),
+              local_date TEXT NOT NULL,
+              available_at TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              PRIMARY KEY (scope, plan_instance_id, session_id, session_revision),
+              CHECK (json_type(payload_json,'$.protection') IS 'text' AND json_extract(payload_json,'$.protection') IN ('automatic','user_protected')),
+              CHECK (json_type(payload_json,'$.lifecycle') IS 'text' AND json_extract(payload_json,'$.lifecycle') IN ('pending','completed','partial','skipped','cancelled')),
+              CHECK (json_extract(payload_json,'$.planInstanceId') IS plan_instance_id),
+              CHECK (json_extract(payload_json,'$.sessionId') IS session_id),
+              CHECK (json_extract(payload_json,'$.sessionRevision') IS session_revision),
+              CHECK (json_extract(payload_json,'$.prescription.localDate') IS local_date),
+              CHECK (json_extract(payload_json,'$.availableAt') IS available_at),
+              CHECK (length(available_at)=24 AND substr(available_at,24,1)='Z')
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          plan_instance_id: 'plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73'
+          session_id: 'session-cd909390-da7f-4847-a0f6-471171efc9af'
+          session_revision: 1
+          state_revision: 2
+          local_date: '2026-10-29'
+          available_at: '2026-10-25T02:00:00.000Z'
+          payload_json: '{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}'
+    22:
+      name: 'mobile_training_state'
+      sql: |-
+        CREATE TABLE mobile_training_state (
+              scope TEXT PRIMARY KEY,
+              revision INTEGER NOT NULL CHECK (revision >= 0),
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              updated_at TEXT NOT NULL
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          revision: 2
+          payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessions":[{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}],"suppressions":[{"localDate":"2026-10-30","reason":"explicit_rest","sessionId":null,"availableAt":"2026-10-25T02:00:00.000Z"}],"publishedInputKey":null}'
+          updated_at: '2026-10-26T02:54:04.391Z'
+    23:
+      name: 'mobile_training_state_history'
+      sql: |-
+        CREATE TABLE mobile_training_state_history (
+              scope TEXT NOT NULL,
+              revision INTEGER NOT NULL,
+              event_type TEXT NOT NULL,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              changed_at TEXT NOT NULL,
+              PRIMARY KEY (scope, revision)
+            )
+      rows:
+        0:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          revision: 1
+          event_type: 'migration_created'
+          payload_json: '{"schemaVersion":1,"migrationVersion":1,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z"}'
+          changed_at: '2026-10-25T02:00:00.000Z'
+        1:
+          scope: '["synthetic-server","synthetic-athlete","synthetic-epoch"]'
+          revision: 2
+          event_type: 'session_identity_migration'
+          payload_json: '{"schemaVersion":2,"migrationVersion":2,"source":"legacy_goals","sourceStatus":"active","sourceDigest":"dbe3980db005b86cfb54d539b9889f05726847c03ab6541a56138e0ecc6684ac","runState":"active","raceGoal":null,"preferencesComplete":true,"legacyRaceTarget":null,"weekPlan":[{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},{"localDate":"2026-10-30","kind":"rest","distanceKm":null,"structure":null}],"lockedSession":null,"runCoach":null,"coachLoop":null,"goalsRevision":1,"planContextDigest":null,"migratedAt":"2026-10-25T02:00:00.000Z","planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessions":[{"planInstanceId":"plan-e9fd1ea9-c06e-40a6-afc8-76556cd4cc73","sessionId":"session-cd909390-da7f-4847-a0f6-471171efc9af","sessionRevision":1,"prescription":{"localDate":"2026-10-29","kind":"tempo","distanceKm":10,"structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":10000},"alert":{"kind":"pace","lower":300,"upper":330}}]}],"cooldown":null}},"recommendation":null,"userOverride":null,"protection":"user_protected","lifecycle":"pending","availableAt":"2026-10-25T02:00:00.000Z","supersededBySessionId":null}],"suppressions":[{"localDate":"2026-10-30","reason":"explicit_rest","sessionId":null,"availableAt":"2026-10-25T02:00:00.000Z"}],"publishedInputKey":null}'
+          changed_at: '2026-10-26T02:54:04.391Z'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:112:12)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: A-01: resolver and protected budget reject an invalid typed lock/weekPlan rest before allocating
+not ok 8 - A-01: resolver and protected budget reject an invalid typed lock/weekPlan rest before allocating
+  ---
+  duration_ms: 1.390814
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:1:5917'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  operator: 'throws'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-history-compatibility.test.ts:119:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 1
+# fail 7
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 802.778762

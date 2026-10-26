@@ -1,0 +1,129 @@
+TAP version 13
+# Subtest: OpenAPI operations declare responses and write contracts
+ok 1 - OpenAPI operations declare responses and write contracts
+  ---
+  duration_ms: 8.379619
+  type: 'test'
+  ...
+# Subtest: inspect source schema rejects missing and additional fields
+ok 2 - inspect source schema rejects missing and additional fields
+  ---
+  duration_ms: 356.135468
+  type: 'test'
+  ...
+# Subtest: import job schema accepts only a source identifier
+ok 3 - import job schema accepts only a source identifier
+  ---
+  duration_ms: 87.391369
+  type: 'test'
+  ...
+# Subtest: prediction training schema rejects ambiguous timestamps and unknown input
+ok 4 - prediction training schema rejects ambiguous timestamps and unknown input
+  ---
+  duration_ms: 107.592313
+  type: 'test'
+  ...
+# Subtest: workout list queries accept eligibility filters and reject calibrating status
+ok 5 - workout list queries accept eligibility filters and reject calibrating status
+  ---
+  duration_ms: 123.934834
+  type: 'test'
+  ...
+# Subtest: training statistics queries constrain ranges and granularities
+ok 6 - training statistics queries constrain ranges and granularities
+  ---
+  duration_ms: 54.982457
+  type: 'test'
+  ...
+# Subtest: recovery trend queries require a whole-day range within the supported window
+ok 7 - recovery trend queries require a whole-day range within the supported window
+  ---
+  duration_ms: 32.83209
+  type: 'test'
+  ...
+# Subtest: training-zone settings require consistent automatic and manual values
+ok 8 - training-zone settings require consistent automatic and manual values
+  ---
+  duration_ms: 67.512922
+  type: 'test'
+  ...
+# Subtest: prediction model routes accept only generated model identifiers
+ok 9 - prediction model routes accept only generated model identifiers
+  ---
+  duration_ms: 32.207001
+  type: 'test'
+  ...
+# Subtest: the goals schema keeps step goals and alerts inside their own semantic bounds
+ok 10 - the goals schema keeps step goals and alerts inside their own semantic bounds
+  ---
+  duration_ms: 107.902353
+  type: 'test'
+  ...
+# Subtest: every registered mutation route is documented in OpenAPI
+ok 11 - every registered mutation route is documented in OpenAPI
+  ---
+  duration_ms: 92.48398
+  type: 'test'
+  ...
+# Subtest: a request that changes data is a route the router can see
+ok 12 - a request that changes data is a route the router can see
+  ---
+  duration_ms: 508.555757
+  type: 'test'
+  ...
+# Subtest: the week editor offers neither today — nor a day already gone — as an editable row
+ok 13 - the week editor offers neither today — nor a day already gone — as an editable row
+  ---
+  duration_ms: 85.642524
+  type: 'test'
+  ...
+# Subtest: native session and race pickers exactly match their API contracts
+ok 14 - native session and race pickers exactly match their API contracts
+  ---
+  duration_ms: 70.108131
+  type: 'test'
+  ...
+# Subtest: plan-operations query contract: four shared statuses, derived summary, strict narrowing
+ok 15 - plan-operations query contract: four shared statuses, derived summary, strict narrowing
+  ---
+  duration_ms: 1.378436
+  type: 'test'
+  ...
+# Subtest: plan publication identity is mandatory: operationId requires a declared scope
+ok 16 - plan publication identity is mandatory: operationId requires a declared scope
+  ---
+  duration_ms: 0.467009
+  type: 'test'
+  ...
+# Subtest: D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads
+not ok 17 - D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads
+  ---
+  duration_ms: 134.795813
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/schemas.test.ts:1:32657'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"statusCode":400,"code":"FST_ERR_VALIDATION","error":"Bad Request","message":"body/draft must have required property 'sessionId', body/draft must have required property 'sessionId', body/draft must have required property 'sessionId', body/draft must have required property 'sessionId', body/draft must have required property 'localDate', body/draft/prescription must have required property 'distanceKm', body/draft must match exactly one schema in oneOf"}
+    
+    400 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 400
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/schemas.test.ts:816:14)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 16
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3606.66036

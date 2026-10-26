@@ -1,0 +1,569 @@
+{
+  "base": "2e7c07bb66b3701c4e1b768c90f431b654584f5c",
+  "branch": "codex/training-plan-v2-final-20261026",
+  "generatedAt": "2026-10-26T17:45:32+08:00",
+  "commits": [
+    {
+      "sha": "5024303416e4aebc5128a62ba67eb4b650ae7d7c",
+      "short": "50243034",
+      "subject": "docs: establish RAI engineering and validation rules",
+      "paths": [
+        {
+          "status": "M",
+          "path": ".gitignore"
+        },
+        {
+          "status": "M",
+          "path": "AGENTS.md"
+        }
+      ],
+      "fileCount": 2,
+      "additions": 1130,
+      "deletions": 125,
+      "stat": "50243034 docs: establish RAI engineering and validation rules\n .gitignore |   10 +\n AGENTS.md  | 1245 ++++++++++++++++++++++++++++++++++++++++++++++++++++++------\n 2 files changed, 1130 insertions(+), 125 deletions(-)\n",
+      "precommitLog": "commit-01.log",
+      "sequence": 1
+    },
+    {
+      "sha": "1ffe313466e74f900aeb8dd9543b459eb1d63367",
+      "short": "1ffe3134",
+      "subject": "fix(training-plan): stabilize B08 input identity and negotiated reads",
+      "paths": [
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-coordinator.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-input-identity.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-routes.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/data.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-coordinator.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-input-identity.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-v2-route.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/PlanStatePolicy.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/TrainingPlanStore.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/tests/TrainingPlanStoreRegression.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/tests/TrainingPlanV2Regression.swift"
+        },
+        {
+          "status": "M",
+          "path": "docs/IOS_NATIVE_API_CONTRACT.md"
+        },
+        {
+          "status": "M",
+          "path": "packages/api-contracts/src/index.ts"
+        }
+      ],
+      "fileCount": 13,
+      "additions": 444,
+      "deletions": 28,
+      "stat": "1ffe3134 fix(training-plan): stabilize B08 input identity and negotiated reads\n apps/api/src/training-plan-coordinator.ts          |  15 ++-\n apps/api/src/training-plan-input-identity.ts       |  35 +++++-\n apps/api/src/training-plan-routes.ts               |  17 +--\n apps/api/test/data.test.ts                         |  45 +++++++\n apps/api/test/training-plan-coordinator.test.ts    |  23 ++++\n apps/api/test/training-plan-input-identity.test.ts |  34 +++++-\n apps/api/test/training-plan-v2-route.test.ts       |  31 ++++-\n apps/ios/RAI/PlanStatePolicy.swift                 |  82 ++++++++++++-\n apps/ios/RAI/TrainingPlanStore.swift               |   6 +-\n apps/ios/tests/TrainingPlanStoreRegression.swift   |  37 ++++++\n apps/ios/tests/TrainingPlanV2Regression.swift      | 131 ++++++++++++++++++++-\n docs/IOS_NATIVE_API_CONTRACT.md                    |  10 +-\n packages/api-contracts/src/index.ts                |   6 +\n 13 files changed, 444 insertions(+), 28 deletions(-)\n",
+      "precommitLog": "commit-02-final.log",
+      "sequence": 2
+    },
+    {
+      "sha": "2ae30501f5054566afd6819af6e8c517baee29d5",
+      "short": "2ae30501",
+      "subject": "fix(training-plan): deliver validated V2 compatibility and execution closure",
+      "paths": [
+        {
+          "status": "M",
+          "path": "apps/api/src/data.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/mobile-goals.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/schemas.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/server.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/session-structure.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-execution-commands.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-execution-match.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-session-commands.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-session-migration.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-session-policy.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-session-state.ts"
+        },
+        {
+          "status": "A",
+          "path": "apps/api/src/training-plan-state-audit.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/src/training-plan-store.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/data.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/direct-sync-handshake-capability.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/helpers/training-plan-crash-child.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/phase5-training-plan.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/schemas.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/session-structure.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-execution-commands.test.ts"
+        },
+        {
+          "status": "A",
+          "path": "apps/api/test/training-plan-execution-cursor-errors.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-execution-match.test.ts"
+        },
+        {
+          "status": "A",
+          "path": "apps/api/test/training-plan-history-compatibility.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-session-commands.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-session-migration.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-session-policy.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/api/test/training-plan-session-state.test.ts"
+        },
+        {
+          "status": "A",
+          "path": "apps/api/test/training-plan-state-audit.test.ts"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/APIClient.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/APIModels.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/NativeAppModel.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/Skins/Technology/TechPlanView.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/TrainingPlanExecutionPolicy.swift"
+        },
+        {
+          "status": "A",
+          "path": "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/tests/ModelRegression.swift"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/tests/TrainingPlanExecutionRegression.swift"
+        },
+        {
+          "status": "A",
+          "path": "apps/ios/tests/TrainingPlanSessionEditorRegression.swift"
+        },
+        {
+          "status": "A",
+          "path": "apps/ios/tests/fixtures/training-session-distance-v1.json"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/tests/run-ios-gates.sh"
+        },
+        {
+          "status": "M",
+          "path": "apps/ios/tests/run-model-tests.sh"
+        },
+        {
+          "status": "M",
+          "path": "packages/api-contracts/src/handshake-registry.ts"
+        },
+        {
+          "status": "M",
+          "path": "packages/api-contracts/src/index.ts"
+        },
+        {
+          "status": "M",
+          "path": "packages/api-contracts/src/training-plan-closed-loop.ts"
+        },
+        {
+          "status": "A",
+          "path": "scripts/audit-training-plan-state.mts"
+        },
+        {
+          "status": "M",
+          "path": "scripts/bench-training-plan-closed-loop.mjs"
+        },
+        {
+          "status": "M",
+          "path": "scripts/migrate-training-planner.mts"
+        }
+      ],
+      "fileCount": 48,
+      "additions": 3673,
+      "deletions": 204,
+      "stat": "2ae30501 fix(training-plan): deliver validated V2 compatibility and execution closure\n apps/api/src/data.ts                               |  28 +-\n apps/api/src/mobile-goals.ts                       |  28 +-\n apps/api/src/schemas.ts                            |  12 +-\n apps/api/src/server.ts                             |  70 ++-\n apps/api/src/session-structure.ts                  |  17 +-\n apps/api/src/training-plan-execution-commands.ts   | 139 +++++-\n apps/api/src/training-plan-execution-match.ts      | 122 ++++-\n apps/api/src/training-plan-session-commands.ts     | 137 ++++--\n apps/api/src/training-plan-session-migration.ts    |  34 +-\n apps/api/src/training-plan-session-policy.ts       |   7 +-\n apps/api/src/training-plan-session-state.ts        |  42 ++\n apps/api/src/training-plan-state-audit.ts          |  77 +++\n apps/api/src/training-plan-store.ts                |   8 +-\n apps/api/test/data.test.ts                         |  37 ++\n .../test/direct-sync-handshake-capability.test.ts  |   8 +\n apps/api/test/helpers/training-plan-crash-child.ts |  10 +-\n apps/api/test/phase5-training-plan.test.ts         |   8 +\n apps/api/test/schemas.test.ts                      |  64 +++\n apps/api/test/session-structure.test.ts            |  15 +-\n .../test/training-plan-execution-commands.test.ts  | 538 ++++++++++++++++++++-\n .../training-plan-execution-cursor-errors.test.ts  |  30 ++\n .../api/test/training-plan-execution-match.test.ts |  44 +-\n .../training-plan-history-compatibility.test.ts    | 253 ++++++++++\n .../test/training-plan-session-commands.test.ts    | 491 ++++++++++++++++++-\n .../test/training-plan-session-migration.test.ts   |  29 ++\n apps/api/test/training-plan-session-policy.test.ts |  10 +\n apps/api/test/training-plan-session-state.test.ts  |   5 +-\n apps/api/test/training-plan-state-audit.test.ts    | 104 ++++\n apps/ios/RAI/APIClient.swift                       |   1 +\n apps/ios/RAI/APIModels.swift                       |  40 +-\n apps/ios/RAI/NativeAppModel.swift                  |  94 +++-\n apps/ios/RAI/Skins/Technology/TechPlanView.swift   |  12 +-\n .../Technology/TechTrainingExecutionReview.swift   |  15 +-\n .../Technology/TechTrainingSessionEditor.swift     | 124 +++--\n apps/ios/RAI/TrainingPlanExecutionPolicy.swift     | 120 ++++-\n apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift | 185 +++++++\n apps/ios/tests/ModelRegression.swift               | 117 ++++-\n .../tests/TrainingPlanExecutionRegression.swift    |  89 ++++\n .../TrainingPlanSessionEditorRegression.swift      | 247 ++++++++++\n .../fixtures/training-session-distance-v1.json     | 406 ++++++++++++++++\n apps/ios/tests/run-ios-gates.sh                    |   2 +-\n apps/ios/tests/run-model-tests.sh                  |   9 +\n packages/api-contracts/src/handshake-registry.ts   |   7 +\n packages/api-contracts/src/index.ts                |   2 +\n .../api-contracts/src/training-plan-closed-loop.ts |  12 +-\n scripts/audit-training-plan-state.mts              |  20 +\n scripts/bench-training-plan-closed-loop.mjs        |   5 +-\n scripts/migrate-training-planner.mts               |   3 +-\n 48 files changed, 3673 insertions(+), 204 deletions(-)\n",
+      "precommitLog": "commit-03.log",
+      "sequence": 3
+    },
+    {
+      "sha": "00414eb22e58f357924dfc5b68162719ebf5e9c8",
+      "short": "00414eb2",
+      "subject": "fix(ios): keep editor step mapping in MainActor context",
+      "paths": [
+        {
+          "status": "M",
+          "path": "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift"
+        }
+      ],
+      "fileCount": 1,
+      "additions": 8,
+      "deletions": 2,
+      "stat": "00414eb2 fix(ios): keep editor step mapping in MainActor context\n apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift | 10 ++++++++--\n 1 file changed, 8 insertions(+), 2 deletions(-)\n",
+      "precommitLog": "actor-precommit.log",
+      "sequence": 4
+    },
+    {
+      "sequence": 5,
+      "sha": "self (final HEAD; use git rev-parse HEAD)",
+      "subject": "docs(deliverables): record V2 delivery evidence and validation",
+      "fileCount": 245,
+      "paths": [
+        ".gitattributes",
+        "AGENTS.md",
+        "deliverables/README.md",
+        "deliverables/training-plan-v2-a01-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-a01-2026-10-26/REPORT.source.txt",
+        "deliverables/training-plan-v2-a01-2026-10-26/before-fix-red.log",
+        "deliverables/training-plan-v2-a01-2026-10-26/l1.log",
+        "deliverables/training-plan-v2-a01-2026-10-26/l2-files.json",
+        "deliverables/training-plan-v2-a01-2026-10-26/l3-files.json",
+        "deliverables/training-plan-v2-a01-2026-10-26/l3.log",
+        "deliverables/training-plan-v2-a01-2026-10-26/typecheck.log",
+        "deliverables/training-plan-v2-a01-2026-10-26/verification.json",
+        "deliverables/training-plan-v2-a01-2026-10-26/workspace-before-sha256.json",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/D01_D02.diff",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.source.txt",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/acceptance-matrix.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/doc-refs.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/docs.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-gates.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-initial.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-result.json",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-source-check-interrupted.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/ios.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-ios.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-server.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/l2-server.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-files.json",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-server.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/node-results.json",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/red-ios.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/red-openapi.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/red-server.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck-initial.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck.log",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/validation-commands.json",
+        "deliverables/training-plan-v2-d01-d02-2026-10-26/workspace-preservation.json",
+        "deliverables/training-plan-v2-d03-2026-10-26/D03.patch",
+        "deliverables/training-plan-v2-d03-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-d03-2026-10-26/REPORT.source.txt",
+        "deliverables/training-plan-v2-d03-2026-10-26/ios.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/l1-final.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/l2-final.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/l3-files.json",
+        "deliverables/training-plan-v2-d03-2026-10-26/l3.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/red-node.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/red-swift.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.log",
+        "deliverables/training-plan-v2-d03-2026-10-26/validation-summary.json",
+        "deliverables/training-plan-v2-d03-2026-10-26/workspace-preservation.json",
+        "deliverables/training-plan-v2-final-2026-10-26/ACTOR_CLEAN_TREE_COMPARISON.json",
+        "deliverables/training-plan-v2-final-2026-10-26/APP_BUILD_COVERAGE.json",
+        "deliverables/training-plan-v2-final-2026-10-26/COMMITS.json",
+        "deliverables/training-plan-v2-final-2026-10-26/COMMIT_BOUNDARIES.json",
+        "deliverables/training-plan-v2-final-2026-10-26/EVIDENCE_ALLOWLIST.json",
+        "deliverables/training-plan-v2-final-2026-10-26/FINAL_VALIDATION.json",
+        "deliverables/training-plan-v2-final-2026-10-26/FROZEN_PRODUCT.json",
+        "deliverables/training-plan-v2-final-2026-10-26/FROZEN_TRACKED.patch",
+        "deliverables/training-plan-v2-final-2026-10-26/L4_BASELINE_INTEGRITY.json",
+        "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_EVIDENCE.json",
+        "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_INDEX.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_STATE.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_WORKSPACE_PROTECTION.json",
+        "deliverables/training-plan-v2-final-2026-10-26/PRECOMMIT_REVIEW.source.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/PRODUCT_IDENTITY_COMPARISON.json",
+        "deliverables/training-plan-v2-final-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-final-2026-10-26/SOURCE_FREEZE.json",
+        "deliverables/training-plan-v2-final-2026-10-26/TRANSFER_COMPARISON.json",
+        "deliverables/training-plan-v2-final-2026-10-26/acceptance-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/actor-precommit.log",
+        "deliverables/training-plan-v2-final-2026-10-26/actor-staged-check.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/actor-staged-paths.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/actor-staged-stat.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/api-targeted-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/api-targeted-final.time.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/app-device.log",
+        "deliverables/training-plan-v2-final-2026-10-26/app-device.time.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/app-simulator.log",
+        "deliverables/training-plan-v2-final-2026-10-26/app-simulator.time.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/b08-clean-checkout.log",
+        "deliverables/training-plan-v2-final-2026-10-26/blob-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/build-warnings-after.json",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-01.json",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-01.log",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-02-final.json",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-02-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-check.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-paths.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-review.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-stat.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-check.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-paths.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-review.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-stat.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-03.json",
+        "deliverables/training-plan-v2-final-2026-10-26/commit-03.log",
+        "deliverables/training-plan-v2-final-2026-10-26/core-clean-l2.log",
+        "deliverables/training-plan-v2-final-2026-10-26/core-clean-typecheck.log",
+        "deliverables/training-plan-v2-final-2026-10-26/doc-refs-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/docs-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/ios-gates-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/package-boundaries-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/package-boundaries-self-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/scripts-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/single-writer-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/swift-version.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/test-discovery-final.json",
+        "deliverables/training-plan-v2-final-2026-10-26/typecheck-final.log",
+        "deliverables/training-plan-v2-final-2026-10-26/visual-compile.log",
+        "deliverables/training-plan-v2-final-2026-10-26/visual-compile.time.txt",
+        "deliverables/training-plan-v2-final-2026-10-26/xcode-list.json",
+        "deliverables/training-plan-v2-final-2026-10-26/xcode-version.txt",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.source.txt",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/acceptance-matrix.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/final-source-sha256.json",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/ios-gates.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-api.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-final.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/l2-api.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-api.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-related.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/node-results.json",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/prior-phase-preservation.json",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/red-api.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-final.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/single-writer.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/stage.diff",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios-final.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/typecheck.log",
+        "deliverables/training-plan-v2-i01-p03-2026-10-26/verification-manifest.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/COMMANDS.md",
+        "deliverables/training-plan-v2-l4-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-l4-2026-10-26/REPORT.source.txt",
+        "deliverables/training-plan-v2-l4-2026-10-26/SUMMARY.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/acceptance.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/acceptance.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/actionlint-install.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/app-device-coverage.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/app-device.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/app-device.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/app-simulator-coverage.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/app-simulator.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/app-simulator.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/blob.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/blob.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/boundaries-self.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/boundaries-self.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/boundaries.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/boundaries.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/build-warnings.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/commands.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/deploy-syntax.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/doc-refs.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/doc-refs.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/docs.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/docs.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/environment.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/eol-check.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/eol.txt",
+        "deliverables/training-plan-v2-l4-2026-10-26/important-sha256.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/ios-gates.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/ios-gates.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/ios-summaries.txt",
+        "deliverables/training-plan-v2-l4-2026-10-26/ios-test-discovery.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/ios.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/ios.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/ml-check.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/ml-check.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/ml-test.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/ml-test.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/model-boundaries.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/model-boundaries.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/node-l4.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/node-l4.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/production-assert.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/production-assert.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/production-install.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/production-install.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/production-smoke.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/production-smoke.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/rust-verify.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/rust-verify.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/scripts.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/scripts.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/single-writer.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/single-writer.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/smoke.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/smoke.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/test-discovery.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/test-inventory.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/typecheck.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/typecheck.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/visual-compile.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/visual-compile.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/workspace-before-sha256.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/workspace-preservation.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/xcode-list.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/xcode-list.log",
+        "deliverables/training-plan-v2-l4-2026-10-26/xcode-settings.json",
+        "deliverables/training-plan-v2-l4-2026-10-26/xcode-settings.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/P1.patch",
+        "deliverables/training-plan-v2-p1-2026-10-26/REPORT.md",
+        "deliverables/training-plan-v2-p1-2026-10-26/REPORT.source.txt",
+        "deliverables/training-plan-v2-p1-2026-10-26/a01-green.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/a01-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/compat01-green.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/compat01-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/doc01-green.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/doc01-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/edit01-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/environment.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec01-green.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec01-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/exec03-red.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/ios-gates.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/ios.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/l3-files.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/l3-final.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/source-locations.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/task-files.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/test-summary.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.log",
+        "deliverables/training-plan-v2-p1-2026-10-26/workspace-baseline.json",
+        "deliverables/training-plan-v2-p1-2026-10-26/workspace-preservation.json",
+        "docs/IOS_NATIVE_API_CONTRACT.md",
+        "docs/OPERATIONS.md",
+        "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md"
+      ],
+      "note": "The final commit cannot contain its own hash; HEAD is reported by the delivery response and git rev-parse."
+    }
+  ]
+}

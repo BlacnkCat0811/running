@@ -1,0 +1,22 @@
+{
+  "typescript": true,
+  ".bin/vite": true,
+  "react": true,
+  "vitest": true
+}
+        0.13 real         0.05 user         0.04 sys
+             8171520  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                4032  page reclaims
+                  62  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  47  involuntary context switches
+             4956160  peak memory footprint

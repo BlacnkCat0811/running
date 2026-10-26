@@ -21,3 +21,7 @@
 # 无扩展名的 bash 脚本：`*.sh` 覆盖不到它，但它同样由 `bash <path>` 执行，
 # 同样会因为 CRLF 变成 `bad interpreter`。
 /.githooks/* text eol=lf
+
+# 交付证据是原始日志、补丁和快照的逐字副本；其中空白字符属于历史字节，
+# 不得为了让 `git diff --check` 变绿而改写。源代码和现行文档仍适用默认检查。
+/deliverables/** whitespace=-trailing-space

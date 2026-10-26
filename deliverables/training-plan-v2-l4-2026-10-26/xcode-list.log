@@ -1,0 +1,27 @@
+{
+  "workspace" : {
+    "name" : "RAI",
+    "schemes" : [
+      "AMap3DMap",
+      "AMapFoundation",
+      "Pods-RAI",
+      "RAI"
+    ]
+  }
+}
+        8.37 real         2.24 user         3.50 sys
+           107016192  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               36922  page reclaims
+                3518  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   5  messages sent
+                   5  messages received
+                   0  signals received
+                3589  voluntary context switches
+                2828  involuntary context switches
+            58679296  peak memory footprint

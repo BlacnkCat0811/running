@@ -1,0 +1,988 @@
+
+> rai-running-intelligence@0.1.0 test:ios
+> node scripts/run-ios.mjs gates
+
+类型检查 103 个文件（已跳过 3 个仅依赖高德 SDK 的文件）
+
+iOS 类型检查通过
+PASS: September 14 pace display orders fast to slow
+PASS: historical corrupt target is not displayed as a valid range
+PASS: blank target pace is optional
+PASS: finish time parses hours minutes seconds
+PASS: finish time parses minutes seconds
+PASS: invalid finish time is rejected
+PASS: ten-kilometer finish time matches pace
+PASS: half-marathon conversion uses full distance
+PASS: race pace converts minutes and seconds
+PASS: race pace includes API boundaries
+PASS: invalid race pace rejected: 2:29
+PASS: invalid race pace rejected: 15:01
+PASS: invalid race pace rejected: 5:60
+PASS: invalid race pace rejected: 5:3
+PASS: invalid race pace rejected: abc
+PASS: invalid race pace rejected: -5:30
+PASS: invalid race pace rejected: 5.5:30
+PASS: race-only save does not replace weekly plan
+PASS: race target is encoded for persistence
+PASS: race-only save does not replace weekly plan
+PASS: clear emits explicit null instead of omitting race target
+PASS: old API/cache is not mistaken for empty weekly statistics
+PASS: a legacy week payload still decodes with the retired goal keys present
+PASS: new API empty zones remain a valid no-data result
+PASS: native decoder preserves all five weekly statistics from the API
+PASS: recovery state recovered is not pending
+PASS: recovery state reduced is not pending
+PASS: recovery state depleted is not pending
+PASS: recovery state unknown is not pending
+PASS: prediction DTO preserves fatigue adjustment
+PASS: prediction DTO preserves recovery provenance
+PASS: prediction DTO preserves missing readiness
+PASS: heart rate ignores invalid samples and sorts time
+PASS: heart rate time axis fits endpoint without overlap
+PASS: heart rate uses minutes and seconds
+PASS: heart rate matches reference scale
+PASS: empty heart rate has valid scale
+PASS: late filter response cannot replace current list
+PASS: a new workouts request cancels the old URLSession request, not merely discards its result
+PASS: uncached failed filter does not retain another filter's rows
+PASS: failed list exits loading and reports offline
+PASS: detail failure exits spinner with retryable error
+PASS: old server response cannot publish into new server scope
+PASS: clear cache invalidates pending list response
+PASS: cancelled detail does not present a failure
+PASS: late detail cannot replace newly selected workout
+PASS: series failure keeps detail available with explicit feedback
+PASS: opening another workout clears both previous detail and series
+PASS: concurrent plan refreshes both observe the shared completed read
+PASS: a concurrent refreshPlanState reuses the in-flight Task instead of issuing a second plan read
+PASS: a configuration change cancels the in-flight plan read so an old scope can never publish
+PASS: a refresh after the cancelled single-flight task starts a fresh read for the new configuration
+PASS: a queued refreshAll waits out the coalescing window instead of rerunning immediately
+PASS: the coalesced refreshAll runs exactly once after the ~350ms window
+PASS: an all-failure refreshAll leaves reachability to the probe failure threshold
+PASS: the all-panel failure classification and copy stay unchanged
+PASS: race save updates model after server acknowledgement and refresh
+PASS: race save carries editor revision without replacing the plan
+PASS: race save touches only the race target
+PASS: race conflict preserves persisted target and reports failure
+PASS: failed clear does not optimistically erase the target
+PASS: race clear refreshes to persisted empty state
+PASS: real clear request sends explicit JSON null
+PASS: saving training settings succeeds
+PASS: plan save keeps revision conflict protection
+PASS: remaining weekly settings are still editable
+PASS: plan save preserves the stored race target
+PASS: plan save still submits the daily plan
+PASS: old API and cache payloads default to no pending migration
+PASS: pending retirement loads from the API
+PASS: pending retirement survives cache encoding and decoding
+PASS: saving settings cannot clear pending confirmation
+PASS: pending settings save omits even a nonempty daily plan
+PASS: clients cannot write the server-owned migration state
+PASS: training settings remain writable while a rule preview needs confirmation
+PASS: an offline cache does not silently remove the confirmation gate
+AUDIT stale-refresh: saveAcknowledged=true, immediatelyAfterSaveRevision=13, finalRevision=13, raceDisappeared=false
+PASS: older GET cannot overwrite acknowledged PUT or clear the race target
+PASS: partial legacy reads retain editable goals without promoting a stale execution response
+PASS: the session structure survives the round trip
+PASS: an executable day is marked as such
+PASS: the plan revision is carried for conflict messages
+PASS: a plan generation reports success
+PASS: preview exposes rule coach provenance
+PASS: rule coach previews have no language model or prompt metadata
+PASS: a generated plan posts the loaded goals revision
+PASS: preview never confirms implicitly
+PASS: offline confirmation is rejected without discarding the preview
+PASS: confirmation acknowledgement survives stale follow-up reads
+PASS: saved acknowledgement plus old goals exposes saved-awaiting-refresh, not old current controls
+PASS: partial refresh is not reported as failed persistence
+PASS: old read revision cannot satisfy acknowledged confirmation revision
+PASS: manual confirm watermark survives all failed reads and offline restart
+PASS: clear-cache preserves acknowledged execution safety floor
+PASS: matching acknowledged revision refreshes every dependent plan surface
+PASS: a verified matching watch plan is current
+PASS: a changed reminder hour dirties the Watch plan against the hour actually synced
+PASS: read timestamps alone do not dirty device scheduling
+PASS: same goals revision with a newly vetoed prescription needs device update
+PASS: verified withdrawal commits its safety records together
+PASS: a verified Watch withdrawal clears the stale acknowledgement
+PASS: a revision conflict is reported as a failure
+PASS: a revision conflict tells the user to regenerate
+PASS: generation fails closed when the goals revision cannot be read
+PASS: a failed goals read never posts an unlocked generation
+PASS: a failed goals read explains that generation was cancelled safely
+PASS: cancelling while goals load never posts generation
+PASS: switching servers while goals load never posts to the old server
+PASS: switching configurations clears the old plan message
+PASS: an old plan response cannot stop the new configuration's plan loading
+PASS: the owning plan request clears its loading state
+PASS: an old generation cannot stop the new configuration's generation spinner
+PASS: the owning generation request clears its spinner
+PASS: fixture business date is confirmable under the injected clock
+PASS: crossing Shanghai midnight revokes confirmation without changing the payload
+PASS: model rejects a previous-day recommendation
+PASS: an old lock response cannot stop the new configuration's lock spinner
+PASS: the owning lock request clears its spinner
+PASS: a coach plan is labelled as rule generation
+PASS: rule adjustments are still surfaced
+PASS: normal rule generation is never labelled as failure or fallback
+PASS: legacy plans are not relabelled as rule generation
+PASS: manual provenance stays distinct
+PASS: unknown provenance does not pretend to be a rule plan
+PASS: a rewritten plan still names its rule coach
+PASS: an overwrite of stored work is surfaced
+PASS: the rule adjustment is still surfaced
+PASS: the summary stays short instead of listing every warning
+PASS: failed registration retains exact confirmed receipts for foreground retry
+PASS: partial sync registers exactly two verified days, not the unverified day
+PASS: retained journal carries actual exported day IDs and structures
+PASS: foreground retry clears only successfully registered entries
+PASS: empty confirmed set emits no guessed receipts
+PASS: older server wire contract omits new metadata but retains actual export
+PASS: advertised receipt capability sends actual verified UUID/time and stable idempotency key
+PASS: a padded distance parses
+PASS: an empty field means unset, not zero
+PASS: a non-numeric distance does not parse
+PASS: a day may be unset or sit exactly on the cap
+PASS: a day outside 0–80 is rejected
+PASS: drafts seed one text field per stored day
+PASS: a seeded draft parses back to its distance
+PASS: a day with no distance seeds an empty field
+PASS: a week of valid drafts passes
+PASS: one out-of-range draft fails the whole week
+PASS: a missing draft falls back to unset rather than invalid
+PASS: an untouched day keeps its distance
+PASS: an untouched day keeps its prescription
+PASS: a day whose kind changed drops the stale prescription
+PASS: the unchanged distance is still applied
+PASS: a resized day takes the new distance
+PASS: a resized day drops the stale prescription
+PASS: clearing the field unsets the distance
+PASS: unsetting the distance drops the stale prescription
+PASS: calibration 'completed' needs attention == false
+PASS: calibration 'calibrating' needs attention == true
+PASS: calibration 'not_started' needs attention == true
+PASS: calibration 'ready' needs attention == true
+PASS: calibration '' needs attention == true
+PASS: calibration 'nil' needs attention == true
+PASS: lost feedback reply retains durable command
+PASS: feedback preserves all override fields
+PASS: analysis failure cannot turn saved feedback into unsaved
+PASS: uncertain feedback retries reuse the same key
+PASS: successful feedback clears pending command
+PASS: rejected enqueue does not pin the form forever
+PASS: feedback conflict is actionable and preserves draft
+PASS: Applied correction has its own wording
+PASS: Reference conditions say so explicitly
+PASS: Missing weather must not read as no adjustment
+PASS: The two states a reader must never confuse stay distinguishable
+PASS: An unknown status falls to the safe side, never to 'not needed'
+PASS: coach DTO preserves training preferences
+PASS: coach plan survives the offline cache round trip
+PASS: coach acknowledgement remains saved even when dependent reads fail
+PASS: coach write refreshes the matching goals revision
+PASS: a partial refresh is not reported as a failed coach save
+PASS: coach commands carry the editor's CAS revision
+PASS: fitness commands explicitly encode nullable fields required by the API schema
+PASS: coach mutation always releases the shared plan gate
+PASS: A failed today read does not mark successful goals and schedule reads offline
+PASS: a partial legacy schedule remains a reference, never current execution when today fails
+PASS: a coach reply from the old server cannot publish into the new scope
+PASS: obsolete coach requests release only their own spinner
+PASS: the coach acknowledgement establishes the display revision even when every dependent read fails
+PASS: a saved coach acknowledgement survives an offline restart independently of the old goals cache
+PASS: older goal and workout caches cannot masquerade as the acknowledged coach revision
+PASS: an offline paused-coach retry restores connectivity and the acknowledged state
+PASS: paused-coach retry repairs dependent reads and clears the partial-refresh error
+PASS: paused-coach retry remains read-only and does not resume the plan
+PASS: a newer coach read cannot be undone by older dependent snapshots
+PASS: stale dependent reads keep the retry error visible and cannot enable today's training
+PASS: goals: coherent safety fixtures contain real today revision
+PASS: goals: acknowledgement survives failed dependent reads
+PASS: goals: offline restart cannot expose old v12 executable cache
+PASS: goals: independent quarantine survives a failed SQLite acknowledgement
+PASS: goals: online coherent confirmation repairs persistence and execution
+PASS: goals: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: snapshot lease invalidates structure, not merely revision changes
+PASS: snapshot lease invalidates timezone, not merely revision changes
+PASS: snapshot lease invalidates hour, not merely revision changes
+PASS: snapshot lease invalidates completed, not merely revision changes
+PASS: snapshot lease invalidates midnight, not merely revision changes
+PASS: snapshot lease invalidates token, not merely revision changes
+PASS: shared coordinator registers partial confirmed day, never calls it full coverage
+PASS: ledger stores actual confirmed coverage and separate server registration
+PASS: same-scope ordinary refresh preserves this session's actual partial system verification
+PASS: a changed effective plan makes a partial persisted ledger stale, not partially current
+PASS: partial operation after restart remains interrupted, never becomes current verification
+PASS: same-revision mid-schedule mutation uses targeted cleanup in shared coordinator
+PASS: serial coordinator rejects next operation until old cleanup completes
+PASS: effective change during server receipt registration withdraws all of this operation's submitted IDs
+PASS: superseded withdrawn days are not queued for later registration or retained as verified current
+PASS: offline restart with no current plan still supports explicit withdrawal
+PASS: scope switch does not carry A's revision or verification into B
+PASS: goals: coherent safety fixtures contain real today revision
+PASS: goals: acknowledgement survives failed dependent reads
+PASS: goals: failed durable write is visible and execution is quarantined
+PASS: goals: offline restart cannot expose old v12 executable cache
+PASS: goals: independent quarantine survives a failed SQLite acknowledgement
+PASS: goals: online coherent confirmation repairs persistence and execution
+PASS: goals: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: lock: coherent safety fixtures contain real today revision
+PASS: lock: acknowledgement survives failed dependent reads
+PASS: lock: offline restart cannot expose old v12 executable cache
+PASS: lock: independent quarantine survives a failed SQLite acknowledgement
+PASS: lock: online coherent confirmation repairs persistence and execution
+PASS: lock: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: lock: coherent safety fixtures contain real today revision
+PASS: lock: acknowledgement survives failed dependent reads
+PASS: lock: failed durable write is visible and execution is quarantined
+PASS: lock: offline restart cannot expose old v12 executable cache
+PASS: lock: independent quarantine survives a failed SQLite acknowledgement
+PASS: lock: online coherent confirmation repairs persistence and execution
+PASS: lock: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: coach: coherent safety fixtures contain real today revision
+PASS: coach: acknowledgement survives failed dependent reads
+PASS: coach: offline restart cannot expose old v12 executable cache
+PASS: coach: independent quarantine survives a failed SQLite acknowledgement
+PASS: coach: online coherent confirmation repairs persistence and execution
+PASS: coach: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: coach: coherent safety fixtures contain real today revision
+PASS: coach: acknowledgement survives failed dependent reads
+PASS: coach: failed durable write is visible and execution is quarantined
+PASS: coach: offline restart cannot expose old v12 executable cache
+PASS: coach: independent quarantine survives a failed SQLite acknowledgement
+PASS: coach: online coherent confirmation repairs persistence and execution
+PASS: coach: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: confirm: coherent safety fixtures contain real today revision
+PASS: confirm: acknowledgement survives failed dependent reads
+PASS: confirm: offline restart cannot expose old v12 executable cache
+PASS: confirm: independent quarantine survives a failed SQLite acknowledgement
+PASS: confirm: online coherent confirmation repairs persistence and execution
+PASS: confirm: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: confirm: coherent safety fixtures contain real today revision
+PASS: confirm: acknowledgement survives failed dependent reads
+PASS: confirm: failed durable write is visible and execution is quarantined
+PASS: confirm: offline restart cannot expose old v12 executable cache
+PASS: confirm: independent quarantine survives a failed SQLite acknowledgement
+PASS: confirm: online coherent confirmation repairs persistence and execution
+PASS: confirm: complete snapshot obtains lease
+PASS: only generatedAt changes do not invalidate the lease
+PASS: display wording alone does not revoke an execution-semantic lease
+PASS: same revision recovery gate change invalidates the complete snapshot lease
+PASS: scope switch does not carry A's revision or verification into B
+PASS: equal revisions cannot authorize a draft owned by another connection
+PASS: lost business response retains durable original operation and disables old execution
+PASS: pending publication survives model reconstruction and cached identity recovery
+PASS: uncertain original result blocks a different publication without changing its revision or operation key
+PASS: foreground operation query after restart accepts committed result without another business write
+PASS: fixture: seed a pending watch receipt before the retirement answer
+PASS: a terminal 410 (legacy_surface_retired) closes the pending publication instead of pinning it forever
+PASS: after a confirmed 410 the UI never claims the result is still unconfirmed
+PASS: closing the publication row must not delete the independent watch-receipt ledger
+PASS: a terminal 410 (unknown_gone_surface) closes the pending publication instead of pinning it forever
+PASS: after a confirmed 410 the UI never claims the result is still unconfirmed
+PASS: closing the publication row must not delete the independent watch-receipt ledger
+PASS: fixture: v2 editing requires fresh negotiated reads
+PASS: fixture: preview belongs to the old editor action
+PASS: confirming a changed editor draft cannot submit the previous action or invalidate current reads
+PASS: v2 preview reaches the production publisher through the model
+PASS: an unsent storage failure restores reads and leaves the same session editable without a pending row
+PASS: repairing storage still requires a fresh preview and explicit confirmation
+PASS: a committed command whose reads fail retains its original pending operation
+PASS: committed-awaiting-read still blocks new schedules
+PASS: withdrawal succeeds during failed command reads without new schedules or clearing the business operation
+PASS: an unresolved acknowledgement storage failure continues to block new schedules
+PASS: acknowledgement failure does not prevent journaled withdrawal of existing schedules
+PASS: recovery finishes the original command after coherent reads without another submission
+PASS: a corrupt watermark with a readable pending row blocks edits until explicit repair
+PASS: failed abandonment retains the pending operation and the unreadable watermark
+PASS: explicit abandonment repairs a corrupt watermark even when the pending row is readable
+PASS: coherent reads restore editing after abandonment without submitting another command
+PASS: no handshake must not authorize legacy plan writes
+PASS: v2 command capability nil never authorizes a legacy URL
+PASS: a retired legacy write is refused before any request and never creates a pending publication
+PASS: no handshake must not authorize legacy plan writes
+PASS: v2 command capability Optional(2) never authorizes a legacy URL
+PASS: a retired legacy write is refused before any request and never creates a pending publication
+PASS: no handshake must not authorize legacy plan writes
+PASS: v2 command capability Optional(999) never authorizes a legacy URL
+PASS: a retired legacy write is refused before any request and never creates a pending publication
+PASS: publication terminal code plan_operation_scope_mismatch must be classified terminal
+PASS: publication terminal code plan_operation_expired must be classified terminal
+PASS: publication terminal code plan_operation_key_conflict must be classified terminal
+PASS: the coach-loop contract guard (409) is terminal for a legacy publication — replaying the same payload can never succeed while the dataset stays managed
+PASS: the coach-loop contract guard (409) is terminal for a legacy watch receipt too (/v1/mobile/workout-plan/** is prefix-matched) — otherwise hasPendingPlanReceipts stays true forever and the user has no exit
+PASS: legacy_surface_retired is terminal: the retired route can never accept the old payload
+PASS: HTTP 410 (gone) is terminal for any code, while 409/503 stay retryable
+PASS: the retryable 503 codes must NOT become terminal (they are 're-read, facts changed')
+PASS: transient publication code network must NOT be terminal
+PASS: transient publication code mutation_conflict must NOT be terminal
+PASS: transient publication code unauthorized must NOT be terminal
+PASS: transient publication code http_503 must NOT be terminal
+PASS: transient publication code http_500 must NOT be terminal
+PASS: receipt terminal code plan_receipt_scope_mismatch must be classified terminal
+PASS: receipt terminal code plan_receipt_evidence_mismatch must be classified terminal
+PASS: receipt terminal code plan_receipt_contract_mismatch must be classified terminal
+PASS: receipt terminal code plan_receipt_date_invalid must be classified terminal
+PASS: receipt terminal code plan_receipt_key_conflict must be classified terminal
+PASS: receipt terminal code coach_receipt_contract_mismatch must be classified terminal
+PASS: receipt terminal code coach_receipt_evidence_mismatch must be classified terminal
+PASS: receipt terminal code coach_loop_contract_required must be classified terminal
+PASS: receipt code network must NOT be terminal (server state can still advance)
+PASS: receipt code http_500 must NOT be terminal (server state can still advance)
+PASS: receipt code coach_receipt_unknown_schedule must NOT be terminal (server state can still advance)
+PASS: receipt code coach_receipt_unknown_prescription must NOT be terminal (server state can still advance)
+PASS: feedback terminal code coach_feedback_invalid must be classified terminal
+PASS: feedback terminal code coach_feedback_revision_conflict must be classified terminal
+PASS: feedback terminal code coach_feedback_not_found must be classified terminal
+PASS: feedback terminal code FST_ERR_VALIDATION must be classified terminal
+PASS: feedback terminal code coach_scope_mismatch must be classified terminal
+PASS: a transient feedback failure must stay retryable
+PASS: four healthy panels report no failure class
+PASS: four network failures are the only shape that lights the offline banner
+PASS: pure decode failures are contract drift: reachable server, upgrade hint allowed
+PASS: pure safety-field failures are reachable-but-untrusted: never an upgrade hint
+PASS: a mixed snapshot-validation + decode failure is NEITHER pure drift NOR pure validation (P3-26: the old predicate counted .validation as decoding and told the user to upgrade)
+PASS: one real network failure among decode failures keeps the offline classification
+PASS: a valid IANA plan timezone parses
+PASS: a non-default plan timezone parses (no hard-coded fallback involvement)
+PASS: an unparseable plan timezone returns nil — the caller must fail closed instead of comparing identities with a substituted timezone
+PASS: a today payload missing the four core cards decodes into honest empty states instead of failing the whole page
+PASS: 200-with-bad-JSON must be reported as a version mismatch, never as offline
+PASS: an all-network failure hits the whole-page branch with the true denominator (4)
+PASS: terminal-answer fixture starts from a durable pending publication
+PASS: an expired terminal answer clears the durable ledger instead of wedging every later publication
+PASS: after a terminal answer clears the ledger, publishing is allowed again
+PASS: a scopeMismatch terminal answer also clears the durable ledger
+PASS: an unknown outcome retains the ledger — the explicit abandon exit is the way out
+PASS: the explicit abandon exit clears the ledger without claiming the server operation never happened
+PASS: terminal-rejection fixture starts from pending verified receipts (coach enable is blocked)
+PASS: a transient 5xx keeps the receipt queued for the next foreground retry
+PASS: a terminal receipt rejection is reported as final — not as another foreground retry
+PASS: terminal rejections drop the receipts so hasPendingPlanReceipts no longer blocks coach enable
+PASS: coach feedback fixture loads the new contract
+PASS: a transient feedback failure keeps the queued command and asks for an explicit retry
+PASS: coach_scope_mismatch is terminal: the queued feedback is cleared instead of a doomed retry
+PASS: replacement recovery fixture stops after SDK verification but before ledger commit
+PASS: unknown recovery entries preserve the old ledger and cannot end the journal or enqueue verified receipts
+PASS: partial recovery records the fully removed old entries while retaining an unfinished replacement journal
+PASS: exact recovery commits the newly verified ledger and ends the interrupted journal
+PASS: recovered replacement atomically queues every old termination event with the new verified receipts
+PASS: repeating partial recovery cannot terminate newly confirmed replacement entries
+PASS: recovered replacement events retain the old actual UUID/time/prescription evidence
+PASS: historical-retry fixture retains lost old receipts beside a successfully verified replacement
+PASS: retrying stale historical verification never quarantines or asks to withdraw the current ledger
+PASS: historical scope-mismatch receipts cannot mark unrelated current entries for withdrawal
+PASS: same UUID at a different instant cannot invalidate the current system entry
+PASS: stale evidence for the actual current UUID/instant still requires withdrawal across equivalent timestamp encodings
+PASS: legacy today missing revision decodes but cannot be current execution
+PASS: unavailable today is not mislabeled as a known revision mismatch
+PASS: unknown coach state is not interpreted as active execution
+PASS: unknown coach state cannot confirm or display a current training recommendation
+PASS: regular and cold-start receipts preserve explicit null authority/targets without a legacy downgrade
+PASS: native model selects new contract before old aggregates
+PASS: native screens share one new-contract today authority without fabricated programme
+PASS: AC0-12 device fake proves exact today-only scheduling and explicit new receipt route
+PASS: new receipt authorization survives durable ledger and withdrawal
+PASS: local uncoordinated schedule blocks conversion even before the server can see a receipt
+PASS: interrupted scheduling journal persists new authority for recovery
+PASS: unknown-result coach publication is not reported as saved
+PASS: lost reply durably retains original new-contract operation and invalidates execution
+PASS: pending new-contract operation prevents issuing a second UUID
+PASS: non-coach v2 receipt stays on the manual-plan receipt route
+PASS: non-coach v2 receipt writes explicit null warmup/cooldown/alert for the canonical digest
+PASS: non-coach v2 receipt keeps every required verification field on the wire
+PASS: legacy receipt still uses the manual-plan receipt route
+PASS: legacy receipt keeps synthesized Codable key omission instead of inventing explicit nulls
+PASS: mixed capability (coachLoop without snapshot) refreshes through the coach-loop contract
+PASS: mixed capability never falls back to the legacy run-coach/goals reads
+PASS: a legacy coach response cannot overwrite an active coach-loop state
+PASS: an unsafe aggregate snapshot is classified as snapshot validation failure
+PASS: validation panel copy explains the rejected snapshot and never suggests upgrading the client
+PASS: a reachable server returning an untrusted snapshot is not reported as offline
+PASS: Retry-After accepts integer seconds
+PASS: Retry-After tolerates surrounding whitespace
+PASS: Retry-After accepts zero seconds
+PASS: negative Retry-After is clamped to zero, never negative
+PASS: the DISPLAY value keeps the server's suggestion (9 stays 9, not clamped to 5)
+PASS: the SCHEDULING value is clamped to five seconds (a foreground retry must not stall)
+PASS: the display value only caps absurd waits (600 s ceiling), never rewrites plausible ones
+PASS: the scheduling value keeps the same parse rules and the 0...5 clamp
+PASS: fractional Retry-After is ignored (integers only)
+PASS: HTTP-date Retry-After is ignored instead of being misread as seconds
+PASS: invalid or missing Retry-After is ignored
+PASS: 503 with Retry-After: 1 becomes a retryable server error carrying the hint
+PASS: retryable server error keeps the server message
+PASS: retryable server error exposes code/status for classification
+PASS: a retryable 503 is classified as retryable server-unavailable, not contract mismatch
+PASS: retryable server error has a localized message
+PASS: a retired 410 read is an upgrade state and is never auto-retried
+PASS: 503 without Retry-After keeps the non-retryable server error
+PASS: 503 with an HTTP-date Retry-After stays .server
+PASS: Retry-After: 0 is preserved as an immediate-retry hint
+PASS: Retry-After: 9 is clamped to five seconds
+PASS: 429 keeps the legacy server error plus its retry hint
+PASS: a 429 with Retry-After: 9 quotes the server's nine seconds verbatim (P3-28)
+PASS: opening a workout must fetch detail, series and freshness
+PASS: detail, series and freshness are fetched together
+PASS: a background activation must not start a UI-level read
+PASS: a background reload must not touch the network
+PASS: a stale open workout must be refetched after a sync generation
+PASS: the refetch refreshes detail, series and freshness together
+PASS: both callers of a burst share one refetch
+PASS: the coalescing window merges a burst into a single refetch
+PASS: a server without the freshness endpoint must not break the detail page
+PASS: a complete, published, old workout must not be refetched
+PASS: a settled workout must not cost a network read per sync generation
+PASS: paging fixture negotiates current session/execution reads
+PASS: widened candidate search loads the first 50 of 62 actual runs
+PASS: loading more after widening retains all 12 remaining candidates
+PASS: pagination transmits the original expanded range with its cursor
+PASS: a fresh search deliberately resets to the default five-day range
+PASS: a cursor from a replaced page cannot be reused for the new range
+PASS: a mismatched response range cannot silently truncate the candidate list
+All model regression checks passed.
+PASS: the contract header has one spelling
+PASS: the client requests exactly contract 2 (no version picker, no v1 downgrade)
+PASS: the receipt and view capabilities decode as separate keys
+PASS: an explicitly negotiated legacy protocol does not imply v2 writes
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: exact read/write/publication versions negotiate independently; v2 never authorizes legacy
+PASS: v2 commands require the durable operation capability
+PASS: an old server's missing capability keys decode as nil, never as a zero/empty view
+PASS: the complete B01 capability matrix is loaded
+PASS: B01 exact capabilities: old_server
+PASS: B01 capabilities never authorize retired URLs: old_server
+PASS: B01 exact capabilities: production_current
+PASS: B01 capabilities never authorize retired URLs: production_current
+PASS: B01 exact capabilities: validation_configuration_only
+PASS: B01 capabilities never authorize retired URLs: validation_configuration_only
+PASS: B01 exact capabilities: future_exact
+PASS: B01 capabilities never authorize retired URLs: future_exact
+PASS: B01 exact capabilities: trainingPlanContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanContractVersion_unknown
+PASS: B01 exact capabilities: planPublicationContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: planPublicationContractVersion_absent
+PASS: B01 exact capabilities: planPublicationContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: planPublicationContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanSessionContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanSessionContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanSessionCommandContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionCommandContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanSessionCommandContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanSessionCommandContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanExecutionCommandContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanExecutionCommandContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanExecutionCommandContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanExecutionCommandContractVersion_unknown
+PASS: B01 exact capabilities: trainingPlanUpdateContractVersion_absent
+PASS: B01 capabilities never authorize retired URLs: trainingPlanUpdateContractVersion_absent
+PASS: B01 exact capabilities: trainingPlanUpdateContractVersion_unknown
+PASS: B01 capabilities never authorize retired URLs: trainingPlanUpdateContractVersion_unknown
+PASS: B01 exact capabilities: unknown_sync
+PASS: B01 capabilities never authorize retired URLs: unknown_sync
+PASS: B01 exact capabilities: unknown_api
+PASS: B01 capabilities never authorize retired URLs: unknown_api
+PASS: B01 exact capabilities: unknown_only_trainingPlanSessionContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanSessionContractVersion
+PASS: B01 exact capabilities: unknown_only_trainingPlanSessionCommandContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanSessionCommandContractVersion
+PASS: B01 exact capabilities: unknown_only_trainingPlanExecutionCommandContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanExecutionCommandContractVersion
+PASS: B01 exact capabilities: unknown_only_trainingPlanUpdateContractVersion
+PASS: B01 capabilities never authorize retired URLs: unknown_only_trainingPlanUpdateContractVersion
+PASS: B02 optional extension retains identities without altering the existing projection: unmanaged
+PASS: B02 optional extension retains identities without altering the existing projection: managed
+PASS: B02 optional extension retains identities without altering the existing projection: legacy_run_coach
+PASS: B02 optional extension retains identities without altering the existing projection: paused
+PASS: B02 optional extension retains identities without altering the existing projection: ended
+PASS: B02 optional extension retains identities without altering the existing projection: empty_data
+PASS: the v2 read call decodes the unified payload from the wire
+PASS: the training-plan read always requests contract 2 on its own path
+PASS: the negotiated unified read sends GET with no mutation body
+PASS: 409 training_contract_unsupported surfaces as a typed upgrade state
+PASS: 409 training_plan_not_migrated surfaces as a typed migration state
+PASS: 503 training_plan_state_unavailable surfaces as a typed retryable state
+PASS: a 404 from an old server surfaces as an upgrade state, not rest
+PASS: an unrelated 500 is not misreported as a contract problem
+Training plan v2 wire negotiation: 6 checks passed
+PASS: the v2 payload decodes with its identity and revision
+PASS: mode, reason and days-to-race survive decoding
+PASS: the race goal carries distance support and target time
+PASS: the published weekly intention decodes as stored intent
+PASS: the read projection carries no execution grant
+PASS: a missing day is an absent intent, never an implied rest
+PASS: an empty/legacy payload cannot decode as the v2 contract (no silent fallback)
+PASS: week rows cached before F03 still decode (optional intent/observation)
+PASS: a past planned-but-unobserved row keeps its intent and unknown observation
+PASS: an unsupported contract version is a typed upgrade state
+PASS: an unmigrated scope is a typed migration state
+PASS: an unreadable unified store is a retryable unavailable state
+PASS: an old server without the route is an upgrade state, not a generic failure
+PASS: unrelated server failures are not misreported as contract problems
+PASS: a transport failure is not misreported as a contract problem
+PASS: a coherent v2 snapshot is accepted
+PASS: a snapshot without a known identity fails the identity check
+PASS: a snapshot from another athlete is rejected before display
+PASS: a newer contract version is an explicit upgrade state
+PASS: the write-confirmation revision floor cannot be lowered by a read
+PASS: a snapshot from another business date fails closed
+PASS: a day outside the business-date window fails closed
+PASS: duplicate published days fail closed
+PASS: race mode without its race facts fails closed
+PASS: an unknown contract version shows an upgrade state, never rest
+PASS: an unmigrated scope shows a migration state, never rest
+PASS: a failed read is unavailable, never rest
+PASS: a read in flight is loading, not an empty plan
+PASS: an unknown mode is not assessable and never rest
+PASS: a configured coach plan is ready with its mode and run state
+PASS: a published session is not rest and the projection grants no execution
+PASS: only an explicitly prescribed rest day is rendered as rest
+PASS: a missing today intention is unknown, not a rest day
+PASS: a race-day plan is distinguished from rest
+PASS: an incomplete configuration is its own state
+PASS: an ended programme needs confirmation and never reports active
+PASS: a snapshot whose goals moved after migration is refresh-required
+PASS: a cached snapshot is reference-only, never current
+PASS: facts freshness and device coordination stay distinguishable
+PASS: a projection that wrongly carries an execution grant is ignored and flagged
+PASS: an observed past day reports an imported workout
+PASS: a past planned interval with no observation keeps its intent and says observation is missing
+PASS: a past day that was never planned says so instead of asserting a rest
+PASS: planned-but-unobserved is never rendered as rest
+PASS: a payload without observation says the field is absent instead of claiming rest
+PASS: an observed day's note says the workout was imported
+PASS: single-day note distinguishes planned-but-unobserved
+PASS: single-day note distinguishes never-planned
+PASS: B02 legitimate identity view passes validation (including an absent update = unknown)
+PASS: B02 identity, revision, override, protection, suppression and units survive Codable round-trip
+PASS: B02 moved and edited intent keeps one stable ID and grants no execution
+PASS: B02 actual transport requests exactly the optional session read extension
+PASS: B08 a negotiated update view with matching published/evaluated keys is accepted
+PASS: B08 an unnegotiated update view fails closed instead of being ignored
+PASS: B08 an update view cannot be attributed without the exact session view
+PASS: B08 update contractVersion is checked independently of the handshake
+PASS: B08 evaluatedStateRevision cannot exceed the snapshot state revision
+PASS: B08 evaluated revision and evaluated key must be present together
+PASS: B08 plan.current is only accepted with a matching published or evaluated input key
+PASS: B08 update stage values are a closed set, not free strings
+PASS: B02 identity validation rejects bad_override with the expected error invalidDays("用户覆盖与有效处方不一致")
+PASS: B02 identity validation rejects duplicate with the expected error invalidDays("课程身份、修订或状态不可信")
+PASS: B02 identity validation rejects foreign_instance with the expected error invalidDays("课程身份、修订或状态不可信")
+PASS: B02 identity validation rejects lost_owner with the expected error invalidDays("已发布意图没有稳定课程身份")
+PASS: B02 identity validation rejects unknown_lifecycle with the expected error invalidDays("课程身份、修订或状态不可信")
+PASS: B02 identity validation rejects unknown_protection with the expected error invalidDays("课程身份、修订或状态不可信")
+PASS: B02 identity validation rejects unknown_reference with the expected error invalidDays("课程日期抑制不可信")
+PASS: B02 identity validation rejects unknown_version with the expected error unknownValue(field: "sessions.contractVersion", value: "99")
+PASS: B02 unsupported session extension is an upgrade state and never a legacy fallback
+PASS: B07 optional executions decode compatibly and keep unknown-vs-unlinked identity
+PASS: B07 execution rows survive the real cache Codable round-trip
+PASS: B07 absent executions remain unknown, never an empty history
+Training plan v2 contract regression: 142 checks passed
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: close button: fixture is previewing
+PASS: close button: cancellation invalidates immediately
+PASS: close button: late preview cannot restore a candidate after reopening
+PASS: close button: reopening requires another explicit preview
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: gesture dismissal: fixture is previewing
+PASS: gesture dismissal: cancellation invalidates immediately
+PASS: gesture dismissal: late preview cannot restore a candidate after reopening
+PASS: gesture dismissal: reopening requires another explicit preview
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: draft change: fixture is previewing
+PASS: draft change: cancellation invalidates immediately
+PASS: draft change: late preview cannot restore a candidate after reopening
+PASS: draft change: reopening requires another explicit preview
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: new draft may preview while the cancelled response is in flight
+PASS: old completion cannot clear or replace the new draft candidate
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview is accepted
+PASS: preview cancellation is zero writes and no journal
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview again
+PASS: intent persistence failure sends zero writes
+PASS: an unsent intent failure needs a new preview rather than an unrecoverable pending-operation gate
+PASS: closing and reopening after an unsent failure remains retryable
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview before in-flight submission dismissal
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: closing during submit preserves its generation and durable intent
+PASS: dismissed submission still acknowledges and completes the normal read lifecycle
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: preview after storage repair
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: unknown result preserves original intent
+PASS: preview cleanup never deletes an unresolved submit journal
+PASS: authenticated transport
+PASS: closing during query preserves its generation and original submit journal
+PASS: restart queries committed even with write capability off, without submitting twice
+PASS: state/goals watermarks remain separate and execution awaits read
+PASS: clear failure cannot report success
+PASS: authenticated transport
+PASS: committed read recovery closes only pending row
+PASS: authenticated transport
+PASS: HTTP 404 is not business notFound and never replays
+PASS: authenticated transport
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: explicit notFound replays original UUID and exact Data bytes
+PASS: authenticated transport
+PASS: acknowledgement failure preserves recoverable intent
+PASS: authenticated transport
+PASS: unknown status never replays or clears intent
+PASS: authenticated transport
+PASS: terminal scope mismatch closes only this pending row
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: refresh has its own endpoint without candidate
+PASS: fixture: close the acknowledged refresh before testing a rejected new command
+PASS: authenticated transport
+PASS: preview uses POST
+PASS: policy rejection still follows an explicit preview
+PASS: authenticated transport
+PASS: all new writes use v2 URLs
+PASS: submit/refresh use POST
+PASS: wire version/scope/revision preserved
+PASS: policy-change rejection closes only the rejected intent and tells the user to accept the rules rather than repeat previews
+PASS: zero retired URL requests
+PASS: session preview uses its own exact negotiated route
+PASS: session preview accepted
+PASS: closed session preview cannot submit
+PASS: session preview uses its own exact negotiated route
+PASS: new session preview accepted
+PASS: session intent failure sends zero HTTP
+PASS: session preview uses its own exact negotiated route
+PASS: session draft retry after storage repair
+PASS: session submit never uses configuration or retired routes
+PASS: session contract and instance survive durable encoding
+PASS: session unknown response keeps original journal
+PASS: session HTTP 404 is not business notFound
+PASS: session submit never uses configuration or retired routes
+PASS: session contract and instance survive durable encoding
+PASS: session restart replays original UUID and exact bytes only after business notFound
+PASS: session save persists separate state/goals floors before re-read
+PASS: session read completion closes journal
+PASS: session committed query works with independent write capability disabled
+PASS: close the previous known result before testing entity rejection
+PASS: session preview uses its own exact negotiated route
+PASS: preview precedes a competing session deletion
+PASS: session submit never uses configuration or retired routes
+PASS: session contract and instance survive durable encoding
+PASS: known session-not-found 404 is a rejected business command, not a missing route or unknown operation
+PASS: session explicit clear differs from omission
+PASS: session structure sends canonical null fields rather than lossy optional encoding
+TrainingPlanPublisher regression passed
+PASS: a structure with no distance goal is recognised as purely time-based
+PASS: an empty distance on a time-only structure encodes distanceKm:null
+PASS: a stale display distance cannot turn a time-only structure into a fake 5 km prescription
+PASS: block iterations multiply the structure's integer-meter distance
+PASS: a consistent total distance is accepted and normalised from the structure
+PASS: integer-meter comparison tolerates floating display noise, not a real mismatch
+PASS: a displayed total below the structure's metres is rejected
+PASS: a distance structure cannot be saved with an empty distance
+PASS: a non-numeric distance is rejected instead of silently becoming zero
+PASS: mixed dose is not mislabelled as its 4,200 m distance-step subtotal
+PASS: D-02: a server-measured mixed total can reach preview
+PASS: a mixed draft can ask the server to measure without inventing a total
+PASS: mixed draft rejects invalid explicit distance: 0
+PASS: mixed draft rejects invalid explicit distance: -1
+PASS: mixed draft rejects invalid explicit distance: NaN
+PASS: mixed draft rejects invalid explicit distance: infinity
+PASS: mixed draft rejects invalid explicit distance: abc
+PASS: mixed draft rejects invalid explicit distance: 80.001
+PASS: a legacy structure-less prescription is not misread as time-only
+PASS: the editor starts without a fabricated 5 km dose; the blank open step must be filled by the user
+PASS: the blank/open structure cannot silently become a 5 km prescription
+PASS: legacy open steps stay readable but cannot back a new editable dose
+PASS: the editor seeds 8.05 km losslessly, and the seeded text matches the 8,050 m structure
+PASS: whole kilometres omit the decimal part
+PASS: a whole-kilometre display value resolves against its 8,000 m structure
+PASS: distance text keeps the minimal exact fraction and treats absent/invalid values as empty
+PASS: a single step is capped at the server's MAX_STEP_METERS=100000
+PASS: shared easy: editor measurement authority matches server contract
+PASS: shared easy: patch encodes omission distinctly from null
+PASS: shared easy: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared interval: editor measurement authority matches server contract
+PASS: shared interval: patch encodes omission distinctly from null
+PASS: shared interval: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared tempo: editor measurement authority matches server contract
+PASS: shared tempo: patch encodes omission distinctly from null
+PASS: shared tempo: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared distance-only: editor measurement authority matches server contract
+PASS: shared distance-only: persisted total is not rounded or invented
+PASS: shared distance-only: patch encodes omission distinctly from null
+PASS: shared distance-only: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared time-only: editor measurement authority matches server contract
+PASS: shared time-only: persisted total is not rounded or invented
+PASS: shared time-only: patch encodes omission distinctly from null
+PASS: pure time has explicit null distance
+PASS: shared time-only: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared mixed: editor measurement authority matches server contract
+PASS: shared mixed: patch encodes omission distinctly from null
+PASS: shared mixed: add can delegate to the server without encoding a fake null/zero distance
+PASS: shared mixed baseline includes time-step distance; native code does not reproduce its pace model
+PASS: shared historical-distance-only: editor measurement authority matches server contract
+PASS: shared historical-distance-only: persisted total is not rounded or invented
+PASS: shared historical-distance-only: patch encodes omission distinctly from null
+PASS: shared historical-distance-only: add can delegate to the server without encoding a fake null/zero distance
+PASS: changed distance structure cannot reuse historical rounded total
+TrainingPlanSessionEditor regression: 54 checks passed
+PASS: execution candidates decode with contract, scope and state revision
+PASS: same-day candidates preserve identity, actual metrics and paging cursor
+PASS: a candidate page bound to the current session/instance/revisions is accepted
+PASS: an unknown candidate contract version is rejected
+PASS: candidates from another plan instance are rejected
+PASS: candidates for another session are rejected
+PASS: a changed session revision invalidates the candidate page
+PASS: duplicate same-day candidates are rejected rather than merged
+PASS: unknown candidate evidence cannot become an automatic confirmation
+PASS: optional executions decode without losing association identity or reasons
+PASS: assessment keeps partial dose, unknown stimulus and nested reason params
+PASS: absent executions decode as unknown, not an empty history
+PASS: an explicit empty executions array stays distinguishable from absence
+PASS: executions, assessment and reason params survive Codable round-trip
+PASS: execution command encodes the exact frozen draft shape (no duplicated session revision)
+PASS: an explicit skip carries only its required reason
+PASS: execution command response decodes a null goals revision and separate plan-update state
+PASS: execution warnings survive decoding
+PASS: execution commands require sessions + publication + exactly execution contract 1
+PASS: a missing execution contract closes the capability
+PASS: an unknown execution contract closes the capability
+PASS: execution commands require durable publication
+PASS: execution commands require the sessions read contract
+PASS: a confirmed execution row without an actual-training identity is rejected
+PASS: a missing execution view is unknown, never incomplete
+PASS: an absent row is not an incomplete course and not an empty history
+PASS: pending confirmation is neither completed nor incomplete
+PASS: partial dose and unknown stimulus stay separate while a confirmed completion is claimed
+PASS: unknown dose is not rendered as a missed or partial dose
+PASS: a confirmed link without assessment is unknown, not incomplete
+PASS: stimulus too hard is independent from dose
+PASS: completed lifecycle without a confirmed link never becomes a completion claim
+PASS: an invalidated association keeps history but withdraws the current completion
+PASS: multiple same-day candidates are never preselected for automatic confirmation
+PASS: a single candidate may be highlighted but still requires an explicit command
+PASS: candidate action copy distinguishes confirm, correct and re-link
+PASS: a pending course with no candidate may be explicitly skipped
+PASS: an unread candidate page disables skip instead of pretending there are no runs
+PASS: an executed candidate blocks skip even before confirmation
+PASS: a completed course cannot be skipped
+PASS: a pending-confirmation link cannot be overwritten by skip
+PASS: retract is available only for a persisted link
+PASS: the widened candidate window is the 31-day maximum around the course date
+PASS: an old GET cannot roll back state revision or swap a plan instance at the same revision
+PASS: an identity-less old server cannot overwrite a newer snapshot; a first identity-bearing snapshot needs a strictly newer revision
+PASS: skip/confirm candidates must match the current state, session and execution revisions
+PASS: failed confirm/retract/skip actions always have user-visible copy
+PASS: source-change and link-conflict errors have readable Chinese copy
+PASS: retracted and corrected execution reason codes have Chinese mappings
+PASS: normal durations keep their existing readable format
+PASS: an arbitrary finite Double never traps Int(value.rounded())
+PASS: finished and past sessions stay visible (only superseded identities are hidden), sorted by date
+PASS: completed/cancelled/past rows are read-only while today's pending row remains editable
+PASS: read-only rows say 查看记录 and never promise 调整; an editable automatic row stays a view action
+PASS: an editable user-protected row keeps the adjust action
+PASS: managed history separates associated, partial and unlinked rows
+PASS: managed history does not turn an absent execution view into an empty history
+PASS: candidate GET uses its exact route, query and three negotiated headers
+PASS: an empty 404 is route-unsupported/upgrade, never operation notFound
+PASS: training_session_not_found remains a business answer, not a missing route
+PASS: execution command POST uses its exact route and execution negotiation header
+PASS: execution command body is the original draft, not a regenerated plan
+PASS: journal submit uses the execution route
+PASS: a null goals revision keeps the existing goals floor and advances state
+PASS: the journal stores the original UUID and the exact bytes that were sent
+PASS: the execution acknowledgement watermark contains only state/goals, never session/execution revisions
+PASS: a successful execution closes the one shared pending row after full read
+PASS: journal submit uses the execution route
+PASS: an unknown execution result keeps its journal row
+PASS: restart queries the original committed operation without resubmitting or changing bytes
+PASS: a read-only recovery keeps the journal when replay is not allowed
+PASS: journal submit uses the execution route
+PASS: a business notFound replays the exact original UUID and bytes
+PASS: an HTTP 404 from the operation query is route/upgrade, not operation notFound or replay
+PASS: a training_session_not_found 404 is a rejected business command, not an unknown operation
+Training plan execution regression: 75 checks passed
+PASS: all three UUID/time/content matches establish full coverage
+PASS: receipts contain the actual exported structure and stable operation IDs
+PASS: system verification never asserts physical Watch delivery
+PASS: cross-language deterministic prescription digest easy
+PASS: cross-language deterministic prescription digest easy
+PASS: cross-language deterministic prescription digest interval
+PASS: cross-language deterministic prescription digest easy
+PASS: cross-language deterministic prescription digest easy
+PASS: cross-language deterministic prescription digest easy
+PASS: cross-language deterministic prescription digest interval
+PASS: cross-language deterministic prescription digest easy
+PASS: cross-language deterministic prescription digest easy
+PASS: shared digest fixture covers half-up micro quantisation, -0, heart_rate, multi-block and the 1e9 bound
+PASS: a value above the agreed 1e9 bound is rejected instead of formatted
+PASS: a non-finite prescription value is rejected
+PASS: NaN is rejected
+PASS: unknown/injecting session kind is rejected instead of changing the digest identity
+PASS: -0 quantises to 0.000000, never -0.000000
+PASS: micro quantisation distinguishes 1.0000015 from 1.0000014
+PASS: failed durable intent precedes every destructive SDK side effect
+PASS: whole-window preflight failure retains actual existing UUIDs
+PASS: termination-equivalent failed persistence after removeAll retains an unfinished durable operation
+PASS: foreground recovery after removeAll targets original UUID/time without another schedule call
+PASS: termination-equivalent failed persistence after schedule retains an unfinished durable operation
+PASS: foreground recovery after schedule targets original UUID/time without another schedule call
+PASS: termination-equivalent failed persistence after readBack3 retains an unfinished durable operation
+PASS: foreground recovery after readBack3 targets original UUID/time without another schedule call
+PASS: partial success registers exactly the two confirmed days
+PASS: unexpected final system entry prevents claiming full replacement despite all owed matches
+PASS: recovery fixture stops before committing a replacement
+PASS: recovery rejects extra unknown-id without ending the original safety journal
+PASS: recovery accepts the exact original UUID/time inventory after unknown-id is removed
+PASS: recovery fixture stops before committing a replacement
+PASS: recovery rejects extra wrong-time without ending the original safety journal
+PASS: recovery accepts the exact original UUID/time inventory after wrong-time is removed
+PASS: recovery fixture stops before committing a replacement
+PASS: recovery rejects extra duplicate without ending the original safety journal
+PASS: recovery accepts the exact original UUID/time inventory after duplicate is removed
+PASS: recovery fixture stops before committing a replacement
+PASS: recovery rejects extra previous-entry without ending the original safety journal
+PASS: recovery accepts the exact original UUID/time inventory after previous-entry is removed
+PASS: capacity failure prevents the entire destructive replacement
+PASS: unsupported required goal preserves the entire previous schedule
+PASS: readback refuses id mismatch
+PASS: readback refuses time mismatch
+PASS: readback refuses content mismatch
+PASS: readback refuses complete mismatch
+PASS: readback refuses missing-date mismatch
+PASS: readback refuses other-day mismatch
+PASS: UTC normalization keeps the same exact instant and local attribution
+PASS: silent removeAll failure prevents replacement and false old-date confirmation
+PASS: silent targeted clear failure cannot be reported as a successful replacement
+PASS: empty-window clear failure cannot be hidden by normal empty copy
+PASS: empty window is successful only after verified empty readback
+PASS: lease invalidation during authorization refuses stale success
+PASS: supersession during authorization is not misreported as failed authorization
+PASS: lease invalidation during authorization leaves no submitted stale entries
+PASS: lease invalidation during requestAuthorization refuses stale success
+PASS: supersession during requestAuthorization is not misreported as failed authorization
+PASS: lease invalidation during requestAuthorization leaves no submitted stale entries
+PASS: lease invalidation during removeAll refuses stale success
+PASS: supersession during removeAll is not misreported as failed authorization
+PASS: lease invalidation during removeAll leaves no submitted stale entries
+PASS: lease invalidation during schedule refuses stale success
+PASS: supersession during schedule is not misreported as failed authorization
+PASS: lease invalidation during schedule leaves no submitted stale entries
+PASS: lease invalidation during readBack2 refuses stale success
+PASS: supersession during readBack2 is not misreported as failed authorization
+PASS: lease invalidation during readBack2 leaves no submitted stale entries
+PASS: failed targeted cleanup retains submitted IDs and visible withdrawal risk
+PASS: targeted cleanup verifies residue by UUID + exact scheduledAt, not UUID alone
+PASS: support check precedes authorization
+PASS: denied authorization uses supported settings guidance, not reinstall/reset
+PASS: withdrawal reports denied without implying system clear or re-prompting
+PASS: withdrawal reports restricted without implying system clear or re-prompting
+PASS: late slot crossing midnight is refused, never reassigned
+PASS: missing execution timezone does not default optimistically
+PASS: dose clamping cannot produce a partial prescription reported as complete
+PASS: heart-rate clamping is not treated as lossless export of a required target
+PASS: fractional compatibility dose cannot disagree with whole-unit server receipt normalization
+PASS: missing safety field planRevision rejects execution payload
+PASS: missing safety field timezone rejects execution payload
+PASS: missing safety field executable rejects execution payload
+PASS: unknown executable enum is not converted to open
+PASS: golden v1 payload preserves explicit executable safety metadata
+PASS: golden v2 payload preserves explicit executable safety metadata
+PASS: old handshake omits additive receipt capability safely
+PASS: duplicate local-date identity cannot produce ambiguous receipts
+Plan scheduling regression: 88 checks passed
+PASS: context and replaced context round-trip through the journal codec
+PASS: a journal written without the new fields still decodes (backward compatible)
+PASS: a pre-PR6 journal without a context remains withdrawable
+PASS: no recorded previous context is unknown provenance, not a switch
+PASS: a missing current context cannot claim sameness
+PASS: an identical context is a no-op
+PASS: a newer plan revision alone is a refresh, not a configuration switch
+PASS: a mode + race goal change is a configuration switch
+PASS: ending the coach-loop (mode becomes legacy) is a configuration switch
+PASS: race goal identity is deterministic and includes date, distance and goal
+PASS: a race goal without a date has no identity
+PASS: a moved race date changes the race goal identity
+PASS: the replaced context is captured from the durable journal before it is overwritten
+PASS: the switch withdraws and strongly reads back before any new schedule call
+PASS: a configuration switch is registered after the withdrawal and before the new push
+PASS: the new and the replaced context are durable before the first destructive SDK call
+PASS: the operation itself records the pushed context and the one it replaces
+PASS: a same-configuration refresh replaces the schedule without claiming a mode switch
+PASS: an unrecorded previous context never blocks withdrawing our own entries
+PASS: a switch whose withdrawal cannot be verified pushes nothing
+PASS: a failed switch is reported as a switch, not as an ordinary empty window
+PASS: a failed switch keeps the journal unfinished with the old identities and the prepared reservation
+PASS: the failed switch is recoverable by an explicit withdrawal of the same entry identities
+PASS: a stale read-back cannot certify the withdrawal even though the entry is gone
+PASS: an unwritable withdrawal registration stops the push instead of running unregistered
+PASS: the durable journal still records the clearing intent when registration fails
+PASS: the registration failure is recoverable: the withdrawal can be re-read and registered
+PASS: a failed reservation write precedes and prevents every destructive switch step
+PASS: equivalent receipts are idempotent within one batch
+PASS: a receipt for another dataset is rejected, never applied
+PASS: a receipt from an older mode/policy context is admitted as history, never rejected
+PASS: older-context receipts stay admissible for withdrawal/replacement
+PASS: a legacy scope-less receipt keeps its pre-PR6 admission rule
+PASS: legacy receipts without an idempotency key dedupe on UUID + date + event
+PASS: the journal applies the receipt admission policy to its own context and identity
+Plan watch context regression: 35 checks passed
+error: input file 'apps/ios/RAI/APIModels.swift' was modified during the build
+error: input file 'apps/ios/RAI/APIModels.swift' was modified during the build

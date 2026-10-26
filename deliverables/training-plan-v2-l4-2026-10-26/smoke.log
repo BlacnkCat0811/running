@@ -1,0 +1,25 @@
+
+> rai-running-intelligence@0.1.0 presmoke:api
+> node scripts/check-node-version.mjs
+
+
+> rai-running-intelligence@0.1.0 smoke:api
+> node apps/api/test/production-runtime-smoke.mjs
+
+Production API runtime smoke test passed
+        3.16 real         2.74 user         1.02 sys
+           182919168  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               85364  page reclaims
+                  18  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   4  messages sent
+                   4  messages received
+                   1  signals received
+                  53  voluntary context switches
+                4371  involuntary context switches
+            19197952  peak memory footprint

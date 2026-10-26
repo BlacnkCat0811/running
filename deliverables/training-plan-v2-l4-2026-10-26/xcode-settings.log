@@ -1,0 +1,43 @@
+[
+  {
+    "target": "RAI",
+    "settings": {
+      "TARGET_NAME": "RAI",
+      "PRODUCT_NAME": "RAI",
+      "PRODUCT_BUNDLE_IDENTIFIER": "app.rai.running.debug",
+      "SWIFT_VERSION": "5.0",
+      "SWIFT_DEFAULT_ACTOR_ISOLATION": "MainActor",
+      "IPHONEOS_DEPLOYMENT_TARGET": "17.0",
+      "SDKROOT": "/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk",
+      "SDK_VERSION": "26.5",
+      "ARCHS": "x86_64",
+      "EXCLUDED_ARCHS": "arm64",
+      "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
+      "CODE_SIGN_STYLE": "Automatic",
+      "CODE_SIGNING_ALLOWED": "NO",
+      "CODE_SIGN_IDENTITY": "Apple Development",
+      "DEVELOPMENT_TEAM": "V6GK55AADW",
+      "CONFIGURATION": "Debug",
+      "TARGETED_DEVICE_FAMILY": "1",
+      "PODS_ROOT": "/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/Pods",
+      "FRAMEWORK_SEARCH_PATHS": "/tmp/rai-v2-l4-20261026-vczzvoi8/app-simulator/Build/Products/Debug-iphonesimulator  \"/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/Pods/AMap3DMap\" \"/tmp/rai-v2-l4-20261026-vczzvoi8/ios-source/Pods/AMapFoundation\"",
+      "OTHER_LDFLAGS": " -ObjC -l\"c++\" -l\"z\" -framework \"AMapFoundationKit\" -framework \"CoreGraphics\" -framework \"CoreLocation\" -framework \"CoreTelephony\" -framework \"CoreText\" -framework \"GLKit\" -framework \"MAMapKit\" -framework \"OpenGLES\" -framework \"QuartzCore\" -framework \"Security\" -framework \"SystemConfiguration\" -lsqlite3"
+    }
+  }
+]
+        4.04 real         1.73 user         1.06 sys
+           110919680  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               46410  page reclaims
+                 557  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   5  messages sent
+                   5  messages received
+                   0  signals received
+                 127  voluntary context switches
+                1178  involuntary context switches
+             5316608  peak memory footprint

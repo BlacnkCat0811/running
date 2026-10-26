@@ -1,0 +1,14 @@
+{
+  "name": "ml-check",
+  "argv": [
+    "npm",
+    "run",
+    "ml:check"
+  ],
+  "envOverrides": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "startedEpoch": 1792998911.5484421,
+  "durationSeconds": 7.9137468338012695,
+  "exitCode": 0
+}

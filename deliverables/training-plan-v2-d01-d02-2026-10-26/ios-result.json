@@ -1,0 +1,9 @@
+{
+  "command": [
+    "npm",
+    "run",
+    "test:ios"
+  ],
+  "exitCode": 0,
+  "durationSeconds": 933.55
+}

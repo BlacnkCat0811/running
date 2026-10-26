@@ -1,0 +1,1295 @@
+--- a/apps/api/src/data.ts
++++ b/apps/api/src/data.ts
+@@ -1977,6 +1977,9 @@
+     return this.inReadSnapshot(() => {
+       const session = this.seriesRepository.sessionForSeries(id);
+       if (!session) return null;
++      const fact = this.executionCandidateFacts(coachLocalDate(session.startedAt), coachLocalDate(session.startedAt))
++        .find(value => value.trainingSessionId === id);
++      if (!fact) return null;
+       const updated = this.database.prepare("SELECT updated_at FROM training_sessions WHERE id=?").get(id) as
+         { updated_at: string } | undefined;
+       const availableAt = updated && Number.isFinite(Date.parse(updated.updated_at))
+@@ -2000,16 +2003,14 @@
+       }
+       const steps = day.structure ? (day.structure.warmup ? 1 : 0) + (day.structure.cooldown ? 1 : 0) +
+         day.structure.blocks.reduce((sum: number, block) => sum + block.iterations * block.steps.length, 0) : 0;
+-      return { id, startedAt: session.startedAt, endedAt: session.endedAt, availableAt,
+-        distanceMeters: session.distanceKm === null ? null : Math.round(session.distanceKm * 1000),
+-        durationSeconds: (Date.parse(session.endedAt) - Date.parse(session.startedAt)) / 1000,
++      return { id, startedAt: fact.startedAt, endedAt: fact.endedAt, availableAt,
++        distanceMeters: fact.distanceMeters, durationSeconds: fact.durationSeconds,
+         evidenceLevel: series.hasMeasuredWorkoutSteps === true ? "measured_steps"
+           : series.segmentPlan ? "reconstructed_segments" : "summary_only",
+         measuredStepsComplete: series.hasMeasuredWorkoutSteps === true && steps > 0 && series.segments.length === steps,
+         segments: series.segments, signalIntervals,
+         evidenceRef: { source: "workout", id, observedAt: session.startedAt,
+-          availableAt: availableAt ?? asOf, revisionOrHash: digest({ id, startedAt: session.startedAt,
+-            endedAt: session.endedAt, distanceKm: session.distanceKm }) } };
++          availableAt: availableAt ?? asOf, revisionOrHash: fact.sourceFactDigest } };
+     });
+   }
+ 
+--- a/apps/api/src/server.ts
++++ b/apps/api/src/server.ts
+@@ -1295,7 +1295,7 @@
+     // B06: a corrected/deleted source invalidates the current link even when the
+     // automatic publisher is closed; the write is a deterministic replayable
+     // operation, never a GET side effect.
+-    const reconciled = await trainingExecutionService.reconcileSourceChanges();
++    const reconciled = await trainingExecutionCommands.reconcile();
+     if (reconciled.changed > 0) return;
+     // Automatic publication has its own explicit gate. Enabling manual writes
+     // never implicitly enables background publication.
+@@ -1401,7 +1401,7 @@
+   // must never be reused for a different negotiation. `no-store` is the primary
+   // guard; Vary keeps compliant shared caches correct even if they ignore it.
+   reply.header("Cache-Control", "no-store");
+-  reply.header("Vary", "X-RAI-Client-Training-Commands, X-RAI-Client-Training-Session-Commands, X-RAI-Client-Training-Execution-Commands");
++  reply.header("Vary", "X-RAI-Client-Training-Commands, X-RAI-Client-Training-Session-Commands, X-RAI-Client-Training-Execution-Commands, X-RAI-Client-Training-Session-Distance-Omission");
+   return {
+   serverId,
+   athleteId,
+@@ -1427,6 +1427,10 @@
+   ...(trainingPlanSessionReadAdvertised() ? { trainingPlanSessionContractVersion: 1 } : {}),
+   ...(trainingSessionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
+     request.headers["x-rai-client-training-session-commands"] === "1" ? { trainingPlanSessionCommandContractVersion: 1 } : {}),
++  ...(trainingSessionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
++    request.headers["x-rai-client-training-session-commands"] === "1" &&
++    request.headers["x-rai-client-training-session-distance-omission"] === "1"
++    ? { trainingPlanSessionDistanceOmissionContractVersion: 1 } : {}),
+   ...(trainingExecutionCommandEnabled && trainingPlanSessionReadAdvertised() && mobileGoalsStore.supportsPublicationOperations &&
+     request.headers["x-rai-client-training-execution-commands"] === "1" ? { trainingPlanExecutionCommandContractVersion: 1 } : {}),
+   ...(trainingPlanSessionReadAdvertised() ? { trainingPlanUpdateContractVersion: 1 } : {}),
+--- a/apps/api/src/training-plan-execution-commands.ts
++++ b/apps/api/src/training-plan-execution-commands.ts
+@@ -20,6 +20,7 @@
+ const conflict = (code: string, message: string): never => { throw new PlanOperationError(code, message, 409); };
+ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+ const SHA256_HEX = /^[a-f0-9]{64}$/i;
++class ReconciliationNoChange extends Error {}
+ 
+ const record = (value: unknown): value is Record<string, unknown> =>
+   value !== null && typeof value === "object" && !Array.isArray(value);
+@@ -130,6 +131,14 @@
+       conflict("training_execution_revision_conflict", "关联已变化，请重新读取课程后重试。");
+     }
+     return current;
++  }
++
++  private assertExecutionAuthority(state: TrainingPlanSessionState, action: TrainingPlanExecutionDraft["action"]): void {
++    // Correct creates a new claim even when it replaces a historical link.
++    // Retract only withdraws a saved claim and never grants execution authority.
++    if (action !== "retract" && (state.runState !== "active" || state.sourceStatus === "ended")) {
++      conflict("training_execution_not_active", "计划已暂停或结束，不能确认、纠正或跳过执行；仍可撤回历史关联。");
++    }
+   }
+ 
+   replay(request: TrainingPlanExecutionCommandRequest): TrainingPlanClosedLoopCommandResponse | null {
+@@ -187,6 +196,12 @@
+       segments: [], signalIntervals: [], evidenceRef: { source: "workout", id: candidate.trainingSessionId,
+         observedAt: candidate.startedAt, availableAt: new Date(this.now()).toISOString(), revisionOrHash: candidate.sourceFactDigest } };
+     const workout = facts.workout(candidate.trainingSessionId, prescription.prescription, new Date(this.now()).toISOString()) ?? fallback;
++    if (workout.id !== candidate.trainingSessionId || workout.startedAt !== candidate.startedAt ||
++        workout.endedAt !== candidate.endedAt || workout.distanceMeters !== candidate.distanceMeters ||
++        workout.durationSeconds !== candidate.durationSeconds || workout.evidenceRef.id !== candidate.trainingSessionId ||
++        workout.evidenceRef.revisionOrHash !== candidate.sourceFactDigest) {
++      conflict("training_execution_source_changed", "候选与执行评价的事实身份或摘要不一致，请重新读取。");
++    }
+     const hash = prescriptionDigest(prescription.prescription.kind, prescription.prescription.structure ?? null);
+     const assessment = assessWorkoutExecution({ asOf: new Date(this.now()).toISOString(),
+       prescription: { day: prescription.prescription, revision: prescription.sessionRevision, createdAt: prescription.availableAt,
+@@ -232,9 +247,19 @@
+     const facts = needsFacts ? this.facts() : null;
+     return new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, request, () => {
+       const current = this.current(request);
++      this.assertExecutionAuthority(current.state, request.draft.action);
+       // Skip takes its fingerprint after the pending/link guards below, so an
+       // already completed course keeps the existing rejection semantics.
+       const fingerprint = request.draft.action === "skip" ? "" : facts?.fingerprint() ?? "";
++      if (request.draft.action === "confirm" || request.draft.action === "correct") {
++        const assertUnchanged = () => {
++          if (facts!.fingerprint() !== fingerprint) {
++            conflict("training_execution_source_changed", "执行评价或提交前训练事实发生变化，请重新读取候选。");
++          }
++        };
++        // Also covers Correct's no-change result and the operation receipt.
++        this.store.beforePublicationCommit(assertUnchanged);
++      }
+       const draft = request.draft as TrainingPlanExecutionDraft;
+       const linksExecution = draft.action !== "retract";
+       const session = linksExecution ? this.executableSession(current.state, request.sessionId)
+@@ -328,6 +353,7 @@
+         const prescription = this.frozenPrescription(state, target, candidate.startedAt);
+         if (prescription === null) conflict("training_execution_source_changed", "开跑前没有已发布生效的课程修订，不能把事后编辑的课当作当时处方。");
+         const assessment = this.assessment(facts!, prescription!, candidate);
++        if (facts!.fingerprint() !== fingerprint) conflict("training_execution_source_changed", "读取执行评价后训练事实发生变化，请重试。");
+         const lifecycle = lifecycleForAssessment(assessment);
+         nextExecution = { sessionId: target.sessionId, executionRevision, association: "confirmed",
+           trainingSessionId: candidate.trainingSessionId, sourceFactDigest: candidate.sourceFactDigest,
+@@ -379,6 +405,7 @@
+       .filter(execution => execution.association === "confirmed");
+     if (current.length === 0) return { changed: 0 };
+     const facts = this.facts();
++    const factsBefore = facts.fingerprint();
+     const stale: Array<{ execution: TrainingPlanSessionExecution; session: TrainingPlanSession }> = [];
+     for (const execution of current) {
+       const session = state.sessions.find(item => item.sessionId === execution.sessionId);
+@@ -393,22 +420,34 @@
+       if (live !== undefined && live.sourceFactDigest === execution.sourceFactDigest) continue;
+       stale.push({ execution, session });
+     }
++    if (facts.fingerprint() !== factsBefore) {
++      conflict("training_execution_source_changed", "预扫描执行事实期间数据发生变化，请重试。");
++    }
+     if (stale.length === 0) return { changed: 0 };
+-    const operationId = `reconcile-${digest({ contract: "rai-training-execution-reconcile-v1", scope: this.identity(),
++    // v2 must not replay a legacy no-change tombstone; old receipts stay immutable.
++    const operationId = `reconcile-${digest({ contract: "rai-training-execution-reconcile-v2", scope: this.identity(),
+       stateRevision: row.revision,
+       executions: stale.map(item => ({ sessionId: item.session.sessionId, executionRevision: item.execution.executionRevision,
+         trainingSessionId: item.execution.trainingSessionId, sourceFactDigest: item.execution.sourceFactDigest })) }).slice(0, 40)}`;
+-    return new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, {
++    const publish = () => new PlanPublicationService(this.store, () => this.scope(), this.identity).publish(route, {
+       operationId, operationScope: this.identity() }, () => {
+       const latest = this.store.trainingPlanStateRow(this.scope());
+       if (latest === null || latest.state.schemaVersion !== 2) {
+         throw new PlanOperationError("training_session_contract_unsupported", "当前数据域尚未完成课程身份迁移。", 409);
+       }
+       const latestState = latest.state as TrainingPlanSessionState;
++      this.assertExecutionAuthority(latestState, "confirm");
++      if (latestState.planInstanceId !== state.planInstanceId || latest.revision !== row.revision) {
++        conflict("training_state_revision_conflict", "核对期间计划状态已变化，请重试。");
++      }
+       // Facts can be updated concurrently between the cheap pre-scan and this
+       // transaction. Re-read every candidate here and only invalidate a link that
+       // is still stale now; a recovered fact must not be marked invalidated.
+-      const factsBefore = facts.fingerprint();
++      this.store.beforePublicationCommit(() => {
++        if (facts.fingerprint() !== factsBefore) {
++          conflict("training_execution_source_changed", "核对结果提交前训练事实发生变化，请重试。");
++        }
++      });
+       const now = new Date(this.now()).toISOString();
+       const next = structuredClone(latestState);
+       let changed = 0;
+@@ -441,12 +480,19 @@
+       if (facts.fingerprint() !== factsBefore) {
+         throw new PlanOperationError("training_execution_source_changed", "核对执行事实期间数据发生变化，请重试。", 409);
+       }
+-      if (changed === 0) return { changed: 0 };
++      // A transiently recovered source must not persist changed:0 under this
++      // deterministic key and mask a later invalidation of the same old claim.
++      if (changed === 0) throw new ReconciliationNoChange();
+       parseTrainingPlanState(next);
+       this.store.commitTrainingPlanCommandState({ scope: this.scope(), expectedRevision: latest.revision,
+         state: { ...next, goalsRevision: latestState.goalsRevision }, eventType: "execution:source_changed" });
+       return { changed };
+     });
++    try { return publish(); }
++    catch (error) {
++      if (error instanceof ReconciliationNoChange) return { changed: 0 };
++      throw error;
++    }
+   }
+ 
+   private response(request: TrainingPlanExecutionCommandRequest, row: { state: TrainingPlanSessionState; revision: number },
+@@ -504,5 +550,6 @@
+       return reply.code(503).send({ code: "training_session_storage_unavailable", message: "执行候选暂不可用，请稍后重试。" });
+     }
+   };
+-  return { candidates, submit: handle, reconcile: () => service.reconcileSourceChanges() };
++  return { candidates, submit: handle,
++    reconcile: () => withFactsLease(async () => service.reconcileSourceChanges()) };
+ }
+--- a/apps/api/src/training-plan-session-migration.ts
++++ b/apps/api/src/training-plan-session-migration.ts
+@@ -71,7 +71,8 @@
+   checkLedger(database);
+   const identity = parseTrainingPlanScopeKey(scope);
+   // Do this before the strict reader and before any ID allocation/DDL. A schema
+-  // 1 rest would become explicit_rest in apply; it must never report ready.
++  // 1 running lock/rest collision must never report ready. A rest lock already
++  // owns that intent; apply retains it without adding duplicate explicit_rest.
+   const history = snapshots(database, scope);
+   const currentRaw = database.prepare("SELECT revision,payload_json FROM mobile_training_state WHERE scope=?").get(scope) as
+     { revision: number; payload_json: string } | undefined;
+@@ -187,7 +188,9 @@
+       });
+       if (isCurrent) {
+         currentDays = days; currentSessions = sessions;
+-        suppressions = days.filter(day => day.kind === "rest").map(day => ({ localDate: day.localDate, reason: "explicit_rest", sessionId: null, availableAt }));
++        suppressions = days.filter(day => day.kind === "rest" && !(current.state.lockedSession?.localDate === day.localDate &&
++          current.state.lockedSession.session.kind === "rest"))
++          .map(day => ({ localDate: day.localDate, reason: "explicit_rest", sessionId: null, availableAt }));
+       }
+     }
+     const state = parseTrainingPlanState({ ...current.state, schemaVersion: 2, migrationVersion: 2,
+--- a/apps/api/src/training-plan-session-state.ts
++++ b/apps/api/src/training-plan-session-state.ts
+@@ -31,7 +31,7 @@
+   const instant = (value: unknown): string | null => typeof value === "string" &&
+     /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
+   const conflicts: TrainingPlanLockedRestConflict[] = [];
+-  if (Array.isArray(raw.weekPlan) && raw.weekPlan.some(day => sessionRecord(day) && day.localDate === date && day.kind === "rest")) {
++  if (lockedKind !== "rest" && Array.isArray(raw.weekPlan) && raw.weekPlan.some(day => sessionRecord(day) && day.localDate === date && day.kind === "rest")) {
+     conflicts.push({ localDate: date, lockedKind, kind: "locked_session_week_plan_rest", lockedAt: instant(lock.lockedAt), availableAt: null });
+   }
+   if (Array.isArray(raw.suppressions)) for (const value of raw.suppressions) {
+@@ -45,8 +45,7 @@
+ export function assertTrainingPlanLockedRestInvariant(raw: unknown): void {
+   // Legacy can lock rest itself. Its matching rest materialization is one intent,
+   // not a running prescription colliding with rest. explicit_rest remains strict.
+-  const conflicts = trainingPlanLockedRestConflicts(raw).filter(value =>
+-    value.kind !== "locked_session_week_plan_rest" || value.lockedKind !== "rest");
++  const conflicts = trainingPlanLockedRestConflicts(raw);
+   if (conflicts.length > 0) {
+     const kind = conflicts.some(value => value.kind === "locked_session_explicit_rest") ? "explicit rest" : "weekPlan rest";
+     throw new TrainingPlanSessionStateError(
+--- a/apps/api/test/phase5-training-plan.test.ts
++++ b/apps/api/test/phase5-training-plan.test.ts
+@@ -528,6 +528,14 @@
+     assert.equal((await api.call("/v1/handshake")).value.trainingPlanSessionCommandContractVersion, undefined);
+     const sessionHandshake = (await api.call("/v1/handshake", undefined, headers)).value;
+     assert.equal(sessionHandshake.trainingPlanSessionCommandContractVersion, 1);
++    assert.equal(sessionHandshake.trainingPlanSessionDistanceOmissionContractVersion, undefined,
++      "COMPAT-01: session command 1 alone does not negotiate omission");
++    const omissionHeaders = { ...headers, "X-RAI-Client-Training-Session-Distance-Omission": "1" };
++    assert.equal((await api.call("/v1/handshake", undefined, omissionHeaders)).value.trainingPlanSessionDistanceOmissionContractVersion, 1,
++      "COMPAT-01: current server explicitly negotiates distance omission");
++    assert.equal((await api.call("/v1/handshake", undefined,
++      { ...headers, "X-RAI-Client-Training-Session-Distance-Omission": "2" })).value.trainingPlanSessionDistanceOmissionContractVersion, undefined);
++
+     assert.equal(sessionHandshake.trainingPlanCommandContractVersion, undefined, "session writes do not require the separate configuration switch");
+     const add = await request({ action: "add", prescription: prescription(2, 2) });
+     assert.equal((await api.call("/v1/mobile/training-plan/session-commands/preview", add)).value.code, "training_session_commands_disabled");
+--- a/apps/api/test/training-plan-execution-commands.test.ts
++++ b/apps/api/test/training-plan-execution-commands.test.ts
+@@ -1,5 +1,7 @@
+ import assert from "node:assert/strict";
+ import test from "node:test";
++import { spawnSync } from "node:child_process";
++import Fastify from "fastify";
+ import { randomUUID } from "node:crypto";
+ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+@@ -7,7 +9,7 @@
+ import { DatabaseSync } from "node:sqlite";
+ import type { MobilePlannedDay, TrainingPlanExecutionCommandRequest, TrainingPlanSession } from "@rai/api-contracts";
+ import type { FastifyReply, FastifyRequest } from "fastify";
+-import { RaiDatabase } from "@rai/storage-sqlite";
++import { acquireDatabasePublicationLock, RaiDatabase } from "@rai/storage-sqlite";
+ import { ReadStoreManager } from "../src/read-store-manager.js";
+ import { MutationCoordinator } from "../src/mutation-coordinator.js";
+ import { TaskAdmissionScheduler } from "../src/task-admission.js";
+@@ -384,7 +386,9 @@
+     };
+     const service = new TrainingPlanExecutionCommandService(f.goals, () => scope, () => businessDate,
+       () => provider, () => Date.parse(nowInstant));
++    const before = businessSnapshot(f.db);
+     assert.equal(service.reconcileSourceChanges().changed, 0);
++    assert.deepEqual(businessSnapshot(f.db), before, "no-change reconciliation must not save an operation tombstone");
+     assert.ok(calls >= 2, "the transaction re-read the candidate instead of trusting the pre-scan");
+     const execution = f.goals.trainingPlanExecution(key, fixture.initial.sessionId)!.execution;
+     assert.equal(execution.association, "confirmed");
+@@ -580,3 +584,260 @@
+     assert.deepEqual(f.snapshot(), before);
+   } finally { f.close(); }
+ });
++
++function businessSnapshot(db: DatabaseSync) {
++  return Object.fromEntries(["mobile_goals", "mobile_goals_history", "mobile_training_state", "mobile_training_state_history",
++    "mobile_training_session_history", "mobile_training_execution", "mobile_training_execution_history", "mobile_plan_operations"]
++    .map(table => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
++}
++function stopExecution(f: ReturnType<typeof setup>, status: "paused" | "ended") {
++  const row = f.row();
++  f.goals.withPublicationTransaction(() => f.goals.commitTrainingPlanCommandState({ scope: key, expectedRevision: row.revision,
++    state: { ...f.state(), runState: "paused", ...(status === "ended" ? { sourceStatus: "ended" as const } : {}) }, eventType: "fixture:stop" }));
++}
++for (const status of ["paused", "ended"] as const) {
++  for (const action of ["confirm", "correct", "skip"] as const) test(`EXEC-01: ${status} rejects new ${action} with stable 409 and zero business writes`, () => {
++    const f = setup();
++    try {
++      const source = f.facts()[0]!;
++      if (action === "correct") f.execute({ action: "confirm", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest });
++      stopExecution(f, status);
++      f.setFacts(action === "skip" ? [] : f.facts());
++      const request = f.body(action === "skip" ? { action, reason: "stopped" }
++        : { action, trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest });
++      const before = businessSnapshot(f.db);
++      assert.throws(() => f.service.submit(request), (error: unknown) => error instanceof PlanOperationError &&
++        error.statusCode === 409 && error.code === "training_execution_not_active");
++      assert.deepEqual(businessSnapshot(f.db), before);
++    } finally { f.close(); }
++  });
++  test(`EXEC-01: ${status} permits saved-identity Retract and committed Confirm replay without authorizing execution`, () => {
++    const f = setup();
++    try {
++      const source = f.facts()[0]!;
++      const request = f.body({ action: "confirm", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest });
++      const confirmed = f.service.submit(request);
++      stopExecution(f, status);
++      const before = businessSnapshot(f.db);
++      assert.deepEqual(f.service.submit(request), confirmed);
++      assert.deepEqual(businessSnapshot(f.db), before);
++      f.setFacts([]);
++      const result = f.execute({ action: "retract", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest });
++      assert.equal(result.execution!.association, "invalidated");
++      assert.equal(f.state().runState, "paused");
++      assert.equal(f.goals.trainingPlanExecutionHistory(key, f.session().sessionId).length, 2);
++    } finally { f.close(); }
++  });
++}
++
++for (const action of ["confirm", "correct"] as const) {
++  for (const point of ["assessment", "receipt", "no-change receipt"] as const) {
++    if (action === "confirm" && point === "no-change receipt") continue;
++    test(`EXEC-02: ${action} detects real fact change at ${point} and rolls back all control rows`, async () => {
++      const f = await skipFixture();
++      try {
++        f.addRun();
++        f.provider.workout = (id, day, asOf) => f.reads.use(store => store.executionWorkout(id, day, asOf));
++        let source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++        if (action === "correct") {
++          f.service.submit(f.body({ action: "confirm", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest }));
++          if (point !== "no-change receipt") {
++            f.main.database.exec("UPDATE training_sessions SET anchor_distance_km=6");
++            source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++          }
++        }
++        const mutate = () => f.main.database.exec("UPDATE training_sessions SET anchor_distance_km=7");
++        if (point === "assessment") {
++          const original = f.provider.workout;
++          f.provider.workout = (id, day, asOf) => { const value = original(id, day, asOf); mutate(); return value; };
++        } else {
++          f.control.function("exec02_mutate", () => { mutate(); return 1; });
++          f.control.exec(`CREATE TRIGGER exec02_mutate AFTER INSERT ON mobile_plan_operations BEGIN SELECT exec02_mutate(); END`);
++        }
++        const request = f.body({ action, trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest });
++        const before = businessSnapshot(f.db);
++        assert.throws(() => f.service.submit(request), code("training_execution_source_changed"));
++        assert.deepEqual(businessSnapshot(f.db), before);
++        assert.equal(f.db.isTransaction, false);
++        assert.equal((f.goals.publicationResult(key, request.operationId) as { status: string }).status, "notFound");
++      } finally { f.close(); }
++    });
++  }
++}
++
++test("EXEC-02: candidate and assessment use the same source identity and recorded duration", async () => {
++  const f = await skipFixture();
++  try {
++    f.addRun();
++    f.main.database.exec("UPDATE workouts SET duration_seconds=1200");
++    const fact = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    const workout = f.reads.use(store => store.executionWorkout(fact.trainingSessionId, f.session().prescription, nowInstant))!;
++    assert.equal(workout.durationSeconds, fact.durationSeconds, "recorded duration is not elapsed wall-clock duration");
++    assert.equal(workout.evidenceRef.revisionOrHash, fact.sourceFactDigest);
++    assert.equal(workout.distanceMeters, fact.distanceMeters);
++  } finally { f.close(); }
++});
++
++for (const mismatch of ["id", "digest", "distance", "duration"] as const) test(`EXEC-02: ${mismatch} mismatch in workout assessment rejects without partial claim`, async () => {
++  const f = await skipFixture();
++  try {
++    f.addRun();
++    const source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    f.provider.workout = (id, day, asOf) => {
++      const value = f.reads.use(store => store.executionWorkout(id, day, asOf))!;
++      return { ...value, ...(mismatch === "id" ? { id: "another-run" } : {}),
++        ...(mismatch === "distance" ? { distanceMeters: 100 } : {}),
++        ...(mismatch === "duration" ? { durationSeconds: 100 } : {}),
++        evidenceRef: { ...value.evidenceRef, revisionOrHash: mismatch === "digest" ? "0".repeat(64) : source.sourceFactDigest } };
++    };
++    const before = businessSnapshot(f.db);
++    assert.throws(() => f.service.submit(f.body({ action: "confirm", trainingSessionId: source.trainingSessionId,
++      sourceFactDigest: source.sourceFactDigest })), code("training_execution_source_changed"));
++    assert.deepEqual(businessSnapshot(f.db), before);
++  } finally { f.close(); }
++});
++
++test("EXEC-03: a fact restored after Reconcile receipt insertion rolls back invalidation and history", async () => {
++  const f = await skipFixture();
++  try {
++    f.addRun();
++    const source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    f.service.submit(f.body({ action: "confirm", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest }));
++    f.main.database.exec("UPDATE training_sessions SET status='inactive'");
++    const before = businessSnapshot(f.db);
++    f.control.function("exec03_recover", () => { f.main.database.exec("UPDATE training_sessions SET status='active'"); return 1; });
++    f.control.exec(`CREATE TRIGGER exec03_recover AFTER INSERT ON mobile_plan_operations BEGIN SELECT exec03_recover(); END`);
++    assert.throws(() => f.service.reconcileSourceChanges(), code("training_execution_source_changed"));
++    assert.deepEqual(businessSnapshot(f.db), before);
++  } finally { f.close(); }
++});
++
++test("EXEC-03: HTTP Confirm and background Reconcile use one non-nested fact lease through COMMIT", async () => {
++  const f = await skipFixture(), app = Fastify();
++  try {
++    const mutations = new MutationCoordinator(), admission = new TaskAdmissionScheduler(mutations);
++    const worker = admission.owner("fact-writer");
++    let acquisitions = 0;
++    const handlers = createTrainingExecutionCommandHandlers(f.service, () => {}, async fn => {
++      acquisitions++;
++      const release = await mutations.acquireWhenAvailable("execution");
++      try { assert.equal(worker.acquire(), null); return await fn(); }
++      finally { worker.withdraw(); release(); }
++    });
++    app.post("/execution", handlers.submit);
++    let release = worker.acquire()!;
++    const background = handlers.reconcile();
++    await new Promise(resolve => setImmediate(resolve));
++    f.addRun(); release();
++    assert.deepEqual(await background, { changed: 0 });
++    const fact = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    const request = f.body({ action: "confirm", trainingSessionId: fact.trainingSessionId, sourceFactDigest: fact.sourceFactDigest });
++    const response = await app.inject({ method: "POST", url: "/execution", payload: request });
++    assert.equal(response.statusCode, 200);
++    release = worker.acquire()!;
++    const reconcile = handlers.reconcile();
++    await new Promise(resolve => setImmediate(resolve));
++    f.main.database.exec("UPDATE training_sessions SET anchor_distance_km=6");
++    release();
++    assert.deepEqual(await reconcile, { changed: 1 });
++    assert.equal(acquisitions, 3, "one acquisition per entry; no nested service lease");
++    const before = businessSnapshot(f.db);
++    const replay = await app.inject({ method: "POST", url: "/execution", payload: request });
++    assert.equal(replay.statusCode, 200);
++    assert.deepEqual(replay.json(), response.json());
++    assert.equal(acquisitions, 3, "committed replay needs no lease or facts");
++    assert.deepEqual(businessSnapshot(f.db), before);
++  } finally { await app.close(); f.close(); }
++});
++
++test("EXEC-02/03: an independent CLI process respects the API publication lock, then Reconcile sees its committed fact", async () => {
++  const f = await skipFixture(), app = Fastify();
++  let release: (() => void) | undefined;
++  try {
++    f.addRun();
++    const mainPath = join(f.root, "facts.sqlite");
++    const child = () => spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
++      import { acquireDatabasePublicationLock } from '@rai/storage-sqlite';
++      import { DatabaseSync } from 'node:sqlite';
++      let release;
++      try {
++        release = acquireDatabasePublicationLock(process.argv[1], 'cli');
++        const db = new DatabaseSync(process.argv[1]);
++        db.exec('BEGIN IMMEDIATE');
++        db.exec('UPDATE training_sessions SET anchor_distance_km=6');
++        db.exec('COMMIT'); db.close();
++      } catch { process.exitCode = 9; }
++      finally { release?.(); }
++    `, mainPath], { encoding: "utf8" });
++    release = acquireDatabasePublicationLock(mainPath, "api");
++    const mutations = new MutationCoordinator();
++    const handlers = createTrainingExecutionCommandHandlers(f.service, () => {}, async fn => {
++      const unlock = await mutations.acquireWhenAvailable("execution");
++      try { return await fn(); } finally { unlock(); }
++    });
++    app.post("/execution", handlers.submit);
++    f.provider.workout = (id, day, asOf) => {
++      assert.equal(child().status, 9, "supported CLI writer cannot enter while API owns main DB");
++      return f.reads.use(store => store.executionWorkout(id, day, asOf));
++    };
++    const source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    const response = await app.inject({ method: "POST", url: "/execution", payload: f.body({ action: "confirm",
++      trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest }) });
++    assert.equal(response.statusCode, 200);
++    release(); release = undefined;
++    assert.equal(child().status, 0, "CLI commits only after API releases the publication lock");
++    release = acquireDatabasePublicationLock(mainPath, "api");
++    assert.equal((await handlers.reconcile()).changed, 1);
++    const history = f.goals.trainingPlanExecutionHistory(key, f.session().sessionId);
++    assert.equal(history.length, 2);
++    assert.equal(history[0]!.execution.sourceFactDigest, source.sourceFactDigest);
++    assert.equal(history[1]!.execution.association, "invalidated");
++  } finally { release?.(); await app.close(); f.close(); }
++});
++
++test("EXEC-03: recovery between pre-scan and transaction cannot persist a no-change receipt that masks later deletion", async () => {
++  const f = await skipFixture();
++  try {
++    f.addRun();
++    const source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    f.service.submit(f.body({ action: "confirm", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest }));
++    const original = f.provider.candidates;
++    f.main.database.exec("UPDATE training_sessions SET status='inactive'");
++    let calls = 0;
++    f.provider.candidates = (start, end) => {
++      const values = original(start, end);
++      if (++calls === 1) f.main.database.exec("UPDATE training_sessions SET status='active'");
++      return values;
++    };
++    const before = businessSnapshot(f.db);
++    let raceError: unknown;
++    try { f.service.reconcileSourceChanges(); } catch (error) { raceError = error; }
++    const afterRace = businessSnapshot(f.db);
++    f.provider.candidates = original;
++    f.main.database.exec("UPDATE training_sessions SET status='inactive'");
++    assert.equal(f.service.reconcileSourceChanges().changed, 1, "later deletion must not replay a poisoned no-change receipt");
++    assert.ok(code("training_execution_source_changed")(raceError));
++    assert.deepEqual(afterRace, before, "no no-change operation receipt may survive this fact race");
++    assert.equal(f.goals.trainingPlanExecutionHistory(key, f.session().sessionId).length, 2);
++  } finally { f.close(); }
++});
++
++test("EXEC-03: legacy reconcile no-change receipt remains immutable without blocking a new v2 evaluation", async () => {
++  const f = await skipFixture();
++  try {
++    f.addRun();
++    const source = f.provider.candidates("2026-10-26", "2026-10-30")[0]!;
++    f.service.submit(f.body({ action: "confirm", trainingSessionId: source.trainingSessionId, sourceFactDigest: source.sourceFactDigest }));
++    const execution = f.goals.trainingPlanExecution(key, f.session().sessionId)!.execution;
++    const operationId = `reconcile-${digest({ contract: "rai-training-execution-reconcile-v1", scope,
++      stateRevision: f.row().revision, executions: [{ sessionId: execution.sessionId, executionRevision: execution.executionRevision,
++        trainingSessionId: execution.trainingSessionId, sourceFactDigest: execution.sourceFactDigest }] }).slice(0, 40)}`;
++    const input = { operationId, operationScope: scope };
++    f.goals.publicationOperation(key, operationId, "training-plan-execution-command", input, () => ({ changed: 0 }));
++    const saved = f.db.prepare("SELECT * FROM mobile_plan_operations WHERE operation_id=?").get(operationId);
++    f.main.database.exec("UPDATE training_sessions SET status='inactive'");
++    assert.equal(f.service.reconcileSourceChanges().changed, 1);
++    assert.deepEqual(f.db.prepare("SELECT * FROM mobile_plan_operations WHERE operation_id=?").get(operationId), saved);
++    assert.deepEqual(f.goals.replayOperation(key, operationId, "training-plan-execution-command", input), { changed: 0 });
++  } finally { f.close(); }
++});
+--- a/apps/ios/RAI/APIClient.swift
++++ b/apps/ios/RAI/APIClient.swift
+@@ -238,6 +238,7 @@
+     func handshake(baseURL: URL, token: String) async throws -> RaiHandshake {
+         try await get(path: "/v1/handshake", baseURL: baseURL, token: token,
+                       headers: ["X-RAI-Client-Training-Commands": "2", "X-RAI-Client-Training-Session-Commands": "1",
++                                "X-RAI-Client-Training-Session-Distance-Omission": "1",
+                                 RaiTrainingPlanExecutionContract.headerField: RaiTrainingPlanExecutionContract.requestedVersion])
+     }
+ 
+--- a/apps/ios/RAI/APIModels.swift
++++ b/apps/ios/RAI/APIModels.swift
+@@ -27,6 +27,7 @@
+     /// B01 仅冻结协议与精确能力判定；服务端不宣告，无编辑/自动排期入口。
+     var trainingPlanSessionContractVersion: Int? = nil
+     var trainingPlanSessionCommandContractVersion: Int? = nil
++    var trainingPlanSessionDistanceOmissionContractVersion: Int? = nil
+     var trainingPlanExecutionCommandContractVersion: Int? = nil
+     var trainingPlanUpdateContractVersion: Int? = nil
+     var planPublicationContractVersion: Int? = nil
+@@ -61,6 +62,7 @@
+         guard syncProtocolCompatible, apiVersion == "v1",
+               trainingPlanContractVersion == nil, trainingPlanCommandContractVersion == nil,
+               trainingPlanSessionContractVersion == nil, trainingPlanSessionCommandContractVersion == nil,
++              trainingPlanSessionDistanceOmissionContractVersion == nil,
+               trainingPlanExecutionCommandContractVersion == nil, trainingPlanUpdateContractVersion == nil else { return false }
+         guard planSnapshotContractVersion == nil || planSnapshotContractVersion == 1,
+               planPublicationContractVersion == nil || planPublicationContractVersion == 1,
+@@ -88,6 +90,10 @@
+ 
+     var trainingPlanExecutionCommandsSupported: Bool {
+         trainingPlanSessionsSupported && planPublicationContractVersion == 1 && trainingPlanExecutionCommandContractVersion == 1
++    }
++
++    var trainingPlanSessionDistanceOmissionSupported: Bool {
++        trainingPlanSessionCommandsSupported && trainingPlanSessionDistanceOmissionContractVersion == 1
+     }
+ 
+     var trainingPlanUpdatesSupported: Bool {
+@@ -2647,6 +2653,29 @@
+     case cancel(sessionId: String, sessionRevision: Int)
+     case setRest(localDate: String)
+     case unlock(sessionId: String, sessionRevision: Int)
++    var requiresDistanceOmission: Bool {
++        switch self {
++        case let .add(_, deriveDistance): return deriveDistance
++        case let .edit(_, _, patch): return !patch.updatesDistance && (patch.kind != nil || patch.structure != nil)
++        default: return false
++        }
++    }
++
++    /// Recovery queries committed operations regardless of current capability.
++    /// Only a notFound result may replay, using the exact original bytes.
++    static func payloadRequiresDistanceOmission(_ payload: Data) -> Bool {
++        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
++              let draft = object["draft"] as? [String: Any], let action = draft["action"] as? String else { return true }
++        if action == "add" {
++            guard let prescription = draft["prescription"] as? [String: Any] else { return true }
++            return prescription["distanceKm"] == nil
++        }
++        if action == "edit" {
++            guard let patch = draft["patch"] as? [String: Any] else { return true }
++            return patch["distanceKm"] == nil && (patch["kind"] != nil || patch["structure"] != nil)
++        }
++        return !["move", "cancel", "set_rest", "unlock"].contains(action)
++    }
+     enum CodingKeys: String, CodingKey { case action, sessionId, sessionRevision, localDate, patch, prescription }
+     private struct Prescription: Encodable {
+         let value: MobilePlannedDay
+--- a/apps/ios/RAI/NativeAppModel.swift
++++ b/apps/ios/RAI/NativeAppModel.swift
+@@ -1657,6 +1657,11 @@
+         executionCommandCapability && !isOffline && trainingPlanStore.unifiedIsCurrent &&
+         trainingPlanStore.unified?.sessions != nil && !isPlanBusy && !hasPendingPlanPublication && !trainingPlanPublisher.executionBlocked
+     }
++    var canLinkTrainingExecutions: Bool {
++        canEditTrainingExecutions && TrainingPlanExecutionPolicy.permitsNewExecution(
++            runState: trainingPlanStore.unified?.runState,
++            sourceStatus: trainingPlanStore.unified?.migration.sourceStatus)
++    }
+     /// Candidate pages keyed by sessionId. Fetched on demand when a course detail
+     /// opens; it is never a source of automatic completion.
+     private(set) var executionCandidates: [String: TrainingPlanExecutionCandidatesResponse] = [:]
+@@ -1772,7 +1777,7 @@
+ 
+     @discardableResult
+     func confirmExecutionLink(sessionId: String, candidate: TrainingPlanExecutionCandidate) async -> Bool {
+-        guard canEditTrainingExecutions, let (session, target) = executionTarget(for: sessionId),
++        guard canLinkTrainingExecutions, let (session, target) = executionTarget(for: sessionId),
+               let page = executionCandidates[sessionId],
+               page.candidates.contains(where: { $0.trainingSessionId == candidate.trainingSessionId &&
+                   $0.sourceFactDigest == candidate.sourceFactDigest }) else { return false }
+@@ -1834,13 +1839,13 @@
+     }
+ 
+     func canSkipTrainingSession(sessionId: String) -> Bool {
+-        canEditTrainingExecutions && skipTrainingSessionIssue(sessionId: sessionId) == nil
++        canLinkTrainingExecutions && skipTrainingSessionIssue(sessionId: sessionId) == nil
+     }
+ 
+     @discardableResult
+     func skipTrainingSession(sessionId: String, reason: String) async -> Bool {
+         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+-        guard canEditTrainingExecutions, !trimmed.isEmpty,
++        guard canLinkTrainingExecutions, !trimmed.isEmpty,
+               let (_, target) = executionTarget(for: sessionId) else { return false }
+         if let issue = skipTrainingSessionIssue(sessionId: sessionId) {
+             executionCandidateIssues[sessionId] = issue
+@@ -1851,6 +1856,11 @@
+ 
+     private func submitExecution(_ draft: TrainingPlanExecutionDraft, target: TrainingPlanExecutionTarget,
+                                  sessionId: String) async -> Bool {
++        if case .retract = draft {
++            guard canEditTrainingExecutions else { return false }
++        } else {
++            guard canLinkTrainingExecutions else { return false }
++        }
+         guard let context = commandContext else { return false }
+         // Skip must require a fresh candidate read after rejection as well as
+         // success: a server fact conflict can leave state revisions unchanged.
+@@ -1889,16 +1899,21 @@
+         return trainingPlanPublisher.finishRead(context: context)
+     }
+ 
+-    func previewTrainingSession(_ draft: TrainingPlanSessionDraft) async -> Bool {
++    func previewTrainingSession(_ draft: TrainingPlanSessionDraft,
++                                editorIdentity: TrainingPlanSessionEditorPolicy.DraftIdentity) async -> Bool {
+         guard canEditTrainingSessions, let context = commandContext, let snapshot = trainingPlanStore.unified,
+-              let sessions = snapshot.sessions else { return false }
++              !draft.requiresDistanceOmission || handshake?.trainingPlanSessionDistanceOmissionSupported == true,
++              editorIdentity.issue(in: snapshot) == nil, editorIdentity.matches(draft) else { return false }
+         return await trainingPlanPublisher.makeSessionPreview(.init(operationScope: context.identity,
+-            expectedStateRevision: snapshot.stateRevision, planInstanceId: sessions.planInstanceId, draft: draft), context: context) {
+-            self.commandContext == context && !Task.isCancelled
+-        }
+-    }
+-    func confirmTrainingSession(_ draft: TrainingPlanSessionDraft) async -> Bool {
++            expectedStateRevision: editorIdentity.stateRevision, planInstanceId: editorIdentity.planInstanceId, draft: draft), context: context) {
++            self.commandContext == context && !Task.isCancelled && editorIdentity.issue(in: self.trainingPlanStore.unified) == nil
++        }
++    }
++    func confirmTrainingSession(_ draft: TrainingPlanSessionDraft,
++                                editorIdentity: TrainingPlanSessionEditorPolicy.DraftIdentity) async -> Bool {
+         guard canEditTrainingSessions, let context = commandContext,
++              !draft.requiresDistanceOmission || handshake?.trainingPlanSessionDistanceOmissionSupported == true,
++              editorIdentity.issue(in: trainingPlanStore.unified) == nil, editorIdentity.matches(draft),
+               trainingPlanPublisher.matchesSessionPreview(draft) else { return false }
+         cancelInFlightPlanRefresh(); trainingPlanStore.invalidate()
+         let result = await trainingPlanPublisher.confirmSession(context: context) { self.commandContext == context }
+@@ -1969,7 +1984,10 @@
+             return await acceptExecutionCommand(value, context: context, sessionId: sessionId)
+         }
+         let value = await trainingPlanPublisher.recover(context: context, mayReplay: pending?.route == "training-session"
+-            ? handshake?.trainingPlanSessionCommandsSupported == true : v2CommandCapability) { self.commandContext == context }
++            ? handshake?.trainingPlanSessionCommandsSupported == true &&
++                (handshake?.trainingPlanSessionDistanceOmissionSupported == true ||
++                 !TrainingPlanSessionDraft.payloadRequiresDistanceOmission(pending?.payload ?? Data()))
++            : v2CommandCapability) { self.commandContext == context }
+         guard commandContext == context, let value else { return false }
+         return await acceptTrainingCommand(value, context: context)
+     }
+--- a/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift
++++ b/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift
+@@ -164,7 +164,7 @@
+                         }
+                     }
+                 }
+-                .disabled(!native.canEditTrainingExecutions)
++                .disabled(!native.canLinkTrainingExecutions)
+                 .accessibilityIdentifier(execution?.association == "confirmed" ? "training.execution.correct" : "training.execution.confirm")
+             }
+             if TrainingPlanExecutionPolicy.canRetract(execution) {
+--- a/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
++++ b/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
+@@ -16,6 +16,8 @@
+     @State private var blocks: [EditorBlock] = []
+     @State private var warmup: EditorStep?
+     @State private var cooldown: EditorStep?
++    @State private var originalSession: TrainingPlanSessionsView.Session?
++    @State private var editorIdentity: TrainingPlanSessionEditorPolicy.DraftIdentity?
+     @State private var initialized = false
+     @State private var localMessage: String?
+     private enum InputField: Hashable { case date, distance, reason, amount(UUID), lower(UUID), upper(UUID) }
+@@ -62,10 +64,8 @@
+         return native.trainingPlanStore.unified?.sessions?.sessions.first { $0.sessionId == session.sessionId && $0.planInstanceId == session.planInstanceId }
+     }
+     private var draft: TrainingPlanSessionDraft? {
+-        if session != nil && (currentSession == nil || currentSession?.lifecycle != "pending" || currentSession?.supersededBySessionId != nil) { return nil }
+-        // A changed version invalidates the old preview. It can only be used by
+-        // a NEW preview and explicit confirmation; no old candidate is rebased.
+-        let id = session?.sessionId ?? "", revision = currentSession?.sessionRevision ?? 0
++        guard let editorIdentity, editorIdentity.issue(in: native.trainingPlanStore.unified) == nil else { return nil }
++        let id = editorIdentity.sessionId ?? "", revision = editorIdentity.sessionRevision ?? 0
+         switch action {
+         case "move": return session == nil ? nil : .move(sessionId: id, sessionRevision: revision, localDate: date)
+         case "cancel": return session == nil ? nil : .cancel(sessionId: id, sessionRevision: revision)
+@@ -88,8 +88,11 @@
+         }
+     }
+     private func distanceResolution(_ structure: MobileSessionStructure) -> TrainingPlanSessionEditorPolicy.DistanceResolution {
+-        TrainingPlanSessionEditorPolicy.resolveDistance(distance, structure: structure,
+-            original: session?.prescription, kind: kind)
++        TrainingPlanSessionEditorPolicy.compatibleDistance(
++            TrainingPlanSessionEditorPolicy.resolveDistance(distance, structure: structure,
++                original: originalSession?.prescription, kind: kind),
++            omissionSupported: native.handshake?.trainingPlanSessionDistanceOmissionSupported == true,
++            original: originalSession?.prescription, structure: structure, kind: kind)
+     }
+     private var currentStructure: MobileSessionStructure? {
+         guard !blocks.isEmpty else { return nil }
+@@ -103,9 +106,8 @@
+         return MobileSessionStructure(warmup: warmup?.value(), blocks: values, cooldown: cooldown?.value())
+     }
+     private var draftIssue: String? {
+-        if session != nil && (currentSession == nil || currentSession?.lifecycle != "pending" || currentSession?.supersededBySessionId != nil) {
+-            return "当前课程已结束、取消或被替换，不能继续修改。"
+-        }
++        guard let editorIdentity else { return "请先读取训练安排。" }
++        if let issue = editorIdentity.issue(in: native.trainingPlanStore.unified) { return issue }
+         switch action {
+         case "add", "edit":
+             guard let structure = currentStructure else {
+@@ -209,15 +211,17 @@
+                 Section {
+                     Button("预览调整") {
+                         focusedField = nil
+-                        guard let draft else { localMessage = draftIssue ?? "请检查日期、距离和分段剂量。"; return }
+-                        Task { _ = await native.previewTrainingSession(draft) }
++                        guard let draft, let editorIdentity else { localMessage = draftIssue ?? "请检查日期、距离和分段剂量。"; return }
++                        Task { _ = await native.previewTrainingSession(draft, editorIdentity: editorIdentity) }
+                     }
+                     .disabled(!native.canEditTrainingSessions || draft == nil)
+                     .accessibilityIdentifier("training.session.preview")
+                     previewContent
+-                    Button("重新读取当前状态") { Task { _ = await native.refreshUnifiedTrainingPlan() } }
++                    Button("重新读取并重建草稿") {
++                        Task { if await native.refreshUnifiedTrainingPlan() { initialize(reload: true) } }
++                    }
+                         .disabled(native.isPlanBusy || native.isOffline)
+-                    Text("重读保留当前草稿；状态变化后需要重新预览和确认。").font(.footnote)
++                    Text("后台刷新不会改写草稿。重新读取会用最新课程重建表单，请重新编辑、预览和确认。").font(.footnote)
+                     if session != nil && (currentSession == nil || currentSession?.lifecycle != "pending" || currentSession?.supersededBySessionId != nil) {
+                         Text("当前课程已结束、取消或被替换，不能继续修改；草稿仍可查看。").font(.footnote)
+                     }
+@@ -230,7 +234,7 @@
+                 }
+     }
+     @ViewBuilder private var previewContent: some View {
+-        if let preview = native.trainingPlanPublisher.sessionPreview, let draft,
++        if let preview = native.trainingPlanPublisher.sessionPreview, let draft, let editorIdentity,
+            native.trainingPlanPublisher.matchesSessionPreview(draft) {
+                         if let before = preview.impact.before {
+                             sessionSummary("原课程", session: before)
+@@ -243,7 +247,7 @@
+                         ForEach(preview.impact.suppressions, id: \.localDate) { item in Text("\(item.localDate)：\(item.reason == "explicit_rest" ? "指定休息" : "不自动补课")") }
+                         if preview.impact.deviceWithdrawalRequired { Label("已有设备排期需先撤回再重新下发。", systemImage: "applewatch") }
+                         ForEach(preview.impact.warnings, id: \.self) { Text($0).font(.footnote) }
+-                        Button("确认保存") { Task { if await native.confirmTrainingSession(draft) { dismiss() } } }
++                        Button("确认保存") { Task { if await native.confirmTrainingSession(draft, editorIdentity: editorIdentity) { dismiss() } } }
+                             .disabled(!native.canEditTrainingSessions).accessibilityIdentifier("training.session.save")
+         }
+     }
+@@ -278,17 +282,28 @@
+             TextField("目标上限", text: step.upper).keyboardType(.numberPad).focused($focusedField, equals: .upper(step.wrappedValue.id))
+         }
+     }
+-    private func initialize() {
+-        guard !initialized else { return }; initialized = true
+-        date = session?.prescription.localDate ?? initialDate
++    private func initialize(reload: Bool = false) {
++        guard !initialized || reload, let snapshot = native.trainingPlanStore.unified,
++              let sessions = snapshot.sessions else { return }
++        let source = reload ? currentSession : session
++        guard session == nil || source != nil else {
++            localMessage = "课程已不在当前计划中，请关闭并重新打开。"
++            return
++        }
++        initialized = true
++        originalSession = source
++        editorIdentity = .init(scope: snapshot.scope, planInstanceId: source?.planInstanceId ?? sessions.planInstanceId,
++            stateRevision: snapshot.stateRevision, sessionId: source?.sessionId, sessionRevision: source?.sessionRevision)
++        native.trainingPlanPublisher.cancelPreview(); localMessage = nil
++        date = source?.prescription.localDate ?? initialDate
+         action = session == nil ? "add" : "move"
+-        kind = session?.prescription.kind ?? "easy"
+-        reason = session?.prescription.reason ?? ""
++        kind = source?.prescription.kind ?? "easy"
++        reason = source?.prescription.reason ?? ""
+         // Never invent a 5 km structure for a missing dose. The blank structure
+         // contains one open work step, which the editor rejects until the user
+         // chooses an explicit distance or time dose.
+-        let structure = session?.prescription.structure ?? TrainingPlanSessionEditorPolicy.blankStructure()
+-        distance = TrainingPlanSessionEditorPolicy.distanceText(session?.prescription.distanceKm)
++        let structure = source?.prescription.structure ?? TrainingPlanSessionEditorPolicy.blankStructure()
++        distance = TrainingPlanSessionEditorPolicy.distanceText(source?.prescription.distanceKm)
+         warmup = structure.warmup.map(EditorStep.init); cooldown = structure.cooldown.map(EditorStep.init)
+         blocks = structure.blocks.map { EditorBlock(iterations: $0.iterations, steps: $0.steps.map(EditorStep.init)) }
+     }
+--- a/apps/ios/RAI/TrainingPlanExecutionPolicy.swift
++++ b/apps/ios/RAI/TrainingPlanExecutionPolicy.swift
+@@ -40,6 +40,10 @@
+     static let observationValues: Set<String> = ["observed", "unknown"]
+     static let evidenceLevels: Set<String> = ["measured_steps", "reconstructed_segments", "summary_only", "none"]
+     static let candidateEvidence: Set<String> = ["verified_identity", "needs_confirmation"]
++
++    static func permitsNewExecution(runState: String?, sourceStatus: String?) -> Bool {
++        runState == "active" && sourceStatus != "ended"
++    }
+ 
+     private static let zone = TimeZone(identifier: TrainingPlanUnifiedPolicy.businessTimeZone)
+         ?? TimeZone(secondsFromGMT: 8 * 3600) ?? TimeZone.current
+--- a/apps/ios/tests/ModelRegression.swift
++++ b/apps/ios/tests/ModelRegression.swift
+@@ -2721,7 +2721,7 @@
+     let model = NativeAppModel(session: session, api: api, now: { clock })
+     let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+         syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, trainingPlanContractVersion: 2,
+-        trainingPlanSessionContractVersion: 1, trainingPlanExecutionCommandContractVersion: 1, planPublicationContractVersion: 1))
++        trainingPlanSessionContractVersion: 1, trainingPlanSessionCommandContractVersion: 1, trainingPlanExecutionCommandContractVersion: 1, planPublicationContractVersion: 1))
+     let legacyState = try PlanTestFixtures.json(PlanTestFixtures.state())
+     var unified = try JSONSerialization.jsonObject(with: Data(PlanTestFixtures.json(PlanTestFixtures.unified()).utf8)) as! [String: Any]
+     let prescription: [String: Any] = ["localDate": "2026-10-09", "kind": "easy", "distanceKm": 8,
+@@ -2752,6 +2752,7 @@
+     var commandCount = 0
+     var rejectSkip = true
+     var skipCommitted = false
++    var sessionPreviewRequests = 0
+     var candidateStateRevision = 2
+     var validSkipReason = false
+     let skipRequests = RequestLog()
+@@ -2789,6 +2790,10 @@
+             skipCommitted = true
+             return (200, String(decoding: try! JSONSerialization.data(withJSONObject: response), as: UTF8.self), 0)
+         }
++        if request.url!.path == "/v1/mobile/training-plan/session-commands/preview" {
++            sessionPreviewRequests += 1
++            return (503, "{}", 0)
++        }
+         guard request.url!.path == path else { return (503, "{}", 0) }
+         if candidateFailure { return (503, "{\"message\":\"候选加载失败\"}", 0) }
+         let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+@@ -2808,6 +2813,29 @@
+     await model.bootstrap()
+     let read = await model.refreshUnifiedTrainingPlan()
+     check(read && model.canEditTrainingExecutions, "paging fixture negotiates current session/execution reads")
++    let openedSnapshot = model.trainingPlanStore.unified!
++    let opened = openedSnapshot.sessions!.sessions[0]
++    let editorIdentity = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: openedSnapshot.scope,
++        planInstanceId: opened.planInstanceId, stateRevision: openedSnapshot.stateRevision,
++        sessionId: opened.sessionId, sessionRevision: opened.sessionRevision)
++    let oldDraft = TrainingPlanSessionDraft.move(sessionId: opened.sessionId,
++        sessionRevision: opened.sessionRevision, localDate: "2026-10-10")
++    candidateStateRevision += 1
++    _ = await model.refreshUnifiedTrainingPlan()
++    let stalePreview = await model.previewTrainingSession(oldDraft, editorIdentity: editorIdentity)
++    let staleConfirm = await model.confirmTrainingSession(oldDraft, editorIdentity: editorIdentity)
++    check(!stalePreview && !staleConfirm && sessionPreviewRequests == 0,
++          "EDIT-01: production model blocks stale editor after background refresh without any preview/submit request")
++    let reloaded = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: openedSnapshot.scope,
++        planInstanceId: opened.planInstanceId, stateRevision: candidateStateRevision,
++        sessionId: opened.sessionId, sessionRevision: opened.sessionRevision)
++    _ = await model.previewTrainingSession(oldDraft, editorIdentity: reloaded)
++    check(sessionPreviewRequests == 1, "EDIT-01: explicitly rebuilt draft can reach preview")
++    let addIdentity = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: openedSnapshot.scope,
++        planInstanceId: opened.planInstanceId, stateRevision: candidateStateRevision, sessionId: nil, sessionRevision: nil)
++    let unsupported = await model.previewTrainingSession(.add(opened.prescription, deriveDistance: true), editorIdentity: addIdentity)
++    check(!unsupported && sessionPreviewRequests == 1,
++          "COMPAT-01: old server session command capability does not send omitted distance requests")
+     let unreadSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "休息")
+     check(!unreadSkip && commandCount == 0 && model.executionCandidateIssue(for: "paging-course") != nil,
+           "I-01: unread candidates cannot authorize Skip or issue a command")
+@@ -2864,5 +2892,12 @@
+     let successfulSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: " 休息 ")
+     check(successfulSkip && commandCount == 2 && skipCommitted && validSkipReason,
+           "I-01: a legal empty page completes Skip with one request and a confirmed read")
++    candidateStateRevision += 1
++    unified["runState"] = "paused"
++    _ = await model.refreshUnifiedTrainingPlan()
++    check(model.canEditTrainingExecutions && !model.canLinkTrainingExecutions,
++          "EXEC-01: stopped snapshot allows history access and disables new execution actions")
++    let stoppedSkip = await model.skipTrainingSession(sessionId: "paging-course", reason: "paused")
++    check(!stoppedSkip && commandCount == 2, "EXEC-01: paused action issues no network mutation")
+     CacheStore.resetScheduleSafety()
+ }
+--- a/apps/ios/tests/TrainingPlanExecutionRegression.swift
++++ b/apps/ios/tests/TrainingPlanExecutionRegression.swift
+@@ -279,6 +279,14 @@
+         check(invalidatedView.statusTitle == "关联已失效" && !invalidatedView.claimsCompletion &&
+               invalidatedView.reasonTexts.isEmpty, "an invalidated association keeps history but withdraws the current completion")
+ 
++        check(TrainingPlanExecutionPolicy.permitsNewExecution(runState: "active", sourceStatus: "active"),
++              "EXEC-01: active plan permits new execution")
++        for status in ["paused", "ended"] {
++            check(!TrainingPlanExecutionPolicy.permitsNewExecution(runState: "paused", sourceStatus: status),
++                  "EXEC-01: stopped plan prohibits Confirm/Correct/Skip")
++            check(TrainingPlanExecutionPolicy.canRetract(execution(association: "confirmed")),
++                  "EXEC-01: historical Retract remains available without new authorization")
++        }
+         // MARK: - Candidate selection / eligibility
+ 
+         check(TrainingPlanExecutionPolicy.preferredCandidateSelection(decodedPage.candidates) == nil,
+--- a/apps/ios/tests/run-model-tests.sh
++++ b/apps/ios/tests/run-model-tests.sh
+@@ -37,6 +37,7 @@
+   apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanWatchSyncCoordinator.swift \
+   apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift apps/ios/RAI/TrainingPlanStore.swift \
+   apps/ios/RAI/TrainingPlanExecutionPolicy.swift apps/ios/RAI/TrainingPlanPublisher.swift \
++  apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift \
+   apps/ios/RAI/TrainingReminderPolicy.swift apps/ios/RAI/PlanMutationDisposition.swift apps/ios/RAI/SyncPresentationPolicy.swift \
+   "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
+   -o "$tmp/model-tests"
+--- a/docs/OPERATIONS.md
++++ b/docs/OPERATIONS.md
+@@ -212,7 +212,7 @@
+ 
+ 工具以 SQLite `readOnly` 连接和一个读事务扫描 `mobile_training_state` 与
+ `mobile_training_state_history` 的全部 scope/revision，支持 payload schema 1/2。
+-它分别报告同日 `lockedSession + explicit_rest` 和 `lockedSession + weekPlan rest`，
++它分别报告同日 `lockedSession + explicit_rest` 和跑课 `lockedSession + weekPlan rest`，
+ 输出受影响 scope 数、来源表、revision、schema、日期、锁定类型及可解析的时间字段，不输出课程/健康 payload。
+ 当前行与历史行分别计入 `snapshots`；`affectedScopes` 对 scope 去重。无 scope 的
+ `mobile_goals_history` 不归属到任何 epoch，也不在该计数内；本工具不验证迁移审计 digest、课程身份历史或 owner 一致性。
+@@ -224,8 +224,9 @@
+ 发现冲突返回 `session_migration_locked_rest_conflict` 和带来源/revision/日期的 `conflicts`，
+ 不会报告 ready；apply 在分配身份、DDL、写入和审计前拒绝，事务回滚。合法历史状态继续使用原迁移。
+ 运行时保留严格读取；统一 store、resolver、legacy goals 写入及 owner 发布均拒绝跑课锁定与休息冲突。
+-旧系统合法的“锁定休息本身 + 同日 weekPlan rest”仍可读写，不改变其业务行为；但身份迁移会把休息物化为
+-`explicit_rest`，因此审计/身份迁移 Preflight 仍报告该组合，不能无依据丢弃该锁。任何锁定与 `explicit_rest` 共存均拒绝。
++旧系统合法的“锁定休息本身 + 同日 weekPlan rest”可读写并可确定性迁移：保留完整锁定及原历史行，
++仅在该锁定日期不另建重复的 `explicit_rest`；其他休息日照常物化。审计、inspect、apply 共用相同冲突分类。
++任何锁定与既有 `explicit_rest` 共存仍拒绝；跑课锁定与同日 weekPlan rest 仍须离线意图核查，失败零写入。
+ 
+ **独立修复方案（尚未实现、不得据此执行生产修复）：**
+ 
+--- a/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
++++ b/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
+@@ -73,6 +73,8 @@
+ 历史版本可能已保存每区块超过 8 steps 的课程；公共 normalizer、严格历史读取、身份迁移与历史回放保留全部步骤，不自动修剪处方。此类历史课程仍可 move/cancel/unlock 或仅修改 reason；编辑训练内容必须提供完整合法结构（即使显式重发的超限结构与历史相同也拒绝）。合法旧课程仍沿用 D-01/D-02 的距离兼容规则。
+ 课程命令 Fastify body Schema 与 OpenAPI 共用同一对象；原始请求先无损解析，再进行 Schema 验证。仅已提交且请求摘要完全匹配的历史 Submit 可在新写数量校验、能力和事实门之前返回原回执；未提交请求不能使用此例外。应用服务直接调用仍执行同等写入校验。
+ iOS 编辑器仅检查上述结构数量及既有基础剂量输入，不复刻服务端 mixed 剂量测量；超限历史结构可解码查看，但不能作为内容编辑草稿重新提交。已有 move/cancel/unlock 动作继续可用，说明字段单独编辑的兼容能力由服务端 patch 合同提供。
++数量边界、历史兼容和分级验证证据见 [D-03 实施记录](../deliverables/training-plan-v2-d03-2026-10-26/REPORT.md)。
++2026-10-26 的锁定休息、执行授权/事实一致性、编辑器过期草稿及能力协商收敛见 [P1 实施记录](../deliverables/training-plan-v2-p1-2026-10-26/REPORT.md)。
+ 新 add 不接受 rest，休息走 set_rest；空 patch 拒绝。日期变更仅走 move，不能夹在 edit 中。
+ 明确改期可以保留与可跑日偏好冲突的用户意图，不能绕过伤病/恢复/容量等有效执行限制；冲突必须在预览解释。
+ 用户明确缩短课程不套用自动生成的完整剂量保证；不能自动加长回算法默认剂量。
+@@ -92,10 +94,15 @@
+ | --- | --- | --- |
+ | `trainingPlanSessionContractVersion` | `X-RAI-Training-Sessions` | unified read 2 顶层可选 `sessions`，含实例、课程、抑制、publishedInputKey；依赖 sync 1/API v1/read 2 |
+ | `trainingPlanSessionCommandContractVersion` | `X-RAI-Client-Training-Session-Commands` | 课程 preview/submit；依赖精确课程读 1 + publication 1 |
++| `trainingPlanSessionDistanceOmissionContractVersion` | `X-RAI-Client-Training-Session-Distance-Omission` | add/edit 省略距离；依赖课程命令 1，不能由旧能力推导 |
+ | `trainingPlanExecutionCommandContractVersion` | `X-RAI-Client-Training-Execution-Commands` | 候选查询/确认/纠错/撤回/跳过；写依赖课程读 1 + publication 1 |
+ | `trainingPlanUpdateContractVersion` | `X-RAI-Training-Updates` | unified read 2 顶层可选 `update`，四阶段；依赖课程读 1，不授权服务器自动发布 |
+ 
+ 配置命令 2 与新命令 1 独立，不能推导彼此。课程写/关联写各有独立服务器开关，自动发布另有开关。
++距离省略能力只在课程写可用且同请求精确协商两个课程写头（各为 `1`）时宣告，handshake 为 no-store 并增加对应 Vary。
++旧服务器省略该新键；新客户端缺位/未知版本时不发送需要新语义的距离省略请求。纯距离显式数值、纯时间显式 null、
++原样历史显式距离及 reason-only 等旧合法 patch 继续兼容；无法显式表达的新 mixed/内容变更提示升级，不在 iOS 重算配速剂量。
++已持久化操作仍先查询原结果；已提交结果可读，notFound 后仅在当前能力支持原 payload 时重放，不能改写原字节或换 UUID。
+ 当前写模式可显式选择 `validation` 或 `production`，默认关闭；生产部署和启用仍须独立记录，不能冒充 G5/G6 已验收。
+ 2026-10-25 用户明确要求部署最新版本时再启用，本轮只准备生产模式，不修改运行服务。B01/B02 中 production/validation 均省略全部四键为历史状态。
+ B03/G1 起仅在已完成受控身份迁移（schema 2）且 owner-ready 的 scope 宣告课程只读扩展；
+@@ -122,6 +129,8 @@
+ | POST `/v1/mobile/training-plan/execution-commands` | contractVersion 1、operationId、operationScope、expectedStateRevision、planInstanceId、sessionId、sessionRevision、executionRevision、draft |
+ 
+ 课程 draft 精确为 move / edit / add / cancel / set_rest / unlock。已有课程动作带 sessionId/sessionRevision；
++iOS 表单打开时固定 scope、planInstanceId、stateRevision、sessionId/sessionRevision 及原始处方；后台刷新改变身份或修订后，
++旧草稿不能预览或保存。重新读取入口明确重建表单，不将旧输入绑定到新修订；模型层再次验证表单身份。
+ add 和 set_rest 不发送伪造 ID。preview 不需要 operationId、零持久写；submit 必须带持久 UUID。
+ 候选 TTL 120 秒，绑定精确 draft、scope、state/session revision、实例、业务日、事实/分析/保护/关联版本、政策、影响清单和到期时间。
+ submit 不得重新生成另一份课表再宣称是原候选；新 add 的 ID 必须在预览绑定，重放保持同一 ID。
+@@ -130,6 +139,9 @@
+ 关联 draft 为 confirm / correct（目标 trainingSessionId/sourceFactDigest）、retract（原 ID/摘要）、skip（明确 reason）。
+ correct 在同一事务验证并释放原唯一占位后认领目标；executionRevision 的 CAS 绑定原关联，目标摘要绑定新事实。
+ 源删除后 retract 可用当前保存摘要撤回失效关联，不要求删除的主库行仍存在；确认/纠正必须重新核验实时源事实。
++服务层统一授权：runState active 且未 ended 时，Confirm/Correct/Skip 才可新增提交；paused/ended 返回
++`409 training_execution_not_active`，业务、历史和回执零写入。历史 Correct 同样会建立新认领，不能豁免；
++Retract 只按保存身份撤销历史结论，paused/ended 仍可用，保持运行状态且不授予新许可。已提交 operationId 精确重放不受新状态门影响。
+ confirm 仅认领未关联/待确认课；已确认的替换用 correct，不容许另一 confirm 抢占。
+ retract/事实失效使当前有效完成结论撤回，追加当前 pending 修订并保留原完成处方/评价历史；不是抹掉旧完成记录。
+ 存在执行当前行的课程在自动重算中继续保留身份与处方，并先计入生成预算；撤回或失效不使课程被自动归档或替换。
+@@ -140,6 +152,12 @@
+ 候选读取前后以及状态/历史/回执写入、owner reconciliation 后、COMMIT 前复核主库 inode/data_version；
+ 变化返回 `409 training_execution_source_changed` 并回滚整笔控制事务。主库与控制库仍是独立数据库，
+ 阻止受支持写者进入校验至提交间隙的是共享 mutation lease 与既有 API/CLI 发布锁，不是跨库原子事务。
++Confirm/Correct 与后台 Reconcile 采用同一边界，各入口只获取一次租约，覆盖完整控制库 COMMIT。
++候选、workout assessment 的 ID、起止、距离、记录时长和 evidence digest 必须一致；记录时长不以墙钟时差替代。
++评价后及状态/历史/回执写入后的最终检查均拒绝事实变化，Correct no_change 的新回执也受最终检查约束。
++Reconcile 在事务内再次检查运行状态、计划实例和状态修订，事实恢复或更新不会留下错误失效历史。
++事实指纹覆盖 Reconcile 预扫描到最终 COMMIT；无变化核对回滚内部尝试，不保存 changed:0 业务回执，避免掩盖后续失效。
++后台核对键使用内部 reconcile-v2 命名空间，避开历史 v1 无变化回执；旧回执保持原样可查询，用户 operationId 的重放合同不变。
+ 已提交 operationId 的原结果重放仍早于能力、租约和事实检查；不同键重复 Skip 按既有不可编辑合同拒绝。
+ 本阶段实现和验证证据见 [I-01/P-03 记录](../deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md)。
+ 仅同日、近距离、同结构或排期对象 workoutID 不构成实际身份凭据；缺可验证来源映射时一律 needs_confirmation。
+@@ -169,6 +187,7 @@
+ | 404 | `training_session_not_found` | 当前 scope/实例内课程不存在，不等同路由不支持 |
+ | 409 | `training_execution_source_changed` / `training_execution_link_conflict` | 源事实摘要改变或实际跑步已认领 |
+ | 409 | `training_execution_candidates_present` | Skip 窗口已有真实候选；刷新后确认关联 |
++| 409 | `training_execution_not_active` | paused/ended 禁止 Confirm/Correct/Skip；历史 Retract 可用 |
+ | 422 | `training_session_safety_rejected` | 新增/加量/结构不能通过现有安全约束 |
+ | 503 | `training_session_storage_unavailable` | 存储/恢复不可用，保留未知提交账目 |
+ 
+--- a/packages/api-contracts/src/handshake-registry.ts
++++ b/packages/api-contracts/src/handshake-registry.ts
+@@ -104,6 +104,13 @@
+     whenAbsent: "课程只读；仍可查询原 operation，不改发配置 refresh 或旧 URL"
+   },
+   {
++    key: "trainingPlanSessionDistanceOmissionContractVersion", kind: "capability", version: 1,
++    semantics: "add/edit 省略距离由服务端保留或测量，不由课程命令 1 推导",
++    advertisedWhen: "课程命令 1 可用且同请求精确协商 X-RAI-Client-Training-Session-Distance-Omission: 1",
++    consumer: "iOS 课程编辑器与重放准入",
++    whenAbsent: "发送显式合法距离/null；无法表达的 mixed 内容变更提示升级，不猜测剂量"
++  },
++  {
+     key: "trainingPlanExecutionCommandContractVersion", kind: "capability", version: 1,
+     semantics: "课程关联确认/纠错/撤回/明确跳过（X-RAI-Client-Training-Execution-Commands: 1）",
+     advertisedWhen: "schema 2、owner-ready、publication 1，独立模式 validation/production 已启用且精确协商 X-RAI-Client-Training-Execution-Commands: 1",
+--- a/packages/api-contracts/src/index.ts
++++ b/packages/api-contracts/src/index.ts
+@@ -194,6 +194,8 @@
+   /** B01 registered only; B02+ may advertise exact version 1 after acceptance. */
+   trainingPlanSessionContractVersion?: number;
+   trainingPlanSessionCommandContractVersion?: number;
++  /** Exact opt-in 1: add/edit may omit distance for server measurement. */
++  trainingPlanSessionDistanceOmissionContractVersion?: number;
+   trainingPlanExecutionCommandContractVersion?: number;
+   trainingPlanUpdateContractVersion?: number;
+   /** Opt-in coach-loop aggregate/commands; legacy plan DTOs retain their meaning. */
+--- a/packages/api-contracts/src/training-plan-closed-loop.ts
++++ b/packages/api-contracts/src/training-plan-closed-loop.ts
+@@ -11,6 +11,7 @@
+ export const TRAINING_PLAN_CLOSED_LOOP_CONTRACT = {
+   sessions: { version: 1, capability: "trainingPlanSessionContractVersion", header: "X-RAI-Training-Sessions" },
+   sessionCommands: { version: 1, capability: "trainingPlanSessionCommandContractVersion", header: "X-RAI-Client-Training-Session-Commands" },
++  sessionDistanceOmission: { version: 1, capability: "trainingPlanSessionDistanceOmissionContractVersion", header: "X-RAI-Client-Training-Session-Distance-Omission" },
+   executionCommands: { version: 1, capability: "trainingPlanExecutionCommandContractVersion", header: "X-RAI-Client-Training-Execution-Commands" },
+   updates: { version: 1, capability: "trainingPlanUpdateContractVersion", header: "X-RAI-Training-Updates" },
+   routes: {
+@@ -217,6 +218,7 @@
+   training_session_contract_required: 422,
+   training_session_commands_disabled: 409,
+   training_execution_commands_disabled: 409,
++  training_execution_not_active: 409,
+   training_session_command_invalid: 422,
+   training_scope_mismatch: 409,
+   training_plan_instance_mismatch: 409,
+--- a/apps/api/test/training-plan-history-compatibility.test.ts
++++ b/apps/api/test/training-plan-history-compatibility.test.ts
+@@ -10,6 +10,7 @@
+ import { classifyTrainingPlanMigration, parseTrainingPlanState, readTrainingPlanMigrationSources,
+   TrainingPlanStore, type TrainingPlanLegacyState } from "../src/training-plan-store.js";
+ import { applySessionIdentityMigration, inspectSessionIdentityMigration } from "../src/training-plan-session-migration.js";
++import { auditTrainingPlanStateCopy } from "../src/training-plan-state-audit.js";
+ import { resolveTrainingPlanSessions, trainingPlanProtectedDays } from "../src/training-plan-session-policy.js";
+ 
+ const fixture = JSON.parse(readFileSync(new URL("../../ios/tests/fixtures/training-plan-sessions-v2.json", import.meta.url), "utf8"));
+@@ -218,15 +219,35 @@
+   } finally { f.close(); }
+ });
+ 
+-test("A-01: a legal legacy rest lock stays readable but identity migration refuses to invent conflicting explicit_rest", () => {
++test("A-01-01: legal rest lock migrates deterministically without duplicate explicit_rest and keeps history", () => {
+   const f = seed();
+   try {
+     f.goals.bindTrainingPlanOwner(() => identity);
+     f.goals.lockSession({ ...lock, session: { ...lock.session, kind: "rest" } });
+-    assert.equal(f.store.read(scope)!.state.lockedSession?.session.kind, "rest");
+-    const before = snapshot(f.db);
+-    assert.throws(() => inspectSessionIdentityMigration(f.db, scope), migrationConflict);
+-    assert.throws(() => applySessionIdentityMigration(f.db, scope, "0".repeat(64), 2), migrationConflict);
+-    assert.deepEqual(snapshot(f.db), before);
+-  } finally { f.close(); }
+-});
++    const original = f.store.read(scope)!.state;
++    const before = snapshot(f.db);
++    assert.equal(auditTrainingPlanStateCopy(f.path).ok, true);
++    const ready = inspectSessionIdentityMigration(f.db, scope);
++    assert.equal(ready.status, "ready");
++    assert.deepEqual(snapshot(f.db), before, "inspect is read only");
++    assert.throws(() => applySessionIdentityMigration(f.db, scope, "0".repeat(64), ready.existingRevision),
++      (error: unknown) => (error as { code: string }).code === "source_digest_mismatch");
++    assert.deepEqual(snapshot(f.db), before, "failed migration writes no tables or DDL");
++    applySessionIdentityMigration(f.db, scope, ready.sourceDigest, ready.existingRevision);
++    const after = f.store.read(scope)!.state;
++    assert.equal(after.schemaVersion, 2);
++    assert.deepEqual(after.lockedSession, original.lockedSession);
++    if (after.schemaVersion !== 2) throw new Error("schema 2 required");
++    assert.equal(after.suppressions.some(s => s.localDate === date), false);
++    for (const table of ["mobile_training_state_history", "mobile_goals_history"]) {
++      const oldRows = before.find(row => row.name === table)!.rows!;
++      assert.deepEqual(snapshot(f.db).find(row => row.name === table)!.rows!.slice(0, oldRows.length), oldRows);
++    }
++    assert.equal(auditTrainingPlanStateCopy(f.path).ok, true);
++    const replay = inspectSessionIdentityMigration(f.db, scope);
++    assert.equal(replay.status, "replayed");
++    const committed = snapshot(f.db);
++    applySessionIdentityMigration(f.db, scope, replay.sourceDigest, replay.existingRevision);
++    assert.deepEqual(snapshot(f.db), committed);
++  } finally { f.close(); }
++});
+--- a/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
++++ b/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
+@@ -6,6 +6,41 @@
+ /// Only a distance-only structure has a locally knowable total. Persisted
+ /// historical values survive unchanged edits; they are checked by the server.
+ enum TrainingPlanSessionEditorPolicy {
++    struct DraftIdentity: Equatable {
++        let scope: PlanReceiptScope
++        let planInstanceId: String
++        let stateRevision: Int
++        let sessionId: String?
++        let sessionRevision: Int?
++
++        func issue(scope currentScope: PlanReceiptScope?, planInstanceId currentInstance: String?,
++                   stateRevision currentRevision: Int?, session: TrainingPlanSessionsView.Session?) -> String? {
++            guard currentScope == scope, currentInstance == planInstanceId, currentRevision == stateRevision,
++                  sessionId == session?.sessionId, sessionRevision == session?.sessionRevision,
++                  session == nil || session?.planInstanceId == planInstanceId else {
++                return "计划或课程修订已变化，旧草稿不能提交；请重新读取并重建草稿。"
++            }
++            if sessionId != nil && (session == nil || session?.lifecycle != "pending" || session?.supersededBySessionId != nil) {
++                return "当前课程不能修改。"
++            }
++            return nil
++        }
++
++        func issue(in snapshot: TrainingPlanStateResponseV2?) -> String? {
++            issue(scope: snapshot?.scope, planInstanceId: snapshot?.sessions?.planInstanceId,
++                stateRevision: snapshot?.stateRevision,
++                session: snapshot?.sessions?.sessions.first { $0.sessionId == sessionId })
++        }
++
++        func matches(_ draft: TrainingPlanSessionDraft) -> Bool {
++            switch draft {
++            case let .move(id, revision, _), let .edit(id, revision, _), let .cancel(id, revision), let .unlock(id, revision):
++                return id == sessionId && revision == sessionRevision
++            case .add, .setRest: return sessionId == nil
++            }
++        }
++    }
++
+     /// Mirrors `apps/api/src/session-structure.ts` (`MAX_STEP_METERS` /
+     /// `MAX_STEP_SECONDS`). The editor must not accept a step the server will
+     /// reject after preview.
+@@ -35,6 +70,15 @@
+         /// measure a changed/new structure. Never encode a fabricated zero.
+         case serverMeasured
+         case failure(String)
++    }
++
++    static func compatibleDistance(_ resolution: DistanceResolution, omissionSupported: Bool,
++                                   original: MobilePlannedDay?, structure: MobileSessionStructure?, kind: String) -> DistanceResolution {
++        guard resolution == .serverMeasured, !omissionSupported else { return resolution }
++        if let original, original.structure == structure, original.kind == kind {
++            return .value(original.distanceKm)
++        }
++        return .failure("服务器尚未确认省略距离能力，请升级服务器后再调整混合剂量课程。")
+     }
+ 
+     /// The editor starts new (or structure-less legacy) drafts with one blank
+--- a/apps/ios/tests/TrainingPlanSessionEditorRegression.swift
++++ b/apps/ios/tests/TrainingPlanSessionEditorRegression.swift
+@@ -23,6 +23,35 @@
+             .init(warmup: warmup, blocks: blocks, cooldown: cooldown)
+         }
+ 
++        // EDIT-01: the identity is captured when the form opens, before refresh.
++        struct SessionFixture: Decodable {
++            let scope: PlanReceiptScope
++            let initial: TrainingPlanSessionsView.Session
++        }
++        let sessionFixture = try JSONDecoder().decode(SessionFixture.self, from: Data(contentsOf:
++            URL(fileURLWithPath: "apps/ios/tests/fixtures/training-plan-sessions-v2.json")))
++        let opened = sessionFixture.initial
++        let binding = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: sessionFixture.scope,
++            planInstanceId: opened.planInstanceId, stateRevision: 7,
++            sessionId: opened.sessionId, sessionRevision: opened.sessionRevision)
++        check(binding.issue(scope: sessionFixture.scope, planInstanceId: opened.planInstanceId,
++            stateRevision: 7, session: opened) == nil, "EDIT-01: original form identity is usable")
++        let refreshed = TrainingPlanSessionsView.Session(planInstanceId: opened.planInstanceId,
++            sessionId: opened.sessionId, sessionRevision: opened.sessionRevision + 1,
++            prescription: opened.prescription, recommendation: opened.recommendation, userOverride: opened.userOverride,
++            protection: "user_protected", lifecycle: "pending", availableAt: opened.availableAt, supersededBySessionId: nil)
++        check(binding.issue(scope: sessionFixture.scope, planInstanceId: opened.planInstanceId,
++            stateRevision: 8, session: refreshed) != nil,
++              "EDIT-01: background refresh cannot wrap an old draft with the new revision")
++        check(binding.issue(scope: sessionFixture.scope, planInstanceId: "replacement", stateRevision: 7, session: opened) != nil,
++              "EDIT-01: replacing the plan invalidates the open form")
++        check(binding.issue(scope: sessionFixture.scope, planInstanceId: opened.planInstanceId,
++            stateRevision: 8, session: opened) != nil, "EDIT-01: even unchanged course needs explicit reload after state change")
++        let addBinding = TrainingPlanSessionEditorPolicy.DraftIdentity(scope: sessionFixture.scope,
++            planInstanceId: opened.planInstanceId, stateRevision: 7, sessionId: nil, sessionRevision: nil)
++        check(addBinding.issue(scope: sessionFixture.scope, planInstanceId: "replacement", stateRevision: 8, session: nil) != nil,
++              "EDIT-01: new course drafts cannot cross plan instances")
++
+         // A purely time-based prescription (the contract permits distanceKm:null).
+         let timeOnly = structure(warmup: time(600),
+             blocks: [.init(iterations: 3, steps: [time(300), time(60)])],
+@@ -62,6 +91,41 @@
+         let mixed = structure(warmup: distance(1_000),
+             blocks: [.init(iterations: 4, steps: [distance(800), time(90)])],
+             cooldown: time(300))
++        var negotiated = RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
++            syncProtocolVersion: 1, apiVersion: "v1", trainingPlanContractVersion: 2,
++            trainingPlanSessionContractVersion: 1, trainingPlanSessionCommandContractVersion: 1,
++            planPublicationContractVersion: 1)
++        for version in [nil, 0, 2, -1] as [Int?] {
++            negotiated.trainingPlanSessionDistanceOmissionContractVersion = version
++            check(!negotiated.trainingPlanSessionDistanceOmissionSupported,
++                  "COMPAT-01: absent/unknown omission capability does not inherit session command 1")
++        }
++        negotiated.trainingPlanSessionDistanceOmissionContractVersion = 1
++        check(negotiated.trainingPlanSessionDistanceOmissionSupported, "COMPAT-01: exact omission 1 is supported")
++        negotiated.planPublicationContractVersion = nil
++        check(!negotiated.trainingPlanSessionDistanceOmissionSupported, "COMPAT-01: omission does not bypass durable/session dependencies")
++        let oldMixed = MobilePlannedDay(localDate: "2026-10-28", kind: "easy", distanceKm: 5.8, structure: mixed, reason: nil)
++        check(TrainingPlanSessionEditorPolicy.compatibleDistance(.serverMeasured, omissionSupported: false,
++            original: oldMixed, structure: mixed, kind: "easy") == .value(5.8),
++              "COMPAT-01: unchanged historical mixed course keeps explicit legal old distance")
++        if case .failure = TrainingPlanSessionEditorPolicy.compatibleDistance(.serverMeasured, omissionSupported: false,
++            original: nil, structure: mixed, kind: "easy") {
++            check(true, "COMPAT-01: new mixed dose requires upgrade before sending omission")
++        } else { check(false, "old server cannot receive unnegotiated omission") }
++        check(TrainingPlanSessionEditorPolicy.compatibleDistance(.value(nil), omissionSupported: false,
++            original: nil, structure: timeOnly, kind: "easy") == .value(nil), "COMPAT-01: explicit time-only null stays compatible")
++        let delegated = TrainingPlanSessionDraft.add(oldMixed, deriveDistance: true)
++        check(delegated.requiresDistanceOmission, "COMPAT-01: omitted add requires capability")
++        struct WireCommand: Encodable { let draft: TrainingPlanSessionDraft }
++        let delegatedWire = try JSONEncoder().encode(WireCommand(draft: delegated))
++        check(TrainingPlanSessionDraft.payloadRequiresDistanceOmission(delegatedWire),
++              "COMPAT-01: durable omitted add cannot replay to a downgraded server")
++        let reasonOnly = TrainingPlanSessionDraft.edit(sessionId: "s", sessionRevision: 1,
++            patch: .init(reason: "legacy legal patch", updatesReason: true))
++        let reasonWire = try JSONEncoder().encode(WireCommand(draft: reasonOnly))
++        check(!reasonOnly.requiresDistanceOmission &&
++              !TrainingPlanSessionDraft.payloadRequiresDistanceOmission(reasonWire),
++              "COMPAT-01: old reason-only patches remain compatible without new capability")
+         check(TrainingPlanSessionEditorPolicy.structureDistance(mixed) == .mixed,
+               "mixed dose is not mislabelled as its 4,200 m distance-step subtotal")
+         check(TrainingPlanSessionEditorPolicy.resolveDistance("5.822", structure: mixed) == .serverMeasured,

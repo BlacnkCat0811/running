@@ -1,0 +1,109 @@
+TAP version 13
+# (node:96511) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+not ok 1 - P-03: a new real running fact after an empty page rejects Skip without state/history/receipt writes
+  ---
+  duration_ms: 279.880269
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:4:655'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:455:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+not ok 2 - P-03: a real main-DB version change at candidate read rolls back the whole Skip publication
+  ---
+  duration_ms: 197.361933
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:4:1372'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:477:14)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+not ok 3 - P-03: a real main-DB version change at operation receipt rolls back the whole Skip publication
+  ---
+  duration_ms: 298.49991
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:4:1372'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:477:14)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+ok 4 - P-03: empty-window Skip replays unchanged after facts arrive; a fresh duplicate Skip is rejected
+  ---
+  duration_ms: 210.835014
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite state failure leaves no Skip or partial operation
+ok 5 - P-03: SQLite state failure leaves no Skip or partial operation
+  ---
+  duration_ms: 189.069814
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite receipt failure leaves no Skip or partial operation
+ok 6 - P-03: SQLite receipt failure leaves no Skip or partial operation
+  ---
+  duration_ms: 197.067134
+  type: 'test'
+  ...
+# Subtest: P-03: SQLite commit failure leaves no Skip or partial operation
+ok 7 - P-03: SQLite commit failure leaves no Skip or partial operation
+  ---
+  duration_ms: 170.844751
+  type: 'test'
+  ...
+# Subtest: P-03: confirmed association and its immutable history survive a stale Skip
+ok 8 - P-03: confirmed association and its immutable history survive a stale Skip
+  ---
+  duration_ms: 226.133727
+  type: 'test'
+  ...
+# Subtest: P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+not ok 9 - P-03: Skip/Confirm share the fact-writer lease; replay bypasses admission and the lease
+  ---
+  duration_ms: 211.598485
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:1320'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    1 !== 2
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  actual: 1
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:562:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 5
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4108.545612

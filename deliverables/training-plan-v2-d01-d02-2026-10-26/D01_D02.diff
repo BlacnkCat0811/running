@@ -1,0 +1,1144 @@
+--- before/apps/api/src/training-plan-session-commands.ts
++++ after/apps/api/src/training-plan-session-commands.ts
+@@ -14,7 +14,7 @@
+ import { isValidLocalDate } from "./local-date.js";
+ import { internalErrorLogDetail } from "./training-plan-commands.js";
+ import { MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
+-import { measureStructure, pacesFromZones, type CoachZonePrescription } from "./mobile-coach.js";
++import { measureStructure, pacesFromZones, roundKm, type CoachZonePrescription } from "./mobile-coach.js";
+ 
+ const route = "training-plan-session-command";
+ const invalid = (message: string): never => { throw new PlanOperationError("training_session_command_invalid", message, 422); };
+@@ -51,7 +51,8 @@
+     }
+     if (["move", "set_rest"].includes(draft.action) && (typeof draft.localDate !== "string" || !isValidLocalDate(draft.localDate))) return invalid("日期非法。");
+     if (draft.action === "add") {
+-      const day = parseSessionPrescription(draft.prescription);
++      if (!sessionRecord(draft.prescription)) return invalid("新增跑课需要完整训练结构。");
++      const day = parseSessionPrescription({ distanceKm: null, ...draft.prescription });
+       if (day.kind === "rest" || !day.structure) return invalid("新增跑课需要完整训练结构。");
+     }
+     if (draft.action === "edit") {
+@@ -178,7 +179,7 @@
+       // same transaction. Other dates are never touched.
+       after.suppressions = after.suppressions.filter(s => s.localDate !== targetDate);
+       session = { planInstanceId: state.planInstanceId, sessionId: c.newSessionId, sessionRevision: 1,
+-        prescription: structuredClone(draft.prescription), recommendation: null,
++        prescription: { distanceKm: null, ...structuredClone(draft.prescription) }, recommendation: null,
+         userOverride: null, protection: "user_protected", lifecycle: "pending", availableAt, supersededBySessionId: null };
+       after.sessions.push(session);
+     } else if (draft.action === "move") {
+@@ -196,6 +197,36 @@
+       session!.protection = "automatic";
+       session!.userOverride = null;
+       after.suppressions = after.suppressions.filter(s => s.sessionId !== session!.sessionId);
++    }
++    if (session && (draft.action === "add" || draft.action === "edit" &&
++      ["kind", "distanceKm", "structure"].some(key => Object.hasOwn(draft.patch, key)))) {
++      const p = session.prescription;
++      if (!p.structure) return invalid("修改训练内容需要明确结构，不能只改显示距离。");
++      const steps = [...(p.structure.warmup ? [p.structure.warmup] : []), ...p.structure.blocks.flatMap(b => b.steps),
++        ...(p.structure.cooldown ? [p.structure.cooldown] : [])];
++      if (steps.some(step => step.goal.type === "open")) invalid("人工课程需要整米或整秒剂量。");
++      const measured = measureStructure(p.structure, p.kind, pacesFromZones(facts!.prescription));
++      if (!Number.isFinite(measured.distanceKm) || !Number.isFinite(measured.durationSeconds) ||
++        measured.distanceKm <= 0 || measured.distanceKm > MAX_PLANNED_DISTANCE_KM || measured.durationSeconds > 4 * 3600) {
++        invalid("训练剂量超出合法范围。");
++      }
++      const hasDistanceStep = steps.some(step => step.goal.type === "distance");
++      const sameStructure = before !== null && p.kind === before.prescription.kind &&
++        digest(p.structure) === digest(before.prescription.structure);
++      const explicitDistance = Object.hasOwn(draft.action === "add" ? draft.prescription : draft.patch, "distanceKm");
++      // Omission delegates a new/changed dose to the single server measurer.
++      // Unchanged edits keep the persisted value, including legacy 0.1 km precision.
++      if (!explicitDistance && !sameStructure) {
++        p.distanceKm = hasDistanceStep ? Math.round(measured.distanceKm * 1000) / 1000 : null;
++      }
++      if (hasDistanceStep && p.distanceKm === null) invalid("结构包含距离步骤时必须提供一致的 distanceKm。");
++      if (p.distanceKm !== null) {
++        if (p.distanceKm <= 0 || p.distanceKm > MAX_PLANNED_DISTANCE_KM) invalid("训练距离超出合法范围。");
++        const exact = Math.round(p.distanceKm * 1000) === Math.round(measured.distanceKm * 1000);
++        const unchangedLegacy = sameStructure && p.distanceKm === before!.prescription.distanceKm &&
++          p.distanceKm === roundKm(measured.distanceKm);
++        if (!exact && !unchangedLegacy) invalid("距离与训练结构不一致，请同时调整结构，或省略距离由服务端测量。");
++      }
+     }
+     if (session) {
+       if (draft.action !== "unlock") {
+@@ -233,25 +264,6 @@
+       deviceWithdrawalRequired: this.devicePushes().some(push => affectedDates.includes(push.localDate)),
+       warnings: ["保存课程不会自动更新设备排期；如有已排期内容，需先撤回再重新下发。", ...warning] };
+     if (!trainingSessionMetadataOnly(draft) && session) {
+-      const p = session.prescription;
+-      // Legacy nullable structures survive moves/unlock. New content must be fully sized.
+-      const contentChanged = draft.action === "add" || draft.action === "edit" &&
+-        ["kind", "distanceKm", "structure"].some(key => Object.hasOwn(draft.patch, key));
+-      if (contentChanged) {
+-        if (!p.structure) return invalid("修改训练内容需要明确结构，不能只改显示距离。");
+-        const steps = [...(p.structure.warmup ? [p.structure.warmup] : []), ...p.structure.blocks.flatMap(b => b.steps),
+-          ...(p.structure.cooldown ? [p.structure.cooldown] : [])];
+-        if (steps.some(step => step.goal.type === "open")) invalid("人工课程需要整米或整秒剂量。");
+-        const measured = measureStructure(p.structure, p.kind, pacesFromZones(facts!.prescription));
+-        if (measured.distanceKm <= 0 || measured.distanceKm > MAX_PLANNED_DISTANCE_KM || measured.durationSeconds > 4 * 3600) invalid("训练剂量超出合法范围。");
+-        const hasDistanceStep = steps.some(step => step.goal.type === "distance");
+-        if (hasDistanceStep && p.distanceKm === null) invalid("结构包含距离步骤时必须提供一致的 distanceKm。");
+-        // Whole-metre comparison: a rounded 0.1 km display value may not hide a
+-        // 50 m structure mismatch, and no silent scaling is allowed.
+-        if (p.distanceKm !== null && Math.round(p.distanceKm * 1000) !== Math.round(measured.distanceKm * 1000)) {
+-          invalid("距离与训练结构不一致，请同时调整结构。");
+-        }
+-      }
+       facts!.validate(after, impact);
+     }
+     parseTrainingPlanState(after);
+--- before/apps/api/test/training-plan-session-commands.test.ts
++++ after/apps/api/test/training-plan-session-commands.test.ts
+@@ -17,17 +17,20 @@
+ import { TrainingPlanCommandService } from "../src/training-plan-commands.js";
+ import { trainingPlanContextDigest } from "../src/training-mode-policy.js";
+ 
++import { measureStructure, pacesFromZones, roundKm, type CoachZonePrescription } from "../src/mobile-coach.js";
++import { buildCompleteCoachWeekPlan } from "../src/coach-complete-plan.js";
++
+ const fixture = JSON.parse(readFileSync(new URL("../../ios/tests/fixtures/training-plan-sessions-v2.json", import.meta.url), "utf8")) as {
+   payload2: TrainingPlanSessionState; initial: TrainingPlanSessionState["sessions"][number]; scope: TrainingPlanSessionPreviewRequest["operationScope"];
+ };
+ const scope = fixture.scope, key = JSON.stringify([scope.serverId, scope.athleteId, scope.datasetEpoch]);
+ const instant = "2026-10-25T03:00:00.000Z";
+ const tables = ["mobile_goals", "mobile_goals_history", "mobile_training_state", "mobile_training_state_history", "mobile_training_session_history", "mobile_plan_operations"];
+-function setup() {
++function setup(day = fixture.initial.prescription, prescription: CoachZonePrescription | null = null) {
+   const root = mkdtempSync(join(tmpdir(), "rai-session-commands-")), path = join(root, "control.sqlite");
+   const goals = new MobileGoalsStore(root, path), db = new DatabaseSync(path), unified = new TrainingPlanStore(db);
+   const initial = structuredClone(fixture.initial);
+-  initial.protection = "automatic"; initial.userOverride = null;
++  initial.protection = "automatic"; initial.userOverride = null; initial.prescription = structuredClone(day);
+   const { planInstanceId, sessions, suppressions, publishedInputKey, ...legacy } = fixture.payload2;
+   const weekPlan = [initial.prescription];
+   goals.write({ weekPlan }, { preserveWeekPlan: true });
+@@ -40,7 +43,7 @@
+   let now = Date.parse(instant), facts = "facts-1", ready = true, validations = 0;
+   const capture = () => {
+     if (!ready) throw new PlanOperationError("coach_sync_pending", "facts pending");
+-    return { fingerprint: facts, prescription: null, validate: () => { validations++; } };
++    return { fingerprint: facts, prescription, validate: () => { validations++; } };
+   };
+   const service = new TrainingPlanSessionCommandService(goals, () => scope, () => "2026-10-25", capture, () => now);
+   const row = () => goals.currentTrainingPlan()!;
+@@ -489,3 +492,172 @@
+     assert.ok(final.some(item => item.reason === "cancelled" && item.sessionId === added.sessionId));
+   } finally { f.close(); }
+ });
++
++
++// D-01/D-02: one frozen semantic baseline is consumed by Node and native Swift.
++const distanceFixture = JSON.parse(readFileSync(new URL("../../ios/tests/fixtures/training-session-distance-v1.json", import.meta.url), "utf8")) as {
++  generatorInput: Parameters<typeof buildCompleteCoachWeekPlan>[0];
++  cases: Array<{ id: string; generated: boolean; prescription: MobilePlannedDay;
++    measured: { distanceKm: number; durationSeconds: number }; displayDistanceKm: number; editorDistanceMode: string }>;
++};
++const distanceZones = distanceFixture.generatorInput.prescription;
++
++test("D-01/D-02: frozen easy/interval/tempo are actual generated courses; measured and display values stay distinct", () => {
++  const generated = buildCompleteCoachWeekPlan(distanceFixture.generatorInput);
++  for (const item of distanceFixture.cases) {
++    if (item.generated) assert.deepEqual(generated.find(day => day.kind === item.prescription.kind), item.prescription);
++    const measured = measureStructure(item.prescription.structure!, item.prescription.kind, pacesFromZones(distanceZones));
++    assert.ok(Math.abs(measured.distanceKm - item.measured.distanceKm) < 1e-9, item.id);
++    assert.ok(Math.abs(measured.durationSeconds - item.measured.durationSeconds) < 1e-9, item.id);
++    assert.equal(roundKm(measured.distanceKm), item.displayDistanceKm, item.id);
++  }
++});
++
++for (const item of distanceFixture.cases) {
++  test(`D-01: ${item.id} original full payload previews/submits without changing its persisted dose`, () => {
++    const f = setup(item.prescription, distanceZones);
++    try {
++      const before = f.snapshot(), { localDate, ...patch } = item.prescription;
++      const request = f.request({ action: "edit", ...f.existing(), patch: patch as never });
++      const preview = f.service.preview(request);
++      assert.deepEqual(f.snapshot(), before, "preview is read-only");
++      assert.deepEqual(preview.impact.after!.prescription, item.prescription);
++      const command = { ...request, candidateId: preview.candidateId, operationId: randomUUID() };
++      const result = f.service.submit(command);
++      assert.deepEqual(result.session!.prescription, item.prescription);
++      assert.deepEqual(f.state().weekPlan[0], item.prescription);
++      assert.deepEqual(f.service.submit(command), result, "replay retains exact acknowledgement");
++    } finally { f.close(); }
++  });
++}
++
++test("D-01: historical rounding cannot mask changed steps, type, targets or fabricated totals", () => {
++  for (const item of distanceFixture.cases.filter(item => item.generated || item.id === "historical-distance-only")) {
++    const f = setup(item.prescription, distanceZones);
++    try {
++      const before = f.snapshot();
++      const structure = structuredClone(item.prescription.structure!);
++      const goal = structure.blocks[0]!.steps[0]!.goal;
++      if (goal.type === "time") goal.seconds += 1;
++      if (goal.type === "distance") goal.meters += 1;
++      const targeted = structuredClone(item.prescription.structure!);
++      targeted.blocks[0]!.steps[0]!.alert = { kind: "heart_rate", lower: 100, upper: 150 };
++      for (const patch of [
++        { structure }, { structure: targeted },
++        { kind: item.prescription.kind === "easy" ? "recovery" : "easy" },
++        { distanceKm: item.prescription.distanceKm! + 0.1 }, { distanceKm: 0 }
++      ]) assert.throws(() => f.service.preview(f.request({ action: "edit", ...f.existing(), patch: { ...patch,
++        distanceKm: "distanceKm" in patch ? patch.distanceKm : item.prescription.distanceKm } as never })), code("training_session_command_invalid"), item.id);
++      assert.deepEqual(f.snapshot(), before);
++    } finally { f.close(); }
++  }
++});
++
++test("D-02: omitted distance delegates changed mixed dose to server; null/zero/rounded explicit totals stay strict", () => {
++  const item = distanceFixture.cases.find(item => item.id === "mixed")!;
++  const f = setup(item.prescription, distanceZones);
++  try {
++    const structure = structuredClone(item.prescription.structure!);
++    structure.blocks[0]!.iterations = 5;
++    const measured = measureStructure(structure, "interval", pacesFromZones(distanceZones));
++    const draft: TrainingPlanSessionDraft = { action: "edit", ...f.existing(), patch: { structure, reason: "one extra repetition" } };
++    const request = f.request(draft), before = f.snapshot();
++    const preview = f.service.preview(request);
++    const expected = Math.round(measured.distanceKm * 1000) / 1000;
++    assert.equal(preview.impact.after!.prescription.distanceKm, expected);
++    assert.deepEqual(preview.impact.after!.prescription.structure, structure);
++    assert.deepEqual(f.snapshot(), before);
++    for (const distanceKm of [null, 0, 5, roundKm(measured.distanceKm)]) {
++      assert.throws(() => f.service.preview(f.request({ ...draft, patch: { structure, distanceKm } })), code("training_session_command_invalid"));
++    }
++    const command = { ...request, candidateId: preview.candidateId, operationId: randomUUID() };
++    f.facts();
++    assert.throws(() => f.service.submit(command), code("training_session_candidate_mismatch"));
++    assert.deepEqual(f.snapshot(), before, "failed submit writes no partial state, history or operation");
++    const result = f.service.submit(f.command(draft));
++    assert.equal(result.session!.prescription.distanceKm, expected);
++    assert.deepEqual(result.session!.prescription.structure, structure);
++  } finally { f.close(); }
++});
++
++test("D-02: add omission computes on server; pure time keeps null; explicit old-client exact totals remain accepted", () => {
++  const f = setup();
++  const service = new TrainingPlanSessionCommandService(f.goals, () => scope, () => "2026-10-25", () => ({
++    fingerprint: "distance-fixture", prescription: distanceZones, validate: () => {} }));
++  try {
++    for (const item of distanceFixture.cases) {
++      const { distanceKm, ...prescription } = item.prescription;
++      const request = f.request({ action: "add", prescription: { ...prescription, localDate: "2026-11-02" } as never });
++      const preview = service.preview(request);
++      const hasDistance = JSON.stringify(prescription.structure).includes('"type":"distance"');
++      assert.equal(preview.impact.after!.prescription.distanceKm,
++        hasDistance ? Math.round(item.measured.distanceKm * 1000) / 1000 : null, item.id);
++      const exact = { ...prescription, localDate: "2026-11-02", distanceKm: hasDistance ? Math.round(item.measured.distanceKm * 1000) / 1000 : null };
++      assert.equal(service.preview(f.request({ action: "add", prescription: exact as never })).impact.after!.prescription.distanceKm, exact.distanceKm);
++    }
++    const before = f.snapshot();
++    for (const prescription of [distanceStructure("2026-11-02", 80001, 80.001),
++      { ...timeOnly("2026-11-02"), structure: { warmup: null, cooldown: null, blocks: [{ iterations: 2, steps: [{ purpose: "work", goal: { type: "time", seconds: 14400 }, alert: null }] }] } }]) {
++      assert.throws(() => service.preview(f.request({ action: "add", prescription: prescription as never })), code("training_session_command_invalid"));
++    }
++    assert.deepEqual(f.snapshot(), before);
++  } finally { f.close(); }
++});
++
++
++test("D-01/D-02: shared native omission/null/value payloads preserve unchanged dose; legal structure adjustments remeasure", () => {
++  for (const item of distanceFixture.cases) {
++    const f = setup(item.prescription, distanceZones);
++    try {
++      const { localDate, distanceKm, ...content } = item.prescription;
++      const patch = { ...content, ...(item.editorDistanceMode === "omit" ? {} : { distanceKm }) };
++      const preview = f.service.preview(f.request({ action: "edit", ...f.existing(), patch: patch as never }));
++      assert.deepEqual(preview.impact.after!.prescription, item.prescription, item.id);
++      const structure = structuredClone(item.prescription.structure!);
++      structure.blocks[0]!.iterations += 1;
++      const measured = measureStructure(structure, item.prescription.kind, pacesFromZones(distanceZones));
++      const adjusted = f.service.submit(f.command({ action: "edit", ...f.existing(), patch: { structure } }));
++      const hasDistance = JSON.stringify(structure).includes('"type":"distance"');
++      assert.equal(adjusted.session!.prescription.distanceKm, hasDistance ? Math.round(measured.distanceKm * 1000) / 1000 : null, item.id);
++      assert.deepEqual(adjusted.session!.prescription.structure, structure, "measurement never scales the requested structure");
++    } finally { f.close(); }
++  }
++});
++
++test("D-01: unchanged but corrupt historical totals are not accepted as legacy rounding", () => {
++  const item = distanceFixture.cases.find(item => item.id === "interval")!;
++  const day = { ...item.prescription, distanceKm: item.prescription.distanceKm! + 0.1 };
++  const f = setup(day, distanceZones);
++  try {
++    const before = f.snapshot();
++    assert.throws(() => f.service.preview(f.request({ action: "edit", ...f.existing(), patch: {
++      kind: day.kind as never, structure: day.structure!, distanceKm: day.distanceKm
++    } })), code("training_session_command_invalid"));
++    assert.deepEqual(f.snapshot(), before);
++  } finally { f.close(); }
++});
++
++
++test("D-02: COMMIT failure rolls back a server-measured mixed edit, projection, override and operation", context => {
++  const item = distanceFixture.cases.find(item => item.id === "mixed")!;
++  const f = setup(item.prescription, distanceZones);
++  try {
++    const structure = structuredClone(item.prescription.structure!);
++    structure.blocks[0]!.iterations = 5;
++    const body = f.command({ action: "edit", ...f.existing(), patch: { structure } }), before = f.snapshot();
++    const original = DatabaseSync.prototype.exec;
++    let fail = true;
++    const mock = context.mock.method(DatabaseSync.prototype, "exec", function(this: DatabaseSync, sql: string) {
++      if (sql === "COMMIT" && f.goals.publicationInFlight() && fail) { fail = false; throw new Error("injected measured-dose COMMIT failure"); }
++      return original.call(this, sql);
++    });
++    assert.throws(() => f.service.submit(body), /injected measured-dose COMMIT failure/);
++    mock.mock.restore();
++    assert.deepEqual(f.snapshot(), before, "all six business/history/result tables remain unchanged");
++    assert.equal(f.goals.publicationGuardState().pendingSince, null);
++    const result = f.service.submit(body);
++    assert.equal(result.session!.prescription.distanceKm,
++      Math.round(measureStructure(structure, item.prescription.kind, pacesFromZones(distanceZones)).distanceKm * 1000) / 1000);
++    assert.deepEqual(result.session!.prescription.structure, structure);
++  } finally { f.close(); }
++});
+--- before/packages/api-contracts/src/training-plan-closed-loop.ts
++++ after/packages/api-contracts/src/training-plan-closed-loop.ts
+@@ -76,7 +76,8 @@
+   executions?: TrainingPlanSessionExecution[];
+ }
+ 
+-/** Omission keeps a field; reason:null clears it. Structure targets clear via alert:null. */
++/** Omission keeps a field, except distance is remeasured when kind/structure changes.
++ * reason:null clears it. Structure targets clear via alert:null. */
+ export interface TrainingPlanSessionPatch {
+   kind?: Exclude<MobileSessionKind, "rest">;
+   distanceKm?: number | null;
+@@ -88,8 +89,10 @@
+ export type TrainingPlanSessionDraft =
+   | (ExistingSession & { action: "move"; localDate: string })
+   | (ExistingSession & { action: "edit"; patch: TrainingPlanSessionPatch })
+-  | { action: "add"; prescription: Omit<MobilePlannedDay, "kind" | "structure"> & {
+-      kind: Exclude<MobileSessionKind, "rest">; structure: MobileSessionStructure } }
++  | { action: "add"; prescription: Omit<MobilePlannedDay, "kind" | "structure" | "distanceKm"> & {
++      kind: Exclude<MobileSessionKind, "rest">; structure: MobileSessionStructure;
++      /** Omitted: server derives distance (null for pure time). Explicit values are checked. */
++      distanceKm?: number | null } }
+   | (ExistingSession & { action: "cancel" })
+   | { action: "set_rest"; localDate: string }
+   | (ExistingSession & { action: "unlock" });
+--- before/apps/ios/RAI/APIModels.swift
++++ after/apps/ios/RAI/APIModels.swift
+@@ -2591,6 +2591,7 @@
+ 
+ /// Session editing is a separate negotiated contract. Nil patch fields are kept
+ /// unless their explicit update flag is set; clearing reason encodes JSON null.
++/// Omitted distance is remeasured by the server when kind/structure changes.
+ struct TrainingPlanSessionPatch: Encodable, Equatable {
+     var kind: String? = nil
+     var distanceKm: Double? = nil
+@@ -2642,18 +2643,20 @@
+ enum TrainingPlanSessionDraft: Encodable, Equatable {
+     case move(sessionId: String, sessionRevision: Int, localDate: String)
+     case edit(sessionId: String, sessionRevision: Int, patch: TrainingPlanSessionPatch)
+-    case add(MobilePlannedDay)
++    case add(MobilePlannedDay, deriveDistance: Bool = false)
+     case cancel(sessionId: String, sessionRevision: Int)
+     case setRest(localDate: String)
+     case unlock(sessionId: String, sessionRevision: Int)
+     enum CodingKeys: String, CodingKey { case action, sessionId, sessionRevision, localDate, patch, prescription }
+     private struct Prescription: Encodable {
+         let value: MobilePlannedDay
++        let deriveDistance: Bool
+         enum CodingKeys: String, CodingKey { case localDate, kind, distanceKm, structure, reason }
+         func encode(to encoder: Encoder) throws {
+             var c = encoder.container(keyedBy: CodingKeys.self)
+             try c.encode(value.localDate, forKey: .localDate); try c.encode(value.kind, forKey: .kind)
+-            try c.encode(value.distanceKm, forKey: .distanceKm); try c.encode(value.reason, forKey: .reason)
++            if !deriveDistance { try c.encode(value.distanceKm, forKey: .distanceKm) }
++            try c.encode(value.reason, forKey: .reason)
+             try c.encode(value.structure.map { TrainingSessionWireStructure(value: $0) }, forKey: .structure)
+         }
+     }
+@@ -2665,7 +2668,9 @@
+         switch self {
+         case let .move(id, revision, date): try existing("move", id, revision); try c.encode(date, forKey: .localDate)
+         case let .edit(id, revision, patch): try existing("edit", id, revision); try c.encode(patch, forKey: .patch)
+-        case let .add(day): try c.encode("add", forKey: .action); try c.encode(Prescription(value: day), forKey: .prescription)
++        case let .add(day, deriveDistance):
++            try c.encode("add", forKey: .action)
++            try c.encode(Prescription(value: day, deriveDistance: deriveDistance), forKey: .prescription)
+         case let .cancel(id, revision): try existing("cancel", id, revision)
+         case let .setRest(date): try c.encode("set_rest", forKey: .action); try c.encode(date, forKey: .localDate)
+         case let .unlock(id, revision): try existing("unlock", id, revision)
+--- before/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
++++ after/apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift
+@@ -2,12 +2,9 @@
+ 
+ /// Pure draft rules for the native training-session editor.
+ ///
+-/// `MobilePlannedDay.distanceKm` is a compatibility display value: the dose is
+-/// measured by the structure. A purely time-based prescription is legal with
+-/// `distanceKm: null`; a distance structure requires the displayed total to
+-/// match its integer-meter sum. The editor must never invent a 5 km dose just
+-/// because the field was empty — this policy is the single decision point so
+-/// the rule can be pinned by a pure-logic regression.
++/// The server owns dose measurement, including time-to-distance conversion.
++/// Only a distance-only structure has a locally knowable total. Persisted
++/// historical values survive unchanged edits; they are checked by the server.
+ enum TrainingPlanSessionEditorPolicy {
+     /// Mirrors `apps/api/src/session-structure.ts` (`MAX_STEP_METERS` /
+     /// `MAX_STEP_SECONDS`). The editor must not accept a step the server will
+@@ -20,6 +17,9 @@
+         case none
+         /// Integer-meter total across warmup, every block iteration and cooldown.
+         case meters(Int)
++        /// Contains both time and distance goals. The sum of distance goals is
++        /// not its total; only the server has the pace model to measure it.
++        case mixed
+         /// Missing/legacy/open/invalid structure: not editable under the new
+         /// prescription contract until the user supplies a measurable dose.
+         case invalid
+@@ -28,6 +28,9 @@
+     enum DistanceResolution: Equatable {
+         /// `nil` is an explicit wire `distanceKm: null`, not "leave unchanged".
+         case value(Double?)
++        /// Omit distanceKm: keep unchanged persisted dose or let the server
++        /// measure a changed/new structure. Never encode a fabricated zero.
++        case serverMeasured
+         case failure(String)
+     }
+ 
+@@ -61,6 +64,7 @@
+         guard let structure, !structure.blocks.isEmpty else { return .invalid }
+         var totalMeters = 0
+         var hasDistance = false
++        var hasTime = false
+ 
+         func validStep(_ step: MobileWorkoutStep, multiplier: Int) -> Bool {
+             switch step.goal {
+@@ -75,7 +79,8 @@
+                 hasDistance = true
+                 return true
+             case let .time(seconds):
+-                return seconds.isFinite && seconds >= 1 && seconds <= maximumStepSeconds
++                hasTime = true
++                return seconds.isFinite && seconds >= 1 && seconds <= maximumStepSeconds && seconds.rounded() == seconds
+             case .open:
+                 return false
+             }
+@@ -87,28 +92,38 @@
+             for step in block.steps where !validStep(step, multiplier: block.iterations) { return .invalid }
+         }
+         if let cooldown = structure.cooldown, !validStep(cooldown, multiplier: 1) { return .invalid }
+-        return hasDistance ? .meters(totalMeters) : .none
++        return hasDistance ? (hasTime ? .mixed : .meters(totalMeters)) : .none
+     }
+ 
+     /// Resolve the distance text against the structure that will be submitted.
+     ///
+-    /// - Pure time: always `nil` on the wire (an old display distance cannot
+-    ///   make a time-only structure a distance prescription).
+-    /// - Distance structure: the text is required and must match the structure
+-    ///   at integer-meter precision; the returned value is normalised from the
+-    ///   structure, never trusted from stale text.
+-    static func resolveDistance(_ text: String, structure: MobileSessionStructure?) -> DistanceResolution {
++    /// Pure time can send null; mixed doses delegate to the server. Unchanged
++    /// historical distance values are forwarded/preserved without local
++    /// rescaling. Explicit distance-only changes still compare whole metres.
++    static func resolveDistance(_ text: String, structure: MobileSessionStructure?,
++                                original: MobilePlannedDay? = nil, kind: String? = nil) -> DistanceResolution {
++        let unchanged = original != nil && original?.structure == structure && original?.kind == kind
+         switch structureDistance(structure) {
+         case .invalid:
+             return .failure("课程结构不完整或仍含未填写剂量；请填写明确的分段剂量。")
+         case .none:
++            if unchanged, original?.distanceKm != nil { return .serverMeasured }
+             return .value(nil)
++        case .mixed:
++            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
++            if !trimmed.isEmpty {
++                guard let value = Double(trimmed), value.isFinite, value > 0, value <= 80 else {
++                    return .failure("总距离必须是大于 0 且不超过 80 公里的有效数值。")
++                }
++            }
++            return .serverMeasured
+         case let .meters(meters):
+             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+-            guard let kilometers = Double(trimmed), kilometers.isFinite, kilometers > 0,
++            guard let kilometers = Double(trimmed), kilometers.isFinite, kilometers > 0, kilometers <= 80,
+                   let displayedMeters = Int(exactly: (kilometers * 1_000).rounded()) else {
+                 return .failure("有距离结构的课程必须填写总距离（公里）。")
+             }
++            if unchanged, kilometers == original?.distanceKm { return .value(kilometers) }
+             guard displayedMeters == meters else {
+                 return .failure("总距离与分段结构不一致：结构合计 \(meters) 米，当前填写 \(displayedMeters) 米。")
+             }
+--- before/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
++++ after/apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift
+@@ -73,16 +73,23 @@
+         case "set_rest": return .setRest(localDate: date)
+         default:
+             guard let structure = currentStructure else { return nil }
+-            guard case let .value(distanceKm) = TrainingPlanSessionEditorPolicy.resolveDistance(distance, structure: structure) else {
+-                return nil
++            let distanceKm: Double?, updatesDistance: Bool
++            switch distanceResolution(structure) {
++            case let .value(value): distanceKm = value; updatesDistance = true
++            case .serverMeasured: distanceKm = nil; updatesDistance = false
++            case .failure: return nil
+             }
+             if action == "add" {
+                 return .add(.init(localDate: date, kind: kind, distanceKm: distanceKm,
+-                    structure: structure, reason: reason.isEmpty ? nil : reason))
++                    structure: structure, reason: reason.isEmpty ? nil : reason), deriveDistance: !updatesDistance)
+             }
+             return .edit(sessionId: id, sessionRevision: revision, patch: .init(kind: kind, distanceKm: distanceKm,
+-                updatesDistance: true, structure: structure, reason: reason.isEmpty ? nil : reason, updatesReason: true))
+-        }
++                updatesDistance: updatesDistance, structure: structure, reason: reason.isEmpty ? nil : reason, updatesReason: true))
++        }
++    }
++    private func distanceResolution(_ structure: MobileSessionStructure) -> TrainingPlanSessionEditorPolicy.DistanceResolution {
++        TrainingPlanSessionEditorPolicy.resolveDistance(distance, structure: structure,
++            original: session?.prescription, kind: kind)
+     }
+     private var currentStructure: MobileSessionStructure? {
+         guard !blocks.isEmpty else { return nil }
+@@ -104,7 +111,7 @@
+             guard let structure = currentStructure else {
+                 return "请填写完整的分段剂量；纯时间课程也需要明确的时间剂量。"
+             }
+-            if case let .failure(message) = TrainingPlanSessionEditorPolicy.resolveDistance(distance, structure: structure) {
++            if case let .failure(message) = distanceResolution(structure) {
+                 return message
+             }
+             return nil
+@@ -139,6 +146,11 @@
+             }
+             .onAppear { initialize() }
+             .onChange(of: draft) { _, _ in native.trainingPlanPublisher.cancelPreview(); localMessage = nil }
++            .onChange(of: TrainingPlanSessionEditorPolicy.structureDistance(currentStructure)) { _, measurement in
++                // Mixed courses have no editable total field. Discard stale
++                // input from a previous distance-only draft before hiding it.
++                if measurement == .mixed { distance = "" }
++            }
+             .onDisappear { native.trainingPlanPublisher.cancelPreview() }
+             .onChange(of: native.feedbackSessionID) { _, _ in dismiss() }
+         }
+@@ -174,9 +186,13 @@
+                             Text("轻松").tag("easy"); Text("恢复").tag("recovery"); Text("节奏").tag("tempo")
+                             Text("间歇").tag("interval"); Text("长距离").tag("long_run")
+                         }
+-                        TextField("总距离（公里）", text: $distance).keyboardType(.decimalPad).focused($focusedField, equals: .distance)
++                        if TrainingPlanSessionEditorPolicy.structureDistance(currentStructure) == .mixed {
++                            Text("总距离由服务端按完整分段计算，请在预览中确认。").font(.footnote)
++                        } else if TrainingPlanSessionEditorPolicy.structureDistance(currentStructure) != .none {
++                            TextField("总距离（公里）", text: $distance).keyboardType(.decimalPad).focused($focusedField, equals: .distance)
++                        }
+                         TextField("说明（留空清除）", text: $reason, axis: .vertical).focused($focusedField, equals: .reason)
+-                        Text("纯时间课程请留空总距离，保存为 distanceKm:null；含距离分段时总距离须与分段剂量一致，不会自动填默认距离。配速填写秒/公里；心率填写次/分钟。目标留空的一侧表示不限制。").font(.footnote)
++                        Text("新建或调整纯时间课程不填写总距离；时间与距离混合课程由服务端测量。原样编辑保留历史距离，纯距离课程总量须与分段一致。配速填写秒/公里；心率填写次/分钟。目标留空的一侧表示不限制。").font(.footnote)
+                     }
+     }
+     @ViewBuilder private var doseSections: some View {
+@@ -210,6 +226,7 @@
+                     }
+                     if let message = native.trainingPlanPublisher.message { Text(message).font(.footnote).fixedSize(horizontal: false, vertical: true) }
+                     if let localMessage { Text(localMessage).font(.footnote) }
++                    if let draftIssue { Text(draftIssue).font(.footnote).accessibilityIdentifier("training.session.draft-issue") }
+                 }
+     }
+     @ViewBuilder private var previewContent: some View {
+@@ -271,8 +288,7 @@
+         // contains one open work step, which the editor rejects until the user
+         // chooses an explicit distance or time dose.
+         let structure = session?.prescription.structure ?? TrainingPlanSessionEditorPolicy.blankStructure()
+-        distance = TrainingPlanSessionEditorPolicy.structureDistance(structure) == .none
+-            ? "" : TrainingPlanSessionEditorPolicy.distanceText(session?.prescription.distanceKm)
++        distance = TrainingPlanSessionEditorPolicy.distanceText(session?.prescription.distanceKm)
+         warmup = structure.warmup.map(EditorStep.init); cooldown = structure.cooldown.map(EditorStep.init)
+         blocks = structure.blocks.map { EditorBlock(iterations: $0.iterations, steps: $0.steps.map(EditorStep.init)) }
+     }
+--- before/apps/ios/tests/TrainingPlanSessionEditorRegression.swift
++++ after/apps/ios/tests/TrainingPlanSessionEditorRegression.swift
+@@ -1,10 +1,10 @@
+ import Foundation
+ 
+ /// P2.10 pure regression: the session editor may send `distanceKm: null` for a
+-/// time-only structure, must not fabricate a 5 km dose, and must require the
+-/// displayed total to match a distance structure at integer-meter precision.
++/// time-only structure, must not fabricate a 5 km dose, and delegates mixed
++/// structure measurement to the server while preserving historical totals.
+ @main struct TrainingPlanSessionEditorRegression {
+-    static func main() {
++    static func main() throws {
+         var count = 0
+         func check(_ condition: @autoclosure () -> Bool, _ name: String) {
+             precondition(condition(), name)
+@@ -62,17 +62,16 @@
+         let mixed = structure(warmup: distance(1_000),
+             blocks: [.init(iterations: 4, steps: [distance(800), time(90)])],
+             cooldown: time(300))
+-        check(TrainingPlanSessionEditorPolicy.structureDistance(mixed) == .meters(4_200),
+-              "warmup, distance work steps and cooldown all count once at their real multiplication")
+-        if case .failure = TrainingPlanSessionEditorPolicy.resolveDistance("4.2", structure: mixed) {
+-            check(false, "a 4.2 km total must match 4,200 structure metres")
+-        } else {
+-            check(true, "a 4.2 km total matches 4,200 structure metres")
+-        }
+-        if case .failure = TrainingPlanSessionEditorPolicy.resolveDistance("4.1", structure: mixed) {
+-            check(true, "a 4.1 km total cannot be saved against 4,200 structure metres")
+-        } else {
+-            check(false, "a 4.1 km total cannot be saved against 4,200 structure metres")
++        check(TrainingPlanSessionEditorPolicy.structureDistance(mixed) == .mixed,
++              "mixed dose is not mislabelled as its 4,200 m distance-step subtotal")
++        check(TrainingPlanSessionEditorPolicy.resolveDistance("5.822", structure: mixed) == .serverMeasured,
++              "D-02: a server-measured mixed total can reach preview")
++        check(TrainingPlanSessionEditorPolicy.resolveDistance("", structure: mixed) == .serverMeasured,
++              "a mixed draft can ask the server to measure without inventing a total")
++        for invalid in ["0", "-1", "NaN", "infinity", "abc", "80.001"] {
++            if case .failure = TrainingPlanSessionEditorPolicy.resolveDistance(invalid, structure: mixed) {
++                check(true, "mixed draft rejects invalid explicit distance: \(invalid)")
++            } else { check(false, "invalid mixed distance cannot become zero or reach preview") }
+         }
+         check(TrainingPlanSessionEditorPolicy.structureDistance(nil) == .invalid,
+               "a legacy structure-less prescription is not misread as time-only")
+@@ -113,6 +112,55 @@
+                 structure(blocks: [.init(iterations: 1, steps: [distance(100_001)])])) == .invalid,
+               "a single step is capped at the server's MAX_STEP_METERS=100000")
+ 
++        struct DistanceFixture: Decodable {
++            struct Course: Decodable {
++                struct Measurement: Decodable { let distanceKm: Double; let durationSeconds: Double }
++                let id: String
++                let prescription: MobilePlannedDay
++                let measured: Measurement
++                let editorDistanceMode: String
++            }
++            let cases: [Course]
++        }
++        let fixture = try JSONDecoder().decode(DistanceFixture.self, from: Data(contentsOf:
++            URL(fileURLWithPath: "apps/ios/tests/fixtures/training-session-distance-v1.json")))
++        for item in fixture.cases {
++            let day = item.prescription
++            let text = TrainingPlanSessionEditorPolicy.distanceText(day.distanceKm)
++            let result = TrainingPlanSessionEditorPolicy.resolveDistance(text, structure: day.structure, original: day, kind: day.kind)
++            let updatesDistance: Bool, distanceKm: Double?
++            switch result {
++            case let .value(value): updatesDistance = true; distanceKm = value
++            case .serverMeasured: updatesDistance = false; distanceKm = nil
++            case .failure: preconditionFailure("fixed legal course rejected: \(item.id)")
++            }
++            check(updatesDistance == (item.editorDistanceMode != "omit"), "shared \(item.id): editor measurement authority matches server contract")
++            if updatesDistance {
++                check(distanceKm == day.distanceKm, "shared \(item.id): persisted total is not rounded or invented")
++            }
++            let patch = TrainingPlanSessionPatch(kind: day.kind, distanceKm: distanceKm, updatesDistance: updatesDistance,
++                structure: day.structure, reason: day.reason, updatesReason: true)
++            let wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(patch)) as! [String: Any]
++            check((wire["distanceKm"] != nil) == updatesDistance, "shared \(item.id): patch encodes omission distinctly from null")
++            if item.editorDistanceMode == "null" { check(wire["distanceKm"] is NSNull, "pure time has explicit null distance") }
++            let add = TrainingPlanSessionDraft.add(day, deriveDistance: !updatesDistance)
++            let addWire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(add)) as! [String: Any]
++            check(((addWire["prescription"] as! [String: Any])["distanceKm"] != nil) == updatesDistance,
++                  "shared \(item.id): add can delegate to the server without encoding a fake null/zero distance")
++            if item.id == "mixed" {
++                check(item.measured.distanceKm > 4.2 && item.measured.durationSeconds > 0,
++                      "shared mixed baseline includes time-step distance; native code does not reproduce its pace model")
++            }
++            if item.id == "historical-distance-only" {
++                let original = day.structure!
++                let changed = MobileSessionStructure(warmup: original.warmup,
++                    blocks: original.blocks.map { .init(iterations: $0.iterations + 1, steps: $0.steps) },
++                    cooldown: original.cooldown)
++                if case .failure = TrainingPlanSessionEditorPolicy.resolveDistance(text, structure: changed, original: day, kind: day.kind) {
++                    check(true, "changed distance structure cannot reuse historical rounded total")
++                } else { check(false, "changed distance structure must revalidate") }
++            }
++        }
+         print("TrainingPlanSessionEditor regression: \(count) checks passed")
+     }
+ }
+--- before/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
++++ after/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md
+@@ -49,13 +49,26 @@
+ pace 范围为 120–1200 秒/km，heart_rate 为 1–240 bpm；每个非空 alert 至少一端非空，两端都有值时 lower ≤ upper。
+ 新处方必须有可测定剂量，不能用 open 工作步骤规避预算校验；旧 open/无结构处方仍按兼容合同读取。
+ 
+-`edit.patch` 未提供的字段保留，`reason:null` 明确清空说明，空字符串不是 null。
++`edit.patch` 未提供的字段保留；距离在结构/类型变化时的省略规则见下文。`reason:null` 明确清空说明，空字符串不是 null。
+ `kind:null`、`structure:null` 非法；清除目标用完整结构内的 `alert:null`。
+ 配速/强度修改必须修改真实 work 步骤的 alert；每步最多一个 pace 或 heart_rate 目标。
+ 配速 lower 为数值较小的秒/km、upper 为较大值，拒绝颠倒范围；清空 warmup/cooldown 用其 null，不能丢弃 blocks。
+-距离通过结构测量，`distanceKm` 为兼容展示值；距离结构与显示距离须一致（整米比较，不做静默缩放）。
+-纯时间结构没有可靠距离时可显式 `distanceKm:null`；距离步骤仍存在时 null 非法。
+-修改距离必须同时提交一致结构；旧无结构课可读，编辑剂量/类型/目标或 add 时须提供合法结构。
++距离合同区分三个量（D-01/D-02）：
++
++- persisted distance：处方中的 `distanceKm`，保留既有自动课程的 0.1 km 存储精度；不是独立于结构的剂量事实。
++- measured distance / duration：仅 TypeScript `measureStructure` 按当前 `pacesFromZones` 计算。距离段为米/1000，时间段按用途/课程类型的服务端配速折算；warmup/recovery/cooldown 与每次重复均计入。它们是派生值，不新增持久化字段。
++- display distance：展示层可按 0.1 km 格式化，不得将展示值回写成新的精确剂量。编辑器对纯距离显式输入保留整米精度。
++
++add 可省略 `distanceKm`；edit 在结构或类型发生变化时也可省略距离，由服务端测量并在预览的有效处方中返回：
++有距离段时取测量值到整米，无距离段时为 `null`。edit 的结构与类型未变化且省略距离时保留 persisted distance，
++不会仅因打开编辑器将历史 0.1 km 值改写为整米值。响应 DTO 形状、候选绑定原始草稿、120 秒有效期、scope/实例/修订/事实检查与原子提交均不变。
++显式非 null 距离必须为正且不超过 80 km，并与完整结构测量值按整米比较；不能仅累计 mixed 的距离段。
++唯一舍入兼容边界是已有 edit 的类型、完整结构（含目标）和距离均未变化，且距离等于当前服务端测量的 0.1 km 舍入值；
++add、结构/类型变化、修改后的舍入值均不适用该例外。测量剂量始终受 80 km / 4 小时和现有安全政策约束。
++纯时间结构可显式 `distanceKm:null`；仍有距离步骤时显式 null 非法。0 不能用于请求服务端测量。
++旧客户端的合法整米 payload 和原样历史 payload 继续有效；结构变化后显式发送旧舍入值仍拒绝，需发送完整测量值或省略距离重新预览。
++旧无结构课可读，编辑剂量/类型/目标或 add 时须提供合法结构。iOS 不复制服务端配速模型，mixed 草稿省略距离，基础错误显示具体原因，最终剂量以服务端预览为准。
++固定课程、红测与分级验证见 [D-01/D-02 实施记录](../deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md)。
+ 新 add 不接受 rest，休息走 set_rest；空 patch 拒绝。日期变更仅走 move，不能夹在 edit 中。
+ 明确改期可以保留与可跑日偏好冲突的用户意图，不能绕过伤病/恢复/容量等有效执行限制；冲突必须在预览解释。
+ 用户明确缩短课程不套用自动生成的完整剂量保证；不能自动加长回算法默认剂量。
+--- before/apps/api/src/schemas.ts
++++ after/apps/api/src/schemas.ts
+@@ -1291,7 +1291,7 @@
+   const draft = { oneOf: [existing("move", { localDate: date }), existing("edit", { patch }), existing("cancel"), existing("unlock"),
+     { type: "object", additionalProperties: false, required: ["action", "localDate"], properties: { action: { const: "set_rest" }, localDate: date } },
+     { type: "object", additionalProperties: false, required: ["action", "prescription"], properties: { action: { const: "add" },
+-      prescription: { ...mobileWeekPlanItemSchema, required: ["localDate", "kind", "distanceKm", "structure"], properties: {
++      prescription: { ...mobileWeekPlanItemSchema, required: ["localDate", "kind", "structure"], properties: {
+         ...mobileWeekPlanItemSchema.properties, kind: { enum: MOBILE_SESSION_KINDS.filter(kind => kind !== "rest") }, structure: mobileSessionStructureSchema } } } }
+   ] };
+   return { type: "object", additionalProperties: false,
+--- before/apps/api/test/schemas.test.ts
++++ after/apps/api/test/schemas.test.ts
+@@ -798,3 +798,30 @@
+   assert.equal(service.publish("goals", {}, () => 7), 7);
+   assert.deepEqual(calls, ["none"], "无 operationId 的普通发布保持直通");
+ });
++
++
++test("D-02: OpenAPI add accepts server-measured omission and existing explicit distance payloads", async () => {
++  const fixture = JSON.parse(readFileSync(new URL("../../ios/tests/fixtures/training-session-distance-v1.json", import.meta.url), "utf8"));
++  for (const path of ["/v1/mobile/training-plan/session-commands/preview", "/v1/mobile/training-plan/session-commands"] as const) {
++    const operation = openapiDocument.paths[path].post;
++    assert.ok("requestBody" in operation);
++    const schema = (operation.requestBody as { content: { "application/json": { schema: object } } }).content["application/json"].schema;
++    const app = Fastify();
++    app.post("/command", { schema: { body: schema } }, request => request.body);
++    try {
++      const original = fixture.cases.find((item: { id: string }) => item.id === "mixed").prescription;
++      const { distanceKm, ...prescription } = original;
++      const body = { contractVersion: 1, operationScope: { serverId: "s", athleteId: "a", datasetEpoch: "e" },
++        expectedStateRevision: 1, planInstanceId: "p", draft: { action: "add", prescription },
++        ...(path.endsWith("/preview") ? {} : { operationId: "00000000-0000-4000-8000-000000000001", candidateId: "candidate" }) };
++      const omitted = await app.inject({ method: "POST", url: "/command", payload: body });
++      assert.equal(omitted.statusCode, 200, omitted.body);
++      assert.equal(Object.hasOwn(omitted.json().draft.prescription, "distanceKm"), false);
++      const old = await app.inject({ method: "POST", url: "/command", payload: { ...body, draft: { action: "add", prescription: original } } });
++      assert.equal(old.statusCode, 200, old.body);
++      const { structure, ...missingStructure } = prescription;
++      const invalid = await app.inject({ method: "POST", url: "/command", payload: { ...body, draft: { action: "add", prescription: missingStructure } } });
++      assert.equal(invalid.statusCode, 400, "server measurement does not make the structure optional");
++    } finally { await app.close(); }
++  }
++});
+--- /dev/null
++++ after/apps/ios/tests/fixtures/training-session-distance-v1.json
+@@ -0,0 +1,406 @@
++{
++  "contractVersion": 1,
++  "generatorInput": {
++    "allowedDates": [
++      "2026-10-26",
++      "2026-10-27",
++      "2026-10-28",
++      "2026-10-29",
++      "2026-10-30",
++      "2026-10-31",
++      "2026-11-01"
++    ],
++    "prescription": {
++      "easyPaceLower": 360,
++      "easyPaceUpper": 407,
++      "thresholdPaceLower": 260,
++      "thresholdPaceUpper": 283,
++      "intervalPaceLower": 230,
++      "intervalPaceUpper": 251,
++      "easyHrLower": null,
++      "easyHrUpper": null,
++      "thresholdHrLower": null,
++      "thresholdHrUpper": null
++    },
++    "weeklyDistanceKm": 100,
++    "previousWeekDistanceKm": 100,
++    "qualitySessionCap": 2,
++    "easyDurationFloorFraction": 0,
++    "injuryFlagCodes": []
++  },
++  "cases": [
++    {
++      "id": "easy",
++      "generated": true,
++      "prescription": {
++        "localDate": "2026-10-26",
++        "kind": "easy",
++        "structure": {
++          "warmup": {
++            "purpose": "warmup",
++            "goal": {
++              "type": "time",
++              "seconds": 300
++            },
++            "alert": null
++          },
++          "blocks": [
++            {
++              "iterations": 1,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "time",
++                    "seconds": 1200
++                  },
++                  "alert": {
++                    "kind": "pace",
++                    "lower": 360,
++                    "upper": 407
++                  }
++                }
++              ]
++            }
++          ],
++          "cooldown": {
++            "purpose": "cooldown",
++            "goal": {
++              "type": "time",
++              "seconds": 300
++            },
++            "alert": null
++          }
++        },
++        "distanceKm": 4.4,
++        "reason": "\u5b8c\u6574\u5242\u91cf\u4f18\u5148\uff1brai-coach-session-dose-v2\uff0c\u672a\u5206\u914d\u5efa\u8bae\u91cf\u4e0d\u4ea7\u751f\u8865\u8bfe\u4e49\u52a1\u3002"
++      },
++      "measured": {
++        "distanceKm": 4.422604422604422,
++        "durationSeconds": 1800
++      },
++      "displayDistanceKm": 4.4,
++      "editorDistanceMode": "omit"
++    },
++    {
++      "id": "interval",
++      "generated": true,
++      "prescription": {
++        "localDate": "2026-10-28",
++        "kind": "interval",
++        "structure": {
++          "warmup": {
++            "purpose": "warmup",
++            "goal": {
++              "type": "time",
++              "seconds": 600
++            },
++            "alert": null
++          },
++          "blocks": [
++            {
++              "iterations": 4,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "distance",
++                    "meters": 800
++                  },
++                  "alert": {
++                    "kind": "pace",
++                    "lower": 230,
++                    "upper": 251
++                  }
++                },
++                {
++                  "purpose": "recovery",
++                  "goal": {
++                    "type": "time",
++                    "seconds": 120
++                  },
++                  "alert": null
++                }
++              ]
++            }
++          ],
++          "cooldown": {
++            "purpose": "cooldown",
++            "goal": {
++              "type": "time",
++              "seconds": 600
++            },
++            "alert": null
++          }
++        },
++        "distanceKm": 7.3,
++        "reason": "\u5b8c\u6574\u5242\u91cf\u4f18\u5148\uff1brai-coach-session-dose-v2\uff0c\u672a\u5206\u914d\u5efa\u8bae\u91cf\u4e0d\u4ea7\u751f\u8865\u8bfe\u4e49\u52a1\u3002"
++      },
++      "measured": {
++        "distanceKm": 7.327764127764128,
++        "durationSeconds": 2483.2
++      },
++      "displayDistanceKm": 7.3,
++      "editorDistanceMode": "omit"
++    },
++    {
++      "id": "tempo",
++      "generated": true,
++      "prescription": {
++        "localDate": "2026-11-01",
++        "kind": "tempo",
++        "structure": {
++          "warmup": {
++            "purpose": "warmup",
++            "goal": {
++              "type": "time",
++              "seconds": 600
++            },
++            "alert": null
++          },
++          "blocks": [
++            {
++              "iterations": 3,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "time",
++                    "seconds": 480
++                  },
++                  "alert": {
++                    "kind": "pace",
++                    "lower": 260,
++                    "upper": 283
++                  }
++                },
++                {
++                  "purpose": "recovery",
++                  "goal": {
++                    "type": "time",
++                    "seconds": 120
++                  },
++                  "alert": null
++                }
++              ]
++            }
++          ],
++          "cooldown": {
++            "purpose": "cooldown",
++            "goal": {
++              "type": "time",
++              "seconds": 600
++            },
++            "alert": null
++          }
++        },
++        "distanceKm": 8.9,
++        "reason": "\u5b8c\u6574\u5242\u91cf\u4f18\u5148\uff1brai-coach-session-dose-v2\uff0c\u672a\u5206\u914d\u5efa\u8bae\u91cf\u4e0d\u4ea7\u751f\u8865\u8bfe\u4e49\u52a1\u3002"
++      },
++      "measured": {
++        "distanceKm": 8.921263055538674,
++        "durationSeconds": 3000
++      },
++      "displayDistanceKm": 8.9,
++      "editorDistanceMode": "omit"
++    },
++    {
++      "id": "distance-only",
++      "generated": false,
++      "prescription": {
++        "localDate": "2026-10-28",
++        "kind": "easy",
++        "distanceKm": 8.05,
++        "structure": {
++          "warmup": null,
++          "blocks": [
++            {
++              "iterations": 1,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "distance",
++                    "meters": 8050
++                  },
++                  "alert": null
++                }
++              ]
++            }
++          ],
++          "cooldown": null
++        },
++        "reason": null
++      },
++      "measured": {
++        "distanceKm": 8.05,
++        "durationSeconds": 3276.3500000000004
++      },
++      "displayDistanceKm": 8.1,
++      "editorDistanceMode": "value"
++    },
++    {
++      "id": "time-only",
++      "generated": false,
++      "prescription": {
++        "localDate": "2026-10-28",
++        "kind": "easy",
++        "distanceKm": null,
++        "structure": {
++          "warmup": {
++            "purpose": "warmup",
++            "goal": {
++              "type": "time",
++              "seconds": 300
++            },
++            "alert": null
++          },
++          "blocks": [
++            {
++              "iterations": 1,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "time",
++                    "seconds": 1200
++                  },
++                  "alert": null
++                }
++              ]
++            }
++          ],
++          "cooldown": {
++            "purpose": "cooldown",
++            "goal": {
++              "type": "time",
++              "seconds": 300
++            },
++            "alert": null
++          }
++        },
++        "reason": null
++      },
++      "measured": {
++        "distanceKm": 4.422604422604422,
++        "durationSeconds": 1800
++      },
++      "displayDistanceKm": 4.4,
++      "editorDistanceMode": "null"
++    },
++    {
++      "id": "mixed",
++      "generated": false,
++      "prescription": {
++        "localDate": "2026-10-28",
++        "kind": "interval",
++        "distanceKm": 5.822,
++        "structure": {
++          "warmup": {
++            "purpose": "warmup",
++            "goal": {
++              "type": "distance",
++              "meters": 1000
++            },
++            "alert": null
++          },
++          "blocks": [
++            {
++              "iterations": 4,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "distance",
++                    "meters": 800
++                  },
++                  "alert": null
++                },
++                {
++                  "purpose": "recovery",
++                  "goal": {
++                    "type": "time",
++                    "seconds": 90
++                  },
++                  "alert": null
++                }
++              ]
++            }
++          ],
++          "cooldown": {
++            "purpose": "cooldown",
++            "goal": {
++              "type": "time",
++              "seconds": 300
++            },
++            "alert": null
++          }
++        },
++        "reason": null
++      },
++      "measured": {
++        "distanceKm": 5.821621621621621,
++        "durationSeconds": 1870.1999999999998
++      },
++      "displayDistanceKm": 5.8,
++      "editorDistanceMode": "omit"
++    },
++    {
++      "id": "historical-distance-only",
++      "generated": false,
++      "prescription": {
++        "localDate": "2026-10-28",
++        "kind": "easy",
++        "distanceKm": 8.1,
++        "structure": {
++          "warmup": {
++            "purpose": "warmup",
++            "goal": {
++              "type": "distance",
++              "meters": 1000
++            },
++            "alert": null
++          },
++          "blocks": [
++            {
++              "iterations": 3,
++              "steps": [
++                {
++                  "purpose": "work",
++                  "goal": {
++                    "type": "distance",
++                    "meters": 2000
++                  },
++                  "alert": null
++                },
++                {
++                  "purpose": "recovery",
++                  "goal": {
++                    "type": "distance",
++                    "meters": 100
++                  },
++                  "alert": null
++                }
++              ]
++            }
++          ],
++          "cooldown": {
++            "purpose": "cooldown",
++            "goal": {
++              "type": "distance",
++              "meters": 760
++            },
++            "alert": null
++          }
++        },
++        "reason": null
++      },
++      "measured": {
++        "distanceKm": 8.06,
++        "durationSeconds": 3280.42
++      },
++      "displayDistanceKm": 8.1,
++      "editorDistanceMode": "value"
++    }
++  ]
++}

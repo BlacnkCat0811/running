@@ -1,0 +1,2626 @@
+{
+  "selected": [
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/REPORT.md",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/REPORT.md",
+      "originalSha256": "5407d87c7d4e8f2ab0afd8d5ecb0386b3516b0aa1f475bf4e21f9f970be41bc2",
+      "mode": "0o644",
+      "rawReport": "deliverables/training-plan-v2-a01-2026-10-26/REPORT.source.txt",
+      "selectedSha256": "d59a1fa65177c8768504981eb0fe269435b074bd918de0c0f2bc880f3eb46803"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/before-fix-red.log",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/before-fix-red.log",
+      "originalSha256": "a9fa4964e63335346a0efb0834fbf72fdcdb26b59beed32ecc3c4fc3099b4cda",
+      "mode": "0o644",
+      "selectedSha256": "a9fa4964e63335346a0efb0834fbf72fdcdb26b59beed32ecc3c4fc3099b4cda"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/l1.log",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/l1.log",
+      "originalSha256": "b0a45d806b00e48b567c8a02d64ec1716d517d59db149f1382bcbab2da2dec11",
+      "mode": "0o644",
+      "selectedSha256": "b0a45d806b00e48b567c8a02d64ec1716d517d59db149f1382bcbab2da2dec11"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/l2-files.json",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/l2-files.json",
+      "originalSha256": "41a312671ff89b3205b09b5825ca74d96416ad9da137c26e17708155804ff0c1",
+      "mode": "0o644",
+      "selectedSha256": "41a312671ff89b3205b09b5825ca74d96416ad9da137c26e17708155804ff0c1"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/l3-files.json",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/l3-files.json",
+      "originalSha256": "63e86e14df9b4f6c23f11a220e44c9c8520c68bd1f3ba2588c9571254c3f1943",
+      "mode": "0o644",
+      "selectedSha256": "63e86e14df9b4f6c23f11a220e44c9c8520c68bd1f3ba2588c9571254c3f1943"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/l3.log",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/l3.log",
+      "originalSha256": "a988b35dca8f48493d034decdb681b08d9727a9cd2deb5ecd442c73d742278d4",
+      "mode": "0o644",
+      "selectedSha256": "a988b35dca8f48493d034decdb681b08d9727a9cd2deb5ecd442c73d742278d4"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/typecheck.log",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/typecheck.log",
+      "originalSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "selectedSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/verification.json",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/verification.json",
+      "originalSha256": "12ded0652453694ad46a05b736d08725dd782914b30ce464c979e377a521808a",
+      "mode": "0o644",
+      "selectedSha256": "12ded0652453694ad46a05b736d08725dd782914b30ce464c979e377a521808a"
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/workspace-before-sha256.json",
+      "source": "deliverables/training-plan-v2-a01-2026-10-26/workspace-before-sha256.json",
+      "originalSha256": "659a93986b640fd7e7354f518050d71879d5ade3a0f47c8daf4a49f129b7eda5",
+      "mode": "0o644",
+      "selectedSha256": "659a93986b640fd7e7354f518050d71879d5ade3a0f47c8daf4a49f129b7eda5"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/D01_D02.diff",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/D01_D02.diff",
+      "originalSha256": "e574fab36b0b04abd46775d01440968aba544248d54f065423a2f19b6de513b8",
+      "mode": "0o644",
+      "selectedSha256": "e574fab36b0b04abd46775d01440968aba544248d54f065423a2f19b6de513b8"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.md",
+      "originalSha256": "e23e0350f64e99f83ec72c2526db77c5e8c38b32994e862e992810c497bec0cb",
+      "mode": "0o644",
+      "rawReport": "deliverables/training-plan-v2-d01-d02-2026-10-26/REPORT.source.txt",
+      "selectedSha256": "81c681f0a9eb610ba55397090e3d1f75aab07cc9ce015acd44ab80ed73a1724e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/acceptance-matrix.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/acceptance-matrix.log",
+      "originalSha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "mode": "0o644",
+      "selectedSha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/doc-refs.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/doc-refs.log",
+      "originalSha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+      "mode": "0o644",
+      "selectedSha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/docs.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/docs.log",
+      "originalSha256": "2552e76c7f2e659d9061d63429586872b872c629409f70a862b05f73fd4e2ed9",
+      "mode": "0o644",
+      "selectedSha256": "2552e76c7f2e659d9061d63429586872b872c629409f70a862b05f73fd4e2ed9"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-gates.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-gates.log",
+      "originalSha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023",
+      "mode": "0o644",
+      "selectedSha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-initial.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-initial.log",
+      "originalSha256": "ac9a4e105f55c5b24564baf59532782cfc5cba504111334fec908ee654e31c29",
+      "mode": "0o644",
+      "selectedSha256": "ac9a4e105f55c5b24564baf59532782cfc5cba504111334fec908ee654e31c29"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-result.json",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-result.json",
+      "originalSha256": "aa273c8d53ad97bf0b57ba3c156479e3f412b2d61edc4937afdfc5c03aaf5b70",
+      "mode": "0o644",
+      "selectedSha256": "aa273c8d53ad97bf0b57ba3c156479e3f412b2d61edc4937afdfc5c03aaf5b70"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-source-check-interrupted.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios-source-check-interrupted.log",
+      "originalSha256": "12ae456d8e7203d022fd13c342cdb5693f59ab1bb266d333afb037848cb4c258",
+      "mode": "0o644",
+      "selectedSha256": "12ae456d8e7203d022fd13c342cdb5693f59ab1bb266d333afb037848cb4c258"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/ios.log",
+      "originalSha256": "c6fa9d9b71a19e2cba440ebec6d7d7c5a53d615ac2df83357fab0d3bd33ed919",
+      "mode": "0o644",
+      "selectedSha256": "c6fa9d9b71a19e2cba440ebec6d7d7c5a53d615ac2df83357fab0d3bd33ed919"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-ios.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-ios.log",
+      "originalSha256": "458e7087b56972758a0d87c1f4c69d780e811c4b31fc9f77ec4bb94d412ddd38",
+      "mode": "0o644",
+      "selectedSha256": "458e7087b56972758a0d87c1f4c69d780e811c4b31fc9f77ec4bb94d412ddd38"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-server.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/l1-server.log",
+      "originalSha256": "c9bc397af0ebcfe9e4ef00d1f6aa2ac3ab32e0ed9f960b0706010888e0372aab",
+      "mode": "0o644",
+      "selectedSha256": "c9bc397af0ebcfe9e4ef00d1f6aa2ac3ab32e0ed9f960b0706010888e0372aab"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/l2-server.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/l2-server.log",
+      "originalSha256": "82eef5bf7a1bfa34930f9014f76da2dcb4784532eb5ba57394a15c231421bfaf",
+      "mode": "0o644",
+      "selectedSha256": "82eef5bf7a1bfa34930f9014f76da2dcb4784532eb5ba57394a15c231421bfaf"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-files.json",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-files.json",
+      "originalSha256": "4fa0e3c4c8bb291286450717fc56b9e0e84596f451fa0e6aa049ed5fe58b36bb",
+      "mode": "0o644",
+      "selectedSha256": "4fa0e3c4c8bb291286450717fc56b9e0e84596f451fa0e6aa049ed5fe58b36bb"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-server.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/l3-server.log",
+      "originalSha256": "c943a8ce53b77f062bf9752693cdfb2c0b5a982b3edee332636ae78df00949ac",
+      "mode": "0o644",
+      "selectedSha256": "c943a8ce53b77f062bf9752693cdfb2c0b5a982b3edee332636ae78df00949ac"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/node-results.json",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/node-results.json",
+      "originalSha256": "6767aa430db575151fae464bcd46c1004bf33f2c1f3e23b77a51cafdf09bfa5d",
+      "mode": "0o644",
+      "selectedSha256": "6767aa430db575151fae464bcd46c1004bf33f2c1f3e23b77a51cafdf09bfa5d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/red-ios.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/red-ios.log",
+      "originalSha256": "193c815b85ef679b807db60e41abc35b4269729514f1b07b980174d77e7a536e",
+      "mode": "0o644",
+      "selectedSha256": "193c815b85ef679b807db60e41abc35b4269729514f1b07b980174d77e7a536e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/red-openapi.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/red-openapi.log",
+      "originalSha256": "e5aeb8f0c3f597ae6fed71033412eecced7dbd865613c4bc644c83e3e2088621",
+      "mode": "0o644",
+      "selectedSha256": "e5aeb8f0c3f597ae6fed71033412eecced7dbd865613c4bc644c83e3e2088621"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/red-server.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/red-server.log",
+      "originalSha256": "14fca28120935303fbe8d9a9134c593ed034f9b85e162841f2f9da491ee5da05",
+      "mode": "0o644",
+      "selectedSha256": "14fca28120935303fbe8d9a9134c593ed034f9b85e162841f2f9da491ee5da05"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck-initial.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck-initial.log",
+      "originalSha256": "ac0312358e7e17b5e9f3e1c90077f61d0ac063ef2987295ed91c2bb5fe951735",
+      "mode": "0o644",
+      "selectedSha256": "ac0312358e7e17b5e9f3e1c90077f61d0ac063ef2987295ed91c2bb5fe951735"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck.log",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/typecheck.log",
+      "originalSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "selectedSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/validation-commands.json",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/validation-commands.json",
+      "originalSha256": "7d2bdf7c232a5230876d5e0dfad883df948a26f9e6a1b5e7575875d5b0823ab7",
+      "mode": "0o644",
+      "selectedSha256": "7d2bdf7c232a5230876d5e0dfad883df948a26f9e6a1b5e7575875d5b0823ab7"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d01-d02-2026-10-26/workspace-preservation.json",
+      "source": "deliverables/training-plan-v2-d01-d02-2026-10-26/workspace-preservation.json",
+      "originalSha256": "987ae0da0682da1fafd274f914a25e3a14c81e4f09d8edd2eff0ec37dcc62e35",
+      "mode": "0o644",
+      "selectedSha256": "987ae0da0682da1fafd274f914a25e3a14c81e4f09d8edd2eff0ec37dcc62e35"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.md",
+      "originalSha256": "616014b63076a9f9d2dc235a28080106a9387ecceb195870c3d45a09acf1c1cf",
+      "mode": "0o644",
+      "rawReport": "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.source.txt",
+      "selectedSha256": "172bb2194b794f30f0750761e169c00b55c2bdfb2e9479d684602f3f7d404dcc"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/acceptance-matrix.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/acceptance-matrix.log",
+      "originalSha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "mode": "0o644",
+      "selectedSha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/final-source-sha256.json",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/final-source-sha256.json",
+      "originalSha256": "51eb12375fee893b0235ce4a00e145bd503e76279a98c2cf01afb76bf0b589ad",
+      "mode": "0o644",
+      "selectedSha256": "51eb12375fee893b0235ce4a00e145bd503e76279a98c2cf01afb76bf0b589ad"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/ios-gates.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/ios-gates.log",
+      "originalSha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023",
+      "mode": "0o644",
+      "selectedSha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-api.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-api.log",
+      "originalSha256": "cb0f1b27d7f608725e9a905c2e084d7f8f972178965f4089bebc2bdacf268c0e",
+      "mode": "0o644",
+      "selectedSha256": "cb0f1b27d7f608725e9a905c2e084d7f8f972178965f4089bebc2bdacf268c0e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-final.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-final.log",
+      "originalSha256": "9fbf305e3d2f6fcc137dd400a515ff4a910406f0c581564218ebc6a091c8edde",
+      "mode": "0o644",
+      "selectedSha256": "9fbf305e3d2f6fcc137dd400a515ff4a910406f0c581564218ebc6a091c8edde"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l2-api.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/l2-api.log",
+      "originalSha256": "cc797e517ffb141c588933a638f79ff2f1d7cc78c003670a01990824621eb7dd",
+      "mode": "0o644",
+      "selectedSha256": "cc797e517ffb141c588933a638f79ff2f1d7cc78c003670a01990824621eb7dd"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-api.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-api.log",
+      "originalSha256": "5c4b7e20a0768c0607af94d426de44bcbee719351c95191420abd15e212a0014",
+      "mode": "0o644",
+      "selectedSha256": "5c4b7e20a0768c0607af94d426de44bcbee719351c95191420abd15e212a0014"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-related.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/l3-related.log",
+      "originalSha256": "09fc86b9a99a481e5717cd21f57d50012152f8fe628d16381cfbd24ed325e98f",
+      "mode": "0o644",
+      "selectedSha256": "09fc86b9a99a481e5717cd21f57d50012152f8fe628d16381cfbd24ed325e98f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/node-results.json",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/node-results.json",
+      "originalSha256": "b2eebf4444006a2ba5673148c7785541e299a5a5371be05076a74f7a5122287c",
+      "mode": "0o644",
+      "selectedSha256": "b2eebf4444006a2ba5673148c7785541e299a5a5371be05076a74f7a5122287c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/prior-phase-preservation.json",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/prior-phase-preservation.json",
+      "originalSha256": "c7fe3b70d20c44c3fc7b94fb5c49f04ebb065e7e536116edc4bbffb134a03fd3",
+      "mode": "0o644",
+      "selectedSha256": "c7fe3b70d20c44c3fc7b94fb5c49f04ebb065e7e536116edc4bbffb134a03fd3"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-api.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-api.log",
+      "originalSha256": "1f7dc4210c5b4a0ba734d729c8bbbc694bb8aa63f80d4cb92aafed13a8445240",
+      "mode": "0o644",
+      "selectedSha256": "1f7dc4210c5b4a0ba734d729c8bbbc694bb8aa63f80d4cb92aafed13a8445240"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-final.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-final.log",
+      "originalSha256": "5ed4ed7f2182e8aafdcbad9d42172c38244893c5089f23c22708805d193aa740",
+      "mode": "0o644",
+      "selectedSha256": "5ed4ed7f2182e8aafdcbad9d42172c38244893c5089f23c22708805d193aa740"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/single-writer.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/single-writer.log",
+      "originalSha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+      "mode": "0o644",
+      "selectedSha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/stage.diff",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/stage.diff",
+      "originalSha256": "4fa6a519415e8e0e278683ccb3ea79da8d15f4ffc34ba76435963e3b1256884b",
+      "mode": "0o644",
+      "selectedSha256": "4fa6a519415e8e0e278683ccb3ea79da8d15f4ffc34ba76435963e3b1256884b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios-final.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios-final.log",
+      "originalSha256": "a47dd1b0f5ce2821f65a4fdc3b809fbf09a089c15acc580411a1dc686b8f002f",
+      "mode": "0o644",
+      "selectedSha256": "a47dd1b0f5ce2821f65a4fdc3b809fbf09a089c15acc580411a1dc686b8f002f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/typecheck.log",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/typecheck.log",
+      "originalSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "selectedSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/verification-manifest.json",
+      "source": "deliverables/training-plan-v2-i01-p03-2026-10-26/verification-manifest.json",
+      "originalSha256": "f9c1fa808a6f085efad141a89b0249c36810c98a5e48f27c84bd5faea20eecc7",
+      "mode": "0o644",
+      "selectedSha256": "f9c1fa808a6f085efad141a89b0249c36810c98a5e48f27c84bd5faea20eecc7"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/D03.patch",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/D03.patch",
+      "originalSha256": "efccca4bc40905b4623cb7b1cc0a8acd731e688db4d58abdcc30bf96360a03d4",
+      "mode": "0o644",
+      "selectedSha256": "efccca4bc40905b4623cb7b1cc0a8acd731e688db4d58abdcc30bf96360a03d4"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/REPORT.md",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/REPORT.md",
+      "originalSha256": "a6b99d6a14743ede4e3b9833be16d38ba974bfa76b4379721c4716e732ee8f2c",
+      "mode": "0o644",
+      "rawReport": "deliverables/training-plan-v2-d03-2026-10-26/REPORT.source.txt",
+      "selectedSha256": "9fe86ade8db05537c3ce4b9120f0dd571985b8dd52a457163a6f81c614606a38"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/ios.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/ios.log",
+      "originalSha256": "253db907ba7eddc01f1711712876031eb4867a2a33f8e0a25ec9fc605846162a",
+      "mode": "0o644",
+      "selectedSha256": "253db907ba7eddc01f1711712876031eb4867a2a33f8e0a25ec9fc605846162a"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1-final.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/l1-final.log",
+      "originalSha256": "6c6e5a5ce929b51375b52a4a5cb9721407db035778c2a62fc641c0c52f262522",
+      "mode": "0o644",
+      "selectedSha256": "6c6e5a5ce929b51375b52a4a5cb9721407db035778c2a62fc641c0c52f262522"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l2-final.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/l2-final.log",
+      "originalSha256": "0684b36255199eb461ca6182f5761ada8515d4c52916b66cde5b5c2514c8a291",
+      "mode": "0o644",
+      "selectedSha256": "0684b36255199eb461ca6182f5761ada8515d4c52916b66cde5b5c2514c8a291"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.log",
+      "originalSha256": "b9003994610475576c9af1edbab896c706b60fa6d24cea5c7f92d305882cf099",
+      "mode": "0o644",
+      "selectedSha256": "b9003994610475576c9af1edbab896c706b60fa6d24cea5c7f92d305882cf099"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l3-files.json",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/l3-files.json",
+      "originalSha256": "e31cfcbedd6eac9de005273b73ae2d457d54897f7671c8dd00da2a89a8b29969",
+      "mode": "0o644",
+      "selectedSha256": "e31cfcbedd6eac9de005273b73ae2d457d54897f7671c8dd00da2a89a8b29969"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l3.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/l3.log",
+      "originalSha256": "f7e252b2159e2837c070e7ed9fc7c61a4b44d9d48a98cc8e6495a59f61d7a7db",
+      "mode": "0o644",
+      "selectedSha256": "f7e252b2159e2837c070e7ed9fc7c61a4b44d9d48a98cc8e6495a59f61d7a7db"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/red-node.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/red-node.log",
+      "originalSha256": "089b8692197e8387b12050a366ffeb06903c854fd746f3f17b974be0660b2fa6",
+      "mode": "0o644",
+      "selectedSha256": "089b8692197e8387b12050a366ffeb06903c854fd746f3f17b974be0660b2fa6"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/red-swift.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/red-swift.log",
+      "originalSha256": "aece3c5a120fdaea3312df11740fdfe0d5940157f37794023a71ae640066baca",
+      "mode": "0o644",
+      "selectedSha256": "aece3c5a120fdaea3312df11740fdfe0d5940157f37794023a71ae640066baca"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.log",
+      "originalSha256": "3866a9384a07de1f64242601f4cf87887d1e94105b77efb63a45623950bb96b4",
+      "mode": "0o644",
+      "selectedSha256": "3866a9384a07de1f64242601f4cf87887d1e94105b77efb63a45623950bb96b4"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.log",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.log",
+      "originalSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "selectedSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/validation-summary.json",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/validation-summary.json",
+      "originalSha256": "abc4b84a77be93b2e67a326b810174de9cdea86732a3ee324530ad2a0345d7fd",
+      "mode": "0o644",
+      "selectedSha256": "abc4b84a77be93b2e67a326b810174de9cdea86732a3ee324530ad2a0345d7fd"
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/workspace-preservation.json",
+      "source": "deliverables/training-plan-v2-d03-2026-10-26/workspace-preservation.json",
+      "originalSha256": "21a28e1ff920b897aaf4549f3b6aba39c85793b4bb6186cef0b68abcafaf6d5b",
+      "mode": "0o644",
+      "selectedSha256": "21a28e1ff920b897aaf4549f3b6aba39c85793b4bb6186cef0b68abcafaf6d5b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/P1.patch",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/P1.patch",
+      "originalSha256": "e0958ac6fd7541e8bbb67d0d8fec85a98099e279262f9ac5a2ce208dff9d8cf6",
+      "mode": "0o644",
+      "selectedSha256": "e0958ac6fd7541e8bbb67d0d8fec85a98099e279262f9ac5a2ce208dff9d8cf6"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/REPORT.md",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/REPORT.md",
+      "originalSha256": "75001850d696d38de391138cff9566b223635c9dcefc1978626e9d9493262215",
+      "mode": "0o644",
+      "rawReport": "deliverables/training-plan-v2-p1-2026-10-26/REPORT.source.txt",
+      "selectedSha256": "09ec36adfd55f457794b3bd0e98b5f7d1a54a9f063080cc0186572ea8cf38cd4"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/a01-green.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/a01-green.log",
+      "originalSha256": "2a76e04e5a64d2725b00200bb92943ef26b1ef497d8ab01728b17e06cf5f5968",
+      "mode": "0o644",
+      "selectedSha256": "2a76e04e5a64d2725b00200bb92943ef26b1ef497d8ab01728b17e06cf5f5968"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/a01-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/a01-red.log",
+      "originalSha256": "9315b8cafa319e44813a12cd229131821a61f939447bd587117f6f749a03ef96",
+      "mode": "0o644",
+      "selectedSha256": "9315b8cafa319e44813a12cd229131821a61f939447bd587117f6f749a03ef96"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.log",
+      "originalSha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "mode": "0o644",
+      "selectedSha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.log",
+      "originalSha256": "e85aabb7480a454d62cb410bff1d6f9b1c13ad3138fd7f3efc4207acae14771a",
+      "mode": "0o644",
+      "selectedSha256": "e85aabb7480a454d62cb410bff1d6f9b1c13ad3138fd7f3efc4207acae14771a"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/compat01-green.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/compat01-green.log",
+      "originalSha256": "3a9dfaedb7a9199af160132ab531932d8b92c6434b4464d125f57fae4b99aab8",
+      "mode": "0o644",
+      "selectedSha256": "3a9dfaedb7a9199af160132ab531932d8b92c6434b4464d125f57fae4b99aab8"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/compat01-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/compat01-red.log",
+      "originalSha256": "ff404a520e9ea443ede85710b17a1343a890e5eff9ce539460e0317e56008131",
+      "mode": "0o644",
+      "selectedSha256": "ff404a520e9ea443ede85710b17a1343a890e5eff9ce539460e0317e56008131"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/doc01-green.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/doc01-green.log",
+      "originalSha256": "1301eda890abad9de774b060ddb3ead8a61a28ef71c03474d30301bff6ef3fa4",
+      "mode": "0o644",
+      "selectedSha256": "1301eda890abad9de774b060ddb3ead8a61a28ef71c03474d30301bff6ef3fa4"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/doc01-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/doc01-red.log",
+      "originalSha256": "fae66a56b15beac3746757ad76db86ff8c7164a8270519c6b89295c72a6fae26",
+      "mode": "0o644",
+      "selectedSha256": "fae66a56b15beac3746757ad76db86ff8c7164a8270519c6b89295c72a6fae26"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.log",
+      "originalSha256": "0a8e1717aacfc2dcbed0fbaa6fb135cd6bc32ebf32e875fd353ee63cd717efdb",
+      "mode": "0o644",
+      "selectedSha256": "0a8e1717aacfc2dcbed0fbaa6fb135cd6bc32ebf32e875fd353ee63cd717efdb"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/edit01-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/edit01-red.log",
+      "originalSha256": "819043de1f84f87a7a4d5bf560bedd91f05e89939c81809920e79dba67e83d4f",
+      "mode": "0o644",
+      "selectedSha256": "819043de1f84f87a7a4d5bf560bedd91f05e89939c81809920e79dba67e83d4f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/environment.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/environment.json",
+      "originalSha256": "85a228218bc3bad1f4d9cfd124c39a5f2dac3b7bb1404bb266ba7dc0e9d19691",
+      "mode": "0o644",
+      "selectedSha256": "85a228218bc3bad1f4d9cfd124c39a5f2dac3b7bb1404bb266ba7dc0e9d19691"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec01-green.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec01-green.log",
+      "originalSha256": "81281911b7ba73c8f2e0fcd12eccf9851877613f8861a9f18312e6b678fba69d",
+      "mode": "0o644",
+      "selectedSha256": "81281911b7ba73c8f2e0fcd12eccf9851877613f8861a9f18312e6b678fba69d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec01-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec01-red.log",
+      "originalSha256": "04390193c3b981fa1f9dd0e3f00d4919bb0f25b8d9e539e86b6544ae634f2e49",
+      "mode": "0o644",
+      "selectedSha256": "04390193c3b981fa1f9dd0e3f00d4919bb0f25b8d9e539e86b6544ae634f2e49"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.log",
+      "originalSha256": "4e40ce580406cc35796b26b698c0a9db2e82f50728d72f11a712902ca223028f",
+      "mode": "0o644",
+      "selectedSha256": "4e40ce580406cc35796b26b698c0a9db2e82f50728d72f11a712902ca223028f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.log",
+      "originalSha256": "57687a7cadfe2ee725601b207a6454b97e589da1c254991de76d106e9576b9a5",
+      "mode": "0o644",
+      "selectedSha256": "57687a7cadfe2ee725601b207a6454b97e589da1c254991de76d106e9576b9a5"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.log",
+      "originalSha256": "e0d03a66e14988e142162805b9deef10fcdedc1bfdb30428383b58d71d162037",
+      "mode": "0o644",
+      "selectedSha256": "e0d03a66e14988e142162805b9deef10fcdedc1bfdb30428383b58d71d162037"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.log",
+      "originalSha256": "58b1c16e0ea4c15b39df26d6708ee3cd2598f214e434d0df65478cfb1a3a774e",
+      "mode": "0o644",
+      "selectedSha256": "58b1c16e0ea4c15b39df26d6708ee3cd2598f214e434d0df65478cfb1a3a774e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.log",
+      "originalSha256": "7431a4b0888af00d7148bb3b565fff8c6eaa8c044c24ad58565dbca208ab47da",
+      "mode": "0o644",
+      "selectedSha256": "7431a4b0888af00d7148bb3b565fff8c6eaa8c044c24ad58565dbca208ab47da"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-red.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/exec03-red.log",
+      "originalSha256": "a02653f1824aeb035d9ff44c7702c62062c307ee31f0cf8c9a0908ac74d2b050",
+      "mode": "0o644",
+      "selectedSha256": "a02653f1824aeb035d9ff44c7702c62062c307ee31f0cf8c9a0908ac74d2b050"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/ios-gates.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/ios-gates.log",
+      "originalSha256": "f2b67e1a0c11cec62ec1effe5ef6d130ec64f459468d634b7551cfd7343fa55f",
+      "mode": "0o644",
+      "selectedSha256": "f2b67e1a0c11cec62ec1effe5ef6d130ec64f459468d634b7551cfd7343fa55f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/ios.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/ios.log",
+      "originalSha256": "1ef510d4b711430ac5521bd6c7de1d55c277a143e1c2268032c26e008a6579b9",
+      "mode": "0o644",
+      "selectedSha256": "1ef510d4b711430ac5521bd6c7de1d55c277a143e1c2268032c26e008a6579b9"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/l3-files.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/l3-files.json",
+      "originalSha256": "053122cf131d3c04d69acf948b4bb6b50128ea9964f1eab797c561e3fc77a48d",
+      "mode": "0o644",
+      "selectedSha256": "053122cf131d3c04d69acf948b4bb6b50128ea9964f1eab797c561e3fc77a48d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/l3-final.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/l3-final.log",
+      "originalSha256": "aeb96dc7f519428fdd2a286bb8c8d34d901e9be65e716bd88fc2f98e67a0b200",
+      "mode": "0o644",
+      "selectedSha256": "aeb96dc7f519428fdd2a286bb8c8d34d901e9be65e716bd88fc2f98e67a0b200"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.log",
+      "originalSha256": "fe1b0edd059a9c43efece2742f497b3906f1f73fd8d62dbc31435f458d6d5834",
+      "mode": "0o644",
+      "selectedSha256": "fe1b0edd059a9c43efece2742f497b3906f1f73fd8d62dbc31435f458d6d5834"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.log",
+      "originalSha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+      "mode": "0o644",
+      "selectedSha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.json",
+      "originalSha256": "017f48c59e3bbbbdeb9c6ab14d1b4b1a4baf528d39481dc3e098618c5de3914d",
+      "mode": "0o644",
+      "selectedSha256": "017f48c59e3bbbbdeb9c6ab14d1b4b1a4baf528d39481dc3e098618c5de3914d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/rollback-check-final.log",
+      "originalSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": "0o644",
+      "selectedSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.log",
+      "originalSha256": "59e45bf97b137d5b3d2aaa4c31b56fca563e3208242c0cd8b42179debf681838",
+      "mode": "0o644",
+      "selectedSha256": "59e45bf97b137d5b3d2aaa4c31b56fca563e3208242c0cd8b42179debf681838"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.log",
+      "originalSha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+      "mode": "0o644",
+      "selectedSha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/source-locations.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/source-locations.json",
+      "originalSha256": "97f54af1e5b3d27c83fc658fa0dcc4ed86de8a5c37b7e607b3a6fa7a66f3f2ad",
+      "mode": "0o644",
+      "selectedSha256": "97f54af1e5b3d27c83fc658fa0dcc4ed86de8a5c37b7e607b3a6fa7a66f3f2ad"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.log",
+      "originalSha256": "7357b24e4b1e37740f90f66b6ccf6755a4c53eab07aef9fec703ea27fff7ac8e",
+      "mode": "0o644",
+      "selectedSha256": "7357b24e4b1e37740f90f66b6ccf6755a4c53eab07aef9fec703ea27fff7ac8e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/task-files.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/task-files.json",
+      "originalSha256": "2dc39ca3e0604c716a03c354da71850aa28441cf8c35f97e73bf46d025a53d24",
+      "mode": "0o644",
+      "selectedSha256": "2dc39ca3e0604c716a03c354da71850aa28441cf8c35f97e73bf46d025a53d24"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/test-summary.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/test-summary.json",
+      "originalSha256": "5f026b9b8934a94d4ce75f7722b0dd4ccdb23658174dcd2b3a35b0fb9eba9a7c",
+      "mode": "0o644",
+      "selectedSha256": "5f026b9b8934a94d4ce75f7722b0dd4ccdb23658174dcd2b3a35b0fb9eba9a7c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.log",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.log",
+      "originalSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "selectedSha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/workspace-baseline.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/workspace-baseline.json",
+      "originalSha256": "2f202b320d528c51e8e8e250ba1f6b5c662952bfb2a75c4c541ca2aefb497bb3",
+      "mode": "0o644",
+      "selectedSha256": "2f202b320d528c51e8e8e250ba1f6b5c662952bfb2a75c4c541ca2aefb497bb3"
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/workspace-preservation.json",
+      "source": "deliverables/training-plan-v2-p1-2026-10-26/workspace-preservation.json",
+      "originalSha256": "b6b58200bea75423ea4958b7dacd24a4868b358f2ef03b0868899042b4558837",
+      "mode": "0o644",
+      "selectedSha256": "b6b58200bea75423ea4958b7dacd24a4868b358f2ef03b0868899042b4558837"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/COMMANDS.md",
+      "source": "l4-external/COMMANDS.md",
+      "originalSha256": "9dece22936132f4592b7bb88873d89abb5cd3cea532f8be629122892bfc2f1c5",
+      "mode": "0o644",
+      "selectedSha256": "48ad80f0943e0cf527db61af54c243a12d444f28c71ef9e100bac969345542e1"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/REPORT.md",
+      "source": "l4-external/REPORT.md",
+      "originalSha256": "ae284c8bc20597348d6a2c0c2262e6e8b94a78d60fc641233252b5554ac52028",
+      "mode": "0o644",
+      "rawReport": "deliverables/training-plan-v2-l4-2026-10-26/REPORT.source.txt",
+      "selectedSha256": "4e0adbe3ee256c2697fd3380dad220bc1b68da21c4beeaebe422df11bec7e84c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/SUMMARY.json",
+      "source": "l4-external/SUMMARY.json",
+      "originalSha256": "007da69b5b5b203439911766b5d4471a308614e01b5cddf7fe56ed08b38a74fc",
+      "mode": "0o644",
+      "selectedSha256": "007da69b5b5b203439911766b5d4471a308614e01b5cddf7fe56ed08b38a74fc"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/acceptance.json",
+      "source": "l4-external/acceptance.json",
+      "originalSha256": "ffc454c8681e960527fd355536b232121307cb55a495aacc746f8ec9f1defb00",
+      "mode": "0o644",
+      "selectedSha256": "ffc454c8681e960527fd355536b232121307cb55a495aacc746f8ec9f1defb00"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/acceptance.log",
+      "source": "l4-external/acceptance.log",
+      "originalSha256": "b452c889cc0f4d4a5fba9700e671d889318cf6dd6ecc5cb797cc9874200fc2fe",
+      "mode": "0o644",
+      "selectedSha256": "b452c889cc0f4d4a5fba9700e671d889318cf6dd6ecc5cb797cc9874200fc2fe"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/actionlint-install.json",
+      "source": "l4-external/actionlint-install.json",
+      "originalSha256": "0777d88cc4e238d40feb373a96006f4db62369874b733adba6be3c3383fecf78",
+      "mode": "0o644",
+      "selectedSha256": "0777d88cc4e238d40feb373a96006f4db62369874b733adba6be3c3383fecf78"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/app-device-coverage.json",
+      "source": "l4-external/app-device-coverage.json",
+      "originalSha256": "e1cc9c62b5c280ff1c9c4f4be63533b47729b35a4c2b46aa15eb87123c70ca74",
+      "mode": "0o644",
+      "selectedSha256": "e1cc9c62b5c280ff1c9c4f4be63533b47729b35a4c2b46aa15eb87123c70ca74"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/app-device.json",
+      "source": "l4-external/app-device.json",
+      "originalSha256": "84a9c301d853c8d3937da3b8dc01471246275a6b5b188dcd99fba4a786d420fa",
+      "mode": "0o644",
+      "selectedSha256": "84a9c301d853c8d3937da3b8dc01471246275a6b5b188dcd99fba4a786d420fa"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/app-device.log",
+      "source": "l4-external/app-device.log",
+      "originalSha256": "0bec67647e28b6d0a94b7b5449f924fa98ec46f3f7a851e3fc000ba8c764a3f3",
+      "mode": "0o644",
+      "selectedSha256": "0bec67647e28b6d0a94b7b5449f924fa98ec46f3f7a851e3fc000ba8c764a3f3"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/app-simulator-coverage.json",
+      "source": "l4-external/app-simulator-coverage.json",
+      "originalSha256": "3e93981fbda9a85c22768b3bede11a80ecaa9120c54904fc30188b10b2c7efde",
+      "mode": "0o644",
+      "selectedSha256": "3e93981fbda9a85c22768b3bede11a80ecaa9120c54904fc30188b10b2c7efde"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/app-simulator.json",
+      "source": "l4-external/app-simulator.json",
+      "originalSha256": "8aa4377d2a44e03555f29586a5a0071aba462e1a77a4d690b0f8998abb93999c",
+      "mode": "0o644",
+      "selectedSha256": "8aa4377d2a44e03555f29586a5a0071aba462e1a77a4d690b0f8998abb93999c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/app-simulator.log",
+      "source": "l4-external/app-simulator.log",
+      "originalSha256": "02919defe1c55fa10e9cfced5fa7301513fd72dbc46f115f796e26e4b29505a1",
+      "mode": "0o644",
+      "selectedSha256": "02919defe1c55fa10e9cfced5fa7301513fd72dbc46f115f796e26e4b29505a1"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/blob.json",
+      "source": "l4-external/blob.json",
+      "originalSha256": "7599adb1c89da78ed6cb1461a7cea42038287d8bc7cb2595009b7f17ec207987",
+      "mode": "0o644",
+      "selectedSha256": "7599adb1c89da78ed6cb1461a7cea42038287d8bc7cb2595009b7f17ec207987"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/blob.log",
+      "source": "l4-external/blob.log",
+      "originalSha256": "d585b98e34529a3e314961a491e12b2b080b88c724801f58942aa4142d51a9cf",
+      "mode": "0o644",
+      "selectedSha256": "d585b98e34529a3e314961a491e12b2b080b88c724801f58942aa4142d51a9cf"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/boundaries-self.json",
+      "source": "l4-external/boundaries-self.json",
+      "originalSha256": "f960b04176828d036a8766c0963431515dfc1569203939840f9d8ec753b4ce77",
+      "mode": "0o644",
+      "selectedSha256": "f960b04176828d036a8766c0963431515dfc1569203939840f9d8ec753b4ce77"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/boundaries-self.log",
+      "source": "l4-external/boundaries-self.log",
+      "originalSha256": "20c8f271c1f1e4c84e35faeeeef051b78eb3daef605e420defeae533dc72951d",
+      "mode": "0o644",
+      "selectedSha256": "20c8f271c1f1e4c84e35faeeeef051b78eb3daef605e420defeae533dc72951d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/boundaries.json",
+      "source": "l4-external/boundaries.json",
+      "originalSha256": "0a549f8951b31ddbc0d83b80e01be058b6b13b09f0568db8b2947de6444d6e80",
+      "mode": "0o644",
+      "selectedSha256": "0a549f8951b31ddbc0d83b80e01be058b6b13b09f0568db8b2947de6444d6e80"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/boundaries.log",
+      "source": "l4-external/boundaries.log",
+      "originalSha256": "5083e6fb0006fdb131875c0f7971baec9a17589a495fc0816d9a31f495ecedc7",
+      "mode": "0o644",
+      "selectedSha256": "5083e6fb0006fdb131875c0f7971baec9a17589a495fc0816d9a31f495ecedc7"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/build-warnings.json",
+      "source": "l4-external/build-warnings.json",
+      "originalSha256": "14fb23b461709ff415284da961e02b2d71dadb31881daaf17825cf1b765ef2a8",
+      "mode": "0o644",
+      "selectedSha256": "14fb23b461709ff415284da961e02b2d71dadb31881daaf17825cf1b765ef2a8"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/commands.json",
+      "source": "l4-external/commands.json",
+      "originalSha256": "c163fadb583bc780dadb3f7d154310b7f59cbd0f28162084cfe7fa006f4d6ee6",
+      "mode": "0o644",
+      "selectedSha256": "c163fadb583bc780dadb3f7d154310b7f59cbd0f28162084cfe7fa006f4d6ee6"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/deploy-syntax.json",
+      "source": "l4-external/deploy-syntax.json",
+      "originalSha256": "bc8794bb36769fd5bb27e0c5be4d46661330c6ad34dd7c17b17e9ba9d1c7070c",
+      "mode": "0o644",
+      "selectedSha256": "bc8794bb36769fd5bb27e0c5be4d46661330c6ad34dd7c17b17e9ba9d1c7070c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/doc-refs.json",
+      "source": "l4-external/doc-refs.json",
+      "originalSha256": "7924d897e79565ee499dc7e13dafbbdc2529408c0385a6391e953dfb1684fc5d",
+      "mode": "0o644",
+      "selectedSha256": "7924d897e79565ee499dc7e13dafbbdc2529408c0385a6391e953dfb1684fc5d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/doc-refs.log",
+      "source": "l4-external/doc-refs.log",
+      "originalSha256": "af06132901100b0a9a83f06dc84ec5e46ee57d1c3fd6fce5b3f4382ea5fa7fc5",
+      "mode": "0o644",
+      "selectedSha256": "af06132901100b0a9a83f06dc84ec5e46ee57d1c3fd6fce5b3f4382ea5fa7fc5"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/docs.json",
+      "source": "l4-external/docs.json",
+      "originalSha256": "b606f6435c1237015460201c819b0849030ca08465c01d711391a3cf2d5a345c",
+      "mode": "0o644",
+      "selectedSha256": "b606f6435c1237015460201c819b0849030ca08465c01d711391a3cf2d5a345c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/docs.log",
+      "source": "l4-external/docs.log",
+      "originalSha256": "457499e49e620144498155e8f676eaced6c21a2e8b514fd86dfdffa537201f82",
+      "mode": "0o644",
+      "selectedSha256": "457499e49e620144498155e8f676eaced6c21a2e8b514fd86dfdffa537201f82"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/environment.json",
+      "source": "l4-external/environment.json",
+      "originalSha256": "5c05d823799a056f6d883df16cc6f2c677aadad2a7d4aefebd830fc1ced3b2cc",
+      "mode": "0o644",
+      "selectedSha256": "5c05d823799a056f6d883df16cc6f2c677aadad2a7d4aefebd830fc1ced3b2cc"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/eol-check.json",
+      "source": "l4-external/eol-check.json",
+      "originalSha256": "78ee559484629a1bd05922ec8806b99176402a9a8be0719c7f84d6225785717e",
+      "mode": "0o644",
+      "selectedSha256": "78ee559484629a1bd05922ec8806b99176402a9a8be0719c7f84d6225785717e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/eol.txt",
+      "source": "l4-external/eol.txt",
+      "originalSha256": "32ace52652ef94741cd22166ec40dfd51cf1963ae94889a62b76d3f8986bf891",
+      "mode": "0o644",
+      "selectedSha256": "32ace52652ef94741cd22166ec40dfd51cf1963ae94889a62b76d3f8986bf891"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/important-sha256.json",
+      "source": "l4-external/important-sha256.json",
+      "originalSha256": "7d7dd9323c8c8ec2c9b8eef063a36beaa0fcbb5f74eca16843c18d77f9f6fa93",
+      "mode": "0o644",
+      "selectedSha256": "7d7dd9323c8c8ec2c9b8eef063a36beaa0fcbb5f74eca16843c18d77f9f6fa93"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ios-gates.json",
+      "source": "l4-external/ios-gates.json",
+      "originalSha256": "b06c079c03de6faa897b12fe68849e3e58214c5e96904463a7e63b77dcda16e9",
+      "mode": "0o644",
+      "selectedSha256": "b06c079c03de6faa897b12fe68849e3e58214c5e96904463a7e63b77dcda16e9"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ios-gates.log",
+      "source": "l4-external/ios-gates.log",
+      "originalSha256": "29e4451891138b68f0af840c7ebd56d2993484bedf1492beef08578f2ce742d6",
+      "mode": "0o644",
+      "selectedSha256": "29e4451891138b68f0af840c7ebd56d2993484bedf1492beef08578f2ce742d6"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ios-summaries.txt",
+      "source": "l4-external/ios-summaries.txt",
+      "originalSha256": "c5684b45b791ac6fa925a91f8e1b6721364f1f718b0348ba0773334642edd9d7",
+      "mode": "0o644",
+      "selectedSha256": "c5684b45b791ac6fa925a91f8e1b6721364f1f718b0348ba0773334642edd9d7"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ios-test-discovery.json",
+      "source": "l4-external/ios-test-discovery.json",
+      "originalSha256": "eb00ae788c0c700ae7e32efe59607b88550e3228dbb9ebf165fd4d511b5d435d",
+      "mode": "0o644",
+      "selectedSha256": "eb00ae788c0c700ae7e32efe59607b88550e3228dbb9ebf165fd4d511b5d435d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ios.json",
+      "source": "l4-external/ios.json",
+      "originalSha256": "e695bc8a47540c1c844e3262377ab0c7d67cb3734a5cf7f02e0c5c787ee37633",
+      "mode": "0o644",
+      "selectedSha256": "e695bc8a47540c1c844e3262377ab0c7d67cb3734a5cf7f02e0c5c787ee37633"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ios.log",
+      "source": "l4-external/ios.log",
+      "originalSha256": "90f01bd8e9c8214bcb114f6ff4ee719b5a2ead5201ada32bb5e33c7675dca9e6",
+      "mode": "0o644",
+      "selectedSha256": "90f01bd8e9c8214bcb114f6ff4ee719b5a2ead5201ada32bb5e33c7675dca9e6"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ml-check.json",
+      "source": "l4-external/ml-check.json",
+      "originalSha256": "50aca03587a0334f8d81349e68872ec3eabd5c57df8e727a8ab8b5e369d99399",
+      "mode": "0o644",
+      "selectedSha256": "50aca03587a0334f8d81349e68872ec3eabd5c57df8e727a8ab8b5e369d99399"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ml-check.log",
+      "source": "l4-external/ml-check.log",
+      "originalSha256": "6ac5aa933ae93f031c0c0fae080fdfed302350bc87ce87f72136c1cedbca310d",
+      "mode": "0o644",
+      "selectedSha256": "6ac5aa933ae93f031c0c0fae080fdfed302350bc87ce87f72136c1cedbca310d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ml-test.json",
+      "source": "l4-external/ml-test.json",
+      "originalSha256": "4257520f00073ce7425966e5379a7ea54acb1a236462da79fad8f28b13def268",
+      "mode": "0o644",
+      "selectedSha256": "4257520f00073ce7425966e5379a7ea54acb1a236462da79fad8f28b13def268"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/ml-test.log",
+      "source": "l4-external/ml-test.log",
+      "originalSha256": "0f655cdcf823a557dec84cf86eaf0db5dd87e6d84759caa9912737d493d069aa",
+      "mode": "0o644",
+      "selectedSha256": "0f655cdcf823a557dec84cf86eaf0db5dd87e6d84759caa9912737d493d069aa"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/model-boundaries.json",
+      "source": "l4-external/model-boundaries.json",
+      "originalSha256": "9006b65f400d6fa3026477e948763e27dca5789f3904c48d8049eb561f8bea5c",
+      "mode": "0o644",
+      "selectedSha256": "9006b65f400d6fa3026477e948763e27dca5789f3904c48d8049eb561f8bea5c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/model-boundaries.log",
+      "source": "l4-external/model-boundaries.log",
+      "originalSha256": "df8b6c190be82b502edecccad9df2444ecdc2822d541b300f190433d5e27ed42",
+      "mode": "0o644",
+      "selectedSha256": "df8b6c190be82b502edecccad9df2444ecdc2822d541b300f190433d5e27ed42"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/node-l4.json",
+      "source": "l4-external/node-l4.json",
+      "originalSha256": "28218d7deb5be70fa91b1f41f13154cb3cf2c3c52e5f9f609c8c03802653b318",
+      "mode": "0o644",
+      "selectedSha256": "28218d7deb5be70fa91b1f41f13154cb3cf2c3c52e5f9f609c8c03802653b318"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/node-l4.log",
+      "source": "l4-external/node-l4.log",
+      "originalSha256": "f3cbeb37941a5de0dfdc59600d84a0e89d7534aeee8053690277ad537169224f",
+      "mode": "0o644",
+      "selectedSha256": "f3cbeb37941a5de0dfdc59600d84a0e89d7534aeee8053690277ad537169224f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/production-assert.json",
+      "source": "l4-external/production-assert.json",
+      "originalSha256": "8246b7fadc285d71bda8d5ffa4be113f3abfadedd10ad79c67b2dd4b7f7df283",
+      "mode": "0o644",
+      "selectedSha256": "8246b7fadc285d71bda8d5ffa4be113f3abfadedd10ad79c67b2dd4b7f7df283"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/production-assert.log",
+      "source": "l4-external/production-assert.log",
+      "originalSha256": "3bcd2b0d5a421e4298324715646fdcaf2a2035f333dfc409907b2afc6da41487",
+      "mode": "0o644",
+      "selectedSha256": "3bcd2b0d5a421e4298324715646fdcaf2a2035f333dfc409907b2afc6da41487"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/production-install.json",
+      "source": "l4-external/production-install.json",
+      "originalSha256": "2ae307ae60d32b38c50940716b02922a84f8ac0a0c1bd5cf2020ca143bc4355f",
+      "mode": "0o644",
+      "selectedSha256": "2ae307ae60d32b38c50940716b02922a84f8ac0a0c1bd5cf2020ca143bc4355f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/production-install.log",
+      "source": "l4-external/production-install.log",
+      "originalSha256": "caf6625e4918359c51f066c1359ac6e7473138c66a8b57f64c612f7b4886876e",
+      "mode": "0o644",
+      "selectedSha256": "caf6625e4918359c51f066c1359ac6e7473138c66a8b57f64c612f7b4886876e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/production-smoke.json",
+      "source": "l4-external/production-smoke.json",
+      "originalSha256": "4c10eabe442a758c2141104ff149dbb2a2d994a73aa25406b3c19693731ae65e",
+      "mode": "0o644",
+      "selectedSha256": "4c10eabe442a758c2141104ff149dbb2a2d994a73aa25406b3c19693731ae65e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/production-smoke.log",
+      "source": "l4-external/production-smoke.log",
+      "originalSha256": "25bebc9dc8fed849e27fe4f42ad45ab5fa24286f8927fe62058eef67306fc8f2",
+      "mode": "0o644",
+      "selectedSha256": "25bebc9dc8fed849e27fe4f42ad45ab5fa24286f8927fe62058eef67306fc8f2"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/rust-verify.json",
+      "source": "l4-external/rust-verify.json",
+      "originalSha256": "5ea282cf35d2f5503449ed3698a84971fa7e88404adc26d8e60198e4ec17fff4",
+      "mode": "0o644",
+      "selectedSha256": "5ea282cf35d2f5503449ed3698a84971fa7e88404adc26d8e60198e4ec17fff4"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/rust-verify.log",
+      "source": "l4-external/rust-verify.log",
+      "originalSha256": "b767054d6b6cdc87c02e926a588ffc0135faaa3042bfb2c25184b5ea850030df",
+      "mode": "0o644",
+      "selectedSha256": "b767054d6b6cdc87c02e926a588ffc0135faaa3042bfb2c25184b5ea850030df"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/scripts.json",
+      "source": "l4-external/scripts.json",
+      "originalSha256": "8dd4c0c216f1c2bf6e34380a4ffc37abf5563498de1ac7be87203f5b75c52680",
+      "mode": "0o644",
+      "selectedSha256": "8dd4c0c216f1c2bf6e34380a4ffc37abf5563498de1ac7be87203f5b75c52680"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/scripts.log",
+      "source": "l4-external/scripts.log",
+      "originalSha256": "63058860ca858d6c861f811c20bf83df51ab719f8b115cbdaa8a37184ccd7dc5",
+      "mode": "0o644",
+      "selectedSha256": "63058860ca858d6c861f811c20bf83df51ab719f8b115cbdaa8a37184ccd7dc5"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/single-writer.json",
+      "source": "l4-external/single-writer.json",
+      "originalSha256": "f92df6368bb748439783ec249567f660904c715a480ddd22bf76914aedd7045d",
+      "mode": "0o644",
+      "selectedSha256": "f92df6368bb748439783ec249567f660904c715a480ddd22bf76914aedd7045d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/single-writer.log",
+      "source": "l4-external/single-writer.log",
+      "originalSha256": "a2d4c136e310c00d568ac4ba2275b9733b6bfe6caa239db6103fd335a03faea6",
+      "mode": "0o644",
+      "selectedSha256": "a2d4c136e310c00d568ac4ba2275b9733b6bfe6caa239db6103fd335a03faea6"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/smoke.json",
+      "source": "l4-external/smoke.json",
+      "originalSha256": "504bb18cbffe0b3bfde8ccf435d401d49348560cb2f8d2a583f4f54efc5c923e",
+      "mode": "0o644",
+      "selectedSha256": "504bb18cbffe0b3bfde8ccf435d401d49348560cb2f8d2a583f4f54efc5c923e"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/smoke.log",
+      "source": "l4-external/smoke.log",
+      "originalSha256": "a69c43b12f11e172432cc0df379db2786577730b083cda7dd1707492e2b07ee0",
+      "mode": "0o644",
+      "selectedSha256": "a69c43b12f11e172432cc0df379db2786577730b083cda7dd1707492e2b07ee0"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/test-discovery.json",
+      "source": "l4-external/test-discovery.json",
+      "originalSha256": "83be4a18c6bba954fbc3cee3c538ad7d18152ecefcd2c710cc41d3381917518f",
+      "mode": "0o644",
+      "selectedSha256": "83be4a18c6bba954fbc3cee3c538ad7d18152ecefcd2c710cc41d3381917518f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/test-inventory.json",
+      "source": "l4-external/test-inventory.json",
+      "originalSha256": "8dc2d4d13306e8ae1cdbcd6fab9ab5423efd06d26c814e1adf3086ce5fc80558",
+      "mode": "0o644",
+      "selectedSha256": "8dc2d4d13306e8ae1cdbcd6fab9ab5423efd06d26c814e1adf3086ce5fc80558"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/typecheck.json",
+      "source": "l4-external/typecheck.json",
+      "originalSha256": "d84892ddaef07c4b93a8d63c01ef84a1048a6df14fdc9413525945a49ced2e7d",
+      "mode": "0o644",
+      "selectedSha256": "d84892ddaef07c4b93a8d63c01ef84a1048a6df14fdc9413525945a49ced2e7d"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/typecheck.log",
+      "source": "l4-external/typecheck.log",
+      "originalSha256": "4d139add965895a4af15e9b5a3824952fce824465b737cfa911afa57edf3fe7c",
+      "mode": "0o644",
+      "selectedSha256": "4d139add965895a4af15e9b5a3824952fce824465b737cfa911afa57edf3fe7c"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/visual-compile.json",
+      "source": "l4-external/visual-compile.json",
+      "originalSha256": "12f6490f1ff6d53e53c94e163141172ec43f06e7789a52798dda27302624b879",
+      "mode": "0o644",
+      "selectedSha256": "12f6490f1ff6d53e53c94e163141172ec43f06e7789a52798dda27302624b879"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/visual-compile.log",
+      "source": "l4-external/visual-compile.log",
+      "originalSha256": "9ee031e20638114c67e5521a40b2a68cf3f7023778754f0cc54099de97970241",
+      "mode": "0o644",
+      "selectedSha256": "9ee031e20638114c67e5521a40b2a68cf3f7023778754f0cc54099de97970241"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/workspace-before-sha256.json",
+      "source": "l4-external/workspace-before-sha256.json",
+      "originalSha256": "261c43d547026c55a94bfd8906b48ae324976eaf4acc565cccb8edbf0d903617",
+      "mode": "0o644",
+      "selectedSha256": "261c43d547026c55a94bfd8906b48ae324976eaf4acc565cccb8edbf0d903617"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/workspace-preservation.json",
+      "source": "l4-external/workspace-preservation.json",
+      "originalSha256": "aed58019d3fb43c16b867f40dbddc3fa0af963521db1afaba384a759d9571e8f",
+      "mode": "0o644",
+      "selectedSha256": "aed58019d3fb43c16b867f40dbddc3fa0af963521db1afaba384a759d9571e8f"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/xcode-list.json",
+      "source": "l4-external/xcode-list.json",
+      "originalSha256": "f62496bb119b3267033b69d60c51b5e02cadd836e6dd99872c25ce204090fce0",
+      "mode": "0o644",
+      "selectedSha256": "f62496bb119b3267033b69d60c51b5e02cadd836e6dd99872c25ce204090fce0"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/xcode-list.log",
+      "source": "l4-external/xcode-list.log",
+      "originalSha256": "9ee0c0bf10e114ab63f1e46ed764244b6aa477b93c533689cf4e44beefe902e7",
+      "mode": "0o644",
+      "selectedSha256": "9ee0c0bf10e114ab63f1e46ed764244b6aa477b93c533689cf4e44beefe902e7"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/xcode-settings.json",
+      "source": "l4-external/xcode-settings.json",
+      "originalSha256": "d2dd3b2dbf16e58f859cef809bdb91f8cb10fecd39658a6c792924e1d0e0ec85",
+      "mode": "0o644",
+      "selectedSha256": "d2dd3b2dbf16e58f859cef809bdb91f8cb10fecd39658a6c792924e1d0e0ec85"
+    },
+    {
+      "path": "deliverables/training-plan-v2-l4-2026-10-26/xcode-settings.log",
+      "source": "l4-external/xcode-settings.log",
+      "originalSha256": "837be8668252369c3d5a388a2f4761dcd36c9417dc1c6fbda9491dbb88f935cf",
+      "mode": "0o644",
+      "selectedSha256": "837be8668252369c3d5a388a2f4761dcd36c9417dc1c6fbda9491dbb88f935cf"
+    }
+  ],
+  "excludedOriginalEvidence": [
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/acceptance.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/doc-refs.log",
+      "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/docs.log",
+      "sha256": "af8ce495bc7d42edf46c0774bbd1741fa90c2409a19921c9ddedff4a46dab455",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/l2_initial.log",
+      "sha256": "c27867c96f824c20857e90d8497beb070fee58353939062eca8a7d4bfb815851",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-a01-2026-10-26/single-writer.log",
+      "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/acceptance.json",
+      "sha256": "5cb42c1c51848789ff4f78336a6c3b962e89c2943ae17cfb6487c7096aa1d18b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/acceptance.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/doc-refs.json",
+      "sha256": "2f858d32be86b2748120f159f7f311b30c8ba852ad83f5b6f467a9ff0f19c74a",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/doc-refs.log",
+      "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/docs.json",
+      "sha256": "7bccba5273699859c01f8976b21ed6a10d7c6f234d1e77291afe06a371a91351",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/docs.log",
+      "sha256": "c0cbc97f551d820d3331fc26bb4741c94be160c9d4efc858a2fc0474affe9505",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/ios-gates.json",
+      "sha256": "cba41bc8a443a8ebf2dc9bc675967b9d6ed720fc3d513695b408d85ceea454e3",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/ios-gates.log",
+      "sha256": "96e7e2e3aa4dd8f88d897bd1008614da11841d6aeb15b2cd61c1baa65630a023",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/ios.json",
+      "sha256": "1015cc844e36c90592c0978fbf6321ec6f195fb99b71c8888f5fb5adb0914ed7",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1-expanded.json",
+      "sha256": "3956f7fcafc596be98567ecd0e48b6b54176b936ad1dc39f42f72e969b185e57",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1-expanded.log",
+      "sha256": "5f817dfa6a3ce19329294dccb4efe15e77fa0876dee17a4b998aa5432eedd783",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1-final.json",
+      "sha256": "db5dee358cc5b84335c1a12a73efec0afd332d6d725ab79b07111557882b3e18",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1-first.json",
+      "sha256": "7f945c282891ac26cacd1330c21ce2e8b2c22064fb9bccc261b7b377d142d8da",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1-first.log",
+      "sha256": "016e1e4e02f4f53e6862f92ff5f470941026cd64e8a09ca74a9f9e2f0e4f4afe",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1.json",
+      "sha256": "1c08469d94100558b7340e1489ef165e62cca2c7c7225ffb23f8f356aefc8a7b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l1.log",
+      "sha256": "1012e624a5d29037dde8e908200c3800831a28c6e0a0b991d68bc1cf2ba67561",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l2-final.json",
+      "sha256": "caae0c2249d8b5bbe71f998878dbcd9e6f9c7b932c7f99d5d7def003c1be3d8a",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l2-first-failure.json",
+      "sha256": "eef4f0518b0223def2726cd0f091787cd8b073f941b24da5c72d9ee44e27182f",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l2.json",
+      "sha256": "0f17c71f87e17c61a867a2deac48feb86c755144cd1bd3d1ed2ca40a0418c618",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l2.log",
+      "sha256": "38aee2bd6d15ca30ae048164d6a05f72e5424ed77f33c0ff004524c4b80c8341",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/l3.json",
+      "sha256": "a3f3aed3f37741a63f2dca4b669829b9666ddbf7bca5c75a0883f893752c02fd",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/red-node.json",
+      "sha256": "cb6863cc7a3532f1b1da8a4965b64262f9c48188992626419b17bd0dd2b690f1",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/red-swift.json",
+      "sha256": "aab1a15a77f7c5650a61571b907c10e168fd69ccc11ca85e98b3f443a37da2ad",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/swift-targeted.json",
+      "sha256": "7b8bfe5001e7b480b5b2a1a8be6a927e72ebe272d908d983c6f282fff2477311",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-baseline.log",
+      "sha256": "33389f65df6d1375e9441eed290af3e6c053c0f0ecf5014a18c3cb1b35b5691c",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-final.json",
+      "sha256": "fa163ed749b3def76acd266cbfef643de7f208603b7c3b69837b1674920c1c3e",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-first-failure.json",
+      "sha256": "6f83b9310c4e5005272d5a65f99c4b64f66632941656957020edc510a18bf6c2",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-first-failure.log",
+      "sha256": "01308d1dd1f42ce78ff79247cc4e9f6006e7aa4c78fa9951123170051cfa53e1",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-red-tests.json",
+      "sha256": "8fdd42196ef39ba21cc0cfcdeff6613bab3f2da1be2ac88c0ec2fd710300e100",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck-red-tests.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck.json",
+      "sha256": "94905ad7b9c7f19e2442dbcceba8ea5a29138cb3e99f5e6b922d72f81d0fd29a",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-d03-2026-10-26/typecheck.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/REPORT.draft.txt",
+      "sha256": "32b5121e2c85071e5ad841cc70a4eb37c0878c8ab3e921363850a7778ca831a8",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/RedSkipRegression.swift",
+      "sha256": "9039b04689b1ab9ce47f1d41eaf31cb8c9348374c2b814ca9fd423fb7d2879c8",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/SkipRegression.swift",
+      "sha256": "9039b04689b1ab9ce47f1d41eaf31cb8c9348374c2b814ca9fd423fb7d2879c8",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/src/mobile-goals.ts",
+      "sha256": "fe90a44dd67c6c6d1c51ea651bb853517a50c124a4192bc60c5fa964480710b9",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/src/training-plan-execution-commands.ts",
+      "sha256": "8b3af71938e0147336cb012c9e48b35362f599398d31931fd0548fcf6d4c0ff0",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/api/test/training-plan-execution-commands.test.ts",
+      "sha256": "ff7fa06ad3baaa1230119963225fb8fe3cc6bc25bea6ea02aa441a4809b555b5",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/NativeAppModel.swift",
+      "sha256": "3aa00f5352fd95e861ca69b7c03dfd020b11b4b81b9676002524f2ffcf5deec0",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/Skins/Technology/TechTrainingExecutionReview.swift",
+      "sha256": "f4e87870c69d7e10b43c52d7b64df827a4a24dc254a193c9f9480f906c597989",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/RAI/TrainingPlanExecutionPolicy.swift",
+      "sha256": "dc7b1cf8d211d7c429f6f4f055930ec7f3e4ff8304dc89e388f00134ea5a9ada",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/apps/ios/tests/ModelRegression.swift",
+      "sha256": "a704c002e66ffe37fc7d2334ada0786aef9abb5af6e22ee6cf6914849c66e47f",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md.txt",
+      "sha256": "692dc6cc99b244d191002dc4b04d61093813a11d9554b2afaefff42437097864",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/before/packages/api-contracts/src/training-plan-closed-loop.ts",
+      "sha256": "d68f9601b4e5edcd9ec3dc042a18042a7edbf5a11d29fb3e7c056181d7e0ac8b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/changed-files.json",
+      "sha256": "c660c982d30b32bbac841145ae3e6592d2c10f5ce6c532616d927ecb166884a1",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/doc-refs.log",
+      "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/docs.log",
+      "sha256": "c0cbc97f551d820d3331fc26bb4741c94be160c9d4efc858a2fc0474affe9505",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/initial-status.txt",
+      "sha256": "9a73feac385db646c220104c76b33550990b1c79d7afe5ab87292e432ee1666a",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/ios-result.json",
+      "sha256": "d76232cc2ce3148994f33a8fbc8acb3f0ffd6acbab6c163ce5def70e4c514715",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-command.sh",
+      "sha256": "0085d2da1201cf99718b21bd24d2af122e9dffd252265a4940d0adda2ef60ba9",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios-targeted.log",
+      "sha256": "3d194fb7ab2ab41317da630e2ed6aed425611151f805688be8c275bb6854249d",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/l1-ios.log",
+      "sha256": "9ee2f340c1199ddcce6ace313a7bdc8014e6442573e091c5140f99e9181bd22a",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-repro.sh",
+      "sha256": "52f1c95c8b5adbadaff321561bacbb60ff5531b56406b82aab5854f6e4bbdfcf",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios-targeted.log",
+      "sha256": "77dccc76a1e8a2795aa8b8c36675e326cf8e29cb41dcc244cd42904ede891117",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/red-ios.log",
+      "sha256": "b4185a0d3dd1bcbe1fcd7b2ddc79934a10ef5fad5e6d5eb22ccdcb34ff241e59",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-i01-p03-2026-10-26/test-ios.log",
+      "sha256": "a35997f9aec188a7f3434bf2f907cc4ea8f204d93c80d2791bad57e979bc942d",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/SHA256SUMS.json",
+      "sha256": "5ac525731589c7c54c89dc473aab4888cecf58592542444412d573484b7b2a65",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/a01-green.json",
+      "sha256": "ad34f32deab8d04aca1237509c90fdf332a0a393c979ea98b0b97bd3066bf764",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/a01-red.json",
+      "sha256": "d076009d89a501bc59d3b23b94b5e359288b64453ddd55dc441ac8e4c35580f5",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/acceptance-final.json",
+      "sha256": "99ebf60830165641d7ea112ca4388ce3310da916cc198c78345ba4aa6f627ec2",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/acceptance.json",
+      "sha256": "18423d29208b354606da5d6be5f4b34c2cb6c24fb8995f48184250e145a5331e",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/acceptance.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/assessment-l2.json",
+      "sha256": "e6f05f5ee84ec535645d2149ebf9efb28aa00b35bd12f8fd46f6c7b051cb0611",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/compat01-green.json",
+      "sha256": "a76ceb0aeddcfd331b74afcf491137ae0bf531ccf32923f68a42c04f9678fead",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/compat01-red.json",
+      "sha256": "025bdcb6fbced77936c281032367c321bd4deafe18cdb30b4e5a194fccbf5d44",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/diff-check-final.json",
+      "sha256": "01d827788ee4a2577eb7766b940d12963b60d7f05654047f989c6dc73bbf3bab",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/diff-check-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/diff-check.json",
+      "sha256": "9a3eec19c9cd9b784d1fda07b29271843f738bde24f0843f83b019b297301ea0",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/diff-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/diff-sealed.json",
+      "sha256": "eacb9f3c593e37c60cabc282b2d7d84e054c0589af3f8bdce6084b8ad9df2f00",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/diff-sealed.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/doc01-green.json",
+      "sha256": "b1749dc54013c525edb70d59a287221a52483c5fd8dd3ef16add3f3f6f6d45b1",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/doc01-red.json",
+      "sha256": "deb3cff8cdf765e0deec222a1e7ef0e8b0eeeb024584e9076e7601428b2a9155",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/doc01-refs.json",
+      "sha256": "cfed705b51b8ff9be15624de4fce381d80d2691adac67ccc80df49d4df509bb6",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/doc01-refs.log",
+      "sha256": "c6f442e53593c3415afea478b45d3e95ad7d24b8a8631e1c48de1ab536ce16ba",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-delivery.json",
+      "sha256": "66f40aeb3c0fb512cf1a9ad8b909b9b79b2e2d6b8f4a4202cfeb97eede046daf",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-final-report.json",
+      "sha256": "1625988891a6bf6d730dfa03e9b8ee660533580fb03df2578be5452c912d0da4",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-final-report.log",
+      "sha256": "b0147027052dc1b3cc49d12d1e68092c71f2f2297c4738e3775bc0ce05c24d6d",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-final.json",
+      "sha256": "7d5a9259131403e6eeaeea06df1b71294fd4e086943e85fefc72929bdd48bad1",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-final.log",
+      "sha256": "1301eda890abad9de774b060ddb3ead8a61a28ef71c03474d30301bff6ef3fa4",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-sealed.json",
+      "sha256": "88c16c9b07ef38b72aa44b71b605bc07ca839e7bb0708a666a4ef6bcf8304937",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/docs-sealed.log",
+      "sha256": "0a8e1717aacfc2dcbed0fbaa6fb135cd6bc32ebf32e875fd353ee63cd717efdb",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/edit01-green.json",
+      "sha256": "c4e22da59f0fed6bf638888edc9081e18f3ef15448166e01ff9434e0c1d54543",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/edit01-green.log",
+      "sha256": "c561781607674f57a353b9ee6c1898fc7280d03fbfd6df0556d0cd13333bf65f",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/edit01-red.json",
+      "sha256": "1f6c0b11e7bab6a7479375ed15dcc68cbbe9195496592aa4bf8ff22bd07c91c6",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec01-green.json",
+      "sha256": "e686f3690311d9b79f385ed74c441d1c6bb1aa0a5e75daccc58d595973ab91af",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec01-red.json",
+      "sha256": "fd0620f16b0c54d8d411363724fffffdbedc2f50a1c8abea5ed8c8e8406d0500",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-green.json",
+      "sha256": "93a9fb3c7b4be4831baf31d7171fa8b3d8a18467133595bfd951ecfaeaec71e1",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-green.log",
+      "sha256": "05967ecd46f08269421b73061ebb42d5c0ef6275b2f8e73444d111e3a0e1ec90",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-l2.json",
+      "sha256": "97f888113116dbcc57a4f75eede25e92802642fd571a3e04d07aec9e479ed8a6",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec0203-red.json",
+      "sha256": "56d222af6669f72c253720106561e2353e8974a06c234cb8f821de0b40f53751",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l1.json",
+      "sha256": "0a3ccaac6f2d5e7a00973c0a2843ab333b189e5207b531e0c8d8a163019b8d55",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-final-l2.json",
+      "sha256": "641de10add5a0ad1942a501148a8b5b91654a79f7ee4e0725a6ca936ad7defae",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-poison-red.json",
+      "sha256": "5a83ab30794775d7444707fd2e4215a8ad5011c1fa407a86cbcb373c6b65ae69",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-prescan-red.json",
+      "sha256": "4031bc6e9e0390d748665ac6515091fa82e8d8844ea0b77ed33cf59f8480b61b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-prescan-red.log",
+      "sha256": "ef1b069c37f1287aa4f0122caac80344409b5c3dcb4649be36c3579d7ff336dd",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/exec03-red.json",
+      "sha256": "e2c6a9f97489ac233ea6b139a0e12ab0e7c9fa8a8dc6558ef493178fd9c27f94",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/ios-gates.json",
+      "sha256": "b1eb44687a42235e6139e42abc4a98cdd74d178a57b444341befe91d5d9aa5bb",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/ios.json",
+      "sha256": "ead8287c367f718a0c86528e31c806575fe0be4a394610ba4fde63f11ced7a82",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/l3-final.json",
+      "sha256": "c683e4288f64086568715151a7d5be05672e99aca4dce93aa2c4088863c76d5c",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/l3.json",
+      "sha256": "b64a6d98390358cd5cb3fb7c6741a060b04c0a6ae0423536f56da72eb6808f03",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/l3.log",
+      "sha256": "35548da36f659599e4a57f9831f9bfbe4ac4a7b8b74e8cc3d94b4cbf6b8a221c",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.json",
+      "sha256": "3c650c2d17a9e644e4330d86749a1de951487cebb7adc2e62386d4a03ae86e1f",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/model-targeted.sh",
+      "sha256": "605113e86f38ac01a3040b2f7604f95cdab3e1cc6c63a83282feaefbeced4dd7",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-delivery.json",
+      "sha256": "744999cdef88459e1118a4bc05df00f84594ec83d2d36d409fd56820071539ec",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-final-report.json",
+      "sha256": "bc64b779f92dd1be609093a2d234d2ef048aef0fd263b970712f58fd4cda7e51",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-final-report.log",
+      "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-final.json",
+      "sha256": "a0a86d44d6c383e9e81b9c9f244f715e900b281b8a71a0f582f1c9180bc70bb6",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-final.log",
+      "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-sealed.json",
+      "sha256": "73e39e52c417dd3bd3a1331196d3e92134163ed445983a4c54169200de9223b0",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/refs-sealed.log",
+      "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/rollback-check.json",
+      "sha256": "ac8d8b6e197565f3b76983bffee254cecf28d5f0f2b18c592864150f644b3b96",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/rollback-check.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/rollback-sealed.json",
+      "sha256": "d61c997cb6356ed7339f774b65079717dec69f9635ba37658ba5fb607a8abd4b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/rollback-sealed.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/scripts-portable.json",
+      "sha256": "7c8891799f503801a38b8493a364c83f214b7e922873d38c3b372d9abd40b93f",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/single-writer-final.json",
+      "sha256": "40795f088bb9953ba36d5836dbcb39c0da0040df7bc9473bfff8ab9bed86714a",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/single-writer.json",
+      "sha256": "d15d4b72d5df14bf6f4f0f07b84324ed976a8b8e05d877df2f3f76bc5b163c8b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/single-writer.log",
+      "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/swift-editor.sh",
+      "sha256": "f78f5f0429b569d029d102545171c82dd2a5751ae71aa2a1db987326862df563",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/swift-targeted.json",
+      "sha256": "a256862a404c7a213a366df9584178cecee87612f739835acdefa308f5ffc721",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/typecheck-final.json",
+      "sha256": "a1ef239eaf0bf5ca81117372e8cf4b23b13e8e20d5e7b6fe01330c76e4556e45",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/typecheck-final.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/typecheck-post-reconcile.json",
+      "sha256": "532a368be952bc6b9fb7cdd7ebdb6bd8ac1971abb949a8fdccde228f2e852d3c",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/typecheck.json",
+      "sha256": "ad43de20154b13de2fa82bb2bf122c669681e06f9a2e987eb3aa4f3e3412e22f",
+      "mode": "0o644",
+      "crlf": false
+    },
+    {
+      "path": "deliverables/training-plan-v2-p1-2026-10-26/typecheck.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "mode": "0o644",
+      "crlf": false
+    }
+  ],
+  "l4Excluded": [
+    {
+      "path": "SHA256SUMS.json",
+      "sha256": "31feeb8226b699f2435e64d685fbce10c03448177054b725b160a6dab6f3e05f",
+      "bytes": 10769
+    },
+    {
+      "path": "acceptance-samples.json",
+      "sha256": "f43be72b9fdc81442cebaba223d3845bdab9f772a0f1f7c2a3d41d6d52160ac6",
+      "bytes": 44716
+    },
+    {
+      "path": "after-ios.py",
+      "sha256": "ad10938ce49424fff0bbb7680e934b0475ab54c82065085789401322891a5103",
+      "bytes": 995
+    },
+    {
+      "path": "after-node.py",
+      "sha256": "836b27a5abb9db270669fa438a3aec03c3b468b8f4df2588113ba2984ba25048",
+      "bytes": 1128
+    },
+    {
+      "path": "after-simulator.py",
+      "sha256": "031880d49723b3da75bf836522d67a596aeb5373157f15ca86d42968aa55e48c",
+      "bytes": 1489
+    },
+    {
+      "path": "app-device-samples.json",
+      "sha256": "16a38b43dd58be38784f8ae56f12bef2fc387eb2ec00f7a270ab192f8d62fab0",
+      "bytes": 7161843
+    },
+    {
+      "path": "app-simulator-samples.json",
+      "sha256": "63ec997d5eaa8b4473f6b8b912db8ba44b1a32980d1090c5d5bc1ab775bc3606",
+      "bytes": 7446876
+    },
+    {
+      "path": "blob-samples.json",
+      "sha256": "74ac14ac5263cc3354e52ac959b9cbc0ce007115a65b34d88572d7c155ac5192",
+      "bytes": 44707
+    },
+    {
+      "path": "boundaries-samples.json",
+      "sha256": "225898176e5f99e72f448cf9635ab3a4053c361887ff7e82002c11e6714f2b3f",
+      "bytes": 22173
+    },
+    {
+      "path": "boundaries-self-samples.json",
+      "sha256": "7fe419d2594905e3de7c4d4f92a7ba07be8e0a0209ee456b66aa522c30cda3c1",
+      "bytes": 22273
+    },
+    {
+      "path": "compile-resource-samples.json",
+      "sha256": "d63a2d0102f342b6ae4c03a9420911bcc12ded7d1f7e34251e9587f765c21167",
+      "bytes": 961
+    },
+    {
+      "path": "diff-check-after.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "diff-check.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "diff-stat.txt",
+      "sha256": "6752ccee9532047105aa3c297f1b8047dda95d52a938b4436c2ca518d041866e",
+      "bytes": 3361
+    },
+    {
+      "path": "diff.txt",
+      "sha256": "188bb933c25a7680508a3085fcccecf615e8112178ba4a55b847bf87baec86b8",
+      "bytes": 375155
+    },
+    {
+      "path": "doc-refs-samples.json",
+      "sha256": "95b2bd941596473d9992ef1f20c3d2ce378377cb066f48a7ab3c3d73a65f64e3",
+      "bytes": 22291
+    },
+    {
+      "path": "docs-samples.json",
+      "sha256": "1243031fbba828487d23d8598da6cd9ad6a9ae2e2c9a35635b1b405e276fadb6",
+      "bytes": 22289
+    },
+    {
+      "path": "head.txt",
+      "sha256": "3e1aec7fba1198179cfa9fc964e1eb3cebea2b7921179c2c1c800b1c606f575d",
+      "bytes": 41
+    },
+    {
+      "path": "ios-copy-sha256.json",
+      "sha256": "90e2ddc529ad3274e646be71fcd364209e5c47cf5bf05e642761a0211f0ac5f5",
+      "bytes": 66150
+    },
+    {
+      "path": "ios-gates-samples.json",
+      "sha256": "1e8980184bac0492b3a76d18ee891cffded545e99e7a46d20b38f9d72c422bb1",
+      "bytes": 16683
+    },
+    {
+      "path": "ios-samples.json",
+      "sha256": "aada434f472afd9e8bc9d4a1777097b552c58e08fc002d8f3d169e46b22d24db",
+      "bytes": 7183624
+    },
+    {
+      "path": "log.txt",
+      "sha256": "433dc88fe6d004355aad7c156b4f32a7b8a485c353059bba8a3955f52dfe94de",
+      "bytes": 217
+    },
+    {
+      "path": "ml-check-samples.json",
+      "sha256": "7beac2b0568f209474e172b74dca9fa710f4a5297b19515b0e0c8a3a891dd209",
+      "bytes": 33434
+    },
+    {
+      "path": "ml-test-samples.json",
+      "sha256": "37a2a55335ab13b95ecc329d83ce121eb128eb1e740db619fde499b8384720ad",
+      "bytes": 76492
+    },
+    {
+      "path": "model-boundaries-samples.json",
+      "sha256": "de777d2aaf257c0cb5c40431206817445e7041125b39b225fd02e8b7f94ad82b",
+      "bytes": 252169
+    },
+    {
+      "path": "node-file-timings.json",
+      "sha256": "480e48b6edd902c373d8e359641b62057ebb085f2064617cdf38dd4d18d51822",
+      "bytes": 76306
+    },
+    {
+      "path": "node-l4-samples.json",
+      "sha256": "9cd5993075387ea16276d281fdc387009ed299bd4861a658af6f59ef70a90ac0",
+      "bytes": 20403450
+    },
+    {
+      "path": "node-live-processes.txt",
+      "sha256": "a4ba99ac9624001efd4765aab2d406208d37adf0e6bf9c80acc36ba72e2e0ae5",
+      "bytes": 207324
+    },
+    {
+      "path": "prior-phases.json",
+      "sha256": "945e5c2abfd1a6a7bd3f9020cebd36ecacc743b3965af5b1a17d623e12ee9636",
+      "bytes": 654
+    },
+    {
+      "path": "production-assert-samples.json",
+      "sha256": "e247532c133e98ec13c34f29473356760f3e7f2eb1ba49316e73592099e5d262",
+      "bytes": 5259
+    },
+    {
+      "path": "production-assert.py",
+      "sha256": "b1d99118bcb1899e210ea30acfad0b583835bbea28bceaa4718508802d7ae788",
+      "bytes": 284
+    },
+    {
+      "path": "production-install-samples.json",
+      "sha256": "1689d3ac4992bba595ee50eaa864701824bf1f2324c33e0485b87a711a060af2",
+      "bytes": 78992
+    },
+    {
+      "path": "production-smoke-samples.json",
+      "sha256": "27d4606de5b0a12afc3afa1c2f5a84e87dda0a28b9a6f79d7baedcd8519c50f5",
+      "bytes": 27821
+    },
+    {
+      "path": "root.txt",
+      "sha256": "16ce83923526ef2f3aa41dee35d8b5da423779a42b949988234061a5d597ae3e",
+      "bytes": 17
+    },
+    {
+      "path": "runner.py",
+      "sha256": "4561da415b9a9cd4f6e6cda3199c85bf57fd911c98bc8666544512e1e387fbd5",
+      "bytes": 1432
+    },
+    {
+      "path": "rust-toolchain.json",
+      "sha256": "2e98ba2c0d3bc32fd84f888419bc23a9ba3998afb21f7c7e21fd8e7cd554e596",
+      "bytes": 119
+    },
+    {
+      "path": "rust-verify-samples.json",
+      "sha256": "5055abeab79a51d3275369fa94a21e5da2998fb39ff733362a83d9d6c684ac35",
+      "bytes": 643380
+    },
+    {
+      "path": "scripts-samples.json",
+      "sha256": "6c18111b542acf7b4b5b00002aeb68aa7e22fac1a9720376de22cfe5af0838a1",
+      "bytes": 22351
+    },
+    {
+      "path": "single-writer-samples.json",
+      "sha256": "4e6beebe4ae0a7b7497a4ff889055665d7e0e10f1ba4972c52b5f4989a8b8d62",
+      "bytes": 44666
+    },
+    {
+      "path": "smoke-samples.json",
+      "sha256": "cae8b7c9e1dda1362355a49ec784465362f8ad63b14b3710a841a481713d1bd0",
+      "bytes": 16946
+    },
+    {
+      "path": "status-after.txt",
+      "sha256": "3dc5b2149e2c93533299863bf3a4330d5215706aaa91ed5d28bdd6861cb76d61",
+      "bytes": 18372
+    },
+    {
+      "path": "status.txt",
+      "sha256": "3dc5b2149e2c93533299863bf3a4330d5215706aaa91ed5d28bdd6861cb76d61",
+      "bytes": 18372
+    },
+    {
+      "path": "tracked.json",
+      "sha256": "d4788736074e6a096ad4e5424d86c6e65bdf8df5d840f6fd773757dac23f9256",
+      "bytes": 182746
+    },
+    {
+      "path": "typecheck-samples.json",
+      "sha256": "8653424f343da6fbee69a47e7410ae36f9ce3127fafc8057c32609eeaaa182c8",
+      "bytes": 102859
+    },
+    {
+      "path": "untracked.json",
+      "sha256": "0c6b5b2d9ef5c5c01d63ac081c4ce8210e2ee3fd5b118db2bc2f47a1917c29e9",
+      "bytes": 16509
+    },
+    {
+      "path": "visual-compile-samples.json",
+      "sha256": "a120d524315060d8898e8f0e90e950fa5c6728fa0cd3f53baf0678595e23e540",
+      "bytes": 363177
+    },
+    {
+      "path": "write-report.py",
+      "sha256": "1e5e38a0dd42af80cd2b8ee8dce3e6a8de95fbb13813e801c2fe1dc9d01f3c9f",
+      "bytes": 18725
+    },
+    {
+      "path": "xcode-list-samples.json",
+      "sha256": "7d015a31bce470d328d5016fc2e37fc4ad931e38991b81b031ab6a8090f6bb06",
+      "bytes": 33495
+    },
+    {
+      "path": "xcode-settings-samples.json",
+      "sha256": "f43b7f823b381c40feb3f16668cd95cb90b54e67faa12c582256b75e52d9083d",
+      "bytes": 21846
+    },
+    {
+      "path": "xcode-settings.py",
+      "sha256": "3eec175bfae72e73a76bbc5328fe94f0d45c55423b793ac9c7bf300756c8dbd3",
+      "bytes": 955
+    }
+  ],
+  "policy": "Only explicit paths are selected. Originals retained outside the delivery worktree with SHA-256. No before trees, draft reports, historical test copies, one-off scripts, databases, Health XML/GPX or build products are selected. Raw logs/patches keep their historical whitespace; .gitattributes exempts only deliverables from whitespace checks.",
+  "finalArtifacts": [
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/ACTOR_CLEAN_TREE_COMPARISON.json",
+      "sha256": "233cc95f9293417daff86220053e8efe2bc79fd53745538390d9a147fb9eba7d",
+      "bytes": 153,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/APP_BUILD_COVERAGE.json",
+      "sha256": "daa17a424f11e2d98f6a62f45398dac969ecc9bbe72333f0969caaf887db7200",
+      "bytes": 13821,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/COMMITS.json",
+      "sha256": "5709bac6296bdb67d83898d9df6ecf06784d960f5e0868dc861cc6db7798bbb8",
+      "bytes": 31640,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/COMMIT_BOUNDARIES.json",
+      "sha256": "c74ea0fb29e7b2472b4ff150808be3347b3b9da48c91f66caebec10eb79cf95f",
+      "bytes": 773,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/FINAL_VALIDATION.json",
+      "sha256": "b342ec0b41cd19bca0ab17f2bbfc508df7b490523d473fdd65edfe5413d020de",
+      "bytes": 6862,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/FROZEN_PRODUCT.json",
+      "sha256": "c56537588ea0c44d6013948347015fa88d81d0b113da9e0e66ccfa399eb2d3ae",
+      "bytes": 10716,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/FROZEN_TRACKED.patch",
+      "sha256": "188bb933c25a7680508a3085fcccecf615e8112178ba4a55b847bf87baec86b8",
+      "bytes": 375155,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/L4_BASELINE_INTEGRITY.json",
+      "sha256": "67fcd99b62706b1b7f88a1522ee6059204428b27a7a78eb19fd5064bb52b3c63",
+      "bytes": 55,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_EVIDENCE.json",
+      "sha256": "d71d979f17be48d6c17ad13c4284adf83813b44f4235b9c4b2c2adcd29c4210e",
+      "bytes": 45882,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_INDEX.txt",
+      "sha256": "0bc162bf60092fc3a02f7a740fba0869bd9fea48566d5d0d7acd3ab51f015387",
+      "bytes": 291194,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_STATE.txt",
+      "sha256": "3dc5b2149e2c93533299863bf3a4330d5215706aaa91ed5d28bdd6861cb76d61",
+      "bytes": 18372,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/ORIGINAL_WORKSPACE_PROTECTION.json",
+      "sha256": "4fc05527fd2c3848791e13f2ea7fb053bd0d54e1f7c2341ab26fb31ecb50b211",
+      "bytes": 318,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/PRECOMMIT_REVIEW.source.txt",
+      "sha256": "fa53a92e002a7a4ddd5f1f65a869f2afeff827fc7ce2be8c955bc966391af172",
+      "bytes": 23107,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/PRODUCT_IDENTITY_COMPARISON.json",
+      "sha256": "225fd49987dfe9495326b0d96853e072c7b8e3057d7fea0e6c104e6d01cf84b5",
+      "bytes": 25492,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/REPORT.md",
+      "sha256": "d30fcc011c930f079576275f641174d5d8e11389b381b6e6005c033ee01ff2e2",
+      "bytes": 15718,
+      "mode": "0o600"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/SOURCE_FREEZE.json",
+      "sha256": "d20706c674c6376a14dbf1329dd12c56c393712f0c9d9112b2faffc89d8f6c1b",
+      "bytes": 538450,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/TRANSFER_COMPARISON.json",
+      "sha256": "ab63776190c1e46c18fa10f7feb83fee6bb4906d721e2bb7f2ec50331496e157",
+      "bytes": 7361,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/acceptance-final.log",
+      "sha256": "9477c132cb28a0466c98316c654478bd94ff0dbb42bb476215e926616b539c85",
+      "bytes": 335,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/actor-precommit.log",
+      "sha256": "5ed7cb50ce792a97b51339e8a45ddad349e55a06cf116aa81a393b92caccb40e",
+      "bytes": 197519,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/actor-staged-check.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/actor-staged-paths.txt",
+      "sha256": "430dc602dc31471158a4ac8fd095d06f8a3163c454e2807ef3194864ed24371b",
+      "bytes": 62,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/actor-staged-stat.txt",
+      "sha256": "afb5070ac1570a49a5c57cfd84bdad3d033c12555ea8bf73f60c9a2c3fdce44b",
+      "bytes": 128,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/api-targeted-final.log",
+      "sha256": "5a48fbc0a16748fdf41fdd5c56bfadb9c3fe1e979dc441cb0e17b470bb532653",
+      "bytes": 32905,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/api-targeted-final.time.txt",
+      "sha256": "6fcacd6be61e7353ad91c0c0a34efb7d24d58a548a3e34b6680c94ff1d049b6e",
+      "bytes": 32,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/app-device.log",
+      "sha256": "51d7de5964f7fe62d4d9063376cdde62c4d5d24272ca7b533e9737e7bc0a3e9b",
+      "bytes": 110943,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/app-device.time.txt",
+      "sha256": "cb069a2aa94e30be6a6baea344584f4fc63024b9d7ceeb6024fd9129c7e1f6e2",
+      "bytes": 697,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/app-simulator.log",
+      "sha256": "3c61df1ff8de492986ed8bc991f99fdf6436c05bc8e8a93dd98b0fa46e1e147c",
+      "bytes": 114225,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/app-simulator.time.txt",
+      "sha256": "5e429a0642d3b3735b16b59186ef705011bca8a1f6715ced77d23e5e982c373f",
+      "bytes": 697,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/b08-clean-checkout.log",
+      "sha256": "173db758c338b42b4ace2592a0f7d2c49b106fd1824889535498d1c072135cb7",
+      "bytes": 9439,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/blob-final.log",
+      "sha256": "58d8f8c3863d56fb9cc0a2db5ec1ced8a62837def8efb2841acae99a752ebfb7",
+      "bytes": 68,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/build-warnings-after.json",
+      "sha256": "1c116c1a844f0122afc29de9473e9ab033b3907f07c4fe7b799d904bf674eeac",
+      "bytes": 1562,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-01.json",
+      "sha256": "aaeaf1ee37bf6d130020be5150f7b474936f32a89d4c10e33af00177ae926a8e",
+      "bytes": 262,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-01.log",
+      "sha256": "552e485ba6c68aecdd40a7c684b8462c787969ee9c78347a43ba14e6e64c8ba2",
+      "bytes": 32845,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-02-final.json",
+      "sha256": "7843028889705314071bde3057dd34865ea1f8f4a572bcbb412b0d1029ccea29",
+      "bytes": 287,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-02-final.log",
+      "sha256": "dd9444e99bd08f9db237974ccf9b29a01d18daf587d9c13d52b88829fe5c2983",
+      "bytes": 189280,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-check.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-paths.txt",
+      "sha256": "5a6a0b855f6f02664cdca68d4337536fdedd78c1ad75e5a1e572c194ddbe7c8b",
+      "bytes": 530,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-review.txt",
+      "sha256": "0f3a8b19581bfaa39df948e3f745500b9efb2c5d7516a56a7ea9f53e31193f0c",
+      "bytes": 48673,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-02-staged-stat.txt",
+      "sha256": "4f4cf30495561316bf241c4ae4f0e8d150f414dd454436bb1480287ce6eebbfc",
+      "bytes": 900,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-check.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-paths.txt",
+      "sha256": "ed6cb4444e31fcd37faf0541a578d108c8bec1d43467e182ae93b8c7e131e1b0",
+      "bytes": 2111,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-review.txt",
+      "sha256": "da3b03e1c8451668251ff141990d88f8a6f2e2fac65fdebd17d3c9f953855db0",
+      "bytes": 341714,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-03-staged-stat.txt",
+      "sha256": "d71ffe281cde9add02cb283bb7c5cbff97858324b2bd85a325447594e2b7eb96",
+      "bytes": 3076,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-03.json",
+      "sha256": "98295f414f933df86cfb9ef90d659ecb6c17f86d03255b6e021e4e052c7e98ba",
+      "bytes": 319,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/commit-03.log",
+      "sha256": "ec2c61d08e0b6ecc4ef1f3a1be046fe9293fea726c84582ba1da433841a1d17f",
+      "bytes": 221749,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/core-clean-l2.log",
+      "sha256": "b44866025fdb3e2a2232f5fcfc96b2a7fbe4134637b9a09f16c10976860da311",
+      "bytes": 43709,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/core-clean-typecheck.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "bytes": 201,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/doc-refs-final.log",
+      "sha256": "a58ab83fa36765dded13430f6536c5d68c0d3fd610e0b064356c35340465d748",
+      "bytes": 31886,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/docs-final.log",
+      "sha256": "124a17c64fa9aa652ff8ce7ab88d4d9cadd18a7f13069e4b19a6469edfe519e5",
+      "bytes": 147,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/ios-gates-final.log",
+      "sha256": "f2b67e1a0c11cec62ec1effe5ef6d130ec64f459468d634b7551cfd7343fa55f",
+      "bytes": 3336,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/package-boundaries-final.log",
+      "sha256": "63100df27ea9e8da3c934fefe66da3a92bf9a560493502ac87d39c76e1b44869",
+      "bytes": 183,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/package-boundaries-self-final.log",
+      "sha256": "bc55c4af10a92b4d1d3e0d012d07571ae6fe2544b354af9d2bfc81936cd43762",
+      "bytes": 687,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/scripts-final.log",
+      "sha256": "59e45bf97b137d5b3d2aaa4c31b56fca563e3208242c0cd8b42179debf681838",
+      "bytes": 180,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/single-writer-final.log",
+      "sha256": "ef59273c5fccf98132ba5599210fa2972266d9c739544c1b8e98c3891cfc8396",
+      "bytes": 267,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/swift-version.txt",
+      "sha256": "0c651bee2d44b12c2073f9541c41215150414217aee61a3adc5f91c4f4aa49f3",
+      "bytes": 101,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/test-discovery-final.json",
+      "sha256": "ebb97676f71e91c95cb964b9c1bd5737a65e87ad083ee0f210998f2c58a57df8",
+      "bytes": 524,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/typecheck-final.log",
+      "sha256": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+      "bytes": 201,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/visual-compile.log",
+      "sha256": "c6a3118e26d91bcf61d3cad282ab93c917f4e78e465cd50808631fcaa5921b92",
+      "bytes": 110353,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/visual-compile.time.txt",
+      "sha256": "4eb235e33ef569b46953dce77189ca0aafdea06ef3d810c665045554f230fb8b",
+      "bytes": 697,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/xcode-list.json",
+      "sha256": "0117ad4d4d9dd955c9402ed678c1137bd9c7da31268b770010bd5a16dd5a522b",
+      "bytes": 143,
+      "mode": "0o644"
+    },
+    {
+      "path": "deliverables/training-plan-v2-final-2026-10-26/xcode-version.txt",
+      "sha256": "5f6350250c6f298d06e1435819ddd1539d6c84785aaa8d824c2ac74f57914d03",
+      "bytes": 31,
+      "mode": "0o644"
+    }
+  ],
+  "summary": {
+    "selectedSourceArtifacts": 171,
+    "selectedFromOriginalUntrackedEvidence": 102,
+    "selectedFromExternalL4Archive": 69,
+    "originalEvidenceFiles": 233,
+    "excludedOriginalEvidence": 131,
+    "l4Excluded": 50,
+    "finalArtifacts": 61,
+    "updatedAt": "2026-10-26T17:48:04+08:00"
+  }
+}

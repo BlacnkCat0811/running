@@ -1,0 +1,12 @@
+{
+  "name": "boundaries",
+  "argv": [
+    "npm",
+    "run",
+    "check:package-boundaries"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997645.0059588,
+  "durationSeconds": 1.1820993423461914,
+  "exitCode": 0
+}

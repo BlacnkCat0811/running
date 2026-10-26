@@ -1,0 +1,42 @@
+{
+  "head": "2e7c07bb66b3701c4e1b768c90f431b654584f5c",
+  "branch": "main",
+  "environment": {
+    "node": "v22.23.2",
+    "os": "Darwin x86_64"
+  },
+  "baselineFiles": 39,
+  "allBaselineFilesRetained": true,
+  "baselineFilesModifiedForA01": [
+    "apps/api/src/training-plan-session-policy.ts",
+    "apps/api/src/training-plan-session-state.ts"
+  ],
+  "runs": {
+    "L1": {
+      "tests": 27.0,
+      "pass": 27.0,
+      "fail": 0.0,
+      "skipped": 0.0,
+      "duration_ms": 11733.396268
+    },
+    "L2_initial": {
+      "tests": 346.0,
+      "pass": 345.0,
+      "fail": 1.0,
+      "skipped": 0.0,
+      "duration_ms": 392057.895624
+    },
+    "L3": {
+      "tests": 209.0,
+      "pass": 209.0,
+      "fail": 0.0,
+      "skipped": 0.0,
+      "duration_ms": 45615.706942
+    }
+  },
+  "uniqueTestsCovered": 555,
+  "initialL2Failure": "coach-loop-runtime-safety: today locked rest; fixed without changing original assertions; all 8 file tests passed in L1",
+  "fullRegressionExecuted": false,
+  "iosSourceChecksExecuted": false,
+  "productionCopyAudited": false
+}

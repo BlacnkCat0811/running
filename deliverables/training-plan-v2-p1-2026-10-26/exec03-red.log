@@ -1,0 +1,27 @@
+TAP version 13
+# (node:18949) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: EXEC-03: a fact restored after Reconcile receipt insertion rolls back invalidation and history
+not ok 1 - EXEC-03: a fact restored after Reconcile receipt insertion rolls back invalidation and history
+  ---
+  duration_ms: 285.01816
+  type: 'test'
+  location: '/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:8:9269'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected exception.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    TestContext.<anonymous> (/Users/ta/running/apps/api/test/training-plan-execution-commands.test.ts:706:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2063.065218

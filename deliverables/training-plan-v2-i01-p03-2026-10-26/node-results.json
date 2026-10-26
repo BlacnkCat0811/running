@@ -1,0 +1,42 @@
+{
+  "red-api": {
+    "tests": 9,
+    "pass": 5,
+    "fail": 4,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 4108.545612
+  },
+  "l1-api": {
+    "tests": 23,
+    "pass": 23,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 5290.883324
+  },
+  "l2-api": {
+    "tests": 91,
+    "pass": 91,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 22537.434458
+  },
+  "l3-api": {
+    "tests": 289,
+    "pass": 289,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 656458.705348
+  },
+  "l3-related": {
+    "tests": 374,
+    "pass": 374,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "duration_ms": 448280.094594
+  }
+}

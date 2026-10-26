@@ -702,7 +702,7 @@ WorkoutKit 训练排程所需的 workout 类型 HealthKit 写授权属于已确�
 
 `check:ios-gates` 直接运行跨平台源码门禁（无需 Xcode，Windows/Linux 也可运行），并在任何未被排除的 `check-*.py` 没有被 `apps/ios/tests/run-*.sh` 引用时失败（“判据存在 ≠ 判据执行”）。pre-commit 在 `apps/ios`、`packages/api-contracts` 或 `packages/contracts` 变更时运行它。
 
-模拟器验收与真机验收必须区分。Simulator-bound acceptance（`apps/ios/tests/run-visual-tests.sh`）和 AMap 坐标交叉检查保持手工执行；前者需要已启动的 Simulator，并且需要 `var/rai.sqlite`。
+模拟器验收与真机验收必须区分。Simulator-bound acceptance（`apps/ios/tests/run-visual-tests.sh`）和 AMap 坐标交叉检查保持手工执行；前者需要已启动的 Simulator，并通过 `prepare-phase5-fixture.mts` 生成隔离的合成数据库，不读取个人 `var/rai.sqlite`。
 
 涉及 HealthKit 权限、真实同步、后台执行和设备交互的功能，不能仅凭静态检查或模拟器通过就宣称真机验收成功。
 

@@ -1,0 +1,47 @@
+{
+  "head": "2e7c07bb66b3701c4e1b768c90f431b654584f5c",
+  "branch": "main",
+  "initialFiles": 134,
+  "changedExisting": [
+    "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift",
+    "apps/ios/tests/TrainingPlanSessionEditorRegression.swift",
+    "apps/api/src/schemas.ts",
+    "apps/api/src/server.ts",
+    "apps/api/src/training-plan-session-commands.ts",
+    "apps/api/test/schemas.test.ts",
+    "apps/api/test/training-plan-session-commands.test.ts",
+    "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift",
+    "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md"
+  ],
+  "deletedExisting": [],
+  "filesChangedByD03": [
+    "apps/api/src/session-structure.ts",
+    "apps/api/src/schemas.ts",
+    "apps/api/src/training-plan-session-commands.ts",
+    "apps/api/src/server.ts",
+    "apps/api/test/session-structure.test.ts",
+    "apps/api/test/schemas.test.ts",
+    "apps/api/test/training-plan-session-commands.test.ts",
+    "apps/api/test/training-plan-session-migration.test.ts",
+    "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift",
+    "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift",
+    "apps/ios/tests/TrainingPlanSessionEditorRegression.swift",
+    "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md"
+  ],
+  "distanceFixtureSha256": "24667252898aa4c1a237eb3eed2434e3b72624551beadbf76f622499dfa91156",
+  "finalVerified": true,
+  "finalSourceSha256": {
+    "apps/api/src/session-structure.ts": "a754e3e5c657a63ee9bc505ddd2c5560a3ca3e32f1b0e263b77ecc3c0cb8dd32",
+    "apps/api/src/schemas.ts": "559f5b25f082fdd81e49b8e0ddf243326eb823420e403afd6cca5b9fc2241ede",
+    "apps/api/src/training-plan-session-commands.ts": "ea6ee05a7dfed4d0f6bdcea2133e54a90cec19f989fe68fb74ccfeec804f6c0a",
+    "apps/api/src/server.ts": "88ce3e0312fe965f7f74d32b8886537c5d45253d030201c2167c167b3099530a",
+    "apps/api/test/session-structure.test.ts": "a7fd8fac76987c9286d722a4b0926bbc9e547456891f238e339cd26bbfcb420d",
+    "apps/api/test/schemas.test.ts": "c60ea5b38221991f38068a1e3f52d0acda4aca0f8aa0c9abbe354595c994905e",
+    "apps/api/test/training-plan-session-commands.test.ts": "23d3ccdd305f0639f210f7bebb3f90e15084b7af8d5ef97b9742f3de8695a6a2",
+    "apps/api/test/training-plan-session-migration.test.ts": "c2ce783dd402f7ee791f301bbcc0c0bda3dfaa74e70596364925f6546af3d901",
+    "apps/ios/RAI/TrainingPlanSessionEditorPolicy.swift": "173d16fe66eaad436f417a4f4d171d88e4b16642ecca4e10ab8228c14a5f3d03",
+    "apps/ios/RAI/Skins/Technology/TechTrainingSessionEditor.swift": "4d86b3044c80d0f18aabc3a665db6ecd3af29c290fcad77a6366c3a74160e3fe",
+    "apps/ios/tests/TrainingPlanSessionEditorRegression.swift": "2993878ac5cd45de983aae122fd829833424ea5aa24e524b29e13acb56b1df03",
+    "docs/TRAINING_PLAN_V2_CLOSED_LOOP_CONTRACT.md": "67e37ff8a09a486b301f4ff6c7f1079f8ce5c6cc14367b28781f2a5c40351b7a"
+  }
+}

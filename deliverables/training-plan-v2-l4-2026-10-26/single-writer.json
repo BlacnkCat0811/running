@@ -1,0 +1,12 @@
+{
+  "name": "single-writer",
+  "argv": [
+    "npm",
+    "run",
+    "check:training-plan-single-writer"
+  ],
+  "envOverrides": {},
+  "startedEpoch": 1792997647.451298,
+  "durationSeconds": 2.921079158782959,
+  "exitCode": 0
+}
